@@ -91,9 +91,13 @@ def _falsify(engine, failing, signature_source):
 
 def test_9_provider_specific_failure_creates_no_self_modification_task(tmp_path):
     """
-    The exact shape of the live false positive: agy exhausts its repair budget,
-    devin_cli synthesizes the same benchmark successfully. That is evidence
-    about agy, not about HowlFrame -- no gap, no engineering task.
+    VERIFIED_REPLAY (#59.2 Phase 20): the exact shape of the live false
+    positive from campaign DOGFOOD-20260822-005043-16adca -- agy exhausts its
+    repair budget (real ACCEPTANCE_FAILURE text) and devin_cli synthesizes the
+    same benchmark successfully with no framework change. That is evidence
+    about agy, not about HowlFrame -- no gap, no engineering task. The real
+    campaign incorrectly opened self-improvement task ENG-NOTES-01 for this
+    shape; the current classification must not.
     """
     engine = _engine(tmp_path, synthesis_script={
         "agy": _result(error=ACCEPTANCE_FAILURE, provider="agy"),
