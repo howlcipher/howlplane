@@ -666,7 +666,9 @@ class GitIntegrationExecutor(AuthorityExecutor):
             branch = self.create_task_branch(task_id, args.get("base_branch", "main"))
             return {"branch": branch}
         if action.action_type == "commit_task_changes":
-            sha = self.stage_and_commit(args["paths"], args["message"], args.get("baseline_sha"))
+            sha = self.stage_and_commit(
+                args["paths"], args["message"], args.get("baseline_sha"), args.get("allowed_paths"),
+            )
             return {"commit_sha": sha}
         if action.action_type == "push_task_branch":
             self.push_branch(args["branch"])
@@ -763,9 +765,21 @@ class GitIntegrationExecutor(AuthorityExecutor):
             raise GitIntegrationError(f"branch '{branch}' does not exist after creation attempt")
         return branch
 
-    def stage_and_commit(self, paths: List[str], message: str, baseline_sha: Optional[str] = None) -> str:
+    def stage_and_commit(
+        self,
+        paths: List[str],
+        message: str,
+        baseline_sha: Optional[str] = None,
+        allowed_paths: Optional[List[str]] = None,
+    ) -> str:
         if not paths:
             raise GitIntegrationError("commit_task_changes called with an empty path list -- nothing to stage")
+        if allowed_paths:
+            violations = [p for p in paths if p not in allowed_paths]
+            if violations:
+                raise GitIntegrationError(
+                    f"commit_task_changes rejected: path(s) outside task-declared scope {allowed_paths}: {violations}"
+                )
         add_proc = self._git(self.repo_root, ["add", "--"] + list(paths), 30)
         if add_proc.returncode != 0:
             raise GitIntegrationError(f"git add of task-owned paths failed: {add_proc.stderr}")

@@ -150,6 +150,11 @@ class TaskSpec(DataClassSerializationMixin):
     human_approval_requirements: List[str] = field(default_factory=list)
     current_state: str = "discovered"
     task_journal_path: Optional[str] = None
+    # Exact repo-relative paths this task may commit (#59.2 Phase 8). Empty
+    # (the default) means unrestricted -- existing serialized task.yaml files
+    # without this key deserialize unaffected. When non-empty,
+    # GitIntegrationExecutor.stage_and_commit fails closed on any other path.
+    allowed_paths: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     schema: str = TASK_SPEC_SCHEMA_VERSION
 

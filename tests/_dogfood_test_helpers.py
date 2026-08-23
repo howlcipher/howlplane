@@ -28,6 +28,22 @@ from src.control_plane.orchestrator import (
 )
 
 
+def scripted_result(
+    role: str, provider: str, exit_code: int = 0, stdout: str = "", stderr: str = "",
+) -> AgentExecutionResult:
+    """
+    A single AgentExecutionResult with the given outcome, for fakes that
+    script per-call behavior (#59.2 Phase 4). Keeping this construction in
+    one place avoids every scripted fake reimplementing the same 5-line
+    dataclass call.
+    """
+    return AgentExecutionResult(
+        agent_id=provider, role=role, command=provider,
+        exit_code=exit_code, stdout=stdout, stderr=stderr,
+        duration_seconds=0.02, success=(exit_code == 0),
+    )
+
+
 def clean_review_result(role: str, provider: str) -> AgentExecutionResult:
     """
     A trivially valid, clean independent-review result for provider-failover
@@ -35,11 +51,7 @@ def clean_review_result(role: str, provider: str) -> AgentExecutionResult:
     care about review content (#59.2 Phase 4). Keeping this in one place
     avoids every such fake reimplementing the same reviewer-role branch.
     """
-    return AgentExecutionResult(
-        agent_id=provider, role=role, command=provider,
-        exit_code=0, stdout="findings: []", stderr="",
-        duration_seconds=0.02, success=True,
-    )
+    return scripted_result(role, provider, exit_code=0, stdout="findings: []")
 
 
 @dataclass

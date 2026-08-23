@@ -1161,6 +1161,7 @@ class MarathonDogfoodEngine:
         risk_level: str = "medium",
         campaign_state: Optional[DurableCampaignState] = None,
         state_dir: Optional[Path] = None,
+        allowed_paths: Optional[List[str]] = None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """
         Executes a bounded engineering task through the REAL governed
@@ -1180,11 +1181,18 @@ class MarathonDogfoodEngine:
         quota-free local model an eligible candidate for this specific fix;
         the default "medium" keeps normal in-campaign gap fixes on cloud
         providers, consistent with Tier-3 local eligibility rules (#58 Phase 9).
+
+        `allowed_paths` (#59.2 Phase 8), when given, mechanically restricts
+        the eventual commit to exactly those repo-relative paths --
+        GitIntegrationExecutor.stage_and_commit rejects any other path before
+        staging anything. Used by the live acceptance canary to guarantee it
+        can touch only its designated evidence artifact.
         """
         objective = f"Resolve {gap_type} for {benchmark_key}: {gap_desc}"
         gap_probe = TaskSpec(
             task_id=task_id, repository="howlplane",
             objective=objective, task_class="bug_fix", risk_level=risk_level,
+            allowed_paths=list(allowed_paths or []),
         )
         candidates = self.provider_pool.select_candidates(
             task_category="code_heavy",
@@ -1381,7 +1389,10 @@ class MarathonDogfoodEngine:
 
         if self._run_step_or_bail(
             "commit_task_changes",
-            {"paths": paths, "message": commit_message, "baseline_sha": baseline_sha},
+            {
+                "paths": paths, "message": commit_message, "baseline_sha": baseline_sha,
+                "allowed_paths": gap_probe.allowed_paths or None,
+            },
             task_id, run_dir, git_rec, campaign_state, state_dir, _apply_commit,
         ) is None:
             return False, git_rec.to_dict()

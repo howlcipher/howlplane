@@ -130,3 +130,27 @@ def test_cross_provider_review_assignment(active_pool: ProviderPoolManager):
     assert mapping["test-falsifier"] != "codex"
     assert mapping["security-reviewer"] != "codex"
     assert mapping["test-falsifier"] in ("agy", "claude_code", "devin_cli")
+
+
+def test_security_reviewer_role_never_local_eligible():
+    """#59.2 Phase 10: local_ollama must never become the sole/assigned
+    security-reviewer, even when it is the only distinct candidate -- it
+    must never be the sole security authority."""
+    pool = ProviderPoolManager()
+    for agent_id in list(pool.get_all_statuses()):
+        pool.set_status(agent_id, ProviderAvailabilityStatus.UNAVAILABLE)
+    pool.set_status("codex", ProviderAvailabilityStatus.AVAILABLE)
+    pool.set_status("local_ollama", ProviderAvailabilityStatus.AVAILABLE)
+
+    mapping, diversity_achieved = pool.select_reviewers(
+        implementing_agent_id="codex",
+        required_roles=["security-reviewer", "architecture-reviewer"],
+        allow_same_provider=True,
+    )
+
+    # local_ollama is the only distinct candidate, but security-reviewer must
+    # fall back to the implementer rather than ever receive local_ollama.
+    assert mapping["security-reviewer"] == "codex"
+    assert diversity_achieved is False
+    # architecture-reviewer has no such restriction and may take local_ollama.
+    assert mapping["architecture-reviewer"] == "local_ollama"

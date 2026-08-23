@@ -112,6 +112,36 @@ def test_empty_path_list_fails_closed():
         executor.stage_and_commit([], "fix: nothing")
 
 
+def test_commit_outside_allowed_paths_fails_closed():
+    """#59.2 Phase 8: a task scoped to specific paths must never commit
+    anything outside that allowlist -- fails before any git add/commit runs."""
+    git = ScriptedRunner()
+    executor = make_executor(git_runner=git)
+    with pytest.raises(GitIntegrationError, match="outside task-declared scope"):
+        executor.stage_and_commit(
+            ["documentation/task_journals/2026-08-22_acceptance.md", "src/unexpected.py"],
+            "fix: scoped change",
+            allowed_paths=["documentation/task_journals/2026-08-22_acceptance.md"],
+        )
+    # No git subprocess was ever invoked -- the check runs before staging.
+    assert git.calls == []
+
+
+def test_commit_within_allowed_paths_succeeds():
+    """A commit touching only the declared allowlist proceeds normally."""
+    git = ScriptedRunner()
+    journal_path = "documentation/task_journals/2026-08-22_acceptance.md"
+    git.on(["add", "--", journal_path], returncode=0)
+    git.on(["commit", "-m", "fix: scoped change"], returncode=0)
+    git.on(["rev-parse", "HEAD"], returncode=0, stdout="cafef00d\n")
+
+    executor = make_executor(git_runner=git)
+    sha = executor.stage_and_commit(
+        [journal_path], "fix: scoped change", allowed_paths=[journal_path],
+    )
+    assert sha == "cafef00d"
+
+
 def test_push_failure_blocks_downstream():
     """A failed `git push` must raise, never silently proceed to PR/merge."""
     git = ScriptedRunner()
