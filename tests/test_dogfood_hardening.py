@@ -42,7 +42,12 @@ from src.control_plane.synthesis.provider_pool import (
     ProviderExhaustionEvent,
     ProviderPoolManager,
 )
-from tests._dogfood_test_helpers import FakeOrchestrator, ScriptedRunner, build_full_merge_flow
+from tests._dogfood_test_helpers import (
+    FakeOrchestrator,
+    ScriptedRunner,
+    build_full_merge_flow,
+    clean_review_result,
+)
 
 
 def _seed_valid_howl_files(task, cwd: Path, prompt: str):
@@ -88,6 +93,10 @@ class ProgrammableDispatcherBackend(AgentBackend):
 
     def execute(self, task, cwd, role="implementation", prompt_override=None, **kwargs):
         self.invocations.append(task.actual_agent)
+        if role not in ("implementation", "remediation"):
+            # Independent review roles: these tests exercise implementation-
+            # provider failover, not review content.
+            return clean_review_result(role, task.actual_agent)
         code, stdout, stderr = self.outcomes.get(task.actual_agent, (1, "", "unknown error"))
         if code == 0:
             _seed_valid_howl_files(task, Path(cwd), prompt_override or "")
@@ -198,6 +207,10 @@ def test_scenario_6_engineering_failure_does_not_exhaust_provider(tmp_path: Path
                     agent_id="codex", role="remediation", command="codex exec", exit_code=0,
                     stdout="Fixed syntax error", stderr="", duration_seconds=0.05, success=True,
                 )
+            elif role != "implementation":
+                # Independent review roles: this test exercises engineering-
+                # failure-vs-exhaustion classification, not review content.
+                return clean_review_result(role, "codex")
             else:
                 # Initial synthesis creates broken syntax
                 app_dir = target_cwd / "app"

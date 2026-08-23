@@ -28,6 +28,20 @@ from src.control_plane.orchestrator import (
 )
 
 
+def clean_review_result(role: str, provider: str) -> AgentExecutionResult:
+    """
+    A trivially valid, clean independent-review result for provider-failover
+    tests that fake implementation/remediation execution but don't otherwise
+    care about review content (#59.2 Phase 4). Keeping this in one place
+    avoids every such fake reimplementing the same reviewer-role branch.
+    """
+    return AgentExecutionResult(
+        agent_id=provider, role=role, command=provider,
+        exit_code=0, stdout="findings: []", stderr="",
+        duration_seconds=0.02, success=True,
+    )
+
+
 @dataclass
 class ScriptedRunner:
     """

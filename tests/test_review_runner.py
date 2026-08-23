@@ -14,21 +14,34 @@ from src.control_plane.task_spec import TaskSpec
 
 
 def test_parse_findings_clean_output():
-    # Empty string
-    findings, err = parse_and_validate_findings("", "correctness-reviewer")
+    # Empty string: never a deliberate clean signal (#59.2 Phase 7).
+    findings, err, is_valid = parse_and_validate_findings("", "correctness-reviewer")
     assert findings == []
     assert err is None
+    assert is_valid is False
 
-    # Explicit empty list
+    # Explicit empty list: a deliberate, valid "no findings" signal.
     yaml_clean = "findings: []\n"
-    findings, err = parse_and_validate_findings(yaml_clean, "correctness-reviewer")
+    findings, err, is_valid = parse_and_validate_findings(yaml_clean, "correctness-reviewer")
     assert findings == []
     assert err is None
+    assert is_valid is True
 
-    # Text saying clean
-    findings, err = parse_and_validate_findings("No defects found. Implementation is clean.", "security-reviewer")
+    # Text saying clean: also a deliberate, valid signal.
+    findings, err, is_valid = parse_and_validate_findings("No defects found. Implementation is clean.", "security-reviewer")
     assert findings == []
     assert err is None
+    assert is_valid is True
+
+
+def test_parse_findings_empty_output_marked_invalid_not_clean():
+    """REVIEW_OUTPUT_INVALID: exit-0-with-empty-stdout must never collapse
+    into the same signal as a reviewer that actually completed and found
+    nothing (#59.2 Phase 7)."""
+    findings, err, is_valid = parse_and_validate_findings("   \n  ", "architecture-reviewer")
+    assert findings == []
+    assert err is None
+    assert is_valid is False
 
 
 def test_parse_findings_valid_yaml():
@@ -45,8 +58,9 @@ findings:
     suggested_fix: "Use parameterized query with cursor.execute(query, (name,))"
 ```
 """
-    findings, err = parse_and_validate_findings(yaml_content, "security-reviewer")
+    findings, err, is_valid = parse_and_validate_findings(yaml_content, "security-reviewer")
     assert err is None
+    assert is_valid is True
     assert len(findings) == 1
     f = findings[0]
     assert f.id == "F001"
@@ -60,8 +74,9 @@ findings:
 def test_parse_findings_malformed_yaml_yields_failure_finding():
     # Malformed YAML syntax must never become 0 findings / pass
     malformed = "```yaml\nfindings: [unclosed list bracket\n```"
-    findings, err = parse_and_validate_findings(malformed, "correctness-reviewer")
+    findings, err, is_valid = parse_and_validate_findings(malformed, "correctness-reviewer")
     assert err is not None
+    assert is_valid is False
     assert len(findings) == 1
     assert findings[0].severity in ("high", "blocker")
     assert "Malformed reviewer output" in findings[0].title
@@ -110,6 +125,55 @@ findings:
     assert len(cycle_res.all_findings) == 2
     assert cycle_res.reconciliation is not None
     assert cycle_res.reconciliation.unresolved_highs >= 1
+
+
+def test_execute_review_cycle_all_reviewers_fail_requires_remediation(tmp_path):
+    """#59.2 Phase 3: zero findings from failed reviewers must never read as
+    "clean" -- absence of findings is not evidence of a completed review."""
+    spec = TaskSpec(
+        task_id="TASK-REV-02",
+        repository="test_repo",
+        objective="Implement auth check",
+    )
+
+    def failing_reviewer_fn(role_id, diff, task):
+        raise RuntimeError(f"{role_id} backend crashed")
+
+    cycle_res = ReviewRunner.execute_review_cycle(
+        task=spec,
+        diff_content="+ secret = '12345'",
+        reviewer_roles=["security-reviewer", "test-falsifier"],
+        cwd=tmp_path,
+        custom_reviewer_fn=failing_reviewer_fn,
+    )
+
+    assert cycle_res.all_findings == []
+    assert cycle_res.status == "review_failure"
+    assert cycle_res.requires_remediation is True
+    for res in cycle_res.reviewer_results.values():
+        assert res.status == "reviewer_failure"
+
+
+def test_execute_review_cycle_empty_output_requires_remediation(tmp_path):
+    """A reviewer that "succeeds" but returns nothing must be classified
+    output_invalid, not clean, and must still require remediation."""
+    spec = TaskSpec(
+        task_id="TASK-REV-03",
+        repository="test_repo",
+        objective="Implement auth check",
+    )
+
+    cycle_res = ReviewRunner.execute_review_cycle(
+        task=spec,
+        diff_content="+ secret = '12345'",
+        reviewer_roles=["security-reviewer"],
+        cwd=tmp_path,
+        custom_reviewer_fn=lambda role_id, diff, task: "",
+    )
+
+    assert cycle_res.reviewer_results["security-reviewer"].status == "output_invalid"
+    assert cycle_res.status == "review_failure"
+    assert cycle_res.requires_remediation is True
 
 
 def test_determine_re_review_roles():
