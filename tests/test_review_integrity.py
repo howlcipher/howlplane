@@ -154,6 +154,30 @@ def test_reviewer_failover_is_bounded_not_infinite(tmp_path: Path):
     # Bounded: at most MAX_REVIEWER_FAILOVER_ATTEMPTS attempts were made per cycle.
     from src.control_plane.review_runner import MAX_REVIEWER_FAILOVER_ATTEMPTS
     assert len(security_invocation["attempts"]) <= MAX_REVIEWER_FAILOVER_ATTEMPTS
+    # One unsatisfied required role is enough to block full verification.
+    assert res.status != "VERIFIED_PRODUCT"
+
+
+def test_review_provider_quota_exhaustion_updates_state_and_retries(tmp_path: Path):
+    """#59.2 Phase 9: a review invocation hitting a real quota-exhaustion
+    signature must update ProviderPoolManager state (like implementation
+    attempts already do) and retry against an independent candidate, not be
+    silently absorbed as a generic reviewer failure."""
+    quota_stderr = "Error: Individual quota reached. Please upgrade your subscription."
+    backend = ScriptedReviewBackend(review_outcomes={
+        ("agy", "architecture-reviewer"): (1, "", quota_stderr),
+    })
+    pool = _pool()
+    engine = ProductSynthesizer(provider_pool=pool, custom_backend=backend, max_repair_cycles=1)
+
+    res = engine.create_from_prompt("Create a persistent notes app", output_dir=tmp_path / "app")
+
+    from src.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus
+    assert pool.get_status("agy") == ProviderAvailabilityStatus.SESSION_EXHAUSTED
+    arch_invocation = next(i for i in res.reviewer_invocations if i["role"] == "architecture-reviewer")
+    # Failover moved on to an independent candidate after the exhaustion.
+    assert arch_invocation["completed"] is True
+    assert arch_invocation["provider"] != "agy"
 
 
 def test_completed_diversity_true_when_a_single_role_completes(tmp_path: Path):
