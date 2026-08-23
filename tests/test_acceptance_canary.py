@@ -18,7 +18,7 @@ from pathlib import Path
 
 from src.control_plane.synthesis.campaign_state import GitIntegrationRecord
 from src.control_plane.synthesis.marathon import MarathonDogfoodEngine
-from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+from src.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus, ProviderPoolManager
 from tests._dogfood_test_helpers import (
     FakeOrchestrator,
     ScriptedRunner,
@@ -46,8 +46,16 @@ def _build_canary_engine(
     exercised through them is real.
     """
     run_dir = tmp_path / "fake_run" / "ACCEPTANCE-TEST"
+    # Explicit, deterministic provider state (#59.2): ProviderPoolManager()
+    # probes real backend availability at construction time, which varies by
+    # machine (e.g. which provider CLIs happen to be installed) -- never rely
+    # on ambient environment for which provider gets selected.
+    pool = ProviderPoolManager()
+    for agent_id in list(pool.get_all_statuses()):
+        pool.set_status(agent_id, ProviderAvailabilityStatus.UNAVAILABLE)
+    pool.set_status("codex", ProviderAvailabilityStatus.AVAILABLE)
     return MarathonDogfoodEngine(
-        provider_pool=ProviderPoolManager(),
+        provider_pool=pool,
         campaign_dir=tmp_path / "campaigns",
         target_repo=tmp_path,
         repo_slug=REPO_SLUG,
