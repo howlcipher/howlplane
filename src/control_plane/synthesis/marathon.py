@@ -749,15 +749,24 @@ class MarathonDogfoodEngine:
         journal_path = f"documentation/task_journals/{date_str}_live_autonomous_acceptance.md"
         task_id = f"ACCEPTANCE-{campaign_id}"
 
+        start_sha_proc = self._git_runner(self.target_repo, ["rev-parse", "HEAD"], 15)
+        start_sha = start_sha_proc.stdout.strip() if start_sha_proc.returncode == 0 else "unknown"
+        digest = self.authority_envelope.policy_digest if self.authority_envelope else "unknown"
+
         task_success, git_rec = self._execute_governed_engineering_improvement(
             task_id=task_id,
             benchmark_key="LIVE-ACCEPTANCE-CANARY",
             gap_type="live_autonomous_acceptance",
             gap_desc=(
-                f"Append a canary confirmation entry to {journal_path} recording that the "
-                f"full live autonomous governed-merge lifecycle (branch, commit, push, PR, "
-                f"CI, delegated merge, remote-main verification, local-main sync) executed "
-                f"successfully for campaign {campaign_id}."
+                f"Create or update {journal_path} to record that live acceptance canary "
+                f"{campaign_id} was initiated: starting main SHA {start_sha}, authority "
+                f"profile digest {digest}, and its purpose (exercising the real governed "
+                f"branch/commit/push/PR/CI/merge/remote-verify/local-sync git lifecycle "
+                f"end-to-end, with no mocked git/gh boundary). Do NOT assert that the merge "
+                f"lifecycle has completed or succeeded -- at the time this file is written, "
+                f"the branch/commit/PR/CI/merge steps that follow have not happened yet. The "
+                f"merge outcome is independently verified by the production git integration "
+                f"steps themselves, never asserted in this file's content."
             ),
             risk_level="medium",
             campaign_state=campaign_state,
