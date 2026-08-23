@@ -127,6 +127,26 @@ class ReviewCycleResult:
         }
 
 
+# Natural-language phrasings real reviewers use to report a clean result
+# without wrapping it in a findings: YAML block (#59.2 live evidence: campaign
+# DOGFOOD-20260823-203128-ed0e9e's simplicity-reviewer wrote "Zero defects
+# found..." prose). Recognizing these directly -- before attempting to parse
+# unfenced prose as YAML -- avoids misreading narrative bullet points/colons
+# as structured (and thus malformed) data. All strongly indicate "nothing to
+# report"; a reviewer describing an actual problem uses different framing, so
+# this does not risk masking a real finding.
+CLEAN_REVIEW_PHRASES = (
+    "no defects", "zero defects", "zero findings", "zero regressions",
+    "no regressions", "looks good", "no issues", "no problems",
+    "nothing found", "no bugs",
+)
+
+
+def _is_recognized_clean_phrase(text: str) -> bool:
+    lowered = text.lower()
+    return any(phrase in lowered for phrase in CLEAN_REVIEW_PHRASES)
+
+
 def parse_and_validate_findings(
     raw_output: str,
     reviewer_role: str,
@@ -151,6 +171,11 @@ def parse_and_validate_findings(
     code_block_match = re.search(r"```(?:yaml|json)?\s*\n([\s\S]*?)\n```", clean_text)
     if code_block_match:
         payload_text = code_block_match.group(1).strip()
+    elif _is_recognized_clean_phrase(clean_text):
+        # Unfenced natural-language prose reporting a clean result: accept it
+        # directly rather than risk yaml.safe_load misreading its bullet
+        # points/colons as an unrelated structured (and thus malformed) shape.
+        return [], None, True
     else:
         payload_text = clean_text
 
@@ -200,7 +225,7 @@ def parse_and_validate_findings(
                 return [_make_err_finding(reviewer_role, err_msg, raw_output)], err_msg, False
     elif isinstance(parsed, list):
         findings_list = parsed
-    elif isinstance(parsed, str) and any(w in parsed.lower() for w in ["no defects", "zero findings", "looks good", "clean", "passed", "no issues"]):
+    elif isinstance(parsed, str) and _is_recognized_clean_phrase(parsed):
         # An explicit prose "clean" signal is a deliberate, valid result.
         return [], None, True
     else:
