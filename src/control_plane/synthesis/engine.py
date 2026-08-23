@@ -28,7 +28,11 @@ from src.control_plane.agent_execution import (
 from src.control_plane.atomic_io import atomic_write_json, atomic_write_text, atomic_write_yaml
 from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
 from src.control_plane.reconciliation import ReviewFinding, ReconciliationResult, ReviewReconciler
-from src.control_plane.review_runner import parse_and_validate_findings
+from src.control_plane.review_runner import (
+    build_reviewer_candidates,
+    invoke_reviewer_with_failover,
+    parse_and_validate_findings,
+)
 from src.control_plane.reviewers import get_reviewer_role
 from src.control_plane.synthesis.acceptance_runner import ProductAcceptanceReport, ProductAcceptanceRunner
 from src.control_plane.synthesis.capability_negotiator import (
@@ -87,6 +91,11 @@ class SynthesisResult(DataClassSerializationMixin):
     # role *mapping*; these are executions (#59.1 Phase 8).
     reviewer_invocations: List[Dict[str, Any]] = field(default_factory=list)
     diversity_achieved: bool = True
+    # diversity_achieved (above) reflects the initial role->provider assignment;
+    # completed_diversity (#59.2 Phase 5) reflects which providers actually
+    # completed each role -- the signal that matters for verification, since
+    # failover may substitute a different provider than originally assigned.
+    completed_diversity: bool = True
     framework_gaps: List[FrameworkGap] = field(default_factory=list)
     error_message: Optional[str] = None
     schema: str = SYNTHESIS_SCHEMA_VERSION
@@ -243,6 +252,7 @@ class ProductSynthesizer:
         review_role_map: Dict[str, str] = {}
         review_invocations: List[Dict[str, Any]] = []
         diversity_achieved = True
+        completed_diversity = True
 
         while repair_count <= self.max_repair_cycles:
             # Check compile via HowlFrame compiler
@@ -281,13 +291,34 @@ class ProductSynthesizer:
 
             # Run independent multi-provider review
             reviewer_roles = ["test-falsifier", "security-reviewer", "architecture-reviewer"]
-            review_findings, review_role_map, diversity_achieved, review_invocations = (
+            review_findings, review_role_map, diversity_achieved, review_invocations, completed_diversity = (
                 self._run_independent_reviews(
                     out_path, spec, reviewer_roles, implementing_provider=active_provider
                 )
             )
             reconcile_res = ReviewReconciler.reconcile(review_findings)
             last_reconciliation = reconcile_res
+
+            # Review completion is a verification gate (#59.2 Phase 3): absence
+            # of findings is never evidence of a completed review. Every
+            # required role must have at least one completed invocation before
+            # VERIFIED_PRODUCT can be returned -- reconciliation findings alone
+            # are not enough, since a reviewer that never ran has none to report.
+            completed_roles = {inv["role"] for inv in review_invocations if inv.get("completed")}
+            missing_roles = [r for r in reviewer_roles if r not in completed_roles]
+
+            if self.synthesis_mode != "deterministic_baseline" and missing_roles:
+                repair_count += 1
+                last_err = f"Review incomplete: no completed invocation for role(s) {missing_roles}"
+                if repair_count <= self.max_repair_cycles:
+                    active_provider, fail_res = self._attempt_repair_or_exhaustion(
+                        spec, "independent_review", last_err,
+                        out_path, active_provider, avoid_provider, repair_count,
+                        neg_res, last_acceptance, t0
+                    )
+                    if fail_res:
+                        return fail_res
+                continue
 
             if reconcile_res.unresolved_blockers > 0 and repair_count < self.max_repair_cycles:
                 repair_count += 1
@@ -325,6 +356,7 @@ class ProductSynthesizer:
                         "passed_checks": accept_report.passed_count,
                         "reviewing_providers": list(review_role_map.values()),
                         "diversity_achieved": diversity_achieved,
+                        "completed_diversity": completed_diversity,
                     },
                 ))
 
@@ -340,10 +372,7 @@ class ProductSynthesizer:
                 repair_cycles=repair_count,
                 duration_seconds=elapsed,
                 implementing_provider=active_provider,
-                reviewing_providers=list(review_role_map.values()),
-                reviewer_mapping=review_role_map,
-            reviewer_invocations=list(review_invocations),
-                diversity_achieved=diversity_achieved,
+                **self._review_evidence_kwargs(review_role_map, review_invocations, diversity_achieved, completed_diversity),
             )
 
         # Exhausted repair budget
@@ -359,12 +388,26 @@ class ProductSynthesizer:
             repair_cycles=repair_count,
             duration_seconds=elapsed,
             implementing_provider=active_provider,
-            reviewing_providers=list(review_role_map.values()),
-            reviewer_mapping=review_role_map,
-            reviewer_invocations=list(review_invocations),
-            diversity_achieved=diversity_achieved,
+            **self._review_evidence_kwargs(review_role_map, review_invocations, diversity_achieved, completed_diversity),
             error_message=f"Exhausted repair budget ({self.max_repair_cycles} cycles): {last_err}",
         )
+
+    @staticmethod
+    def _review_evidence_kwargs(
+        review_role_map: Dict[str, str],
+        review_invocations: List[Dict[str, Any]],
+        diversity_achieved: bool,
+        completed_diversity: bool,
+    ) -> Dict[str, Any]:
+        """Shared SynthesisResult review-evidence fields, common to both the
+        VERIFIED_PRODUCT and REPAIR_BUDGET_EXHAUSTED terminal returns."""
+        return {
+            "reviewing_providers": list(review_role_map.values()),
+            "reviewer_mapping": review_role_map,
+            "reviewer_invocations": list(review_invocations),
+            "diversity_achieved": diversity_achieved,
+            "completed_diversity": completed_diversity,
+        }
 
     def _exhausted_result(self, spec: ProductSpec, neg_res: NegotiationResult, t0: float, msg: str) -> SynthesisResult:
         elapsed = round(time.time() - t0, 3)
@@ -559,14 +602,19 @@ Make the necessary file edits now.
         spec: ProductSpec,
         roles: List[str],
         implementing_provider: str = "codex",
-    ) -> Tuple[List[ReviewFinding], Dict[str, str], bool, List[Dict[str, Any]]]:
+    ) -> Tuple[List[ReviewFinding], Dict[str, str], bool, List[Dict[str, Any]], bool]:
         """
         Executes independent multi-provider adversarial reviews over synthesized artifacts.
-        Distributes reviewer roles across distinct available providers.
+        Distributes reviewer roles across distinct available providers, with bounded
+        failover (#59.2 Phase 4) to one independent fallback candidate per role when
+        the preferred assignment is unavailable, exhausted, times out, or produces
+        invalid/malformed output.
 
         Also returns a per-role invocation record distinguishing assigned from
         invoked from completed (#59.1 Phase 8) -- the role mapping alone says
-        nothing about whether a reviewer actually ran.
+        nothing about whether a reviewer actually ran -- plus `completed_diversity`
+        (#59.2 Phase 5), which reflects which providers actually completed each
+        role rather than which providers were merely assigned.
         """
         findings: List[ReviewFinding] = []
         invocations: List[Dict[str, Any]] = []
@@ -604,58 +652,71 @@ Make the necessary file edits now.
         # Multi-provider reviewer execution (only in real AI / custom backend mode)
         if self.synthesis_mode != "deterministic_baseline":
             for role_id in roles:
-                rev_provider = rev_mapping.get(role_id, implementing_provider)
+                preferred = rev_mapping.get(role_id, implementing_provider)
                 role_obj = get_reviewer_role(role_id)
-                if role_obj:
-                    brief = role_obj.render_brief(
-                        task=TaskSpec(
-                            task_id=f"SYNTH-{spec.name.upper()}",
-                            repository=spec.name,
-                            objective=f"Review synthesized product {spec.title}",
-                            task_class="feature",
-                            risk_level="medium",
-                            recommended_reasoning_tier="tier_2",
-                        ),
-                        diff_content=backend_txt[:4000],
-                    )
-                    rev_backend = self.custom_backend or AgentBackendRegistry.get_backend(rev_provider)
-                    # Assignment is not execution (#59.1 Phase 8): a reviewer
-                    # can be mapped to a role and never run -- the backend may
-                    # be unavailable, or execute() may raise. Record what
-                    # actually happened rather than inferring it from the map.
-                    invocation = {
-                        "role": role_id, "provider": rev_provider,
-                        "assigned": True, "invoked": False, "completed": False,
-                        "duration_seconds": 0.0,
-                    }
-                    invocations.append(invocation)
-                    if rev_backend and rev_backend.is_available():
-                        invocation["invoked"] = True
-                        try:
-                            rev_res = rev_backend.execute(
-                                task=TaskSpec(
-                                    task_id=f"SYNTH-REV-{role_id}",
-                                    repository=spec.name,
-                                    objective=f"Perform {role_id} review for {spec.name}",
-                                    task_class="other",
-                                    risk_level="low",
-                                    recommended_reasoning_tier="tier_2",
-                                ),
-                                cwd=out_path,
-                                role="review",
-                                prompt_override=brief,
-                                timeout_seconds=30,
-                            )
-                            invocation["completed"] = bool(rev_res.success)
-                            invocation["duration_seconds"] = round(rev_res.duration_seconds, 3)
-                            invocation.update(self._local_review_telemetry(rev_provider, rev_res))
-                            if rev_res.success and rev_res.stdout.strip():
-                                parsed_findings, _ = parse_and_validate_findings(rev_res.stdout, role_id)
-                                findings.extend(parsed_findings)
-                        except Exception as exc:  # noqa: BLE001 - a reviewer crash is evidence, not a campaign failure
-                            invocation["error"] = str(exc)[:200]
+                if not role_obj:
+                    continue
 
-        return findings, rev_mapping, diversity_achieved, invocations
+                brief = role_obj.render_brief(
+                    task=TaskSpec(
+                        task_id=f"SYNTH-{spec.name.upper()}",
+                        repository=spec.name,
+                        objective=f"Review synthesized product {spec.title}",
+                        task_class="feature",
+                        risk_level="medium",
+                        recommended_reasoning_tier="tier_2",
+                    ),
+                    diff_content=backend_txt[:4000],
+                )
+                review_task = TaskSpec(
+                    task_id=f"SYNTH-REV-{role_id}",
+                    repository=spec.name,
+                    objective=f"Perform {role_id} review for {spec.name}",
+                    task_class="other",
+                    risk_level="low",
+                    recommended_reasoning_tier="tier_2",
+                )
+
+                candidates = build_reviewer_candidates(role_id, preferred, self.provider_pool, review_task)
+
+                if self.custom_backend:
+                    backend_lookup: Callable[[str], Optional[AgentBackend]] = lambda _cid: self.custom_backend
+                else:
+                    backend_lookup = AgentBackendRegistry.get_backend
+
+                winner, rev_res, attempts = invoke_reviewer_with_failover(
+                    role_id=role_id,
+                    candidates=candidates,
+                    task=review_task,
+                    cwd=out_path,
+                    prompt_override=brief,
+                    backend_lookup=backend_lookup,
+                    provider_pool=self.provider_pool,
+                )
+
+                # Assignment is not execution (#59.1 Phase 8): a reviewer can be
+                # mapped to a role and never run. Record what actually happened.
+                invocation: Dict[str, Any] = {
+                    "role": role_id,
+                    "provider": winner or preferred,
+                    "assigned": True,
+                    "invoked": bool(attempts),
+                    "completed": bool(winner),
+                    "status": "completed" if winner else (attempts[-1]["outcome"] if attempts else "not_invoked"),
+                    "duration_seconds": attempts[-1]["duration_seconds"] if attempts else 0.0,
+                    "attempts": attempts,
+                }
+                if winner and rev_res is not None:
+                    invocation.update(self._local_review_telemetry(winner, rev_res))
+                    if rev_res.stdout and rev_res.stdout.strip():
+                        parsed_findings, _parse_err, _is_valid = parse_and_validate_findings(rev_res.stdout, role_id)
+                        findings.extend(parsed_findings)
+                invocations.append(invocation)
+
+        completed_by_role = {inv["role"]: inv["provider"] for inv in invocations if inv.get("completed")}
+        completed_diversity = bool(completed_by_role) and len(set(completed_by_role.values())) == len(completed_by_role)
+
+        return findings, rev_mapping, diversity_achieved, invocations, completed_diversity
 
     @staticmethod
     def _local_review_telemetry(provider: str, rev_res: AgentExecutionResult) -> Dict[str, Any]:

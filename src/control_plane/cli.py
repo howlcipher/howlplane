@@ -539,6 +539,24 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
     p_dogfood.add_argument("--target-repo", default=".", help="Repository root for real git/GitHub integration")
     p_dogfood.add_argument("--repo-slug", help="owner/repo for GitHub integration (auto-detected from origin remote if omitted)")
 
+    # acceptance (live governed-integration acceptance canary, #59.2 Phases 15-18)
+    p_accept = subparsers.add_parser("acceptance", help="Live autonomous acceptance canary", **kwargs)
+    accept_sub = p_accept.add_subparsers(dest="acceptance_action", required=True)
+    p_overnight = accept_sub.add_parser(
+        "overnight-integration",
+        help="Run the one-shot live governed branch/commit/PR/CI/merge lifecycle canary",
+    )
+    p_overnight.add_argument(
+        "--authority-profile", choices=["strict", "overnight-safe"], required=True,
+        help="Delegated campaign authority the canary runs under. Required -- there is no "
+             "default; an operator must explicitly authorize exactly the actions it encodes.",
+    )
+    p_overnight.add_argument("--target-repo", default=".", help="Repository root for real git/GitHub integration")
+    p_overnight.add_argument("--repo-slug", help="owner/repo (auto-detected from origin remote if omitted)")
+    p_overnight.add_argument("--campaign-dir", default=".dogfood_runs", help="Base directory for durable campaign state")
+    p_overnight.add_argument("--ledger-file", help="Ledger file path")
+    p_overnight.add_argument("--json", action="store_true", help="Output JSON result")
+
     # authority (read-only authority profile inspection, #59 Phase 26)
     p_authority = subparsers.add_parser("authority", help="Inspect delegated authority profiles (read-only)", **kwargs)
     authority_sub = p_authority.add_subparsers(dest="authority_action", required=True)
@@ -795,6 +813,62 @@ def cmd_dogfood(args: argparse.Namespace) -> int:
         print(report.render_markdown())
 
     return 0 if report.iterations_failed == 0 else 1
+
+
+def cmd_acceptance(args: argparse.Namespace) -> int:
+    """
+    Live governed-integration acceptance canary (#59.2 Phases 15-18).
+    `ai acceptance overnight-integration` runs exactly one bounded governed
+    engineering task -- through the real GovernedTaskOrchestrator, real
+    independent review, real deterministic verification, and real
+    GitIntegrationExecutor branch/commit/push/PR/CI/merge/remote-verify/
+    local-sync lifecycle -- to prove that lifecycle end-to-end with no
+    mocked git/gh boundary. The task is mechanically scoped to touch only
+    its designated evidence artifact under documentation/task_journals/.
+    """
+    if getattr(args, "acceptance_action", None) != "overnight-integration":
+        print("Usage: ai acceptance overnight-integration --authority-profile <strict|overnight-safe>")
+        return 1
+
+    from src.control_plane.synthesis import MarathonDogfoodEngine
+
+    ledger = EvidenceLedger(args.ledger_file) if getattr(args, "ledger_file", None) else None
+    engine = MarathonDogfoodEngine(
+        campaign_dir=getattr(args, "campaign_dir", None),
+        target_repo=getattr(args, "target_repo", None) or ".",
+        repo_slug=getattr(args, "repo_slug", None),
+        ledger=ledger,
+    )
+    result = engine.run_acceptance_canary(authority_profile_id=args.authority_profile)
+    git_rec = result.get("git_record") or {}
+    fully_verified = bool(
+        git_rec.get("merged") and git_rec.get("remote_main_contains_merge") and git_rec.get("local_main_synced")
+    )
+
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps({**result, "fully_verified": fully_verified}, indent=2))
+    else:
+        print("=" * 60)
+        print(f"HOWLPLANE — LIVE ACCEPTANCE CANARY: {result['campaign_id']}")
+        print("=" * 60)
+        print(f"Task ID:            {result['task_id']}")
+        print(f"Journal path:       {result['journal_path']}")
+        print(f"Task success:       {result['task_success']}")
+        print(f"Branch:             {git_rec.get('branch')}")
+        print(f"Commit SHA:         {git_rec.get('commit_sha')}")
+        print(f"PR:                 #{git_rec.get('pr_number')} {git_rec.get('pr_url') or ''}")
+        print(f"CI status:          {git_rec.get('ci_status')}")
+        print(f"Merged:             {git_rec.get('merged')}")
+        print(f"Merge SHA:          {git_rec.get('merge_sha')}")
+        print(f"Remote verified:    {git_rec.get('remote_main_contains_merge')}")
+        print(f"Local synced:       {git_rec.get('local_main_synced')}")
+        if git_rec.get("failure_reason"):
+            print(f"Failure reason:     {git_rec.get('failure_reason')}")
+        print(f"Fully verified:     {fully_verified}")
+        print("=" * 60)
+
+    return 0 if fully_verified else 1
 
 
 def cmd_authority(args: argparse.Namespace) -> int:

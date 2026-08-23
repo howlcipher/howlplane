@@ -35,6 +35,13 @@ LOCAL_INELIGIBLE_SKILLS = {
     "database_management", "devops_sre", "network_engineering",
 }
 
+# Reviewer roles a local Tier-3 model must never be assigned to, regardless of
+# task risk level (#59.2 Phase 10). The local model must never become the
+# sole/only security authority: is_task_local_eligible() gates by task
+# risk/class, but review-role assignment (select_reviewers, below) has no
+# task risk level of its own to gate on, so this is role-based instead.
+LOCAL_INELIGIBLE_REVIEWER_ROLES = {"security-reviewer"}
+
 
 def is_task_local_eligible(task: Optional[TaskSpec]) -> bool:
     """
@@ -411,7 +418,12 @@ class ProviderPoolManager:
     ) -> Tuple[Dict[str, str], bool]:
         """
         Selects independent reviewers from distinct providers whenever available.
-        Returns mapping of role_id -> agent_id, and boolean indicating if full provider diversity was achieved.
+        Returns mapping of role_id -> agent_id, and boolean indicating if full
+        provider diversity was achieved.
+
+        Roles in LOCAL_INELIGIBLE_REVIEWER_ROLES (#59.2 Phase 10) never receive
+        a local provider, even when local is the only distinct candidate --
+        the local Tier-3 model must never become the sole security authority.
         """
         impl_norm = self._normalize(implementing_agent_id)
         available_agents = [
@@ -425,8 +437,12 @@ class ProviderPoolManager:
         diversity_achieved = True
 
         for idx, role in enumerate(required_roles):
-            if distinct_candidates:
-                chosen = distinct_candidates[idx % len(distinct_candidates)]
+            role_candidates = distinct_candidates
+            if role in LOCAL_INELIGIBLE_REVIEWER_ROLES:
+                role_candidates = [c for c in distinct_candidates if c not in LOCAL_PROVIDER_IDS]
+
+            if role_candidates:
+                chosen = role_candidates[idx % len(role_candidates)]
                 role_mapping[role] = chosen
             elif allow_same_provider and available_agents:
                 role_mapping[role] = impl_norm

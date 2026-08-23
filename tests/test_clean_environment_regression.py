@@ -38,6 +38,7 @@ from src.control_plane.synthesis.provider_pool import (
 )
 from src.control_plane.synthesis.spec_synthesizer import NaturalLanguageSynthesizer
 from src.control_plane.task_spec import TaskSpec
+from tests._dogfood_test_helpers import clean_review_result
 
 
 def test_no_personal_paths_in_generated_product_artifacts(tmp_path: Path):
@@ -115,6 +116,10 @@ def test_provider_fallback_chain_clean_environment(tmp_path: Path):
         def execute(self, task, cwd, role="implementation", **kwargs):
             if role == "implementation":
                 events.append(task.actual_agent)
+            if role not in ("implementation", "remediation"):
+                # Independent review roles: this test exercises
+                # implementation-provider fallback, not review content.
+                return clean_review_result(role, task.actual_agent or self.agent_id)
             err = agent_errors.get(task.actual_agent)
             ok = err is None
             return AgentExecutionResult(

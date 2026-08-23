@@ -700,6 +700,91 @@ class MarathonDogfoodEngine:
             state_dir=str(state_dir),
         )
 
+    def run_acceptance_canary(self, authority_profile_id: str) -> Dict[str, Any]:
+        """
+        Live governed integration acceptance canary (#59.2 Phases 15-18).
+
+        A first-class, explicitly labeled acceptance action -- not a
+        fabricated defect -- whose only purpose is to exercise the real
+        governed git/GitHub lifecycle end-to-end with no mocked boundary:
+        GovernedTaskOrchestrator -> independent review -> deterministic
+        verification -> real branch/commit/push/PR via GitIntegrationExecutor
+        -> live GitHub Ruleset discovery -> CI poll to terminal -> delegated
+        merge -> real gh merge verification -> remote-main reconciliation ->
+        local-main sync. Reuses _execute_governed_engineering_improvement
+        exactly as any other governed engineering task does -- no special
+        shortcut, no direct git/gh call outside the production executor.
+
+        The task is mechanically scoped via TaskSpec.allowed_paths (#59.2
+        Phase 8) to touch only its designated acceptance evidence artifact
+        under documentation/task_journals/ -- a fail-closed guarantee, not a
+        prompt-only request. `risk_level="medium"` excludes the quota-free
+        local model, since the canary's entire point is proving the
+        cloud-governed path works.
+
+        Returns a dict: campaign_id, task_id, journal_path, task_success,
+        git_record. Callers should treat completion as verified only when
+        git_record's merged / remote_main_contains_merge / local_main_synced
+        are all true.
+        """
+        self.base_output_dir.mkdir(parents=True, exist_ok=True)
+        self.campaign_base_dir.mkdir(parents=True, exist_ok=True)
+
+        campaign_id = self._generate_campaign_id()
+        state_dir = self.campaign_base_dir / campaign_id
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        campaign_state = DurableCampaignState(campaign_id=campaign_id)
+        self.authority_envelope = self._bind_authority_envelope(
+            state_dir, campaign_id, authority_profile_id, is_resume=False,
+        )
+        campaign_state.authority_envelope = (
+            self.authority_envelope.to_dict() if self.authority_envelope else None
+        )
+        self.git_executor = self._git_executor_factory(
+            self.authority_envelope, campaign_state.merges_this_campaign,
+        )
+
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        journal_path = f"documentation/task_journals/{date_str}_live_autonomous_acceptance.md"
+        task_id = f"ACCEPTANCE-{campaign_id}"
+
+        task_success, git_rec = self._execute_governed_engineering_improvement(
+            task_id=task_id,
+            benchmark_key="LIVE-ACCEPTANCE-CANARY",
+            gap_type="live_autonomous_acceptance",
+            gap_desc=(
+                f"Append a canary confirmation entry to {journal_path} recording that the "
+                f"full live autonomous governed-merge lifecycle (branch, commit, push, PR, "
+                f"CI, delegated merge, remote-main verification, local-main sync) executed "
+                f"successfully for campaign {campaign_id}."
+            ),
+            risk_level="medium",
+            campaign_state=campaign_state,
+            state_dir=state_dir,
+            allowed_paths=[journal_path],
+        )
+
+        if task_success and git_rec:
+            campaign_state.record_task_completed({
+                "task_id": task_id,
+                "objective": "Live autonomous acceptance canary",
+                "provider": git_rec.get("provider", "unknown"),
+                "remediations": 0,
+            })
+            campaign_state.record_git_integration(git_rec)
+        campaign_state.stop_reason = "acceptance_canary_complete" if task_success else "acceptance_canary_incomplete"
+        campaign_state.save(state_dir)
+
+        return {
+            "campaign_id": campaign_id,
+            "task_id": task_id,
+            "journal_path": journal_path,
+            "task_success": task_success,
+            "git_record": git_rec,
+            "state_dir": str(state_dir),
+        }
+
     def _run_local_only_continuation(self, campaign_state: DurableCampaignState, avoid_provider: Optional[str]) -> str:
         """
         Bounded local-only engineering continuation, entered only once every cloud
@@ -1161,6 +1246,7 @@ class MarathonDogfoodEngine:
         risk_level: str = "medium",
         campaign_state: Optional[DurableCampaignState] = None,
         state_dir: Optional[Path] = None,
+        allowed_paths: Optional[List[str]] = None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """
         Executes a bounded engineering task through the REAL governed
@@ -1180,11 +1266,18 @@ class MarathonDogfoodEngine:
         quota-free local model an eligible candidate for this specific fix;
         the default "medium" keeps normal in-campaign gap fixes on cloud
         providers, consistent with Tier-3 local eligibility rules (#58 Phase 9).
+
+        `allowed_paths` (#59.2 Phase 8), when given, mechanically restricts
+        the eventual commit to exactly those repo-relative paths --
+        GitIntegrationExecutor.stage_and_commit rejects any other path before
+        staging anything. Used by the live acceptance canary to guarantee it
+        can touch only its designated evidence artifact.
         """
         objective = f"Resolve {gap_type} for {benchmark_key}: {gap_desc}"
         gap_probe = TaskSpec(
             task_id=task_id, repository="howlplane",
             objective=objective, task_class="bug_fix", risk_level=risk_level,
+            allowed_paths=list(allowed_paths or []),
         )
         candidates = self.provider_pool.select_candidates(
             task_category="code_heavy",
@@ -1381,7 +1474,10 @@ class MarathonDogfoodEngine:
 
         if self._run_step_or_bail(
             "commit_task_changes",
-            {"paths": paths, "message": commit_message, "baseline_sha": baseline_sha},
+            {
+                "paths": paths, "message": commit_message, "baseline_sha": baseline_sha,
+                "allowed_paths": gap_probe.allowed_paths or None,
+            },
             task_id, run_dir, git_rec, campaign_state, state_dir, _apply_commit,
         ) is None:
             return False, git_rec.to_dict()

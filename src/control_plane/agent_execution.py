@@ -532,7 +532,7 @@ class FakeAgentBackend(AgentBackend):
         self,
         agent_id: str = "fake_agent",
         default_exit_code: int = 0,
-        default_stdout: str = "Fake implementation completed successfully.",
+        default_stdout: str = "Fake implementation completed successfully. No issues found.",
         default_stderr: str = "",
         side_effect: Optional[Callable[[TaskSpec, Path, str], None]] = None,
         duration: float = 0.05,

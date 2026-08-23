@@ -28,7 +28,6 @@ from src.control_plane.agent_execution import (
     FakeAgentBackend,
 )
 from src.control_plane.evidence_ledger import EvidenceLedger
-from src.control_plane.git_integration import GitIntegrationExecutor
 from src.control_plane.synthesis.campaign_state import DurableCampaignState, GitIntegrationRecord
 from src.control_plane.synthesis.capability_negotiator import CapabilityNegotiator, FrameworkGap
 from src.control_plane.synthesis.engine import ProductSynthesizer, SynthesisResult
@@ -42,7 +41,14 @@ from src.control_plane.synthesis.provider_pool import (
     ProviderExhaustionEvent,
     ProviderPoolManager,
 )
-from tests._dogfood_test_helpers import FakeOrchestrator, ScriptedRunner, build_full_merge_flow
+from tests._dogfood_test_helpers import (
+    FakeOrchestrator,
+    ScriptedRunner,
+    assert_fully_integrated,
+    build_full_merge_flow,
+    clean_review_result,
+    scripted_git_executor_factory,
+)
 
 
 def _seed_valid_howl_files(task, cwd: Path, prompt: str):
@@ -88,6 +94,10 @@ class ProgrammableDispatcherBackend(AgentBackend):
 
     def execute(self, task, cwd, role="implementation", prompt_override=None, **kwargs):
         self.invocations.append(task.actual_agent)
+        if role not in ("implementation", "remediation"):
+            # Independent review roles: these tests exercise implementation-
+            # provider failover, not review content.
+            return clean_review_result(role, task.actual_agent)
         code, stdout, stderr = self.outcomes.get(task.actual_agent, (1, "", "unknown error"))
         if code == 0:
             _seed_valid_howl_files(task, Path(cwd), prompt_override or "")
@@ -198,6 +208,10 @@ def test_scenario_6_engineering_failure_does_not_exhaust_provider(tmp_path: Path
                     agent_id="codex", role="remediation", command="codex exec", exit_code=0,
                     stdout="Fixed syntax error", stderr="", duration_seconds=0.05, success=True,
                 )
+            elif role != "implementation":
+                # Independent review roles: this test exercises engineering-
+                # failure-vs-exhaustion classification, not review content.
+                return clean_review_result(role, "codex")
             else:
                 # Initial synthesis creates broken syntax
                 app_dir = target_cwd / "app"
@@ -343,9 +357,7 @@ def test_scenario_9_closed_loop_self_improvement_flywheel(tmp_path: Path):
         target_repo=tmp_path,
         repo_slug=repo_slug,
         orchestrator_factory=lambda config: FakeOrchestrator(run_dir, "src/control_plane/howlframe_runtime.py"),
-        git_executor_factory=lambda envelope, merges_so_far: GitIntegrationExecutor(
-            tmp_path, repo_slug, envelope, git_runner=git_runner, gh_runner=gh_runner, merges_so_far=merges_so_far,
-        ),
+        git_executor_factory=scripted_git_executor_factory(tmp_path, repo_slug, git_runner, gh_runner),
     )
 
     report = engine.run_marathon(benchmarks=["notes"], max_iterations=1, authority_profile_id="overnight-safe")
@@ -358,13 +370,7 @@ def test_scenario_9_closed_loop_self_improvement_flywheel(tmp_path: Path):
     assert len(report.git_records) == 1
 
     rec = GitIntegrationRecord.from_dict(report.git_records[0])
-    assert rec.integration_mode == "real"
-    assert rec.is_fully_integrated() is True
-    assert rec.branch_observed and rec.commit_observed and rec.push_observed
-    assert rec.pr_observed and rec.required_checks_green and rec.merge_observed
-    assert rec.remote_main_contains_merge is True
-    assert rec.merge_sha == "realmergesha1"
-    assert rec.commit_sha == "realcommitsha1"
+    assert_fully_integrated(rec, merge_sha="realmergesha1", commit_sha="realcommitsha1")
 
 
 def test_scenario_10_until_providers_exhausted_semantics(tmp_path: Path):

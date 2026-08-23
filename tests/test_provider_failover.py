@@ -153,6 +153,13 @@ def test_live_agy_quota_stderr_is_classified_as_session_exhaustion():
 # ---------------------------------------------------------------------------
 
 def test_1_quota_exhausted_provider_fails_over_to_next_and_completes(tmp_path):
+    """
+    VERIFIED_REPLAY (#59.2 Phase 20): replays the verbatim agy quota-exhaustion
+    stderr observed live in campaign DOGFOOD-20260822-005043-16adca through the
+    current production classification/failover path. Proves the historical
+    misclassification (a genuine subscription exhaustion read as a plain
+    engineering failure, no failover attempted) is fixed.
+    """
     run = Run(tmp_path, ["agy", "devin_cli"], {"agy": ("exhausted", LIVE_AGY_QUOTA_STDERR)})
 
     assert run.ok is True, "devin_cli should have completed the task after agy exhausted"
