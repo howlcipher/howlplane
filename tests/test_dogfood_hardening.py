@@ -28,7 +28,6 @@ from src.control_plane.agent_execution import (
     FakeAgentBackend,
 )
 from src.control_plane.evidence_ledger import EvidenceLedger
-from src.control_plane.git_integration import GitIntegrationExecutor
 from src.control_plane.synthesis.campaign_state import DurableCampaignState, GitIntegrationRecord
 from src.control_plane.synthesis.capability_negotiator import CapabilityNegotiator, FrameworkGap
 from src.control_plane.synthesis.engine import ProductSynthesizer, SynthesisResult
@@ -45,8 +44,10 @@ from src.control_plane.synthesis.provider_pool import (
 from tests._dogfood_test_helpers import (
     FakeOrchestrator,
     ScriptedRunner,
+    assert_fully_integrated,
     build_full_merge_flow,
     clean_review_result,
+    scripted_git_executor_factory,
 )
 
 
@@ -356,9 +357,7 @@ def test_scenario_9_closed_loop_self_improvement_flywheel(tmp_path: Path):
         target_repo=tmp_path,
         repo_slug=repo_slug,
         orchestrator_factory=lambda config: FakeOrchestrator(run_dir, "src/control_plane/howlframe_runtime.py"),
-        git_executor_factory=lambda envelope, merges_so_far: GitIntegrationExecutor(
-            tmp_path, repo_slug, envelope, git_runner=git_runner, gh_runner=gh_runner, merges_so_far=merges_so_far,
-        ),
+        git_executor_factory=scripted_git_executor_factory(tmp_path, repo_slug, git_runner, gh_runner),
     )
 
     report = engine.run_marathon(benchmarks=["notes"], max_iterations=1, authority_profile_id="overnight-safe")
@@ -371,13 +370,7 @@ def test_scenario_9_closed_loop_self_improvement_flywheel(tmp_path: Path):
     assert len(report.git_records) == 1
 
     rec = GitIntegrationRecord.from_dict(report.git_records[0])
-    assert rec.integration_mode == "real"
-    assert rec.is_fully_integrated() is True
-    assert rec.branch_observed and rec.commit_observed and rec.push_observed
-    assert rec.pr_observed and rec.required_checks_green and rec.merge_observed
-    assert rec.remote_main_contains_merge is True
-    assert rec.merge_sha == "realmergesha1"
-    assert rec.commit_sha == "realcommitsha1"
+    assert_fully_integrated(rec, merge_sha="realmergesha1", commit_sha="realcommitsha1")
 
 
 def test_scenario_10_until_providers_exhausted_semantics(tmp_path: Path):

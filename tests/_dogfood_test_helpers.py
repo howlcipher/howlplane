@@ -20,7 +20,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from src.control_plane.agent_execution import AgentExecutionResult
 from src.control_plane.git_baseline import RepositoryDelta
-from src.control_plane.git_integration import PR_MERGE_FIELDS
+from src.control_plane.git_integration import PR_MERGE_FIELDS, GitIntegrationExecutor
 from src.control_plane.orchestrator import (
     FAILURE_CLASS_AUTHORITY_BLOCKED,
     FAILURE_CLASS_ENGINEERING,
@@ -182,6 +182,38 @@ def complete_result(task_spec, run_dir, modified_files, provider_execution=None)
         run_dir=str(run_dir),
         provider_execution=provider_execution,
     )
+
+
+def scripted_git_executor_factory(
+    target_repo: Union[str, Path], repo_slug: str, git_runner: "ScriptedRunner", gh_runner: "ScriptedRunner",
+) -> Callable[..., GitIntegrationExecutor]:
+    """
+    A `git_executor_factory` for MarathonDogfoodEngine that fakes only the
+    git/gh subprocess boundary -- the production GitIntegrationExecutor logic
+    it constructs is real. Factored out since multiple real-integration test
+    modules (test_dogfood_hardening.py, test_acceptance_canary.py) build this
+    exact factory shape.
+    """
+    return lambda envelope, merges_so_far: GitIntegrationExecutor(
+        target_repo, repo_slug, envelope, git_runner=git_runner, gh_runner=gh_runner, merges_so_far=merges_so_far,
+    )
+
+
+def assert_fully_integrated(rec, merge_sha: str, commit_sha: str) -> None:
+    """
+    Asserts a GitIntegrationRecord reflects a complete, independently-verified
+    real lifecycle (branch through remote-verified merge). Shared by every
+    real-integration test that drives a governed task all the way through
+    merge, so the same invariant isn't pinned as a near-identical assertion
+    block in each one.
+    """
+    assert rec.integration_mode == "real"
+    assert rec.is_fully_integrated() is True
+    assert rec.branch_observed and rec.commit_observed and rec.push_observed
+    assert rec.pr_observed and rec.required_checks_green and rec.merge_observed
+    assert rec.remote_main_contains_merge is True
+    assert rec.merge_sha == merge_sha
+    assert rec.commit_sha == commit_sha
 
 
 class FakeOrchestrator:
