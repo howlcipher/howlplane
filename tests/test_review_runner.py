@@ -34,6 +34,26 @@ def test_parse_findings_clean_output():
     assert is_valid is True
 
 
+def test_parse_findings_unfenced_prose_with_bullets_recognized_as_clean():
+    """
+    VERIFIED_REPLAY (#59.2): live campaign DOGFOOD-20260823-203128-ed0e9e's
+    simplicity-reviewer wrote unfenced prose containing markdown bullets and
+    colons -- yaml.safe_load would misparse that as an unrelated structured
+    (and thus malformed) shape unless the clean-phrase check runs first.
+    """
+    prose = (
+        "Zero defects found. The change is a single, minimal documentation "
+        "file with no code, no redundant boilerplate, and no unnecessary "
+        "abstraction — it's leaner than the project's own journal template, "
+        "appropriate for its narrow purpose (recording canary initiation "
+        "facts without asserting an unfinished outcome)."
+    )
+    findings, err, is_valid = parse_and_validate_findings(prose, "simplicity-reviewer")
+    assert findings == []
+    assert err is None
+    assert is_valid is True
+
+
 def test_parse_findings_empty_output_marked_invalid_not_clean():
     """REVIEW_OUTPUT_INVALID: exit-0-with-empty-stdout must never collapse
     into the same signal as a reviewer that actually completed and found
