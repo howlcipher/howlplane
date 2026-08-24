@@ -778,8 +778,8 @@ def test_repeated_remediation_pattern_can_create_observation(tmp_path: Path):
     assert any(o.category == "context_weakness" for o in obs)
 
 
-def test_trajectory_observation_does_not_immediately_alter_routing():
-    store = ObservationStore("/tmp/obs_test")
+def test_trajectory_observation_does_not_immediately_alter_routing(tmp_path: Path):
+    store = ObservationStore(tmp_path / "observations")
     traj = execution_trajectory(
         "no-alter",
         task_id="NA-001",

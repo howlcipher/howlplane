@@ -18,39 +18,28 @@ REMOTE_BRANCH_EXISTS:
     false
 
 CURRENT_PHASE:
-    hygiene recovery checkpoint ready for commit and push
+    verified Bandit repair ready to commit
 
 LAST_COMPLETED_WORK:
-    Git proves that commit 1fdb668 adds the reasoning package, orchestrator and
-    campaign state integration, ADR 0005, and
-    tests/test_reasoning_strategy_dogfooding.py. Architectural completeness has
-    not yet been audited.
+    Signed checkpoint ef5e74d preserves the recovered source fixes, refactors
+    test duplication to the committed ceiling, packages builtin strategies, and
+    records the architectural audit. Push attempt 1 did not reach origin.
 
 UNCOMMITTED_FILES:
-    README.md
     change_log.md
-    pyproject.toml
-    src/control_plane/reasoning/reasoning_experiment.py
-    src/control_plane/reasoning/strategy_registry.py
-    src/control_plane/reasoning/trajectory_discovery.py
-    src/control_plane/reasoning/builtin_strategies.yaml
-    tests/_dogfood_test_helpers.py
     tests/test_reasoning_strategy_dogfooding.py
     documentation/task_journals/2026-08-24_reasoning_strategy_trajectories.md
 
 CURRENT_BLOCKER:
-    None for the hygiene checkpoint. Audited #60A capability gaps remain after
-    the first remote checkpoint and draft PR are established.
+    None. The Bandit B108 repair is verified and ready for a signed commit.
 
 LAST_TEST_RESULT:
-    Reasoning tests: 48 passed. Hygiene policy regression: 1 passed. SlopsLint:
-    python_src 14 / 14 and python_tests 29 / 29, with no standing or unmatched
-    tombstones. Targeted flake8: clean. The prior full suite result of 769 passed
-    / 1 failed has not yet been independently rerun after the refactor.
+    Bandit: no medium or high issues. Reasoning plus hygiene regression: 49
+    passed. SlopsLint: source 14 / 14 and tests 29 / 29. Targeted flake8 and git
+    diff checks: clean. Prior hook: 770 Python passed, all Go passed.
 
 NEXT_SAFE_ACTION:
-    Stage the exact hygiene recovery files, create a signed checkpoint commit,
-    push through the normal pre-push hook, and open the draft PR.
+    Create a signed repair commit, then retry the normal push.
 
 WORKTREE_STATE:
     DIRTY_INTENTIONAL
@@ -58,7 +47,7 @@ WORKTREE_STATE:
 ## Handoff Packet
 
 TIMESTAMP:
-    2026-08-24T20:40:22Z
+    2026-08-24T21:15:59Z
 
 CURRENT_PROVIDER_AGENT:
     OpenAI Codex / primary agent
@@ -67,43 +56,38 @@ BRANCH:
     feat/reasoning-strategy-dogfooding-canary
 
 HEAD:
-    1fdb6680aae604092ef3af56153d874e5376cb65
+    ef5e74debf7191840c935a955ccb89f9017ed38e
 
 BASE_MAIN:
     c9ec82c126973b86327a1da7773fa1219207d423
 
 CURRENT_PHASE:
-    hygiene recovery checkpoint ready for commit and push
+    verified Bandit repair ready to commit
 
 FILES_CHANGED:
-    README.md
     change_log.md
-    pyproject.toml
-    src/control_plane/reasoning/reasoning_experiment.py
-    src/control_plane/reasoning/strategy_registry.py
-    src/control_plane/reasoning/trajectory_discovery.py
-    src/control_plane/reasoning/builtin_strategies.yaml
-    tests/_dogfood_test_helpers.py
     tests/test_reasoning_strategy_dogfooding.py
     documentation/task_journals/2026-08-24_reasoning_strategy_trajectories.md
 
 TESTS_RUN:
-    slopslint check --classify --enforce: passed at python_src 14 / 14 and
-    python_tests 29 / 29. Targeted reasoning tests: 48 passed. Targeted hygiene
-    policy regression: 1 passed. Targeted flake8: clean. git diff --check: clean.
+    Bandit full scan: no medium or high issues. Reasoning tests plus hygiene
+    regression: 49 passed. SlopsLint: python_src 14 / 14 and python_tests 29 /
+    29. Targeted flake8: clean. git diff --check: clean. Prior push hook before
+    repair: 770 Python passed and all Go tests passed.
 
 TESTS_NOT_RUN:
-    SlopsLint, targeted reasoning tests, hygiene policy regression, and the full
-    repository verification matrix.
+    The hook has not rerun after the repair. Go build and docs build remain for
+    that retry.
 
 KNOWN_FAILURES:
-    No product failure in the checkpoint acceptance set. Sandboxed runs cannot
-    launch flake8 multiprocessing workers; authorized or single worker runs pass.
-    Full repository verification remains pending.
+    Push attempt 1 was blocked by Bandit B108 at
+    tests/test_reasoning_strategy_dogfooding.py because of /tmp/obs_test.
+    The full hook reached 770 Python passes, all Go passes, and clean flake8
+    before that failure. The branch did not reach origin.
 
 EXACT_NEXT_STEP:
-    Commit the exact checkpoint file set with an SSH signature, then push without
-    bypassing the pre-push hook.
+    Commit the test, changelog, and journal update with an SSH signature, then
+    push without bypassing the pre-push hook.
 
 ## Progress Log
 
@@ -178,3 +162,19 @@ strategy artifact to tracked packaged YAML without changing its bytes or pinned
 SHA256. Updated README and change_log for the in progress checkpoint. All 48
 reasoning tests, the previously failing hygiene regression, SlopsLint, targeted
 flake8, and git diff checks pass.
+
+### 2026-08-24T21:15:59Z
+
+Created signed checkpoint ef5e74debf7191840c935a955ccb89f9017ed38e.
+Push attempt 1 ran the normal pre-push hook. It passed all 770 Python tests, all
+Go tests, and flake8, then Bandit rejected hardcoded temporary directory use at
+tests/test_reasoning_strategy_dogfooding.py. The push was aborted and no remote
+branch was created. Replaced the shared /tmp/obs_test path with pytest's isolated
+tmp_path fixture; verification is pending.
+
+### 2026-08-24T21:17:14Z
+
+Verified the Bandit repair: full Bandit scan reports no medium or high issues;
+the reasoning suite plus hygiene regression passes 49 tests; SlopsLint remains
+at python_src 14 / 14 and python_tests 29 / 29; targeted flake8 and git diff
+checks are clean.
