@@ -76,6 +76,15 @@ class OrchestrationConfig:
     custom_reviewer_fn: Optional[Callable[[str, str, TaskSpec], str]] = None
     custom_remediation_fn: Optional[Callable[[TaskSpec, Path, List[ReviewFinding]], None]] = None
     reviewer_agent_mapping: Optional[Dict[str, str]] = None
+    # Enables bounded reviewer failover (#59.2 Phase 4) in the governed review
+    # cycle: a reviewer whose assigned provider fails, times out, or emits
+    # invalid/malformed output gets one alternate-provider attempt instead of
+    # immediately blocking the task. Sharing the caller's pool means review
+    # quota exhaustion updates the same provider state implementation failover
+    # reads (#59.2 Phase 9). Left None (the default) by callers that inject a
+    # custom_backend/custom_reviewer_fn, which keeps deterministic tests on the
+    # prior single-attempt path.
+    provider_pool: Optional[Any] = None
 
 
 @dataclass
@@ -618,6 +627,7 @@ class GovernedTaskOrchestrator:
                 reviewer_agent_mapping=self.config.reviewer_agent_mapping,
                 custom_reviewer_fn=self.config.custom_reviewer_fn,
                 run_dir=run_dir,
+                provider_pool=self.config.provider_pool,
             )
             review_cycles.append(cycle_res)
             latest_reconciliation = cycle_res.reconciliation

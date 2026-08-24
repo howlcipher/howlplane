@@ -1353,7 +1353,14 @@ class MarathonDogfoodEngine:
         # only grows, and any provider already tried is filtered out of the
         # next selection, so the loop cannot spin.
         # --------------------------------------------------------------------
-        orch_config = OrchestrationConfig(acquire_locks=True, record_evidence=bool(self.ledger))
+        orch_config = OrchestrationConfig(
+            acquire_locks=True,
+            record_evidence=bool(self.ledger),
+            # Share this campaign's pool so governed reviews get bounded
+            # alternate-provider failover and so review-time quota exhaustion
+            # is visible to implementation failover (#59.2 Phases 4/9).
+            provider_pool=self.provider_pool,
+        )
         attempted: set = set()
         result = None
         attempt_index = 0
