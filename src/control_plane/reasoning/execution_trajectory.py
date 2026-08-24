@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""
+execution_trajectory.py
+
+Durable, schema-versioned observable orchestration history for a governed task.
+
+An ExecutionTrajectory is NOT hidden model chain-of-thought. It captures the
+code-selected choices (provider, model, agent, reviewer topology, context
+strategy, etc.), evidence references, and outcomes so that later reasoning
+strategy experiments can be evaluated against real trajectory evidence.
+"""
+
+import hashlib
+import json
+from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
+from src.control_plane.atomic_io import atomic_write_json, safe_load_json
+from src.control_plane.evidence_ledger import sanitize_value
+from src.control_plane.reasoning._json_store import DurableObjectStore
+from src.control_plane.task_spec import DataClassSerializationMixin
+
+EXECUTION_TRAJECTORY_SCHEMA_VERSION = "howlplane.execution_trajectory/v1"
+
+
+# Forward imports are kept local to avoid circular dependency with orchestrator.py.
+def _import_orchestration_result():
+    from src.control_plane.orchestrator import OrchestrationResult
+    return OrchestrationResult
+
+# Fields that may contain hidden model reasoning or unnecessary source dumps.
+_SENSITIVE_TRAJECTORY_FIELDS = {
+    "hidden_reasoning",
+    "chain_of_thought",
+    "raw_prompt",
+    "private_notes",
+    "internal_thoughts",
+}
+
+
+def _redact_trajectory_value(val: Any) -> Any:
+    """Recursively redacts strings while preserving structure."""
+    return sanitize_value(val)
+
+
+def _strip_sensitive_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Removes explicitly forbidden hidden-reasoning fields from trajectory data."""
+    result: Dict[str, Any] = {}
+    for k, v in data.items():
+        if k in _SENSITIVE_TRAJECTORY_FIELDS:
+            continue
+        if isinstance(v, dict):
+            result[k] = _strip_sensitive_fields(v)
+        elif isinstance(v, list):
+            result[k] = [
+                _strip_sensitive_fields(i) if isinstance(i, dict) else i for i in v
+            ]
+        else:
+            result[k] = v
+    return result
+
+
+@dataclass
+class ExecutionTrajectory(DataClassSerializationMixin):
+    """
+    Observable orchestration history for one governed task execution.
+
+    Only fields that are knowable from the control plane are required.
+    Cost, latency, and model version are stored only when actually observed;
+    they are never invented.
+    """
+
+    trajectory_id: str
+    task_id: str
+    schema_version: str = EXECUTION_TRAJECTORY_SCHEMA_VERSION
+    campaign_id: Optional[str] = None
+    opportunity_id: Optional[str] = None
+    experiment_id: Optional[str] = None
+    task_class: Optional[str] = None
+    objective: Optional[str] = None
+    selected_provider: Optional[str] = None
+    selected_model: Optional[str] = None
+    selected_agent: Optional[str] = None
+    selected_reviewers: List[str] = field(default_factory=list)
+    prompt_strategy_id: Optional[str] = None
+    context_strategy_id: Optional[str] = None
+    retrieval_strategy_id: Optional[str] = None
+    tool_strategy_id: Optional[str] = None
+    decomposition_strategy_id: Optional[str] = None
+    review_strategy_id: Optional[str] = None
+    verification_strategy_id: Optional[str] = None
+    input_evidence_refs: List[str] = field(default_factory=list)
+    selected_context_refs: List[str] = field(default_factory=list)
+    actions_attempted: List[str] = field(default_factory=list)
+    tools_invoked: List[str] = field(default_factory=list)
+    provider_events: List[Dict[str, Any]] = field(default_factory=list)
+    review_findings: List[Dict[str, Any]] = field(default_factory=list)
+    verification_results: Optional[Dict[str, Any]] = None
+    repair_cycles: List[Dict[str, Any]] = field(default_factory=list)
+    final_status: Optional[str] = None
+    outcome: Optional[str] = None
+    cost_if_available: Optional[float] = None
+    latency_if_available: Optional[float] = None
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    completed_at: Optional[str] = None
+    content_digest: str = ""
+    # Hidden reasoning fields are accepted during construction only so they can
+    # be explicitly stripped by to_dict(); they are never persisted.
+    hidden_reasoning: Optional[str] = None
+    chain_of_thought: Optional[str] = None
+    raw_prompt: Optional[str] = None
+    private_notes: Optional[str] = None
+    internal_thoughts: Optional[str] = None
+
+    def __post_init__(self):
+        self.content_digest = self.compute_content_digest()
+
+    def compute_content_digest(self) -> str:
+        """Deterministic digest over the durable content of this trajectory."""
+        d = self.to_dict()
+        d.pop("content_digest", None)
+        d.pop("completed_at", None)
+        canonical = json.dumps(_strip_sensitive_fields(_redact_trajectory_value(d)), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def finalize(self, final_status: str, outcome: str) -> None:
+        """Marks the trajectory complete and recomputes its digest."""
+        self.final_status = final_status
+        self.outcome = outcome
+        self.completed_at = datetime.now(timezone.utc).isoformat()
+        self.content_digest = self.compute_content_digest()
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = asdict(self)
+        # Ensure hidden-reasoning fields are never serialized, even if somehow present
+        d = _strip_sensitive_fields(d)
+        d = _redact_trajectory_value(d)
+        return d
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ExecutionTrajectory":
+        d = dict(data)
+        d.pop("content_digest", None)
+        d.pop("schema_version", None)
+        return cls(**d)
+
+    def verify_digest(self) -> bool:
+        """Verifies that the stored content_digest matches recomputed digest."""
+        return self.compute_content_digest() == self.content_digest
+
+
+class TrajectoryStore(DurableObjectStore):
+    """
+    Durable, atomic store for ExecutionTrajectory records.
+
+    Trajectories are written to a directory structure that supports resumption:
+    the store refuses to overwrite an existing trajectory with the same id, so
+    repeated event ingestion does not duplicate records.
+    """
+
+    _filename_suffix = ".json"
+
+    def __init__(self, base_dir: Union[str, Path]):
+        super().__init__(
+            base_dir,
+            factory=ExecutionTrajectory.from_dict,
+            dedup_field="content_digest",
+        )
+
+    def save(self, trajectory: ExecutionTrajectory) -> Path:
+        """Atomically persists a trajectory; idempotent on repeated calls."""
+        return super().save(trajectory.trajectory_id, trajectory.to_dict())
+
+    def load(self, trajectory_id: str) -> ExecutionTrajectory:
+        return self._factory(safe_load_json(self._path(trajectory_id)))
+
+    def load_for_task(self, task_id: str) -> List[ExecutionTrajectory]:
+        return [t for t in self.list_all() if t.task_id == task_id]
+
+
+def summarize_for_experiment(trajectory: ExecutionTrajectory) -> Dict[str, Any]:
+    """
+    Produces a compact, deterministic summary of a trajectory for experiment
+    comparison. Omits large diff/prompt content by reference only.
+    """
+    return {
+        "trajectory_id": trajectory.trajectory_id,
+        "task_id": trajectory.task_id,
+        "selected_provider": trajectory.selected_provider,
+        "selected_agent": trajectory.selected_agent,
+        "selected_reviewers": trajectory.selected_reviewers,
+        "final_status": trajectory.final_status,
+        "outcome": trajectory.outcome,
+        "repair_cycles_count": len(trajectory.repair_cycles),
+        "verification_status": (
+            trajectory.verification_results.get("overall_status") if trajectory.verification_results else None
+        ),
+        "cost_if_available": trajectory.cost_if_available,
+        "latency_if_available": trajectory.latency_if_available,
+        "content_digest": trajectory.content_digest,
+    }
+
+
+def _safe_provider_event(provider_execution: Optional[Any]) -> Dict[str, Any]:
+    if provider_execution is None:
+        return {}
+    d = provider_execution.to_dict() if hasattr(provider_execution, "to_dict") else dict(provider_execution)
+    # Drop raw stdout/stderr to avoid duplicating large agent transcripts; keep
+    # metadata and reference identifiers.
+    d.pop("stdout", None)
+    d.pop("stderr", None)
+    return d
+
+
+def _extract_review_findings(review_cycles: Optional[List[Any]]) -> List[Dict[str, Any]]:
+    if not review_cycles:
+        return []
+    findings: List[Dict[str, Any]] = []
+    for cycle in review_cycles:
+        cycle_findings = getattr(cycle, "all_findings", None)
+        if cycle_findings is None:
+            cycle_findings = cycle.get("all_findings", []) if hasattr(cycle, "get") else []
+        for f in cycle_findings:
+            fd = f.to_dict() if hasattr(f, "to_dict") else dict(f)
+            findings.append(fd)
+    return findings
+
+
+def _extract_repair_cycles(review_cycles: Optional[List[Any]]) -> List[Dict[str, Any]]:
+    if not review_cycles:
+        return []
+    cycles: List[Dict[str, Any]] = []
+    for idx, cycle in enumerate(review_cycles, 1):
+        if idx > 1:
+            all_findings = getattr(cycle, "all_findings", None)
+            if all_findings is None and hasattr(cycle, "get"):
+                all_findings = cycle.get("all_findings", [])
+            cycles.append({
+                "cycle_index": idx - 1,
+                "finding_count": len(all_findings or []),
+            })
+    return cycles
+
+
+class ExecutionTrajectoryBuilder:
+    """Builds an ExecutionTrajectory from an OrchestrationResult."""
+
+    @classmethod
+    def from_orchestration_result(cls, result: Any) -> ExecutionTrajectory:
+        OrchestrationResult = _import_orchestration_result()
+        if not isinstance(result, OrchestrationResult):
+            raise TypeError("Expected OrchestrationResult")
+
+        task_spec = result.task_spec
+        routing = result.routing_decision
+        provider_exec = result.provider_execution
+        import uuid
+
+        traj = ExecutionTrajectory(
+            trajectory_id=f"traj-{task_spec.task_id}-{uuid.uuid4().hex[:12]}",
+            task_id=task_spec.task_id,
+            task_class=task_spec.task_class,
+            objective=task_spec.objective,
+            selected_provider=provider_exec.agent_id if provider_exec else (routing.selected_agent_id if routing else None),
+            selected_agent=routing.selected_agent_id if routing else None,
+            selected_reviewers=list(routing.recommended_reviewers) if routing else [],
+            prompt_strategy_id=task_spec.metadata.get("prompt_strategy_id"),
+            context_strategy_id=task_spec.metadata.get("context_strategy_id"),
+            retrieval_strategy_id=task_spec.metadata.get("retrieval_strategy_id"),
+            tool_strategy_id=task_spec.metadata.get("tool_strategy_id"),
+            decomposition_strategy_id=task_spec.metadata.get("decomposition_strategy_id"),
+            review_strategy_id=task_spec.metadata.get("review_strategy_id"),
+            verification_strategy_id=task_spec.metadata.get("verification_strategy_id"),
+            input_evidence_refs=task_spec.metadata.get("input_evidence_refs", []),
+            selected_context_refs=task_spec.metadata.get("selected_context_refs", []),
+            actions_attempted=task_spec.metadata.get("actions_attempted", []),
+            tools_invoked=task_spec.metadata.get("tools_invoked", []),
+            provider_events=[_safe_provider_event(provider_exec)],
+            review_findings=_extract_review_findings(result.review_cycles),
+            verification_results=result.verification_plan.to_dict() if result.verification_plan else None,
+            repair_cycles=_extract_repair_cycles(result.review_cycles),
+            final_status=result.final_state,
+            outcome="success" if result.final_state == "complete" else (result.failure_class or "failed"),
+            cost_if_available=(
+                provider_exec.metadata.get("cost_usd")
+                if provider_exec and isinstance(getattr(provider_exec, "metadata", None), dict)
+                else None
+            ),
+            latency_if_available=(
+                result.duration_seconds if result.duration_seconds > 0 else None
+            ),
+        )
+        if provider_exec and hasattr(provider_exec, "metadata") and isinstance(provider_exec.metadata, dict):
+            traj.selected_model = provider_exec.metadata.get("model")
+        traj.finalize(final_status=traj.final_status, outcome=traj.outcome)
+        return traj
+

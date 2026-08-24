@@ -179,6 +179,11 @@ class DurableCampaignState(DataClassSerializationMixin):
     provider_specific_failures: List[Dict[str, Any]] = field(default_factory=list)
     git_records: List[Dict[str, Any]] = field(default_factory=list)
     reviewer_diversity_records: List[Dict[str, Any]] = field(default_factory=list)
+    # Reasoning strategy dogfooding artifacts (#60A): durable references to
+    # trajectories and experiments, not the full payloads.
+    trajectory_ids: List[str] = field(default_factory=list)
+    reasoning_experiments: List[Dict[str, Any]] = field(default_factory=list)
+    trajectory_observations: List[Dict[str, Any]] = field(default_factory=list)
     repair_cycles_total: int = 0
     # Delegated overnight authority (#59). `authority_envelope` is the
     # serialized AuthorityEnvelope this campaign was bound to at creation or
@@ -222,6 +227,23 @@ class DurableCampaignState(DataClassSerializationMixin):
             })
             self.update_timestamp()
         return added
+
+    def record_trajectory(self, trajectory_id: str) -> None:
+        if trajectory_id and trajectory_id not in self.trajectory_ids:
+            self.trajectory_ids.append(trajectory_id)
+        self.update_timestamp()
+
+    def record_reasoning_experiment(self, experiment_dict: Dict[str, Any]) -> None:
+        self.reasoning_experiments.append(experiment_dict)
+        self.update_timestamp()
+
+    def record_trajectory_observation(self, observation_dict: Dict[str, Any]) -> None:
+        # Deduplicate by fingerprint
+        fingerprint = observation_dict.get("fingerprint")
+        if fingerprint and any(o.get("fingerprint") == fingerprint for o in self.trajectory_observations):
+            return
+        self.trajectory_observations.append(observation_dict)
+        self.update_timestamp()
 
     def record_local_success(self, ram_gib: Optional[float] = None) -> None:
         lm = self.ensure_local_model_defaults()
