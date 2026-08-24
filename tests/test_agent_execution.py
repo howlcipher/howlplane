@@ -113,3 +113,31 @@ def test_subprocess_agent_backend_unavailable(tmp_path):
     assert res.success is False
     assert res.exit_code == 127
     assert "not installed" in res.stderr
+
+
+def test_codex_backend_uses_workspace_write_for_implementation(tmp_path):
+    """
+    Codex CLI defaults to a read-only sandbox; implementation/remediation
+    roles must request workspace-write or the agent cannot create files.
+    Regression for live acceptance canary failure where codex returned
+    'Blocked by the read-only workspace: the requested journal was not created.'
+    """
+    spec = TaskSpec(
+        task_id="TASK-CODEX-SANDBOX-001",
+        repository="howlplane",
+        objective="Create a journal file",
+    )
+    backend = CodexBackend()
+
+    impl_cmd = backend.build_command(spec, tmp_path, "implementation", "prompt")
+    assert "exec" in impl_cmd
+    assert "--sandbox" in impl_cmd
+    assert "workspace-write" in impl_cmd
+
+    rem_cmd = backend.build_command(spec, tmp_path, "remediation", "prompt")
+    assert "--sandbox" in rem_cmd
+    assert "workspace-write" in rem_cmd
+
+    review_cmd = backend.build_command(spec, tmp_path, "correctness-reviewer", "prompt")
+    assert "--sandbox" not in review_cmd
+    assert "workspace-write" not in review_cmd

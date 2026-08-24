@@ -315,7 +315,14 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
 
 class CodexBackend(SubprocessAgentBackend):
     def __init__(self):
-        super().__init__("codex", "codex", lambda t, c, r, p: ["codex", "exec", p])
+        def _codex_cmd(t, c, r, p):
+            # Codex defaults to a read-only sandbox; implementation and
+            # remediation roles must be able to edit files in the workspace.
+            # Review roles keep the default read-only sandbox.
+            if r and (r.endswith("-reviewer") or r == "review"):
+                return ["codex", "exec", p]
+            return ["codex", "exec", "--sandbox", "workspace-write", p]
+        super().__init__("codex", "codex", _codex_cmd)
 
 
 class GeminiCLIBackend(SubprocessAgentBackend):
