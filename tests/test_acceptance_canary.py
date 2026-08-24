@@ -15,11 +15,14 @@ correct without touching a real remote.
 
 from datetime import datetime, timezone
 from pathlib import Path
-import re
 
 import pytest
 
-from src.control_plane.git_integration import GitIntegrationExecutor
+from src.control_plane.git_integration import (
+    PREMATURE_MERGE_SUCCESS_PATTERN,
+    GitIntegrationError,
+    GitIntegrationExecutor,
+)
 from src.control_plane.synthesis.campaign_state import GitIntegrationRecord
 from src.control_plane.synthesis.marathon import MarathonDogfoodEngine
 from src.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus, ProviderPoolManager
@@ -32,22 +35,6 @@ from tests._dogfood_test_helpers import (
 )
 
 REPO_SLUG = "howlcipher/howlplane"
-
-# A deterministic safety net (#59.2): live campaign DOGFOOD-20260823-191450-
-# 16bbf5's test-falsifier reviewer correctly found that nothing but LLM
-# reviewer judgment stood between the acceptance journal and a fabricated
-# "merge succeeded" claim written before the merge lifecycle had even run.
-# This pattern gives that judgment a deterministic backstop.
-PREMATURE_MERGE_SUCCESS_PATTERN = re.compile(
-    r"\b(?:"
-    r"(?:the\s+)?merge(?:\s+lifecycle)?\s+(?:(?:has\s+)?succeed(?:ed|s)?|"
-    r"(?:is|was)\s+successful|(?:is|was|has\s+been)\s+complet(?:e|ed)|completed)|"
-    r"(?:the\s+)?(?:[\w-]+\s+){0,5}[\w-]*merge[\w-]*\s+lifecycle\s+"
-    r"(?:was\s+)?(?:executed|completed)\s+successfully|"
-    r"(?:successfully\s+)?merged"
-    r")\b",
-    re.IGNORECASE,
-)
 
 
 def _today_journal_path() -> str:
@@ -93,6 +80,14 @@ def test_run_acceptance_canary_drives_real_production_path(tmp_path: Path):
     subprocess boundary are faked here.
     """
     journal_path = _today_journal_path()
+    journal = tmp_path / journal_path
+    journal.parent.mkdir(parents=True)
+    journal.write_text(
+        "# Live Autonomous Acceptance Canary\n\n"
+        "This canary was initiated to exercise the real governed git lifecycle.\n\n"
+        "This entry records no merge outcome.\n",
+        encoding="utf-8",
+    )
     git_runner = ScriptedRunner()
     gh_runner = ScriptedRunner()
     engine = _build_canary_engine(tmp_path, git_runner, gh_runner, journal_path)
@@ -192,6 +187,30 @@ def test_acceptance_canary_journal_content_is_initiation_only_and_stageable(tmp_
 def test_premature_merge_success_matcher_rejects_success_assertions(premature_assertion: str):
     """Keep the journal guard broad enough for real completion claims."""
     assert PREMATURE_MERGE_SUCCESS_PATTERN.search(premature_assertion) is not None
+
+
+def test_acceptance_canary_premature_merge_claim_fails_closed_before_staging(tmp_path: Path):
+    """The production staging path rejects fabricated success before invoking git."""
+    journal_path = "documentation/task_journals/2026-08-23_live_autonomous_acceptance.md"
+    journal = tmp_path / journal_path
+    journal.parent.mkdir(parents=True)
+    journal.write_text(
+        "# Live Autonomous Acceptance Canary\n\nThe merge lifecycle has succeeded.\n",
+        encoding="utf-8",
+    )
+    git_runner = ScriptedRunner()
+    executor = GitIntegrationExecutor(
+        tmp_path, REPO_SLUG, envelope=None, git_runner=git_runner, gh_runner=ScriptedRunner(),
+    )
+
+    with pytest.raises(GitIntegrationError, match="premature merge success claim"):
+        executor.stage_and_commit(
+            [journal_path],
+            "docs: record acceptance canary initiation",
+            allowed_paths=[journal_path],
+        )
+
+    assert git_runner.calls == []
 
 
 def test_run_acceptance_canary_scope_violation_fails_closed(tmp_path: Path):
