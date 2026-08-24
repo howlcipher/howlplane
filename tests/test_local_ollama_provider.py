@@ -531,6 +531,10 @@ def test_local_only_continuation_resolves_pending_gap_and_bounds_iterations(tmp_
 
 def test_local_only_continuation_budget_is_finite(tmp_path, monkeypatch):
     engine = _local_only_engine(tmp_path, monkeypatch)
+    # Prevent ambient low-RAM conditions from short-circuiting the budget test.
+    monkeypatch.setattr(
+        "src.control_plane.synthesis.marathon.read_available_memory_gib", lambda: 64.0
+    )
     state = DurableCampaignState(campaign_id="TEST-LOCAL-ONLY-BUDGET")
     state.ensure_local_model_defaults()
     state.local_model["local_only_iteration_limit"] = 2

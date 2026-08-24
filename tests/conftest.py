@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import shutil
+import tempfile
 import pytest
 
 
@@ -17,6 +18,19 @@ _REAL_COMPILER_INTEGRATION_MODULES = {
     "test_howlframe_dogfood.py",
     "test_launcher.py",
 }
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_tmp_git_contamination():
+    """Remove a stale temp-root .git created by earlier agent/tool runs so that
+    repository-discovery tests see a clean temp namespace."""
+    tmp_git = Path(tempfile.gettempdir()) / ".git"
+    if tmp_git.exists():
+        try:
+            shutil.rmtree(tmp_git)
+        except OSError:
+            pass
+    yield
 
 
 @pytest.fixture(autouse=True)
