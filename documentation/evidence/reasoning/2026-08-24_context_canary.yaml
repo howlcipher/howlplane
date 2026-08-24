@@ -1,0 +1,132 @@
+schema: howlplane.reasoning_live_evidence/v1
+experiment_id: EXP-60A-LIVE-CONTEXT-001
+campaign_id: MILESTONE-60A
+opportunity_id: LIVE-CONTEXT-RECOVERY-QUESTION
+experiment_type: CONTEXT
+task_class: test_improvement
+started_at: "2026-08-24T21:43:49.104511+00:00"
+completed_at: "2026-08-24T21:44:28.472998+00:00"
+provider: local_ollama
+model: qwen2.5-coder:7b-instruct
+sample_count_per_arm: 1
+preregistration:
+  hypothesis: >-
+    Changed-files-plus-architecture context yields a verified answer while
+    task-only context does not.
+  baseline_strategy: context.task_plus_acceptance/v1
+  baseline_strategy_digest: f27159e8780464663b845638a92eb71e018ae4aa7a95e1c80cc7b511d5c6518e
+  candidate_strategy: context.changed_files_plus_architecture/v1
+  candidate_strategy_digest: 47c3260e57f31720a0fafc56e486601542299acfc77e551ee92e63e947b91609
+  expected_outcome: >-
+    Candidate passes the exact repository-protocol verifier while baseline
+    does not.
+  falsification_criteria:
+    - candidate.verification_pass_rate < baseline.verification_pass_rate
+  selected_metrics:
+    - verification_pass_rate
+    - mean_repair_cycles
+  prediction_digest: f4746850986f180192f33e922e57fd6f333e180833c8a8dcad0d4d3330162bf8
+deterministic_verifier:
+  required_persisted_hooks:
+    - baseline_persisted
+    - candidate_persisted
+    - definition_persisted
+    - evaluation_persisted
+  required_resume_actions:
+    - complete
+    - evaluate
+    - run_baseline
+    - run_candidate
+  required_authority_objects: []
+  response_contract: bare JSON object with no prose or Markdown fencing
+arms:
+  baseline:
+    trajectory_id: traj-10f2e29b249eddc487a44cd6
+    trajectory_digest: cc41c16e3ae395eb8f83c82410eedec3ce6f58ff6c31cdabc7a07b2adc8b530b
+    strategy_id: context.task_plus_acceptance/v1
+    context_refs:
+      - task:LIVE-CONTEXT-RECOVERY-QUESTION
+    provider_completed: true
+    latency_seconds: 11.424
+    cost_observed: null
+    repair_cycles: 0
+    verification_status: failed
+    outcome: verification_failed
+    response_parsed: false
+    output_sha256: 16b11ef78fc32b049ebf70fed42a8470a842e9d0fbaa427a981282ea4e0b7c90
+    observable_response: |-
+      ```json
+      {
+        "persisted_hooks": ["checkpoint_hook_1", "checkpoint_hook_2"],
+        "resume_actions": ["resume_action_1", "resume_action_2"],
+        "authority_objects": []
+      }
+      ```
+    failure_evidence:
+      - response used Markdown fencing instead of bare JSON
+      - persisted hook names were invented placeholders
+      - resume action names were invented placeholders
+  candidate:
+    trajectory_id: traj-f749a97f7c4e371789398d01
+    trajectory_digest: 245c6f3c80e6c4188adf8dc568edcb6dbe4db342c08937dfd0b11c2aeac05e06
+    strategy_id: context.changed_files_plus_architecture/v1
+    context_refs:
+      - src/control_plane/reasoning/experiment_coordinator.py
+      - src/control_plane/reasoning/__init__.py
+    provider_completed: true
+    latency_seconds: 27.878
+    cost_observed: null
+    repair_cycles: 0
+    verification_status: failed
+    outcome: verification_failed
+    response_parsed: false
+    output_sha256: 67560ae8a01b8167fd2a6bfb38a4e339db9a12d07d872ce9d32c9deca96e878d
+    observable_response: |-
+      ```json
+      {
+        "persisted_hooks": [
+          "definition_persisted",
+          "{arm}_persisted",
+          "evaluation_persisted"
+        ],
+        "resume_actions": [
+          "run_baseline",
+          "run_candidate",
+          "evaluate"
+        ],
+        "authority_objects": []
+      }
+      ```
+    failure_evidence:
+      - response used Markdown fencing instead of bare JSON
+      - dynamic source expression was not expanded to both exact arm hook strings
+      - complete resume action was omitted
+evaluation:
+  result: INCONCLUSIVE
+  confidence: baseline_n=1, candidate_n=1, primary_metric=verification_pass_rate
+  metric_comparisons:
+    verification_pass_rate: equal
+    mean_repair_cycles: equal
+  falsification_failures: []
+  experiment_content_digest: c9de7fc0417395fde9fdadff156f7b27d13bcfea70dcb69fb174d6da3a16197a
+  evidence_classification: >-
+    Direct live local-provider outputs with deterministic code-fact verification;
+    one sample per arm is insufficient for a superiority claim.
+authority:
+  authority_objects_exposed_to_arm: []
+  authority_changed: false
+  repository_scope_changed: false
+  ttl_changed: false
+  merge_or_spend_budget_changed: false
+evidence_volume:
+  trajectories: 2
+  by_task_class:
+    test_improvement: 2
+  by_provider:
+    local_ollama: 2
+  by_outcome:
+    verification_failed: 2
+  by_repair:
+    no_repair: 2
+  by_review_topology:
+    no_reviewers: 2

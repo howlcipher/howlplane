@@ -118,6 +118,7 @@ Human Objective / Backlog Item
 4. **Deterministic Verification Suites (`src/control_plane/verification.py`)**: Executes build, test, lint, and repository hygiene gates (`slopslint`) through deterministic subprocess execution.
 5. **Durable Evidence Ledger (`logs/control_plane/evidence_ledger.jsonl`)**: Append-only structured record of task lifecycles, review findings, and verification outcomes with automated credential and token redaction.
 6. **Human Authority Boundaries (`src/control_plane/human_boundary.py`)**: Enforces explicit human authorization on consequential actions (production deployments, infrastructure modifications, database drops, package releases, and repository hygiene policy weakenings).
+7. **Reasoning Strategy Dogfooding (`src/control_plane/reasoning/`)**: Records bounded and redacted execution trajectories, immutable pre-registered baseline and candidate definitions, versioned strategy identities, deterministic comparisons, and evidence-linked observations. One shared coordinator supports every experiment type with durable definition, baseline, candidate, and evaluation checkpoints; a fresh process can resume the exact incomplete phase without duplicating trajectories or accounting. Strategy experiments remain orthogonal to authority and never store hidden chain-of-thought or change model weights.
 
 ---
 
