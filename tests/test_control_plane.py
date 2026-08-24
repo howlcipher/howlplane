@@ -825,6 +825,24 @@ def test_routing_reviewer_rationales():
     assert len(decision.reviewer_selection_reasons["security-reviewer"]) > 5
 
 
+def test_reviewer_requirements_replace_baseline():
+    """Explicit reviewer_requirements override the default baseline set."""
+    router = TaskRouter()
+    spec = TaskSpec(
+        task_id="TASK-R-02",
+        repository="howlframe",
+        objective="Evidence-only canary journal",
+        task_class="bug_fix",
+        risk_level="medium",
+        reviewer_requirements=["correctness-reviewer", "regression-reviewer", "simplicity-reviewer"],
+    )
+    decision = router.route(spec)
+    assert "test-falsifier" not in decision.recommended_reviewers
+    assert "correctness-reviewer" in decision.recommended_reviewers
+    assert "regression-reviewer" in decision.recommended_reviewers
+    assert "simplicity-reviewer" in decision.recommended_reviewers
+
+
 # ============================================================================
 # 12. Repository Hygiene & SlopsLint Gate Tests
 # ============================================================================

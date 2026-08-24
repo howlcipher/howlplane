@@ -181,14 +181,19 @@ class TaskRouter:
                 reviewers.append(role)
                 reasons[role] = reason
 
-        # Baseline reviewers for all tasks
-        add_reviewer("correctness-reviewer", "Baseline correctness, edge cases, and acceptance contract verification.")
-        add_reviewer("test-falsifier", "Adversarial test verification, missing negative branch and vacuous assertion checks.")
-
-        # If user explicitly listed reviewer requirements in task spec, merge them
+        # If the task explicitly lists required reviewers, honor that as the
+        # authoritative starting set instead of the default baseline. This lets
+        # special tasks (e.g., the live acceptance canary, which produces an
+        # evidence artifact rather than production code) avoid reviewers that
+        # are inappropriate for their scope, while preserving the security and
+        # risk-based additions below.
         if task.reviewer_requirements:
             for req in task.reviewer_requirements:
                 add_reviewer(req, "Explicitly required by TaskSpec reviewer_requirements.")
+        else:
+            # Baseline reviewers for ordinary tasks
+            add_reviewer("correctness-reviewer", "Baseline correctness, edge cases, and acceptance contract verification.")
+            add_reviewer("test-falsifier", "Adversarial test verification, missing negative branch and vacuous assertion checks.")
 
         skills = set(task.required_skills)
         if task.risk_level in ("high", "critical") or skills.intersection(
