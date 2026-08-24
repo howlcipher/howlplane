@@ -843,7 +843,9 @@ class GitIntegrationExecutor(AuthorityExecutor):
                 )
 
     def push_branch(self, branch: str) -> bool:
-        push_proc = self._git(self.repo_root, ["push", "-u", "origin", branch], 90)
+        # Pre-push hooks may run the full deterministic verification suite,
+        # which takes well over the previous 90-second budget. Allow 300s.
+        push_proc = self._git(self.repo_root, ["push", "-u", "origin", branch], 300)
         if push_proc.returncode != 0:
             raise GitIntegrationError(f"git push -u origin {branch} failed: {push_proc.stderr}")
         local_sha = self._git(self.repo_root, ["rev-parse", branch], 15).stdout.strip()
