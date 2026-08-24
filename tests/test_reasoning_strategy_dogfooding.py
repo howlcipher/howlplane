@@ -92,6 +92,7 @@ def test_successful_governed_task_creates_trajectory(tmp_path: Path):
         impl,
     )
     assert res.final_state == "complete"
+    assert res.trajectory_id == traj.trajectory_id
     assert traj.task_id == "TRJ-OK-001"
     assert traj.final_status == "complete"
     assert traj.outcome == "success"

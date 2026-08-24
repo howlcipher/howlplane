@@ -1,7 +1,7 @@
 # ADR 0005 — Reasoning Strategy Dogfooding: Architecture Gap
 
 ## Status
-Draft — Milestone #60A Phase 0
+Accepted and implemented — Milestone #60A
 
 ## Context
 Milestone #60A adds the ability for HowlPlane to discover and experiment with its
@@ -44,14 +44,18 @@ The existing unattended engineering foundation (#56–#59.2) already implements:
   authority rules are code-defined and digest-verified; repository content cannot
   silently redefine them.
 
-## Proposed Integration Points
+## Decision and Integration Points
 
-1. `ExecutionTrajectory` is created/updated by `GovernedTaskOrchestrator` at
-   lifecycle boundaries (planned, implementing, reviewing, remediating, verifying,
-   complete/failed). It references task spec, route, verification plan, review
-   cycles, provider events, and repair cycles.
-2. `ReasoningExperiment` is created by a lightweight experiment runner that
-   reuses the orchestrator to execute baseline and candidate configurations.
+1. `ExecutionTrajectory` is created by `GovernedTaskOrchestrator` for a terminal
+   governed result. It references task spec, route, verification plan, review
+   cycles, provider events, and repair cycles, then exposes its stable ID to the
+   durable campaign state. The shared artifact policy bounds and redacts payloads,
+   removes hidden reasoning fields, and verifies the stored digest on load.
+2. `ReasoningExperimentCoordinator` is the single experiment lifecycle for every
+   supported type. It persists the immutable definition before execution,
+   checkpoints baseline and candidate trajectory summaries append-only, derives
+   stable per-arm trajectory IDs, and resumes the exact missing stage after a
+   crash before applying deterministic evaluation.
 3. `StrategyRegistry` is a small code-defined registry (`src/control_plane/reasoning/`
    or `src/control_plane/strategies/`) mapping `strategy_id` -> immutable
    `StrategyDefinition` with a SHA-256 digest over its canonical JSON.
@@ -61,9 +65,22 @@ The existing unattended engineering foundation (#56–#59.2) already implements:
 5. `TrajectoryObservation` mines completed trajectories for recurring patterns
    (e.g. repeated architecture omission, reviewer dismissal, local-first success)
    and emits candidate `improvements.md` rows through the existing backlog format.
-6. `ExperimentFingerprint` deduplicates by hashing (experiment_type,
-   baseline_strategy_id, candidate_strategy_id, task_class, key metric names).
-   Reopening requires explicit `reopened_by_evidence_refs`.
+6. Observation fingerprints deduplicate a proposed comparison. A disposed
+   observation reopens only when a new trajectory reference also contributes a
+   materially new observable evidence fingerprint; the durable reopening history
+   records the reason, references, fingerprints, and timestamp.
+
+## Consequences
+
+The coordinator adds one persisted lifecycle stage to `ReasoningExperiment`, but
+avoids seven separate experiment orchestrators and makes pre-registration and
+resume behavior mechanically testable. Stable IDs make replay idempotent; callers
+must provide a distinct event or sample identity when a task is intentionally run
+again as new evidence. Fail-closed digest loading means corrupted or legacy
+pre-merge artifacts require explicit recovery rather than being silently trusted.
+Authority profiles, envelopes, TTLs, repository scope, merge and spend budgets,
+credentials, publishing rights, and branch protection remain outside the
+coordinator input and output types.
 
 ## At Least Two Future Experiments Enabled
 

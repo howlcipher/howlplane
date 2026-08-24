@@ -25,6 +25,7 @@ _HIGHER_IS_BETTER = {
     "verification_pass_rate",
     "first_pass_success_rate",
     "success_rate",
+    "reproducibility_rate",
 }
 
 # Metrics where lower values are better for the candidate.
@@ -37,6 +38,8 @@ _LOWER_IS_BETTER = {
     "cost_if_available",
     "mean_cost",
     "review_escape_rate",
+    "confirmed_defects",
+    "escaped_defects",
 }
 
 
@@ -69,6 +72,14 @@ def _compute_rate(summaries: List[Dict[str, Any]], predicate) -> Optional[float]
     return round(sum(1 for s in summaries if predicate(s)) / len(summaries), 2)
 
 
+def _quality_summaries(summaries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Exclude provider availability events from engineering quality metrics."""
+    return [
+        summary for summary in summaries
+        if summary.get("outcome") not in ("provider_exhausted", "provider_unavailable")
+    ]
+
+
 def _compute_mean(summaries: List[Dict[str, Any]], key: str) -> Optional[float]:
     values = [_to_numeric(s.get(key)) for s in summaries]
     values = [v for v in values if v is not None]
@@ -83,16 +94,25 @@ def _get_aggregate(summaries: List[Dict[str, Any]], metric: str) -> Any:
         return None
 
     if metric == "verification_pass_rate":
-        return _compute_rate(summaries, lambda s: s.get("verification_status") == "passed")
+        return _compute_rate(
+            _quality_summaries(summaries),
+            lambda s: s.get("verification_status") == "passed",
+        )
 
     if metric == "first_pass_success_rate":
         return _compute_rate(
-            summaries,
+            _quality_summaries(summaries),
             lambda s: s.get("verification_status") == "passed" and s.get("repair_cycles_count", 0) == 0,
         )
 
     if metric == "success_rate":
-        return _compute_rate(summaries, lambda s: s.get("outcome") == "success")
+        return _compute_rate(
+            _quality_summaries(summaries),
+            lambda s: s.get("outcome") == "success",
+        )
+
+    if metric == "reproducibility_rate":
+        return _compute_rate(summaries, lambda s: s.get("reproducible") is True)
 
     if metric == "mean_repair_cycles":
         return _compute_mean(summaries, "repair_cycles_count")
@@ -123,6 +143,9 @@ def _get_aggregate(summaries: List[Dict[str, Any]], metric: str) -> Any:
     if metric == "review_escape_rate":
         # Not directly observable from a single trajectory; reported if provided.
         return _compute_mean(summaries, "review_escape_rate")
+
+    if metric in ("confirmed_defects", "escaped_defects"):
+        return sum(_to_numeric(s.get(metric)) or 0 for s in summaries)
 
     # Direct per-summary field: fall back to first value for scalar comparison.
     values = [s.get(metric) for s in summaries]
@@ -326,4 +349,4 @@ def finalize_experiment_outcome(experiment: ReasoningExperiment) -> None:
         f"baseline_n={details.get('baseline_n')}, candidate_n={details.get('candidate_n')}, "
         f"primary_metric={details.get('primary_metric')}, comparisons={details.get('metric_comparisons')}"
     )
-    experiment.finalize(outcome, confidence=confidence)
+    experiment.finalize(outcome, confidence=confidence, evaluation_details=details)

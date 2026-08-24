@@ -9,12 +9,19 @@ TrajectoryStore, ReasoningExperimentStore, and ObservationStore, which specify t
 artifact-specific serialization and idempotency rules.
 """
 
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
 
 T = TypeVar("T")
+
+_SAFE_OBJECT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+class ArtifactIdentityError(ValueError):
+    """Raised when an artifact identifier could escape its durable store."""
 
 
 class DurableObjectStore:
@@ -34,6 +41,10 @@ class DurableObjectStore:
         self._dedup_field = dedup_field
 
     def _path(self, obj_id: str) -> Path:
+        if not isinstance(obj_id, str) or not _SAFE_OBJECT_ID.fullmatch(obj_id):
+            raise ArtifactIdentityError(
+                "Artifact IDs must be 1-128 safe filename characters."
+            )
         return self.base_dir / f"{obj_id}{self._filename_suffix}"
 
     def save(self, obj_id: str, data: Dict[str, Any]) -> Path:
@@ -62,8 +73,5 @@ class DurableObjectStore:
     def list_all(self) -> List[T]:
         objects: List[T] = []
         for p in sorted(self.base_dir.glob(f"*{self._filename_suffix}")):
-            try:
-                objects.append(self._factory(safe_load_json(p)))
-            except Exception:
-                continue
+            objects.append(self._factory(safe_load_json(p)))
         return objects

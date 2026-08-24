@@ -33,6 +33,11 @@ from src.control_plane.reasoning.trajectory_discovery import (
     discover_observations,
     ObservationStatus,
     experiment_exists_for_observation,
+    challenge_observation,
+)
+from src.control_plane.reasoning.experiment_coordinator import (
+    ExperimentArmContext,
+    ReasoningExperimentCoordinator,
 )
 
 __all__ = [
@@ -53,4 +58,7 @@ __all__ = [
     "discover_observations",
     "ObservationStatus",
     "experiment_exists_for_observation",
+    "challenge_observation",
+    "ExperimentArmContext",
+    "ReasoningExperimentCoordinator",
 ]

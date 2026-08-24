@@ -11,15 +11,19 @@ immutable once execution starts by capturing a prediction digest before any
 results are recorded.
 """
 
-import hashlib, json
 from dataclasses import dataclass, field
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
 from src.control_plane.reasoning._json_store import DurableObjectStore
+from src.control_plane.reasoning.artifact_safety import (
+    ArtifactIntegrityError,
+    SafeArtifactSerializationMixin,
+    canonical_digest,
+    safe_artifact_value,
+)
 from src.control_plane.reasoning.strategy_registry import StrategyDefinition
 from src.control_plane.task_spec import DataClassSerializationMixin
 
@@ -31,6 +35,7 @@ VALID_EXPERIMENT_OUTCOMES = {
     "FALSIFIED",
     "INCONCLUSIVE",
     "NOT_YET_MEASURABLE",
+    "REQUIRES_MORE_EVIDENCE",
 }
 
 VALID_EXPERIMENT_TYPES = {
@@ -49,6 +54,15 @@ VALID_EXPERIMENT_TYPES = {
 class ExperimentIntegrityError(ValueError):
     """Raised when an experiment's immutable prediction fields would be mutated."""
     pass
+
+
+EXPERIMENT_STAGE_RANK = {
+    "DEFINED": 0,
+    "RUNNING": 1,
+    "BASELINE_RECORDED": 2,
+    "CANDIDATE_RECORDED": 3,
+    "COMPLETE": 4,
+}
 
 
 @dataclass
@@ -71,9 +85,25 @@ class StrategySnapshot(DataClassSerializationMixin):
             full_config=definition.immutable_config,
         )
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "StrategySnapshot":
+        snapshot = cls(**data)
+        definition = StrategyDefinition(
+            strategy_id=snapshot.strategy_id,
+            version=snapshot.version,
+            strategy_type=snapshot.strategy_type,
+            description="snapshot integrity check",
+            immutable_config=snapshot.full_config,
+        )
+        if definition.digest != snapshot.config_digest:
+            raise ArtifactIntegrityError(
+                f"Strategy snapshot '{snapshot.strategy_id}' digest mismatch."
+            )
+        return snapshot
+
 
 @dataclass
-class ReasoningExperiment(DataClassSerializationMixin):
+class ReasoningExperiment(SafeArtifactSerializationMixin):
     """
     Durable record of a bounded reasoning-strategy comparison.
 
@@ -120,6 +150,8 @@ class ReasoningExperiment(DataClassSerializationMixin):
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
+    lifecycle_stage: str = "DEFINED"
+    evaluation_details: Dict[str, Any] = field(default_factory=dict)
     prediction_digest: str = ""
     content_digest: str = ""
 
@@ -161,15 +193,10 @@ class ReasoningExperiment(DataClassSerializationMixin):
         }
 
     def _compute_prediction_digest(self) -> str:
-        canonical = json.dumps(self._prediction_fields, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return canonical_digest(self._prediction_fields)
 
     def _compute_full_digest(self) -> str:
-        d = self.to_dict()
-        d.pop("content_digest", None)
-        d.pop("completed_at", None)
-        canonical = json.dumps(d, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return canonical_digest(self.to_dict(), "content_digest")
 
     def _ensure_prediction_immutable(self) -> None:
         if self.started_at:
@@ -183,6 +210,7 @@ class ReasoningExperiment(DataClassSerializationMixin):
             return
         self.prediction_digest = self._compute_prediction_digest()
         self.started_at = datetime.now(timezone.utc).isoformat()
+        self.lifecycle_stage = "RUNNING"
         self.content_digest = self._compute_full_digest()
 
     def set_expected_outcome(self, expected_outcome: str) -> None:
@@ -231,39 +259,83 @@ class ReasoningExperiment(DataClassSerializationMixin):
             raise ExperimentIntegrityError(
                 "Prediction digest mismatch: prediction fields changed after execution started."
             )
-        self.baseline_results = list(baseline_results)
-        self.candidate_results = list(candidate_results)
-        refs = set(self.evidence_refs)
-        for r in baseline_results + candidate_results:
-            tid = r.get("trajectory_id")
-            if tid:
-                refs.add(tid)
-        self.evidence_refs = list(refs)
+        for result in baseline_results:
+            self.record_arm_result("baseline", result)
+        for result in candidate_results:
+            self.record_arm_result("candidate", result)
+
+    def record_arm_result(self, arm: str, result: Dict[str, Any]) -> None:
+        """Append one immutable trajectory summary to an experiment arm."""
+        if arm not in ("baseline", "candidate"):
+            raise ValueError("Experiment arm must be 'baseline' or 'candidate'.")
+        if not self.started_at:
+            self.mark_started()
+        if not self.verify_prediction_digest():
+            raise ExperimentIntegrityError(
+                "Prediction digest mismatch: prediction fields changed after execution started."
+            )
+        safe_result = safe_artifact_value(result)
+        trajectory_id = safe_result.get("trajectory_id")
+        if not trajectory_id:
+            raise ExperimentIntegrityError("Arm results require a trajectory_id.")
+        results = self.baseline_results if arm == "baseline" else self.candidate_results
+        existing = next(
+            (item for item in results if item.get("trajectory_id") == trajectory_id),
+            None,
+        )
+        if existing is not None:
+            if existing != safe_result:
+                raise ExperimentIntegrityError(
+                    f"Trajectory '{trajectory_id}' is already accounted with different evidence."
+                )
+            return
+        results.append(safe_result)
+        if trajectory_id not in self.evidence_refs:
+            self.evidence_refs.append(trajectory_id)
+        self.lifecycle_stage = (
+            "CANDIDATE_RECORDED" if self.candidate_results else "BASELINE_RECORDED"
+        )
         self.content_digest = self._compute_full_digest()
 
-    def finalize(self, result: str, confidence: Optional[str] = None) -> None:
+    def finalize(
+        self,
+        result: str,
+        confidence: Optional[str] = None,
+        evaluation_details: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Records the deterministic experiment outcome."""
         if result not in VALID_EXPERIMENT_OUTCOMES:
             raise ValueError(f"Invalid experiment outcome: {result}")
+        if self.completed_at:
+            if self.result == result:
+                return
+            raise ExperimentIntegrityError("Completed experiment evidence is immutable.")
         self.result = result
         self.confidence = confidence
+        self.evaluation_details = safe_artifact_value(evaluation_details or {})
         self.completed_at = datetime.now(timezone.utc).isoformat()
+        self.lifecycle_stage = "COMPLETE"
         self.content_digest = self._compute_full_digest()
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ReasoningExperiment":
         d = dict(data)
-        d.pop("content_digest", None)
-        d.pop("prediction_digest", None)
-        d.pop("schema_version", None)
+        if d.get("schema_version") != REASONING_EXPERIMENT_SCHEMA_VERSION:
+            raise ArtifactIntegrityError("Unsupported reasoning experiment schema.")
         if d.get("baseline_strategy"):
             d["baseline_strategy"] = StrategySnapshot.from_dict(d["baseline_strategy"])
         if d.get("candidate_strategy"):
             d["candidate_strategy"] = StrategySnapshot.from_dict(d["candidate_strategy"])
-        return cls(**d)
+        experiment = cls(**d)
+        if not experiment.verify_prediction_digest():
+            raise ArtifactIntegrityError(
+                f"Reasoning experiment '{experiment.experiment_id}' prediction digest mismatch."
+            )
+        if experiment._compute_full_digest() != experiment.content_digest:
+            raise ArtifactIntegrityError(
+                f"Reasoning experiment '{experiment.experiment_id}' content digest mismatch."
+            )
+        return experiment
 
 
 class ReasoningExperimentStore(DurableObjectStore):
@@ -275,12 +347,33 @@ class ReasoningExperimentStore(DurableObjectStore):
         super().__init__(
             base_dir,
             factory=ReasoningExperiment.from_dict,
-            dedup_field="content_digest",
+            dedup_field=None,
         )
 
     def save(self, experiment: ReasoningExperiment) -> Path:
-        """Atomically persists an experiment; idempotent on repeated calls."""
-        return super().save(experiment.experiment_id, experiment.to_dict())
+        """Persist an append-only lifecycle checkpoint for an experiment."""
+        if not experiment.verify_prediction_digest():
+            raise ExperimentIntegrityError("Prediction digest mismatch before persistence.")
+        experiment.content_digest = experiment._compute_full_digest()
+        target = self._path(experiment.experiment_id)
+        if target.is_file():
+            existing = self.load(experiment.experiment_id)
+            if existing.content_digest == experiment.content_digest:
+                return target
+            if existing.prediction_digest != experiment.prediction_digest:
+                raise ExperimentIntegrityError("Persisted experiment definition is immutable.")
+            if existing.completed_at:
+                raise ExperimentIntegrityError("Completed experiment evidence is immutable.")
+            for old, new in (
+                (existing.baseline_results, experiment.baseline_results),
+                (existing.candidate_results, experiment.candidate_results),
+            ):
+                if new[:len(old)] != old:
+                    raise ExperimentIntegrityError("Experiment results are append-only.")
+            if EXPERIMENT_STAGE_RANK[experiment.lifecycle_stage] < EXPERIMENT_STAGE_RANK[existing.lifecycle_stage]:
+                raise ExperimentIntegrityError("Experiment lifecycle cannot move backward.")
+        atomic_write_json(target, experiment.to_dict())
+        return target
 
     def load(self, experiment_id: str) -> ReasoningExperiment:
         return self._factory(safe_load_json(self._path(experiment_id)))

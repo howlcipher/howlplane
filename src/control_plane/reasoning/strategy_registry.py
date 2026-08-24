@@ -12,13 +12,21 @@ content tampering from silently altering reasoning experiments.
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.control_plane.task_spec import DataClassSerializationMixin
+from src.control_plane.reasoning.artifact_safety import (
+    ArtifactIntegrityError,
+    safe_artifact_value,
+)
 
 STRATEGY_SCHEMA_VERSION = "howlplane.strategy_definition/v1"
+_STRATEGY_ID_RE = re.compile(
+    r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+/v[1-9][0-9]*$"
+)
 
 
 class StrategyIdentityError(ValueError):
@@ -49,14 +57,18 @@ class StrategyDefinition(DataClassSerializationMixin):
             raise StrategyIdentityError("strategy_id must be a non-empty string")
         if not self.version:
             raise StrategyIdentityError("version must be a non-empty string")
-        if "/" not in self.strategy_id:
+        if not _STRATEGY_ID_RE.fullmatch(self.strategy_id):
             raise StrategyIdentityError(
-                f"strategy_id '{self.strategy_id}' must use dotted namespaced form, e.g. context.foo/v1"
+                f"strategy_id '{self.strategy_id}' must use namespaced versioned form, "
+                "e.g. context.foo/v1"
             )
-        if self.strategy_id.count("/") > 1:
+        identity_version = self.strategy_id.rsplit("/", 1)[1]
+        if identity_version != self.version:
             raise StrategyIdentityError(
-                f"strategy_id '{self.strategy_id}' may contain at most one '/' separating namespace/versioned name"
+                f"strategy_id suffix '{identity_version}' must match version '{self.version}'"
             )
+        self.immutable_config = safe_artifact_value(self.immutable_config)
+        self.description = safe_artifact_value(self.description)
 
     @property
     def digest(self) -> str:
@@ -78,9 +90,14 @@ class StrategyDefinition(DataClassSerializationMixin):
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "StrategyDefinition":
         d = dict(data)
-        d.pop("digest", None)
+        stored_digest = d.pop("digest", None)
         d.pop("schema", None)
-        return cls(schema=STRATEGY_SCHEMA_VERSION, **d)
+        strategy = cls(schema=STRATEGY_SCHEMA_VERSION, **d)
+        if stored_digest is not None and stored_digest != strategy.digest:
+            raise ArtifactIntegrityError(
+                f"Strategy '{strategy.strategy_id}' digest mismatch."
+            )
+        return strategy
 
 
 # Canonical, code-defined reasoning strategies. No runtime code constructs a new

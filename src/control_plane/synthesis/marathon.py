@@ -1398,6 +1398,10 @@ class MarathonDogfoodEngine:
                 self._persist_git_record(git_rec, campaign_state, state_dir)
                 return False, git_rec.to_dict()
 
+            if campaign_state is not None and result.trajectory_id:
+                campaign_state.record_trajectory(result.trajectory_id)
+                campaign_state.save(state_dir)
+
             exec_res = result.provider_execution
             if exec_res is not None and campaign_state is not None:
                 campaign_state.record_provider_invocation(provider, role="implementation")

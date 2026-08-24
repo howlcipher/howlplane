@@ -10,17 +10,18 @@ strategy, etc.), evidence references, and outcomes so that later reasoning
 strategy experiments can be evaluated against real trajectory evidence.
 """
 
-import hashlib
-import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from src.control_plane.atomic_io import atomic_write_json, safe_load_json
-from src.control_plane.evidence_ledger import sanitize_value
+from src.control_plane.atomic_io import safe_load_json
 from src.control_plane.reasoning._json_store import DurableObjectStore
-from src.control_plane.task_spec import DataClassSerializationMixin
+from src.control_plane.reasoning.artifact_safety import (
+    ArtifactIntegrityError,
+    SafeArtifactSerializationMixin,
+    canonical_digest,
+)
 
 EXECUTION_TRAJECTORY_SCHEMA_VERSION = "howlplane.execution_trajectory/v1"
 
@@ -31,39 +32,8 @@ def _import_orchestration_result():
     return OrchestrationResult
 
 # Fields that may contain hidden model reasoning or unnecessary source dumps.
-_SENSITIVE_TRAJECTORY_FIELDS = {
-    "hidden_reasoning",
-    "chain_of_thought",
-    "raw_prompt",
-    "private_notes",
-    "internal_thoughts",
-}
-
-
-def _redact_trajectory_value(val: Any) -> Any:
-    """Recursively redacts strings while preserving structure."""
-    return sanitize_value(val)
-
-
-def _strip_sensitive_fields(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Removes explicitly forbidden hidden-reasoning fields from trajectory data."""
-    result: Dict[str, Any] = {}
-    for k, v in data.items():
-        if k in _SENSITIVE_TRAJECTORY_FIELDS:
-            continue
-        if isinstance(v, dict):
-            result[k] = _strip_sensitive_fields(v)
-        elif isinstance(v, list):
-            result[k] = [
-                _strip_sensitive_fields(i) if isinstance(i, dict) else i for i in v
-            ]
-        else:
-            result[k] = v
-    return result
-
-
 @dataclass
-class ExecutionTrajectory(DataClassSerializationMixin):
+class ExecutionTrajectory(SafeArtifactSerializationMixin):
     """
     Observable orchestration history for one governed task execution.
 
@@ -115,36 +85,35 @@ class ExecutionTrajectory(DataClassSerializationMixin):
     internal_thoughts: Optional[str] = None
 
     def __post_init__(self):
-        self.content_digest = self.compute_content_digest()
+        if not self.content_digest:
+            self.content_digest = self.compute_content_digest()
 
     def compute_content_digest(self) -> str:
         """Deterministic digest over the durable content of this trajectory."""
-        d = self.to_dict()
-        d.pop("content_digest", None)
-        d.pop("completed_at", None)
-        canonical = json.dumps(_strip_sensitive_fields(_redact_trajectory_value(d)), sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return canonical_digest(self.to_dict(), "content_digest")
 
     def finalize(self, final_status: str, outcome: str) -> None:
         """Marks the trajectory complete and recomputes its digest."""
+        if self.completed_at:
+            if self.final_status == final_status and self.outcome == outcome:
+                return
+            raise ArtifactIntegrityError("Completed trajectory evidence is immutable.")
         self.final_status = final_status
         self.outcome = outcome
         self.completed_at = datetime.now(timezone.utc).isoformat()
         self.content_digest = self.compute_content_digest()
 
-    def to_dict(self) -> Dict[str, Any]:
-        d = asdict(self)
-        # Ensure hidden-reasoning fields are never serialized, even if somehow present
-        d = _strip_sensitive_fields(d)
-        d = _redact_trajectory_value(d)
-        return d
-
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExecutionTrajectory":
         d = dict(data)
-        d.pop("content_digest", None)
-        d.pop("schema_version", None)
-        return cls(**d)
+        if d.get("schema_version") != EXECUTION_TRAJECTORY_SCHEMA_VERSION:
+            raise ArtifactIntegrityError("Unsupported execution trajectory schema.")
+        trajectory = cls(**d)
+        if not trajectory.verify_digest():
+            raise ArtifactIntegrityError(
+                f"Execution trajectory '{trajectory.trajectory_id}' digest mismatch."
+            )
+        return trajectory
 
     def verify_digest(self) -> bool:
         """Verifies that the stored content_digest matches recomputed digest."""
@@ -171,6 +140,19 @@ class TrajectoryStore(DurableObjectStore):
 
     def save(self, trajectory: ExecutionTrajectory) -> Path:
         """Atomically persists a trajectory; idempotent on repeated calls."""
+        target = self._path(trajectory.trajectory_id)
+        if target.is_file():
+            existing = self.load(trajectory.trajectory_id)
+            if existing.content_digest == trajectory.content_digest:
+                return target
+            existing_payload = existing.to_dict()
+            incoming_payload = trajectory.to_dict()
+            for payload in (existing_payload, incoming_payload):
+                payload.pop("created_at", None)
+                payload.pop("completed_at", None)
+                payload.pop("content_digest", None)
+            if existing_payload == incoming_payload:
+                return target
         return super().save(trajectory.trajectory_id, trajectory.to_dict())
 
     def load(self, trajectory_id: str) -> ExecutionTrajectory:
@@ -196,6 +178,18 @@ def summarize_for_experiment(trajectory: ExecutionTrajectory) -> Dict[str, Any]:
         "repair_cycles_count": len(trajectory.repair_cycles),
         "verification_status": (
             trajectory.verification_results.get("overall_status") if trajectory.verification_results else None
+        ),
+        "confirmed_defects": sum(
+            1 for finding in trajectory.review_findings
+            if finding.get("status") in ("confirmed", "fixed", "accepted")
+        ),
+        "escaped_defects": (
+            trajectory.verification_results.get("escaped_defects")
+            if trajectory.verification_results else None
+        ),
+        "reproducible": (
+            trajectory.verification_results.get("reproducible")
+            if trajectory.verification_results else None
         ),
         "cost_if_available": trajectory.cost_if_available,
         "latency_if_available": trajectory.latency_if_available,
@@ -256,11 +250,22 @@ class ExecutionTrajectoryBuilder:
         task_spec = result.task_spec
         routing = result.routing_decision
         provider_exec = result.provider_execution
-        import uuid
-
+        identity = task_spec.metadata.get("trajectory_id")
+        if not identity:
+            event_key = task_spec.metadata.get("trajectory_event_id") or result.run_dir
+            event_key = event_key or ":".join([
+                task_spec.task_id,
+                str(task_spec.metadata.get("experiment_id", "standalone")),
+                str(task_spec.metadata.get("experiment_arm", "run")),
+                str(task_spec.metadata.get("experiment_sample_id", "0")),
+            ])
+            identity = f"traj-{canonical_digest({'event': event_key})[:24]}"
         traj = ExecutionTrajectory(
-            trajectory_id=f"traj-{task_spec.task_id}-{uuid.uuid4().hex[:12]}",
+            trajectory_id=identity,
             task_id=task_spec.task_id,
+            campaign_id=task_spec.metadata.get("campaign_id"),
+            opportunity_id=task_spec.metadata.get("opportunity_id"),
+            experiment_id=task_spec.metadata.get("experiment_id"),
             task_class=task_spec.task_class,
             objective=task_spec.objective,
             selected_provider=provider_exec.agent_id if provider_exec else (routing.selected_agent_id if routing else None),
@@ -296,4 +301,3 @@ class ExecutionTrajectoryBuilder:
             traj.selected_model = provider_exec.metadata.get("model")
         traj.finalize(final_status=traj.final_status, outcome=traj.outcome)
         return traj
-

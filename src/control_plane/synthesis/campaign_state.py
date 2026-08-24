@@ -234,7 +234,19 @@ class DurableCampaignState(DataClassSerializationMixin):
         self.update_timestamp()
 
     def record_reasoning_experiment(self, experiment_dict: Dict[str, Any]) -> None:
-        self.reasoning_experiments.append(experiment_dict)
+        experiment_id = experiment_dict.get("experiment_id")
+        for index, existing in enumerate(self.reasoning_experiments):
+            if experiment_id and existing.get("experiment_id") == experiment_id:
+                if existing.get("prediction_digest") != experiment_dict.get("prediction_digest"):
+                    raise ValueError(
+                        "Reasoning experiment ID cannot be reassigned to a new definition."
+                    )
+                if existing.get("completed_at") and existing != experiment_dict:
+                    raise ValueError("Completed reasoning experiment accounting is immutable.")
+                self.reasoning_experiments[index] = dict(experiment_dict)
+                self.update_timestamp()
+                return
+        self.reasoning_experiments.append(dict(experiment_dict))
         self.update_timestamp()
 
     def record_trajectory_observation(self, observation_dict: Dict[str, Any]) -> None:

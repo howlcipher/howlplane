@@ -12,20 +12,25 @@ other discoveries.
 
 import hashlib
 import json
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
 from src.control_plane.reasoning._json_store import DurableObjectStore
+from src.control_plane.reasoning.artifact_safety import (
+    SafeArtifactSerializationMixin,
+    canonical_digest,
+)
+from src.control_plane.reasoning.experiment_coordinator import ReasoningExperimentCoordinator
 from src.control_plane.reasoning.execution_trajectory import ExecutionTrajectory
 from src.control_plane.reasoning.reasoning_experiment import (
     ReasoningExperiment,
     ReasoningExperimentStore,
+    StrategySnapshot,
 )
 from src.control_plane.reasoning.strategy_registry import StrategyRegistry
-from src.control_plane.task_spec import DataClassSerializationMixin
 
 TRAJECTORY_OBSERVATION_SCHEMA_VERSION = "howlplane.trajectory_observation/v1"
 
@@ -42,7 +47,7 @@ class ObservationStatus:
 
 
 @dataclass
-class TrajectoryObservation(DataClassSerializationMixin):
+class TrajectoryObservation(SafeArtifactSerializationMixin):
     """
     Evidence-backed observation derived from one or more execution trajectories.
 
@@ -64,12 +69,11 @@ class TrajectoryObservation(DataClassSerializationMixin):
     suggested_candidate_strategy_id: Optional[str] = None
     status: str = ObservationStatus.OPEN
     reopened_by_evidence_refs: List[str] = field(default_factory=list)
+    evidence_fingerprints: List[str] = field(default_factory=list)
+    reopening_history: List[Dict[str, Any]] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     schema_version: str = TRAJECTORY_OBSERVATION_SCHEMA_VERSION
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TrajectoryObservation":
@@ -77,11 +81,22 @@ class TrajectoryObservation(DataClassSerializationMixin):
         d.pop("schema_version", None)
         return cls(**d)
 
-    def reopen(self, new_evidence_refs: List[str]) -> None:
+    def reopen(
+        self,
+        new_evidence_refs: List[str],
+        new_evidence_fingerprints: List[str],
+        reason: str,
+    ) -> None:
         """Reopens a previously deferred/falsified observation with explicit new evidence."""
         self.status = ObservationStatus.OPEN
         self.reopened_by_evidence_refs = list(new_evidence_refs)
         self.updated_at = datetime.now(timezone.utc).isoformat()
+        self.reopening_history.append({
+            "at": self.updated_at,
+            "reason": reason,
+            "evidence_refs": list(new_evidence_refs),
+            "evidence_fingerprints": list(new_evidence_fingerprints),
+        })
 
 
 def _fingerprint(pattern_name: str, keys: List[str]) -> str:
@@ -89,11 +104,35 @@ def _fingerprint(pattern_name: str, keys: List[str]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
+def _material_evidence_fingerprint(trajectory: ExecutionTrajectory) -> str:
+    """Fingerprint observable evidence while ignoring IDs and timestamps."""
+    verification = trajectory.verification_results or {}
+    return canonical_digest({
+        "task_class": trajectory.task_class,
+        "provider": trajectory.selected_provider,
+        "agent": trajectory.selected_agent,
+        "reviewers": sorted(trajectory.selected_reviewers),
+        "strategies": {
+            "context": trajectory.context_strategy_id,
+            "retrieval": trajectory.retrieval_strategy_id,
+            "review": trajectory.review_strategy_id,
+        },
+        "final_status": trajectory.final_status,
+        "outcome": trajectory.outcome,
+        "verification_status": verification.get("overall_status"),
+        "files_modified_count": len(verification.get("files_modified", [])),
+        "repair_cycles_count": len(trajectory.repair_cycles),
+        "review_statuses": sorted(
+            str(finding.get("status")) for finding in trajectory.review_findings
+        ),
+    })
+
+
 def _find_architecture_omissions(trajectories: List[ExecutionTrajectory]) -> List[TrajectoryObservation]:
     """Detects repeated context that excludes architecture for cross-module work."""
     candidates: Dict[str, Dict[str, Any]] = {}
     for t in trajectories:
-        if t.final_status != "success" and t.context_strategy_id in (
+        if t.final_status not in ("complete", "success") and t.context_strategy_id in (
             "context.changed_files_only/v1",
             "context.task_plus_acceptance/v1",
         ):
@@ -283,6 +322,17 @@ def discover_observations(
     for miner in PATTERN_MINERS:
         candidates.extend(miner(trajectories))
 
+    evidence_fingerprints = {
+        trajectory.trajectory_id: _material_evidence_fingerprint(trajectory)
+        for trajectory in trajectories
+    }
+    for observation in candidates:
+        observation.evidence_fingerprints = sorted({
+            evidence_fingerprints[ref]
+            for ref in observation.evidence_refs
+            if ref in evidence_fingerprints
+        })
+
     result: List[TrajectoryObservation] = []
     if store is None:
         return candidates
@@ -293,11 +343,23 @@ def discover_observations(
             store.save(obs)
             result.append(obs)
         elif existing.status in (ObservationStatus.DEFERRED, ObservationStatus.FALSIFIED, ObservationStatus.INCONCLUSIVE):
-            new_refs = [r for r in obs.evidence_refs if r not in existing.evidence_refs]
-            if reopen_new_evidence and new_refs:
-                existing.evidence_refs = list(set(existing.evidence_refs) | set(obs.evidence_refs))
+            new_refs = sorted(set(obs.evidence_refs) - set(existing.evidence_refs))
+            new_fingerprints = sorted(
+                set(obs.evidence_fingerprints) - set(existing.evidence_fingerprints)
+            )
+            if reopen_new_evidence and new_refs and new_fingerprints:
+                existing.evidence_refs = sorted(
+                    set(existing.evidence_refs) | set(obs.evidence_refs)
+                )
+                existing.evidence_fingerprints = sorted(
+                    set(existing.evidence_fingerprints) | set(obs.evidence_fingerprints)
+                )
                 existing.occurrence_count = max(existing.occurrence_count, obs.occurrence_count)
-                existing.reopen(new_refs)
+                existing.reopen(
+                    new_refs,
+                    new_fingerprints,
+                    "new observable evidence fingerprint after prior disposition",
+                )
                 store.save(existing)
                 result.append(existing)
         # If existing is OPEN or EXPERIMENTING, do not duplicate; the observation is
@@ -320,3 +382,42 @@ def experiment_exists_for_observation(
         ):
             return True
     return False
+
+
+def challenge_observation(
+    observation: TrajectoryObservation,
+    registry: StrategyRegistry,
+    coordinator: ReasoningExperimentCoordinator,
+    expected_outcome: str,
+    falsification_criteria: List[str],
+    metrics: List[str],
+    observation_store: Optional[ObservationStore] = None,
+) -> ReasoningExperiment:
+    """Pre-register, but do not execute, an observation's bounded challenge."""
+    baseline = registry.get(observation.suggested_baseline_strategy_id or "")
+    candidate = registry.get(observation.suggested_candidate_strategy_id or "")
+    if baseline is None or candidate is None:
+        raise ValueError("Observation challenge references an unknown strategy.")
+    identity = canonical_digest({
+        "fingerprint": observation.fingerprint,
+        "baseline": baseline.digest,
+        "candidate": candidate.digest,
+    })
+    experiment = ReasoningExperiment(
+        experiment_id=f"exp-{identity[:24]}",
+        opportunity_id=observation.observation_id,
+        task_class=observation.task_classes[0] if observation.task_classes else None,
+        experiment_type=observation.suggested_experiment_type or "CONTEXT",
+        baseline_strategy=StrategySnapshot.from_definition(baseline),
+        candidate_strategy=StrategySnapshot.from_definition(candidate),
+        expected_outcome=expected_outcome,
+        falsification_criteria=falsification_criteria,
+        metrics=metrics,
+        evidence_refs=list(observation.evidence_refs),
+    )
+    registered = coordinator.preregister(experiment)
+    observation.status = ObservationStatus.EXPERIMENTING
+    observation.updated_at = datetime.now(timezone.utc).isoformat()
+    if observation_store:
+        observation_store.save(observation)
+    return registered

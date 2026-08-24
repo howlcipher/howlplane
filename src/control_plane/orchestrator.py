@@ -122,6 +122,7 @@ class OrchestrationResult:
     # human-readable summary text.
     provider_execution: Optional[AgentExecutionResult] = None
     failure_class: Optional[str] = None
+    trajectory_id: Optional[str] = None
     schema: str = ORCHESTRATOR_SCHEMA_VERSION
 
     @property
@@ -151,6 +152,7 @@ class OrchestrationResult:
             "provider_execution": self.provider_execution.to_dict() if self.provider_execution else None,
             "executing_provider": self.executing_provider,
             "failure_class": self.failure_class,
+            "trajectory_id": self.trajectory_id,
             "schema": self.schema,
         }
 
@@ -397,11 +399,9 @@ class GovernedTaskOrchestrator:
         try:
             result = self._run_governed_loop(task_spec, planned_actions, start_time)
             if self.trajectory_store is not None:
-                try:
-                    traj = ExecutionTrajectoryBuilder.from_orchestration_result(result)
-                    self.trajectory_store.save(traj)
-                except Exception:
-                    pass
+                traj = ExecutionTrajectoryBuilder.from_orchestration_result(result)
+                self.trajectory_store.save(traj)
+                result.trajectory_id = traj.trajectory_id
             return result
         except Exception as exc:
             run_dir = self.target_repo / ".task_runs" / task_spec.task_id
