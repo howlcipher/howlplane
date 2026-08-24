@@ -28,6 +28,7 @@ from src.control_plane.atomic_io import (
 from src.control_plane.checkpoints import CheckpointManager, StageCheckpoint
 from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
 from src.control_plane.git_baseline import GitBaseline, RepositoryDelta, capture_baseline, capture_delta
+from src.control_plane.git_integration import run_git
 from src.control_plane.howlframe_runner import HowlFrameAuditRunner, get_dogfood_mode, DEFAULT_INSTRUCTION_BUDGET
 from src.control_plane.human_boundary import HumanBoundaryGate, BoundaryCheckResult, HumanDecisionPacket
 from src.control_plane.locking import RepoLock, TaskLock, RepositoryLockedError, TaskLockedError
@@ -170,6 +171,72 @@ class GovernedTaskOrchestrator:
         self.config = config or OrchestrationConfig()
         ledger_path = str(self.control_plane_root / "logs" / "control_plane" / "evidence_ledger.jsonl")
         self.ledger = EvidenceLedger(ledger_path)
+
+    def _enforce_task_path_scope(self, task_spec: TaskSpec, delta: RepositoryDelta) -> List[str]:
+        """
+        Reverts edits outside `task_spec.allowed_paths` before the delta is
+        reviewed (#59.2 Phase 8/17).
+
+        `allowed_paths` was previously enforced only at commit time, inside
+        GitIntegrationExecutor.stage_and_commit -- after independent review had
+        already seen (and legitimately objected to) the out-of-scope work. A
+        path-scoped task whose agent wandered into production files therefore
+        parked on review findings about code it was never permitted to change.
+        Enforcing here keeps the reviewed diff identical to the committed one.
+
+        Reverts only the paths the delta itself names, using the same
+        `git checkout --` / unlink pair as _reconcile_attempt_state: no
+        `git reset --hard`, no `git clean`, and files the task never touched
+        are never inspected. Returns the reverted paths (empty when the task
+        declares no scope, which is the default for ordinary tasks).
+        """
+        allowed = list(task_spec.allowed_paths or [])
+        if not allowed or delta is None or delta.is_empty:
+            return []
+
+        repo_root = Path(self.target_repo).resolve()
+        out_of_scope = [
+            p for p in (
+                list(delta.files_modified) + list(delta.files_deleted) + list(delta.files_added)
+            )
+            if p not in allowed
+        ]
+        added = set(delta.files_added)
+        for rel_path in out_of_scope:
+            if rel_path in added:
+                candidate = (repo_root / rel_path).resolve()
+                # Never step outside the repository, whatever the delta claims.
+                if not str(candidate).startswith(str(repo_root)):
+                    continue
+                try:
+                    if candidate.is_file():
+                        candidate.unlink()
+                except OSError:
+                    pass
+            else:
+                run_git(repo_root, ["checkout", "--", rel_path], 30)
+        return out_of_scope
+
+    def _capture_scoped_delta(
+        self,
+        task_spec: TaskSpec,
+        baseline: GitBaseline,
+        agent_id: str,
+        stage: str,
+    ) -> RepositoryDelta:
+        """Capture delta and revert any out-of-scope edits before review/commit."""
+        delta = capture_delta(self.target_repo, baseline)
+        reverted_scope = self._enforce_task_path_scope(task_spec, delta)
+        if reverted_scope:
+            delta = capture_delta(self.target_repo, baseline)
+            self._record_event(
+                task_id=task_spec.task_id,
+                agent_id=agent_id,
+                action="out_of_scope_edits_reverted",
+                spec=task_spec,
+                metadata={"reverted_paths": reverted_scope, "allowed_paths": list(task_spec.allowed_paths), "stage": stage},
+            )
+        return delta
 
     def _record_event(
         self,
@@ -553,7 +620,9 @@ class GovernedTaskOrchestrator:
                     failure_class=FAILURE_CLASS_ENGINEERING,
                 )
 
-            current_delta = capture_delta(self.target_repo, baseline)
+            current_delta = self._capture_scoped_delta(
+                task_spec, baseline, routing.selected_agent_id, stage="implementation"
+            )
             (impl_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
             (run_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
 
@@ -758,7 +827,9 @@ class GovernedTaskOrchestrator:
                 )
                 (rem_cycle_dir / "result.json").write_text(rem_res.to_json(), encoding="utf-8")
 
-            current_delta = capture_delta(self.target_repo, baseline)
+            current_delta = self._capture_scoped_delta(
+                task_spec, baseline, routing.selected_agent_id, stage="remediation"
+            )
             (rem_cycle_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
             (run_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
 

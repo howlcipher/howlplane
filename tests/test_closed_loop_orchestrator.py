@@ -355,7 +355,107 @@ findings:
 
 
 # ============================================================================
-# 6. CLI Integration: `ai work --execute` and `ai status`
+# 6. Path Scope Enforcement: out-of-scope edits are reverted before review/commit
+# ============================================================================
+
+def test_allowed_paths_enforcement_reverts_out_of_scope_edits(tmp_path):
+    """
+    A task with TaskSpec.allowed_paths must never present or commit changes to
+    disallowed paths, both during initial implementation and during
+    remediation. Regression for live acceptance canary where the agent
+    expanded scope into src/control_plane/*.py.
+    """
+    repo = _init_test_git_repo(tmp_path / "scope_repo")
+    journal = repo / "docs" / "journal.md"
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    journal.write_text("# initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "docs/journal.md"], cwd=str(repo), check=True)
+    subprocess.run(["git", "commit", "-m", "Add journal"], cwd=str(repo), check=True)
+
+    spec = TaskSpec(
+        task_id="SCOPE-001",
+        repository="scope_repo",
+        objective="Update the journal",
+        task_class="bug_fix",
+        risk_level="medium",
+        allowed_paths=["docs/journal.md"],
+    )
+
+    def impl_side_effect(task, cwd, prompt):
+        # Agent touches both in-scope journal and out-of-scope production file.
+        (cwd / "docs" / "journal.md").write_text("# updated\n", encoding="utf-8")
+        (cwd / "src" / "auth.py").write_text("def authenticate(u, t):\n    return True\n", encoding="utf-8")
+
+    review_pass = {"done": False}
+
+    def reviewer_fn(role_id, diff, task):
+        if not review_pass["done"] and "src/auth.py" not in diff:
+            # First clean review forces remediation, which will try to expand scope.
+            review_pass["done"] = True
+            return """
+findings:
+  - id: "FMT-001"
+    reviewer_role: "correctness-reviewer"
+    title: "Missing header"
+    severity: "high"
+    category: "correctness"
+    location: "docs/journal.md"
+    claim: "Journal needs a title header"
+    evidence: "Content lacks '# Title'"
+    suggested_fix: "Add '# Title' to docs/journal.md"
+"""
+        # Re-review: flag only if scope enforcement leaked an out-of-scope edit.
+        if "src/auth.py" in diff:
+            return """
+findings:
+  - id: "BAD-001"
+    reviewer_role: "correctness-reviewer"
+    title: "Injected out-of-scope file"
+    severity: "high"
+    category: "correctness"
+    location: "src/auth.py"
+    claim: "Agent modified a disallowed file"
+    evidence: "src/auth.py appears in the diff"
+    suggested_fix: "Revert src/auth.py"
+"""
+        return "findings: []\n"
+
+    def remediation_fn(task, cwd, findings):
+        # Remediation fixes the in-scope finding and tries to expand scope.
+        (cwd / "docs" / "journal.md").write_text("# Title\n# updated\n", encoding="utf-8")
+        (cwd / "src" / "auth.py").write_text("# backdoor\n", encoding="utf-8")
+
+    impl_backend = FakeAgentBackend(
+        agent_id="claude_code",
+        side_effect=impl_side_effect,
+    )
+
+    orchestrator = GovernedTaskOrchestrator(
+        target_repo=repo,
+        config=OrchestrationConfig(
+            custom_backend=impl_backend,
+            custom_reviewer_fn=reviewer_fn,
+            custom_remediation_fn=remediation_fn,
+            max_remediation_cycles=2,
+        ),
+    )
+
+    res = orchestrator.run(spec)
+
+    assert res.final_state == "complete"
+    assert res.exit_code == 0
+    assert res.remediation_cycles_count >= 1
+    assert res.final_delta is not None
+    assert "docs/journal.md" in res.final_delta.files_modified
+    assert "src/auth.py" not in res.final_delta.files_modified
+    # Both the implementation and remediation out-of-scope edits were reverted.
+    assert (repo / "src" / "auth.py").read_text(encoding="utf-8") == (
+        "def authenticate(username, token):\n    return False\n"
+    )
+
+
+# ============================================================================
+# 7. CLI Integration: `ai work --execute` and `ai status`
 # ============================================================================
 
 def test_cli_work_execute_and_status(tmp_path, monkeypatch, capsys):
