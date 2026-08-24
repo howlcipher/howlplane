@@ -18,14 +18,227 @@ from pathlib import Path
 import subprocess
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
-from src.control_plane.agent_execution import AgentExecutionResult
+from src.control_plane.agent_execution import AgentExecutionResult, FakeAgentBackend
 from src.control_plane.git_baseline import RepositoryDelta
 from src.control_plane.git_integration import PR_MERGE_FIELDS, GitIntegrationExecutor
 from src.control_plane.orchestrator import (
     FAILURE_CLASS_AUTHORITY_BLOCKED,
     FAILURE_CLASS_ENGINEERING,
+    GovernedTaskOrchestrator,
+    OrchestrationConfig,
     OrchestrationResult,
 )
+from src.control_plane.reasoning import (
+    ExecutionTrajectory,
+    ReasoningExperiment,
+    StrategyDefinition,
+    StrategySnapshot,
+    TrajectoryStore,
+)
+from src.control_plane.router import RoutingDecision
+from src.control_plane.task_spec import TaskSpec
+from src.control_plane.verification import VerificationPlan
+
+
+def init_minimal_python_repo(path: Path) -> Path:
+    """Create the shared minimal real Git repository used by reasoning tests."""
+    path.mkdir(parents=True, exist_ok=True)
+    commands = (
+        ["git", "init", "-b", "main"],
+        ["git", "config", "user.email", "ci@howlplane.local"],
+        ["git", "config", "user.name", "HowlPlane CI"],
+    )
+    for command in commands:
+        subprocess.run(command, cwd=str(path), check=True, capture_output=True)
+
+    files = {
+        "AGENTS.md": "# Test Project\n",
+        "pyproject.toml": (
+            "[project]\nname = \"test_service\"\nversion = \"0.1.0\"\n"
+        ),
+        "src/__init__.py": "",
+        "src/feature.py": "def run():\n    return True\n",
+        "tests/__init__.py": "",
+        "tests/test_feature.py": (
+            "from src.feature import run\n\n\ndef test_run():\n"
+            "    assert run() is True\n"
+        ),
+    }
+    for relative_path, content in files.items():
+        target = path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    subprocess.run(
+        ["git", "add", "."], cwd=str(path), check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "Initial commit"],
+        cwd=str(path),
+        check=True,
+        capture_output=True,
+    )
+    return path
+
+
+def reasoning_strategy(
+    strategy_id: str,
+    strategy_type: Optional[str] = None,
+    immutable_config: Optional[Dict] = None,
+) -> StrategyDefinition:
+    """Build a compact strategy definition with a type inferred from its ID."""
+    inferred_type = strategy_type or strategy_id.split(".", 1)[0]
+    if inferred_type == "planning":
+        inferred_type = "task_decomposition"
+    if inferred_type == "review":
+        inferred_type = "review_topology"
+    return StrategyDefinition(
+        strategy_id=strategy_id,
+        version="v1",
+        strategy_type=inferred_type,
+        description="test strategy",
+        immutable_config=immutable_config or {},
+    )
+
+
+def reasoning_experiment(
+    experiment_id: str,
+    *,
+    experiment_type: str = "CONTEXT",
+    baseline_id: Optional[str] = None,
+    candidate_id: Optional[str] = None,
+    strategy_type: Optional[str] = None,
+    expected_outcome: str = "",
+    falsification_criteria: Optional[List[str]] = None,
+    metrics: Optional[List[str]] = None,
+) -> ReasoningExperiment:
+    """Build an experiment while keeping arm definitions explicit at call sites."""
+    baseline = reasoning_strategy(baseline_id, strategy_type) if baseline_id else None
+    candidate = reasoning_strategy(candidate_id, strategy_type) if candidate_id else None
+    return ReasoningExperiment(
+        experiment_id=experiment_id,
+        experiment_type=experiment_type,
+        baseline_strategy=StrategySnapshot.from_definition(baseline) if baseline else None,
+        candidate_strategy=StrategySnapshot.from_definition(candidate) if candidate else None,
+        expected_outcome=expected_outcome,
+        falsification_criteria=falsification_criteria or [],
+        metrics=metrics or [],
+    )
+
+
+def trajectory_summary(
+    trajectory_id: str,
+    *,
+    verification_status: str = "passed",
+    repair_cycles_count: int = 0,
+    outcome: str = "success",
+    **observable_metrics,
+) -> Dict:
+    """Build a compact observable trajectory summary for evaluator tests."""
+    return {
+        "trajectory_id": trajectory_id,
+        "verification_status": verification_status,
+        "repair_cycles_count": repair_cycles_count,
+        "outcome": outcome,
+        **observable_metrics,
+    }
+
+
+def record_reasoning_results(
+    experiment: ReasoningExperiment,
+    baseline_results: Optional[List[Dict]] = None,
+    candidate_results: Optional[List[Dict]] = None,
+) -> ReasoningExperiment:
+    """Freeze an experiment and record explicit or neutral result summaries."""
+    experiment.mark_started()
+    experiment.record_results(
+        baseline_results or [trajectory_summary("b1")],
+        candidate_results or [trajectory_summary("c1")],
+    )
+    return experiment
+
+
+def execution_trajectory(
+    trajectory_id: str,
+    *,
+    task_id: Optional[str] = None,
+    **fields,
+) -> ExecutionTrajectory:
+    """Build a trajectory with a deterministic test task identifier."""
+    return ExecutionTrajectory(
+        trajectory_id=trajectory_id,
+        task_id=task_id or f"TASK-{trajectory_id}",
+        **fields,
+    )
+
+
+def orchestration_result(
+    tmp_path: Path,
+    *,
+    final_state: str = "complete",
+    failure_class: str = "",
+    review_cycles: Optional[List] = None,
+    provider_execution=None,
+) -> OrchestrationResult:
+    """Build an observable result without running the governed loop."""
+    init_minimal_python_repo(tmp_path / "repo")
+    spec = TaskSpec(
+        task_id="TEST-001",
+        repository="test_service",
+        objective="Test feature",
+        task_class="feature",
+        risk_level="medium",
+    )
+    verification = VerificationPlan(task_id=spec.task_id)
+    verification.overall_status = (
+        "passed" if final_state == "complete" else "failed"
+    )
+    routing = RoutingDecision(
+        selected_agent_id="claude_code",
+        selected_agent_name="Claude Code",
+        reasoning_tier="tier_2",
+        rationale="test routing",
+        recommended_reviewers=["correctness-reviewer", "test-falsifier"],
+    )
+    return OrchestrationResult(
+        task_id=spec.task_id,
+        task_spec=spec,
+        final_state=final_state,
+        exit_code=0 if final_state == "complete" else 1,
+        routing_decision=routing,
+        review_cycles=review_cycles or [],
+        verification_plan=verification,
+        provider_execution=provider_execution,
+        failure_class=failure_class or None,
+        duration_seconds=1.5,
+    )
+
+
+def run_reasoning_task(
+    target_repo: Path,
+    trajectory_dir: Path,
+    task_spec: TaskSpec,
+    implementation,
+    **config_overrides,
+):
+    """Run a governed task and load its single durable trajectory."""
+    options = {
+        "custom_backend": FakeAgentBackend(
+            agent_id="claude_code", side_effect=implementation,
+        ),
+        "custom_reviewer_fn": lambda role, diff, task: "findings: []\n",
+        "record_trajectory": True,
+        "trajectory_store_dir": trajectory_dir,
+    }
+    options.update(config_overrides)
+    orchestrator = GovernedTaskOrchestrator(
+        target_repo=target_repo,
+        config=OrchestrationConfig(**options),
+    )
+    result = orchestrator.run(task_spec)
+    trajectories = TrajectoryStore(trajectory_dir).list_all()
+    assert len(trajectories) == 1
+    return result, trajectories[0]
 
 
 def scripted_result(

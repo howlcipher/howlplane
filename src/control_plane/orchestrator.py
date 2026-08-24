@@ -42,6 +42,10 @@ from src.control_plane.router import TaskRouter, RoutingDecision
 from src.control_plane.proposed_action import ProposedAction, infer_proposed_actions
 from src.control_plane.task_spec import TaskSpec
 from src.control_plane.verification import VerificationPlan, VerificationStep
+from src.control_plane.reasoning.execution_trajectory import (
+    ExecutionTrajectoryBuilder,
+    TrajectoryStore,
+)
 
 ORCHESTRATOR_SCHEMA_VERSION = "howlplane.orchestrator/v1"
 
@@ -68,6 +72,8 @@ class OrchestrationConfig:
     dogfood_mode: str = "shadow"
     enable_howlframe_audit: bool = True
     record_evidence: bool = True
+    record_trajectory: bool = True
+    trajectory_store_dir: Optional[Union[str, Path]] = None
     stop_on_verification_failure: bool = True
     force: bool = False
     skip_doctor: bool = False
@@ -116,6 +122,7 @@ class OrchestrationResult:
     # human-readable summary text.
     provider_execution: Optional[AgentExecutionResult] = None
     failure_class: Optional[str] = None
+    trajectory_id: Optional[str] = None
     schema: str = ORCHESTRATOR_SCHEMA_VERSION
 
     @property
@@ -145,6 +152,7 @@ class OrchestrationResult:
             "provider_execution": self.provider_execution.to_dict() if self.provider_execution else None,
             "executing_provider": self.executing_provider,
             "failure_class": self.failure_class,
+            "trajectory_id": self.trajectory_id,
             "schema": self.schema,
         }
 
@@ -171,6 +179,10 @@ class GovernedTaskOrchestrator:
         self.config = config or OrchestrationConfig()
         ledger_path = str(self.control_plane_root / "logs" / "control_plane" / "evidence_ledger.jsonl")
         self.ledger = EvidenceLedger(ledger_path)
+        traj_dir = self.config.trajectory_store_dir
+        if traj_dir is None:
+            traj_dir = self.control_plane_root / "logs" / "control_plane" / "trajectories"
+        self.trajectory_store = TrajectoryStore(traj_dir) if self.config.record_trajectory else None
 
     def _enforce_task_path_scope(self, task_spec: TaskSpec, delta: RepositoryDelta) -> List[str]:
         """
@@ -385,7 +397,12 @@ class GovernedTaskOrchestrator:
             task_lock.acquire()
 
         try:
-            return self._run_governed_loop(task_spec, planned_actions, start_time)
+            result = self._run_governed_loop(task_spec, planned_actions, start_time)
+            if self.trajectory_store is not None:
+                traj = ExecutionTrajectoryBuilder.from_orchestration_result(result)
+                self.trajectory_store.save(traj)
+                result.trajectory_id = traj.trajectory_id
+            return result
         except Exception as exc:
             run_dir = self.target_repo / ".task_runs" / task_spec.task_id
             if run_dir.is_dir():
