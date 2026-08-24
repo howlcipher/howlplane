@@ -18,47 +18,31 @@ REMOTE_BRANCH_EXISTS:
     true at 6d6551ecb6b0a05aa23f1b9b700dbe40defb1890
 
 CURRENT_PHASE:
-    core durability implementation verified; checkpoint documentation in progress
+    live experiment complete; final verification and delivery
 
 LAST_COMPLETED_WORK:
-    Normal push of signed commits ef5e74d and 6d6551e passed the complete pre-push
-    hook and created the remote branch. Draft PR #45 is open. The shared experiment
-    coordinator, artifact integrity policy, material-evidence discovery, campaign
-    trajectory reference, and staged recovery tests are implemented and targeted
-    verification is green.
+    Signed core checkpoint 270d239 passed the complete pre-push hook and is remote.
+    Draft PR #45 is open. One pre-registered live local-model context experiment
+    completed as INCONCLUSIVE with two durable failed trajectories and no authority
+    change; tracked evidence is ready to checkpoint.
 
 UNCOMMITTED_FILES:
-    README.md
     change_log.md
-    documentation/adr/0005_reasoning_strategy_dogfooding_architecture_gap.md
+    documentation/evidence/reasoning/2026-08-24_context_canary.yaml
     documentation/task_journals/2026-08-24_reasoning_strategy_trajectories.md
-    src/control_plane/orchestrator.py
-    src/control_plane/reasoning/__init__.py
-    src/control_plane/reasoning/_json_store.py
-    src/control_plane/reasoning/artifact_safety.py
-    src/control_plane/reasoning/execution_trajectory.py
-    src/control_plane/reasoning/experiment_coordinator.py
-    src/control_plane/reasoning/experiment_evaluator.py
-    src/control_plane/reasoning/reasoning_experiment.py
-    src/control_plane/reasoning/strategy_registry.py
-    src/control_plane/reasoning/trajectory_discovery.py
-    src/control_plane/synthesis/campaign_state.py
-    src/control_plane/synthesis/marathon.py
-    tests/test_reasoning_experiment_recovery.py
-    tests/test_reasoning_strategy_dogfooding.py
 
 CURRENT_BLOCKER:
     None.
 
 LAST_TEST_RESULT:
-    Targeted reasoning, orchestrator, marathon, dogfood hardening, and hygiene
-    regression: 114 passed. SlopsLint: source 14 / 14 and tests 29 / 29.
-    Targeted flake8: clean. First remote checkpoint pre-push: 770 Python passed,
-    all Go passed, flake8 and Bandit passed, Go build and docs build passed.
+    Core checkpoint hook: 798 Python passed, all Go passed, flake8 and Bandit
+    passed, Go build and docs build passed. SlopsLint remains source 14 / 14 and
+    tests 29 / 29. Live experiment result: INCONCLUSIVE, two trajectories, no
+    repairs, no reviewers, no authority change.
 
 NEXT_SAFE_ACTION:
-    Create and push the signed core durability checkpoint, then run one bounded
-    live context-strategy experiment through the durable coordinator.
+    Validate and sign the live evidence checkpoint, push normally, then run final
+    explicit verification, observe GitHub checks, ready and merge PR #45.
 
 WORKTREE_STATE:
     DIRTY_INTENTIONAL
@@ -66,7 +50,7 @@ WORKTREE_STATE:
 ## Handoff Packet
 
 TIMESTAMP:
-    2026-08-24T21:37:48Z
+    2026-08-24T21:45:53Z
 
 CURRENT_PROVIDER_AGENT:
     OpenAI Codex / primary agent
@@ -75,43 +59,35 @@ BRANCH:
     feat/reasoning-strategy-dogfooding-canary
 
 HEAD:
-    6d6551ecb6b0a05aa23f1b9b700dbe40defb1890
+    270d239c3b6d79701f806011d2ef0bcf8d5ad9e7
 
 BASE_MAIN:
     c9ec82c126973b86327a1da7773fa1219207d423
 
 CURRENT_PHASE:
-    core durability implementation verified; checkpoint documentation in progress
+    live experiment complete; evidence checkpoint in progress
 
 FILES_CHANGED:
-    README.md
     change_log.md
-    documentation/adr/0005_reasoning_strategy_dogfooding_architecture_gap.md
-    tests/test_reasoning_strategy_dogfooding.py
+    documentation/evidence/reasoning/2026-08-24_context_canary.yaml
     documentation/task_journals/2026-08-24_reasoning_strategy_trajectories.md
-    src/control_plane/orchestrator.py
-    src/control_plane/reasoning/
-    src/control_plane/synthesis/campaign_state.py
-    src/control_plane/synthesis/marathon.py
-    tests/test_reasoning_experiment_recovery.py
 
 TESTS_RUN:
-    Targeted integration matrix: 114 passed. SlopsLint: python_src 14 / 14 and
-    python_tests 29 / 29. Targeted flake8: clean. First remote checkpoint hook:
-    770 Python passed, all Go passed, flake8 and Bandit passed, build and docs
-    passed.
+    Core checkpoint normal pre-push hook: 798 Python passed; all Go tests passed;
+    flake8, Bandit, Go build, and docs build passed. The production live
+    coordinator completed and reloaded one experiment and two trajectories with
+    next_action=complete.
 
 TESTS_NOT_RUN:
-    Full repository verification has not rerun after the core durability changes;
-    the normal push hook will run it for the checkpoint.
+    Evidence YAML parse and final explicit full repository verification remain.
 
 KNOWN_FAILURES:
     None in current targeted verification. Push attempt 1's Bandit B108 failure
     was repaired in signed commit 6d6551e; push attempt 2 completed normally.
 
 EXACT_NEXT_STEP:
-    Stage the exact core implementation, tests, README, changelog, ADR, and journal;
-    create a signed checkpoint and push normally without bypassing the hook.
+    Parse and inspect the tracked evidence, run SlopsLint and docs checks, create a
+    signed evidence checkpoint, and push normally without bypassing the hook.
 
 ## Progress Log
 
@@ -241,3 +217,31 @@ verification passes 114 tests. SlopsLint remains at python_src 14 / 14 and
 python_tests 29 / 29, with no policy changes or tombstones. Targeted flake8 and
 git diff checks pass. Full verification is delegated to the normal checkpoint
 push hook next.
+
+### 2026-08-24T21:45:53Z
+
+Signed core durability checkpoint 270d239c3b6d79701f806011d2ef0bcf8d5ad9e7
+passed the normal pre-push hook and reached origin. The hook passed 798 Python
+tests, all Go tests, flake8, Bandit, the Go build, and docs build. GitHub checks
+started on draft PR #45.
+
+Ran exactly one bounded live reasoning experiment through the production
+ReasoningExperimentCoordinator using local_ollama with
+qwen2.5-coder:7b-instruct for both arms. The pre-registered baseline was
+context.task_plus_acceptance/v1 and the candidate was
+context.changed_files_plus_architecture/v1. The task asked for exact persisted
+hook names, exact resume action names, and whether arm context exposes authority.
+Both provider calls completed, but both responses failed the exact verifier and
+the bare JSON response contract. The baseline invented placeholder names. The
+candidate recovered the dynamic hook expression and three resume actions but did
+not expand both arm names or include complete. Deterministic evaluation therefore
+persisted INCONCLUSIVE, not a candidate win. No metric, expectation, or
+falsification criterion was changed after seeing the responses.
+
+The experiment contains two failed test_improvement trajectories, both from
+local_ollama, with no repairs and no reviewers. Observed latencies were 11.424
+seconds for baseline and 27.878 seconds for candidate; cost was not observable.
+No authority object was exposed and no authority, scope, TTL, merge budget, spend
+budget, or publication capability changed. The exact observable responses,
+digests, preregistration, deterministic result, and evidence-volume breakdown are
+tracked in documentation/evidence/reasoning/2026-08-24_context_canary.yaml.
