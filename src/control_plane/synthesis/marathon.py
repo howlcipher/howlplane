@@ -772,6 +772,11 @@ class MarathonDogfoodEngine:
             campaign_state=campaign_state,
             state_dir=state_dir,
             allowed_paths=[journal_path],
+            reviewer_requirements=[
+                "correctness-reviewer",
+                "regression-reviewer",
+                "simplicity-reviewer",
+            ],
         )
 
         if task_success and git_rec:
@@ -1256,6 +1261,7 @@ class MarathonDogfoodEngine:
         campaign_state: Optional[DurableCampaignState] = None,
         state_dir: Optional[Path] = None,
         allowed_paths: Optional[List[str]] = None,
+        reviewer_requirements: Optional[List[str]] = None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """
         Executes a bounded engineering task through the REAL governed
@@ -1287,6 +1293,7 @@ class MarathonDogfoodEngine:
             task_id=task_id, repository="howlplane",
             objective=objective, task_class="bug_fix", risk_level=risk_level,
             allowed_paths=list(allowed_paths or []),
+            reviewer_requirements=list(reviewer_requirements or []),
         )
         candidates = self.provider_pool.select_candidates(
             task_category="code_heavy",
