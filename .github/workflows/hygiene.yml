@@ -17,6 +17,7 @@ on:
       - 'scripts/**'
       - '.slop/**'
       - '.github/workflows/hygiene.yml'
+      - 'documentation/task_journals/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
