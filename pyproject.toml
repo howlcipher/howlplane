@@ -98,6 +98,9 @@ all = [
 ai = "src.control_plane.launcher:main"
 howlplane = "src.control_plane.launcher:main"
 
+[tool.setuptools.package-data]
+"src.control_plane.reasoning" = ["builtin_strategies.yaml"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

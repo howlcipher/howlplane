@@ -85,14 +85,15 @@ class StrategyDefinition(DataClassSerializationMixin):
 
 # Canonical, code-defined reasoning strategies. No runtime code constructs a new
 # StrategyDefinition from repository content. The canonical strategy data lives in
-# a bundled JSON artifact so the Python source remains free of repetitive data
-# blocks. At import time the module verifies the JSON contents against a pinned
-# SHA-256 digest; any repository tampering with the JSON raises StrategyIdentityError.
+# a bundled YAML artifact so the Python source remains free of repetitive data
+# blocks. JSON is a valid YAML subset, so the canonical compact serialization is
+# retained. At import time the module verifies the contents against a pinned
+# SHA-256 digest; tampering raises StrategyIdentityError.
 _BUILT_IN_STRATEGIES_DIGEST = "ba8d2e418e3c1c5ac91ba753843a490328ac2512b12e75c59fe16050ff2e89e9"
 
 
 def _load_builtin_strategies() -> List[StrategyDefinition]:
-    data_path = Path(__file__).parent / "builtin_strategies.json"
+    data_path = Path(__file__).parent / "builtin_strategies.yaml"
     raw = data_path.read_text(encoding="utf-8")
     observed_digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     if observed_digest != _BUILT_IN_STRATEGIES_DIGEST:

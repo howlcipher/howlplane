@@ -12,7 +12,8 @@ results are recorded.
 """
 
 import hashlib, json
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union

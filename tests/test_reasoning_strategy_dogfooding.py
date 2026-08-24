@@ -15,31 +15,19 @@ Deterministic tests covering:
   - authority invariants
 """
 
-import copy
-import hashlib
 import json
-import os
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from src.control_plane.agent_execution import FakeAgentBackend
 from src.control_plane.authority_profile import (
-    CANONICAL_PROFILES,
     OVERNIGHT_SAFE_PROFILE,
-    AuthorityProfile,
 )
 from src.control_plane.authority_envelope import (
     AuthorityDecision,
     AuthorityEnvelope,
     create_envelope,
     evaluate_action_against_envelope,
-)
-from src.control_plane.orchestrator import (
-    GovernedTaskOrchestrator,
-    OrchestrationConfig,
-    OrchestrationResult,
 )
 from src.control_plane.reasoning import (
     ExecutionTrajectory,
@@ -67,80 +55,16 @@ from src.control_plane.reasoning.trajectory_discovery import (
     _fingerprint as _observation_fingerprint,
 )
 from src.control_plane.task_spec import TaskSpec
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _init_test_git_repo(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    for cmd in [
-        ["git", "init", "-b", "main"],
-        ["git", "config", "user.email", "ci@howlplane.local"],
-        ["git", "config", "user.name", "HowlPlane CI"],
-    ]:
-        subprocess.run(cmd, cwd=str(path), check=True, capture_output=True)
-    (path / "AGENTS.md").write_text("# Test Project\n", encoding="utf-8")
-    (path / "pyproject.toml").write_text(
-        "[project]\nname = \"test_service\"\nversion = \"0.1.0\"\n",
-        encoding="utf-8",
-    )
-    (path / "src").mkdir()
-    (path / "src" / "__init__.py").write_text("", encoding="utf-8")
-    (path / "src" / "feature.py").write_text("def run():\n    return True\n", encoding="utf-8")
-    (path / "tests").mkdir()
-    (path / "tests" / "__init__.py").write_text("", encoding="utf-8")
-    (path / "tests" / "test_feature.py").write_text(
-        "from src.feature import run\n\n\ndef test_run():\n    assert run() is True\n",
-        encoding="utf-8",
-    )
-    subprocess.run(["git", "add", "."], cwd=str(path), check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=str(path), check=True, capture_output=True)
-    return path
-
-
-def _make_orchestration_result(
-    tmp_path: Path,
-    final_state: str = "complete",
-    failure_class: str = "",
-    review_cycles: list = None,
-    provider_execution=None,
-) -> OrchestrationResult:
-    repo = _init_test_git_repo(tmp_path / "repo")
-    spec = TaskSpec(
-        task_id="TEST-001",
-        repository="test_service",
-        objective="Test feature",
-        task_class="feature",
-        risk_level="medium",
-    )
-    from src.control_plane.verification import VerificationPlan
-    verif = VerificationPlan(task_id="TEST-001")
-    verif.overall_status = "passed" if final_state == "complete" else "failed"
-
-    from src.control_plane.router import RoutingDecision
-    routing = RoutingDecision(
-        selected_agent_id="claude_code",
-        selected_agent_name="Claude Code",
-        reasoning_tier="tier_2",
-        rationale="test routing",
-        recommended_reviewers=["correctness-reviewer", "test-falsifier"],
-    )
-
-    return OrchestrationResult(
-        task_id="TEST-001",
-        task_spec=spec,
-        final_state=final_state,
-        exit_code=0 if final_state == "complete" else 1,
-        routing_decision=routing,
-        review_cycles=review_cycles or [],
-        verification_plan=verif,
-        provider_execution=provider_execution,
-        failure_class=failure_class or None,
-        duration_seconds=1.5,
-    )
+from tests._dogfood_test_helpers import (
+    execution_trajectory,
+    init_minimal_python_repo,
+    orchestration_result,
+    record_reasoning_results,
+    reasoning_experiment,
+    reasoning_strategy,
+    run_reasoning_task,
+    trajectory_summary,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +73,7 @@ def _make_orchestration_result(
 
 
 def test_successful_governed_task_creates_trajectory(tmp_path: Path):
-    repo = _init_test_git_repo(tmp_path / "repo")
+    repo = init_minimal_python_repo(tmp_path / "repo")
     spec = TaskSpec(
         task_id="TRJ-OK-001",
         repository="test_service",
@@ -161,22 +85,13 @@ def test_successful_governed_task_creates_trajectory(tmp_path: Path):
     def impl(task, cwd, prompt):
         (cwd / "README.md").write_text("# Updated\n", encoding="utf-8")
 
-    orchestrator = GovernedTaskOrchestrator(
-        target_repo=repo,
-        config=OrchestrationConfig(
-            custom_backend=FakeAgentBackend(agent_id="claude_code", side_effect=impl),
-            custom_reviewer_fn=lambda role, diff, task: "findings: []\n",
-            record_trajectory=True,
-            trajectory_store_dir=tmp_path / "trajectories",
-        ),
+    res, traj = run_reasoning_task(
+        repo,
+        tmp_path / "trajectories",
+        spec,
+        impl,
     )
-    res = orchestrator.run(spec)
     assert res.final_state == "complete"
-
-    store = TrajectoryStore(tmp_path / "trajectories")
-    trajectories = store.list_all()
-    assert len(trajectories) == 1
-    traj = trajectories[0]
     assert traj.task_id == "TRJ-OK-001"
     assert traj.final_status == "complete"
     assert traj.outcome == "success"
@@ -184,7 +99,7 @@ def test_successful_governed_task_creates_trajectory(tmp_path: Path):
 
 
 def test_failed_governed_task_creates_trajectory(tmp_path: Path):
-    repo = _init_test_git_repo(tmp_path / "repo")
+    repo = init_minimal_python_repo(tmp_path / "repo")
     spec = TaskSpec(
         task_id="TRJ-FAIL-001",
         repository="test_service",
@@ -199,26 +114,18 @@ def test_failed_governed_task_creates_trajectory(tmp_path: Path):
             encoding="utf-8",
         )
 
-    orchestrator = GovernedTaskOrchestrator(
-        target_repo=repo,
-        config=OrchestrationConfig(
-            custom_backend=FakeAgentBackend(agent_id="claude_code", side_effect=impl),
-            custom_reviewer_fn=lambda role, diff, task: "findings: []\n",
-            record_trajectory=True,
-            trajectory_store_dir=tmp_path / "trajectories",
-        ),
+    res, traj = run_reasoning_task(
+        repo,
+        tmp_path / "trajectories",
+        spec,
+        impl,
     )
-    res = orchestrator.run(spec)
     assert res.final_state == "failed"
-
-    store = TrajectoryStore(tmp_path / "trajectories")
-    trajectories = store.list_all()
-    assert len(trajectories) == 1
-    assert trajectories[0].final_status == "failed"
+    assert traj.final_status == "failed"
 
 
 def test_repair_cycles_preserved_in_trajectory(tmp_path: Path):
-    repo = _init_test_git_repo(tmp_path / "repo")
+    repo = init_minimal_python_repo(tmp_path / "repo")
     spec = TaskSpec(
         task_id="TRJ-REPAIR-001",
         repository="test_service",
@@ -249,23 +156,17 @@ findings:
     def remediation_fn(task, cwd, findings):
         (cwd / "src" / "feature.py").write_text("def run():\n    return True\n", encoding="utf-8")
 
-    orchestrator = GovernedTaskOrchestrator(
-        target_repo=repo,
-        config=OrchestrationConfig(
-            custom_backend=FakeAgentBackend(agent_id="claude_code", side_effect=impl),
-            custom_reviewer_fn=reviewer_fn,
-            custom_remediation_fn=remediation_fn,
-            max_remediation_cycles=3,
-            record_trajectory=True,
-            trajectory_store_dir=tmp_path / "trajectories",
-        ),
+    res, traj = run_reasoning_task(
+        repo,
+        tmp_path / "trajectories",
+        spec,
+        impl,
+        custom_reviewer_fn=reviewer_fn,
+        custom_remediation_fn=remediation_fn,
+        max_remediation_cycles=3,
     )
-    res = orchestrator.run(spec)
     assert res.final_state == "complete"
     assert res.remediation_cycles_count >= 1
-
-    store = TrajectoryStore(tmp_path / "trajectories")
-    traj = store.list_all()[0]
     assert len(traj.repair_cycles) >= 1
 
 
@@ -305,14 +206,14 @@ def test_review_findings_linked_in_trajectory(tmp_path: Path):
         status="has_findings",
         requires_remediation=True,
     )
-    res = _make_orchestration_result(tmp_path, review_cycles=[cycle])
+    res = orchestration_result(tmp_path, review_cycles=[cycle])
     traj = ExecutionTrajectoryBuilder.from_orchestration_result(res)
     assert len(traj.review_findings) == 1
     assert traj.review_findings[0]["id"] == "F001"
 
 
 def test_verification_linked_in_trajectory(tmp_path: Path):
-    res = _make_orchestration_result(tmp_path, final_state="complete")
+    res = orchestration_result(tmp_path, final_state="complete")
     traj = ExecutionTrajectoryBuilder.from_orchestration_result(res)
     assert traj.verification_results is not None
     assert traj.verification_results["overall_status"] == "passed"
@@ -332,7 +233,7 @@ def test_provider_events_linked_in_trajectory(tmp_path: Path):
         success=True,
         metadata={"model": "claude-opus", "cost_usd": 0.02},
     )
-    res = _make_orchestration_result(tmp_path, provider_execution=provider_exec)
+    res = orchestration_result(tmp_path, provider_execution=provider_exec)
     traj = ExecutionTrajectoryBuilder.from_orchestration_result(res)
     assert traj.selected_provider == "claude_code"
     assert traj.selected_model == "claude-opus"
@@ -343,8 +244,8 @@ def test_provider_events_linked_in_trajectory(tmp_path: Path):
 
 
 def test_hidden_chain_of_thought_not_stored(tmp_path: Path):
-    traj = ExecutionTrajectory(
-        trajectory_id="trj-hidden-test",
+    traj = execution_trajectory(
+        "trj-hidden-test",
         task_id="HIDDEN-001",
         hidden_reasoning="I think I should bypass the checks",
         chain_of_thought="Step 1: ...",
@@ -357,8 +258,8 @@ def test_hidden_chain_of_thought_not_stored(tmp_path: Path):
 
 
 def test_secrets_redacted_in_trajectory(tmp_path: Path):
-    traj = ExecutionTrajectory(
-        trajectory_id="trj-secret-test",
+    traj = execution_trajectory(
+        "trj-secret-test",
         task_id="SECRET-001",
         objective="Test with api_key=super_secret_123456",
         provider_events=[{"command": "curl -H api_key:super_secret_123456"}],
@@ -371,8 +272,8 @@ def test_secrets_redacted_in_trajectory(tmp_path: Path):
 
 def test_resume_does_not_duplicate_trajectory(tmp_path: Path):
     store = TrajectoryStore(tmp_path / "trajectories")
-    traj = ExecutionTrajectory(
-        trajectory_id="trj-dup-test",
+    traj = execution_trajectory(
+        "trj-dup-test",
         task_id="DUP-001",
         final_status="complete",
         outcome="success",
@@ -383,8 +284,8 @@ def test_resume_does_not_duplicate_trajectory(tmp_path: Path):
 
 
 def test_trajectory_digest_is_deterministic(tmp_path: Path):
-    traj = ExecutionTrajectory(
-        trajectory_id="trj-digest-test",
+    traj = execution_trajectory(
+        "trj-digest-test",
         task_id="DIGEST-001",
         final_status="complete",
         outcome="success",
@@ -405,49 +306,29 @@ def test_trajectory_digest_is_deterministic(tmp_path: Path):
 
 
 def test_baseline_candidate_immutable_after_experiment_starts():
-    baseline = StrategyDefinition(
-        strategy_id="context.changed_files_only/v1",
-        version="v1",
-        strategy_type="context",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="context.full_repository/v1",
-        version="v1",
-        strategy_type="context",
-        description="candidate",
-    )
-    exp = ReasoningExperiment(
-        experiment_id="EXP-IMM-001",
-        experiment_type="CONTEXT",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+    exp = reasoning_experiment(
+        "EXP-IMM-001",
+        baseline_id="context.changed_files_only/v1",
+        candidate_id="context.full_repository/v1",
     )
     exp.mark_started()
     with pytest.raises(Exception):
-        exp.set_candidate_strategy(StrategySnapshot.from_definition(baseline))
+        exp.set_candidate_strategy(
+            StrategySnapshot.from_definition(
+                reasoning_strategy("context.changed_files_only/v1")
+            )
+        )
 
 
 def test_prediction_persisted_before_outcome():
-    baseline = StrategyDefinition(
-        strategy_id="context.changed_files_only/v1",
-        version="v1",
-        strategy_type="context",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="context.full_repository/v1",
-        version="v1",
-        strategy_type="context",
-        description="candidate",
-    )
-    exp = ReasoningExperiment(
-        experiment_id="EXP-PRED-001",
-        experiment_type="CONTEXT",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+    exp = reasoning_experiment(
+        "EXP-PRED-001",
+        baseline_id="context.changed_files_only/v1",
+        candidate_id="context.full_repository/v1",
         expected_outcome="Candidate improves verification pass rate",
-        falsification_criteria=["candidate.verification_pass_rate < baseline.verification_pass_rate"],
+        falsification_criteria=[
+            "candidate.verification_pass_rate < baseline.verification_pass_rate"
+        ],
         metrics=["verification_pass_rate"],
     )
     predigest = exp.prediction_digest
@@ -457,9 +338,8 @@ def test_prediction_persisted_before_outcome():
 
 
 def test_falsification_criteria_persisted_before_outcome():
-    exp = ReasoningExperiment(
-        experiment_id="EXP-FALS-001",
-        experiment_type="CONTEXT",
+    exp = reasoning_experiment(
+        "EXP-FALS-001",
         expected_outcome="x",
         falsification_criteria=["candidate.repair_cycles > baseline.repair_cycles"],
         metrics=["mean_repair_cycles"],
@@ -469,60 +349,34 @@ def test_falsification_criteria_persisted_before_outcome():
 
 
 def test_candidate_cannot_rewrite_metric_after_execution():
-    baseline = StrategyDefinition(
-        strategy_id="context.changed_files_only/v1",
-        version="v1",
-        strategy_type="context",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="context.full_repository/v1",
-        version="v1",
-        strategy_type="context",
-        description="candidate",
-    )
-    exp = ReasoningExperiment(
-        experiment_id="EXP-METRIC-001",
-        experiment_type="CONTEXT",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+    exp = reasoning_experiment(
+        "EXP-METRIC-001",
+        baseline_id="context.changed_files_only/v1",
+        candidate_id="context.full_repository/v1",
         metrics=["verification_pass_rate"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [{"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0}],
-        [{"trajectory_id": "c1", "verification_status": "passed", "repair_cycles_count": 0}],
-    )
+    record_reasoning_results(exp)
     with pytest.raises(Exception):
         exp.set_metrics(["success_rate"])
 
 
 def test_falsified_candidate_remains_durable(tmp_path: Path):
     store = ReasoningExperimentStore(tmp_path / "experiments")
-    baseline = StrategyDefinition(
-        strategy_id="review.general_single/v1",
-        version="v1",
-        strategy_type="review_topology",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="review.two_independent_reconcile/v1",
-        version="v1",
-        strategy_type="review_topology",
-        description="candidate",
-    )
-    exp = ReasoningExperiment(
-        experiment_id="EXP-DURABLE-001",
+    exp = reasoning_experiment(
+        "EXP-DURABLE-001",
         experiment_type="REVIEW_TOPOLOGY",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+        baseline_id="review.general_single/v1",
+        candidate_id="review.two_independent_reconcile/v1",
         falsification_criteria=["candidate.verification_pass_rate < 1.0"],
         metrics=["verification_pass_rate"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [{"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0}],
-        [{"trajectory_id": "c1", "verification_status": "failed", "repair_cycles_count": 1}],
+    record_reasoning_results(
+        exp,
+        candidate_results=[
+            trajectory_summary(
+                "c1", verification_status="failed", repair_cycles_count=1,
+            )
+        ],
     )
     finalize_experiment_outcome(exp)
     assert exp.result == "FALSIFIED"
@@ -532,58 +386,28 @@ def test_falsified_candidate_remains_durable(tmp_path: Path):
 
 
 def test_small_sample_may_return_requires_more_evidence():
-    baseline = StrategyDefinition(
-        strategy_id="planning.direct_implementation/v1",
-        version="v1",
-        strategy_type="task_decomposition",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="planning.plan_then_implement/v1",
-        version="v1",
-        strategy_type="task_decomposition",
-        description="candidate",
-    )
-    exp = ReasoningExperiment(
-        experiment_id="EXP-SMALL-001",
+    exp = reasoning_experiment(
+        "EXP-SMALL-001",
         experiment_type="TASK_DECOMPOSITION",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+        baseline_id="planning.direct_implementation/v1",
+        candidate_id="planning.plan_then_implement/v1",
         metrics=["verification_pass_rate"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [{"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0}],
-        [{"trajectory_id": "c1", "verification_status": "passed", "repair_cycles_count": 0}],
-    )
+    record_reasoning_results(exp)
     outcome, details = evaluate_experiment(exp)
     assert outcome in ("INCONCLUSIVE", "NOT_YET_MEASURABLE")
 
 
 def test_inconclusive_is_valid_outcome():
-    baseline = StrategyDefinition(
-        strategy_id="context.changed_files_only/v1",
-        version="v1",
-        strategy_type="context",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="context.changed_files_plus_architecture/v1",
-        version="v1",
-        strategy_type="context",
-        description="candidate",
-    )
-    exp = ReasoningExperiment(
-        experiment_id="EXP-INC-001",
-        experiment_type="CONTEXT",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+    exp = reasoning_experiment(
+        "EXP-INC-001",
+        baseline_id="context.changed_files_only/v1",
+        candidate_id="context.changed_files_plus_architecture/v1",
         metrics=["verification_pass_rate", "mean_repair_cycles"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [{"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0}],
-        [{"trajectory_id": "c1", "verification_status": "passed", "repair_cycles_count": 1}],
+    record_reasoning_results(
+        exp,
+        candidate_results=[trajectory_summary("c1", repair_cycles_count=1)],
     )
     outcome, details = evaluate_experiment(exp)
     assert outcome == "INCONCLUSIVE"
@@ -592,16 +416,16 @@ def test_inconclusive_is_valid_outcome():
 
 
 def test_deterministic_comparison_reproducible():
-    baseline = [{"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0}]
-    candidate = [{"trajectory_id": "c1", "verification_status": "failed", "repair_cycles_count": 1}]
-    exp = ReasoningExperiment(
-        experiment_id="EXP-REPR-001",
-        experiment_type="CONTEXT",
+    baseline = [trajectory_summary("b1")]
+    candidate = [
+        trajectory_summary("c1", verification_status="failed", repair_cycles_count=1)
+    ]
+    exp = reasoning_experiment(
+        "EXP-REPR-001",
         falsification_criteria=["candidate.verification_pass_rate < 1.0"],
         metrics=["verification_pass_rate"],
     )
-    exp.mark_started()
-    exp.record_results(baseline, candidate)
+    record_reasoning_results(exp, baseline, candidate)
     o1, _ = evaluate_experiment(exp)
     o2, _ = evaluate_experiment(exp)
     assert o1 == o2 == "FALSIFIED"
@@ -609,7 +433,7 @@ def test_deterministic_comparison_reproducible():
 
 def test_experiment_resume_is_idempotent(tmp_path: Path):
     store = ReasoningExperimentStore(tmp_path / "experiments")
-    exp = ReasoningExperiment(experiment_id="EXP-RESUME-001", experiment_type="CONTEXT")
+    exp = reasoning_experiment("EXP-RESUME-001")
     store.save(exp)
     store.save(exp)
     assert len(store.list_all()) == 1
@@ -629,39 +453,18 @@ def test_strategy_ids_are_versioned():
 
 
 def test_strategy_definition_digest_is_stable():
-    s1 = StrategyDefinition(
-        strategy_id="context.changed_files_only/v1",
-        version="v1",
-        strategy_type="context",
-        description="baseline",
-        immutable_config={"scope": "changed_files"},
-    )
-    s2 = StrategyDefinition(
-        strategy_id="context.changed_files_only/v1",
-        version="v1",
-        strategy_type="context",
-        description="baseline",
-        immutable_config={"scope": "changed_files"},
-    )
+    config = {"scope": "changed_files"}
+    s1 = reasoning_strategy("context.changed_files_only/v1", immutable_config=config)
+    s2 = reasoning_strategy("context.changed_files_only/v1", immutable_config=config)
     assert s1.digest == s2.digest
 
 
 def test_same_id_version_cannot_silently_change_implementation():
     registry = StrategyRegistry()
-    s1 = StrategyDefinition(
-        strategy_id="context.test/v1",
-        version="v1",
-        strategy_type="context",
-        description="original",
-        immutable_config={"scope": "full"},
-    )
+    s1 = reasoning_strategy("context.test/v1", immutable_config={"scope": "full"})
     registry.register(s1)
-    s2 = StrategyDefinition(
-        strategy_id="context.test/v1",
-        version="v1",
-        strategy_type="context",
-        description="tampered",
-        immutable_config={"scope": "changed_files"},
+    s2 = reasoning_strategy(
+        "context.test/v1", immutable_config={"scope": "changed_files"}
     )
     with pytest.raises(Exception):
         registry.register(s2)
@@ -707,12 +510,11 @@ def test_repository_content_cannot_rewrite_strategy_policy(tmp_path: Path):
 def test_candidate_strategy_cannot_change_authority():
     # Strategy definitions have no authority fields; authority is enforced by
     # AuthorityProfile / AuthorityEnvelope / HumanBoundaryGate separately.
-    s = StrategyDefinition(
-        strategy_id="routing.local_first_low_risk/v1",
-        version="v1",
-        strategy_type="routing",
-        description="candidate",
-        immutable_config={"allowed_action_classes": ["merge_pull_request", "production_deployment"]},
+    reasoning_strategy(
+        "routing.local_first_low_risk/v1",
+        immutable_config={
+            "allowed_action_classes": ["merge_pull_request", "production_deployment"]
+        },
     )
     # The immutable_config can store arbitrary keys, but the authority system
     # never reads strategy config for permissions.
@@ -732,61 +534,33 @@ def test_candidate_provider_cannot_self_promote():
 
 
 def test_expensive_provider_does_not_automatically_win():
-    baseline = StrategyDefinition(
-        strategy_id="routing.local_first_low_risk/v1",
-        version="v1",
-        strategy_type="routing",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="routing.frontier_first/v1",
-        version="v1",
-        strategy_type="routing",
-        description="candidate",
-    )
     # Candidate with higher cost and equal metrics is not promoted.
-    exp = ReasoningExperiment(
-        experiment_id="EXP-COST-001",
+    exp = reasoning_experiment(
+        "EXP-COST-001",
         experiment_type="ROUTING",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+        baseline_id="routing.local_first_low_risk/v1",
+        candidate_id="routing.frontier_first/v1",
         metrics=["verification_pass_rate", "mean_cost"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [{"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0, "cost_if_available": 0.0}],
-        [{"trajectory_id": "c1", "verification_status": "passed", "repair_cycles_count": 0, "cost_if_available": 1.0}],
+    record_reasoning_results(
+        exp,
+        [trajectory_summary("b1", cost_if_available=0.0)],
+        [trajectory_summary("c1", cost_if_available=1.0)],
     )
     outcome, _ = evaluate_experiment(exp)
     assert outcome in ("INCONCLUSIVE", "FALSIFIED")
 
 
 def test_provider_diversity_does_not_automatically_win():
-    baseline = StrategyDefinition(
-        strategy_id="review.general_single/v1",
-        version="v1",
-        strategy_type="review_topology",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="review.correctness_security_test_falsifier/v1",
-        version="v1",
-        strategy_type="review_topology",
-        description="candidate",
-    )
     # More reviewers but no better verification => inconclusive.
-    exp = ReasoningExperiment(
-        experiment_id="EXP-DIV-001",
+    exp = reasoning_experiment(
+        "EXP-DIV-001",
         experiment_type="REVIEW_TOPOLOGY",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+        baseline_id="review.general_single/v1",
+        candidate_id="review.correctness_security_test_falsifier/v1",
         metrics=["verification_pass_rate"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [{"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0}],
-        [{"trajectory_id": "c1", "verification_status": "passed", "repair_cycles_count": 0}],
-    )
+    record_reasoning_results(exp)
     outcome, _ = evaluate_experiment(exp)
     assert outcome in ("INCONCLUSIVE", "NOT_YET_MEASURABLE")
 
@@ -794,54 +568,39 @@ def test_provider_diversity_does_not_automatically_win():
 def test_provider_availability_failure_distinct_from_engineering_quality():
     # A trajectory whose outcome is provider_exhausted should not be counted
     # as a verification failure in experiment evaluation.
-    exp = ReasoningExperiment(
-        experiment_id="EXP-AVAIL-001",
+    exp = reasoning_experiment(
+        "EXP-AVAIL-001",
         experiment_type="ROUTING",
         metrics=["verification_pass_rate", "provider_failures"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [{"trajectory_id": "b1", "verification_status": "passed", "outcome": "success", "repair_cycles_count": 0}],
-        [{"trajectory_id": "c1", "verification_status": "failed", "outcome": "provider_exhausted", "repair_cycles_count": 0}],
+    record_reasoning_results(
+        exp,
+        candidate_results=[
+            trajectory_summary(
+                "c1",
+                verification_status="failed",
+                outcome="provider_exhausted",
+            )
+        ],
     )
     outcome, details = evaluate_experiment(exp)
     assert details["metric_comparisons"]["provider_failures"] == "worse"
 
 
 def test_local_first_strategy_wins_only_if_metrics_support():
-    baseline = StrategyDefinition(
-        strategy_id="routing.frontier_first/v1",
-        version="v1",
-        strategy_type="routing",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="routing.local_first_low_risk/v1",
-        version="v1",
-        strategy_type="routing",
-        description="candidate",
-    )
     # Cost is the primary signal for local-first routing; verification parity is
     # a required secondary constraint.
-    exp = ReasoningExperiment(
-        experiment_id="EXP-LOCAL-001",
+    exp = reasoning_experiment(
+        "EXP-LOCAL-001",
         experiment_type="ROUTING",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+        baseline_id="routing.frontier_first/v1",
+        candidate_id="routing.local_first_low_risk/v1",
         metrics=["mean_cost", "verification_pass_rate"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [
-            {"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0, "cost_if_available": 1.0},
-            {"trajectory_id": "b2", "verification_status": "passed", "repair_cycles_count": 0, "cost_if_available": 1.0},
-            {"trajectory_id": "b3", "verification_status": "passed", "repair_cycles_count": 0, "cost_if_available": 1.0},
-        ],
-        [
-            {"trajectory_id": "c1", "verification_status": "passed", "repair_cycles_count": 0, "cost_if_available": 0.0},
-            {"trajectory_id": "c2", "verification_status": "passed", "repair_cycles_count": 0, "cost_if_available": 0.0},
-            {"trajectory_id": "c3", "verification_status": "passed", "repair_cycles_count": 0, "cost_if_available": 0.0},
-        ],
+    record_reasoning_results(
+        exp,
+        [trajectory_summary(f"b{i}", cost_if_available=1.0) for i in range(1, 4)],
+        [trajectory_summary(f"c{i}", cost_if_available=0.0) for i in range(1, 4)],
     )
     outcome, _ = evaluate_experiment(exp)
     assert outcome == "SUPPORTED"
@@ -853,32 +612,17 @@ def test_local_first_strategy_wins_only_if_metrics_support():
 
 
 def test_context_strategies_compared_deterministically():
-    baseline = StrategyDefinition(
-        strategy_id="context.changed_files_only/v1",
-        version="v1",
-        strategy_type="context",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="context.full_repository/v1",
-        version="v1",
-        strategy_type="context",
-        description="candidate",
-    )
-    exp = ReasoningExperiment(
-        experiment_id="EXP-CTX-001",
-        experiment_type="CONTEXT",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+    exp = reasoning_experiment(
+        "EXP-CTX-001",
+        baseline_id="context.changed_files_only/v1",
+        candidate_id="context.full_repository/v1",
         expected_outcome="Candidate has equal or better verification pass rate",
-        falsification_criteria=["candidate.verification_pass_rate < baseline.verification_pass_rate"],
+        falsification_criteria=[
+            "candidate.verification_pass_rate < baseline.verification_pass_rate"
+        ],
         metrics=["verification_pass_rate"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [{"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0}],
-        [{"trajectory_id": "c1", "verification_status": "passed", "repair_cycles_count": 0}],
-    )
+    record_reasoning_results(exp)
     outcome, details = evaluate_experiment(exp)
     assert outcome in VALID_EXPERIMENT_OUTCOMES
     assert details["falsification_failures"] == []
@@ -897,12 +641,13 @@ def test_selected_context_evidence_refs_retained():
 
 def test_irrelevant_context_may_be_excluded():
     # Context strategy with max_files=0 explicitly excludes irrelevant context.
-    s = StrategyDefinition(
-        strategy_id="context.task_plus_acceptance/v1",
-        version="v1",
-        strategy_type="context",
-        description="minimal",
-        immutable_config={"scope": "task_acceptance", "include_architecture": False, "max_files": 0},
+    s = reasoning_strategy(
+        "context.task_plus_acceptance/v1",
+        immutable_config={
+            "scope": "task_acceptance",
+            "include_architecture": False,
+            "max_files": 0,
+        },
     )
     assert s.immutable_config["max_files"] == 0
 
@@ -929,39 +674,26 @@ def test_historical_failed_trajectories_remain_eligible_evidence():
 
 
 def test_more_reviewers_may_be_rejected():
-    baseline = StrategyDefinition(
-        strategy_id="review.general_single/v1",
-        version="v1",
-        strategy_type="review_topology",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="review.correctness_security_test_falsifier/v1",
-        version="v1",
-        strategy_type="review_topology",
-        description="candidate",
-    )
     # Candidate adds reviewers but verification rate drops; falsified.
-    exp = ReasoningExperiment(
-        experiment_id="EXP-REV-001",
+    exp = reasoning_experiment(
+        "EXP-REV-001",
         experiment_type="REVIEW_TOPOLOGY",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+        baseline_id="review.general_single/v1",
+        candidate_id="review.correctness_security_test_falsifier/v1",
         falsification_criteria=["candidate.verification_pass_rate < baseline.verification_pass_rate"],
         metrics=["verification_pass_rate"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [{"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0}],
-        [{"trajectory_id": "c1", "verification_status": "failed", "repair_cycles_count": 0}],
+    record_reasoning_results(
+        exp,
+        candidate_results=[trajectory_summary("c1", verification_status="failed")],
     )
     outcome, _ = evaluate_experiment(exp)
     assert outcome == "FALSIFIED"
 
 
 def test_review_disagreement_preserved():
-    traj = ExecutionTrajectory(
-        trajectory_id="trj-disagree",
+    traj = execution_trajectory(
+        "trj-disagree",
         task_id="DISAGREE-001",
         review_findings=[
             {"id": "F1", "reviewer_role": "correctness-reviewer", "status": "confirmed"},
@@ -976,16 +708,15 @@ def test_strong_unresolved_objection_can_prevent_promotion():
     # A candidate strategy whose own falsification criterion demands no
     # unresolved high-severity objections cannot be promoted if such objections
     # remain. The experiment-level falsification check already enforces this.
-    exp = ReasoningExperiment(
-        experiment_id="EXP-OBJ-001",
+    exp = reasoning_experiment(
+        "EXP-OBJ-001",
         experiment_type="REVIEW_TOPOLOGY",
         falsification_criteria=["candidate.verification_pass_rate < 1.0"],
         metrics=["verification_pass_rate"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [{"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0}],
-        [{"trajectory_id": "c1", "verification_status": "failed", "repair_cycles_count": 0}],
+    record_reasoning_results(
+        exp,
+        candidate_results=[trajectory_summary("c1", verification_status="failed")],
     )
     outcome, _ = evaluate_experiment(exp)
     assert outcome == "FALSIFIED"
@@ -999,16 +730,16 @@ def test_strong_unresolved_objection_can_prevent_promotion():
 def test_repeated_routing_problem_can_create_observation(tmp_path: Path):
     store = ObservationStore(tmp_path / "observations")
     trajectories = [
-        ExecutionTrajectory(
-            trajectory_id="rt-1",
+        execution_trajectory(
+            "rt-1",
             task_id="R-001",
             task_class="feature",
             selected_provider="codex",
             final_status="failed",
             outcome="provider_exhausted",
         ),
-        ExecutionTrajectory(
-            trajectory_id="rt-2",
+        execution_trajectory(
+            "rt-2",
             task_id="R-002",
             task_class="feature",
             selected_provider="codex",
@@ -1024,8 +755,8 @@ def test_repeated_routing_problem_can_create_observation(tmp_path: Path):
 def test_repeated_remediation_pattern_can_create_observation(tmp_path: Path):
     store = ObservationStore(tmp_path / "observations")
     trajectories = [
-        ExecutionTrajectory(
-            trajectory_id="rem-1",
+        execution_trajectory(
+            "rem-1",
             task_id="REM-001",
             task_class="feature",
             context_strategy_id="context.changed_files_only/v1",
@@ -1033,8 +764,8 @@ def test_repeated_remediation_pattern_can_create_observation(tmp_path: Path):
             outcome="failed",
             review_findings=[{"id": "F1", "title": "Missing architecture context"}],
         ),
-        ExecutionTrajectory(
-            trajectory_id="rem-2",
+        execution_trajectory(
+            "rem-2",
             task_id="REM-002",
             task_class="feature",
             context_strategy_id="context.changed_files_only/v1",
@@ -1049,8 +780,8 @@ def test_repeated_remediation_pattern_can_create_observation(tmp_path: Path):
 
 def test_trajectory_observation_does_not_immediately_alter_routing():
     store = ObservationStore("/tmp/obs_test")
-    traj = ExecutionTrajectory(
-        trajectory_id="no-alter",
+    traj = execution_trajectory(
+        "no-alter",
         task_id="NA-001",
         task_class="docs",
         selected_provider="local_ollama",
@@ -1066,31 +797,15 @@ def test_trajectory_observation_does_not_immediately_alter_routing():
 def test_completed_experiment_can_inform_later_seek(tmp_path: Path):
     # An experiment record carries suggested strategy IDs that can be used by
     # a future SEEK/OBSERVE process to propose a follow-up experiment.
-    baseline = StrategyDefinition(
-        strategy_id="retrieval.no_historical/v1",
-        version="v1",
-        strategy_type="retrieval",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="retrieval.task_class/v1",
-        version="v1",
-        strategy_type="retrieval",
-        description="candidate",
-    )
-    exp = ReasoningExperiment(
-        experiment_id="EXP-SEEK-001",
+    exp = reasoning_experiment(
+        "EXP-SEEK-001",
         experiment_type="RETRIEVAL",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+        baseline_id="retrieval.no_historical/v1",
+        candidate_id="retrieval.task_class/v1",
         expected_outcome="Candidate improves first-pass success",
         metrics=["verification_pass_rate"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [{"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0}],
-        [{"trajectory_id": "c1", "verification_status": "passed", "repair_cycles_count": 0}],
-    )
+    record_reasoning_results(exp)
     outcome, _ = evaluate_experiment(exp)
     exp.finalize(outcome)
     # Future seek can read the experiment and its suggested strategies.
@@ -1100,30 +815,16 @@ def test_completed_experiment_can_inform_later_seek(tmp_path: Path):
 def test_identical_failed_strategy_not_endlessly_rediscovered(tmp_path: Path):
     store = ObservationStore(tmp_path / "observations")
     exp_store = ReasoningExperimentStore(tmp_path / "experiments")
-    baseline = StrategyDefinition(
-        strategy_id="context.changed_files_only/v1",
-        version="v1",
-        strategy_type="context",
-        description="baseline",
-    )
-    candidate = StrategyDefinition(
-        strategy_id="context.full_repository/v1",
-        version="v1",
-        strategy_type="context",
-        description="candidate",
-    )
-    exp = ReasoningExperiment(
-        experiment_id="EXP-DEDUP-001",
-        experiment_type="CONTEXT",
-        baseline_strategy=StrategySnapshot.from_definition(baseline),
-        candidate_strategy=StrategySnapshot.from_definition(candidate),
+    exp = reasoning_experiment(
+        "EXP-DEDUP-001",
+        baseline_id="context.changed_files_only/v1",
+        candidate_id="context.full_repository/v1",
         falsification_criteria=["candidate.verification_pass_rate < baseline.verification_pass_rate"],
         metrics=["verification_pass_rate"],
     )
-    exp.mark_started()
-    exp.record_results(
-        [{"trajectory_id": "b1", "verification_status": "passed", "repair_cycles_count": 0}],
-        [{"trajectory_id": "c1", "verification_status": "failed", "repair_cycles_count": 0}],
+    record_reasoning_results(
+        exp,
+        candidate_results=[trajectory_summary("c1", verification_status="failed")],
     )
     finalize_experiment_outcome(exp)
     exp_store.save(exp)
@@ -1155,8 +856,8 @@ def test_new_evidence_can_reopen_deferred_hypothesis(tmp_path: Path):
         status=ObservationStatus.DEFERRED,
     )
     store.save(obs)
-    new_traj = ExecutionTrajectory(
-        trajectory_id="reopen-1",
+    new_traj = execution_trajectory(
+        "reopen-1",
         task_id="R-100",
         task_class="feature",
         selected_provider="codex",
@@ -1166,7 +867,14 @@ def test_new_evidence_can_reopen_deferred_hypothesis(tmp_path: Path):
     # The routing-problem miner needs two occurrences, so feed two trajectories
     # including the original evidence ref.
     trajectories = [
-        ExecutionTrajectory(trajectory_id="orig-1", task_id="R-099", task_class="feature", selected_provider="codex", final_status="failed", outcome="provider_exhausted"),
+        execution_trajectory(
+            "orig-1",
+            task_id="R-099",
+            task_class="feature",
+            selected_provider="codex",
+            final_status="failed",
+            outcome="provider_exhausted",
+        ),
         new_traj,
     ]
     reopened = discover_observations(trajectories, store=store)
@@ -1179,37 +887,40 @@ def test_new_evidence_can_reopen_deferred_hypothesis(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_strategy_experiment_cannot_widen_repository_scope():
-    # Strategy definitions have no repository scope field; only the AuthorityEnvelope
-    # authorized_repositories list controls scope. A strategy cannot add to it.
+@pytest.mark.parametrize(
+    ("candidate_config", "action", "repository", "usage"),
+    [
+        (
+            {"authorized_repositories": ["*"]},
+            "merge_pull_request",
+            "some/other-repo",
+            {},
+        ),
+        (
+            {"max_merges": 999},
+            "merge_pull_request",
+            "howlcipher/howlplane",
+            {"merges_so_far": 10},
+        ),
+        (
+            {"external_spend_usd_limit": 1000.0},
+            "invoke_configured_ai_provider",
+            "howlcipher/howlplane",
+            {"spend_so_far": 1.0},
+        ),
+    ],
+    ids=["repository_scope", "merge_budget", "spend_budget"],
+)
+def test_strategy_config_cannot_expand_authority(
+    candidate_config, action, repository, usage,
+):
     envelope = create_envelope(OVERNIGHT_SAFE_PROFILE, "c", "test")
-    assert envelope.authorized_repositories == ["howlcipher/howlplane"]
-    s = StrategyDefinition(
-        strategy_id="routing.frontier_first/v1",
-        version="v1",
-        strategy_type="routing",
-        description="",
-        immutable_config={"authorized_repositories": ["*"]},
-    )
-    # Strategy config is ignored by authority envelope evaluation.
-    decision, _ = evaluate_action_against_envelope(envelope, "merge_pull_request", "some/other-repo")
-    assert decision == AuthorityDecision.OUTSIDE_ENVELOPE_SCOPE
-
-
-def test_strategy_experiment_cannot_increase_merge_count():
-    envelope = create_envelope(OVERNIGHT_SAFE_PROFILE, "c", "test")
-    max_merges = envelope.max_merges
-    assert max_merges == 10
-    # Strategy selection does not mutate the envelope.
-    s = StrategyDefinition(
-        strategy_id="routing.frontier_first/v1",
-        version="v1",
-        strategy_type="routing",
-        description="",
-        immutable_config={"max_merges": 999},
+    reasoning_strategy(
+        "routing.frontier_first/v1",
+        immutable_config=candidate_config,
     )
     decision, _ = evaluate_action_against_envelope(
-        envelope, "merge_pull_request", "howlcipher/howlplane", merges_so_far=max_merges
+        envelope, action, repository, **usage,
     )
     assert decision == AuthorityDecision.OUTSIDE_ENVELOPE_SCOPE
 
@@ -1232,28 +943,11 @@ def test_strategy_experiment_cannot_modify_authority_envelope():
     assert ok
 
 
-def test_strategy_experiment_cannot_increase_spend_budget():
-    envelope = create_envelope(OVERNIGHT_SAFE_PROFILE, "c", "test")
-    limit = envelope.external_spend_usd_limit
-    assert limit == 0.0
-    s = StrategyDefinition(
-        strategy_id="routing.frontier_first/v1",
-        version="v1",
-        strategy_type="routing",
-        description="",
-        immutable_config={"external_spend_usd_limit": 1000.0},
-    )
-    decision, _ = evaluate_action_against_envelope(
-        envelope, "invoke_configured_ai_provider", "howlcipher/howlplane", spend_so_far=1.0
-    )
-    assert decision == AuthorityDecision.OUTSIDE_ENVELOPE_SCOPE
-
-
 def test_verified_is_distinct_from_authorized():
     # A verification-passed trajectory is not itself authority to merge/deploy.
     envelope = create_envelope(OVERNIGHT_SAFE_PROFILE, "c", "test")
-    traj = ExecutionTrajectory(
-        trajectory_id="trj-verified",
+    traj = execution_trajectory(
+        "trj-verified",
         task_id="V-001",
         final_status="complete",
         outcome="success",
