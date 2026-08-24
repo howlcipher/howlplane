@@ -82,13 +82,25 @@ TASK_BRANCH_PATTERN = re.compile(r"^fix/[A-Za-z0-9_.\-]+$")
 LIVE_ACCEPTANCE_JOURNAL_PATTERN = re.compile(
     r"^documentation/task_journals/\d{4}-\d{2}-\d{2}_live_autonomous_acceptance\.md$"
 )
+# This must reject outcome assertions, not merely a few preferred phrasings.
+# An acceptance journal is created before the lifecycle begins, so claims that
+# a PR landed, GitHub incorporated a change into main, or remote main was
+# successfully reconciled are equally premature even when they avoid "merge".
 PREMATURE_MERGE_SUCCESS_PATTERN = re.compile(
     r"\b(?:"
     r"(?:the\s+)?merge(?:\s+lifecycle)?\s+(?:(?:has\s+)?succeed(?:ed|s)?|"
     r"(?:is|was)\s+successful|(?:is|was|has\s+been)\s+complet(?:e|ed)|completed)|"
     r"(?:the\s+)?(?:[\w-]+\s+){0,5}[\w-]*merge[\w-]*\s+lifecycle\s+"
     r"(?:was\s+)?(?:executed|completed)\s+successfully|"
-    r"(?:successfully\s+)?merged"
+    r"(?:successfully\s+)?merged(?:\s+successfully)?|"
+    r"(?:github\s+)?(?:has\s+)?incorporated\s+(?:this\s+)?(?:change|pull\s+request|pr)\s+into\s+(?:the\s+)?main|"
+    r"(?:the\s+)?(?:change|pull\s+request|pr)\s+(?:has\s+)?landed\s+(?:on|in)\s+(?:the\s+)?main|"
+    r"(?:the\s+)?(?:change|pull\s+request|pr)\s+(?:has\s+been\s+)?(?:integrated|merged)\s+into\s+(?:the\s+)?main|"
+    r"(?:the\s+)?(?:change|pull\s+request|pr)\s+(?:is\s+)?now\s+(?:on|in)\s+(?:the\s+)?main|"
+    r"(?:the\s+)?remote\s+main\s+(?:(?:has\s+been|was)\s+)?(?:successfully\s+)?(?:verified|updated|synchronized|synced|reconciled)|"
+    r"(?:the\s+)?remote[-\s]?main[-\s]?(?:verification|sync)\s+(?:has\s+)?succeed(?:ed|s)?|"
+    r"(?:the\s+)?merge\s+(?:has\s+)?landed|"
+    r"(?:the\s+)?pull\s+request\s+(?:has\s+)?landed"
     r")\b",
     re.IGNORECASE,
 )
