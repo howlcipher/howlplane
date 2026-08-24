@@ -75,6 +75,24 @@ POLICY_SOURCE_UNAVAILABLE = "unavailable"
 # matching this is never eligible for the automated merge gate.
 TASK_BRANCH_PATTERN = re.compile(r"^fix/[A-Za-z0-9_.\-]+$")
 
+# The live acceptance journal is written before its governed integration
+# lifecycle begins.  It must therefore never claim that merge success is an
+# established fact.  This check deliberately lives in the production commit
+# boundary so a path scoped task cannot commit a fabricated outcome.
+LIVE_ACCEPTANCE_JOURNAL_PATTERN = re.compile(
+    r"^documentation/task_journals/\d{4}-\d{2}-\d{2}_live_autonomous_acceptance\.md$"
+)
+PREMATURE_MERGE_SUCCESS_PATTERN = re.compile(
+    r"\b(?:"
+    r"(?:the\s+)?merge(?:\s+lifecycle)?\s+(?:(?:has\s+)?succeed(?:ed|s)?|"
+    r"(?:is|was)\s+successful|(?:is|was|has\s+been)\s+complet(?:e|ed)|completed)|"
+    r"(?:the\s+)?(?:[\w-]+\s+){0,5}[\w-]*merge[\w-]*\s+lifecycle\s+"
+    r"(?:was\s+)?(?:executed|completed)\s+successfully|"
+    r"(?:successfully\s+)?merged"
+    r")\b",
+    re.IGNORECASE,
+)
+
 CommandRunner = Callable[[Union[str, Path], List[str], int], subprocess.CompletedProcess]
 
 
@@ -780,6 +798,7 @@ class GitIntegrationExecutor(AuthorityExecutor):
                 raise GitIntegrationError(
                     f"commit_task_changes rejected: path(s) outside task-declared scope {allowed_paths}: {violations}"
                 )
+        self._reject_premature_acceptance_merge_claims(paths)
         add_proc = self._git(self.repo_root, ["add", "--"] + list(paths), 30)
         if add_proc.returncode != 0:
             raise GitIntegrationError(f"git add of task-owned paths failed: {add_proc.stderr}")
@@ -793,6 +812,23 @@ class GitIntegrationExecutor(AuthorityExecutor):
         if baseline_sha and sha == baseline_sha:
             raise GitIntegrationError("HEAD did not move after commit -- commit did not actually happen")
         return sha
+
+    def _reject_premature_acceptance_merge_claims(self, paths: List[str]) -> None:
+        """Reject unverified merge success claims before any git subprocess runs."""
+        for path in paths:
+            if not LIVE_ACCEPTANCE_JOURNAL_PATTERN.fullmatch(path):
+                continue
+            journal_path = self.repo_root / path
+            try:
+                content = journal_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise GitIntegrationError(
+                    f"commit_task_changes rejected: could not read live acceptance journal '{path}': {exc}"
+                ) from exc
+            if PREMATURE_MERGE_SUCCESS_PATTERN.search(content):
+                raise GitIntegrationError(
+                    "commit_task_changes rejected: live acceptance journal contains a premature merge success claim"
+                )
 
     def push_branch(self, branch: str) -> bool:
         push_proc = self._git(self.repo_root, ["push", "-u", "origin", branch], 90)
