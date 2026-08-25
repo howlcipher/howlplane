@@ -9,7 +9,12 @@ All notable changes to this project will be documented in this file.
 #60D PR #48 is merged into `origin/main`, recorded the post-#60D starting SHA,
 and opened a durable architecture and recovery journal on the dedicated feature
 branch. The implementation will extend the shared provider pool rather than
-introduce a second source of readiness or capacity truth.
+introduce a second source of readiness or capacity truth. The production audit
+selected `ProviderPoolManager` as the single final-selection and capacity owner,
+`AgentBackendRegistry` as the adapter boundary, and `TaskRouter` as an advisory
+deterministic cognitive seam after hard filtering. The unwired Go provider
+interface remains a compatibility surface instead of becoming a competing
+runtime.
 
 **Milestone #60C Comparable Evidence Campaign**: preregistered six experiments before provider execution and accepted fourteen digest-valid live trajectories: four exact #60B context repetitions, a held constant Claude versus Codex comparison, a bounded repair attempt against a real failed notes fixture, a raw provider composition attempt, a raw task decomposition attempt, and general versus correctness-plus-security review of an empty historical reviewer artifact. Coordinator resume checks produced no duplicates after every experiment. Seven trajectories passed deterministic verification and seven failed; the sole repair was legitimate but unsuccessful. Provider composition and task decomposition are preserved as live trajectories but classified `NOT_OBSERVED` as meaningful coverage because the composition fixture was trivial exact fact extraction with provider events labeled `role=review` for both invocations, and the decomposition fixture manufactured two subtasks for a simple two-fact extraction. All evaluations remain `INCONCLUSIVE`, cloud models and costs remain `NOT_OBSERVED`, and no strategy or authority changed.
 - **Milestone #60B Reasoning Evidence Campaign Start**: created the durable campaign journal and draft PR on the required main SHA, passed all 76 focused #60A measurement tests, inventoried live, replay, deterministic, simulated, and malformed evidence without relabeling it, and preregistered three immutable experiments covering architecture context, provider routing, and review topology across six bounded trajectories and the canonical `other`, `bug_fix`, and `test_improvement` task classes. The first descriptive task label failed production TaskSpec validation before any provider call; all original definitions remain visible, and corrected replacement IDs preserve immutable hypotheses instead of widening the enum or rewriting evidence. No learned preference exists, and unavailable dimensions will be recorded rather than manufactured.

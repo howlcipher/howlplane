@@ -149,6 +149,12 @@ recommendation, and authority stages. The work remains on its feature branch
 until the generic registry, CLI visibility, trajectory integration, local-only
 proof, compatibility, and complete verification are merged.
 
+The implementation extends the production Python `ProviderPoolManager` and its
+existing registry, backend, review, marathon, and trajectory consumers. The
+deterministic `TaskRouter` remains an advisory recommendation layer over an
+already eligible candidate set; it does not grant provider permission, egress,
+spend, capability, or execution authority.
+
 ---
 
 ## Operating Modes & Egress Governance

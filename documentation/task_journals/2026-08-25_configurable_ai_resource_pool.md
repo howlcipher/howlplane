@@ -15,10 +15,10 @@ PR:
     https://github.com/howlcipher/howlplane/pull/49
 
 CURRENT_PHASE:
-    architecture_audit
+    test_driven_resource_foundation
 
 LAST_COMPLETED_PHASE:
-    hard_start_gate
+    architecture_audit
 
 LATEST_CHECKPOINT_COMMIT:
     2ea6fbbe0fdee815ecadb44ab3827425fd0a2fcb
@@ -33,6 +33,21 @@ PROVIDER_ARCHITECTURE_DECISIONS:
     observed model identities. Never invent an unobserved model identifier.
     Keep the future cognitive optimization seam advisory and subordinate to
     hard policy.
+    Extend AgentProfile with provider_id, interface_id, resource_id, observed
+    model identity, locality, economics, role eligibility, and capability
+    facts while retaining legacy fields and agent IDs.
+    Keep ProviderPoolManager as the single runtime readiness, capacity,
+    failure normalization, recovery, reviewer diversity, and final resource
+    selection owner.
+    Keep TaskRouter as deterministic cognitive recommendation. It ranks only
+    candidates already admitted by hard policy and cannot enable resources,
+    egress, spend, capability, or authority.
+    Preserve AgentBackendRegistry as the adapter registry and add generic
+    readiness metadata there without generation probes.
+    Extend ExecutionTrajectory through an explicit compatibility migration;
+    do not add an analytics log.
+    Treat the unwired Go internal/provider interface as a compatibility
+    surface, not a second production provider manager.
 
 FILES_CHANGED:
     README.md
@@ -50,19 +65,21 @@ TESTS_RUN:
     pre-push: flake8 passed
     pre-push: Bandit found no medium or high severity issues
     pre-push: documentation generation passed with dependency annotation warnings
+    architecture audit: source traced across registry, backends, pool, router,
+    governed orchestration, reviewer failover, marathon, CLI, doctor,
+    configuration, atomic I/O, evidence ledger, and trajectory persistence
 
 KNOWN_FAILURES:
     NONE
 
 UNVERIFIED_WORK:
-    Existing provider architecture and verification commands have not yet been
-    audited for Milestone #61.
+    Resource configuration, selection, capacity persistence, CLI, trajectory,
+    and egress acceptance tests have not yet been implemented.
 
 NEXT_SAFE_ACTION:
-    Audit the existing provider pool, agent registry, router, governed
-    orchestration, review selection, operating-mode egress controls, CLI,
-    trajectory, evidence, and persistence implementations before choosing the
-    extension seam.
+    Write failing deterministic tests for resource identity, configuration,
+    readiness, policy, capability, capacity, economics, recommendation,
+    onboarding, subset operation, and structured no-resource outcomes.
 
 WORKTREE_STATE:
     Clean after the initial signed checkpoint and enforced pre-push suite. The
@@ -107,3 +124,31 @@ pushed the branch, and opened draft PR #49. The hook reported pre-existing
 pdoc dependency annotation warnings and skipped `golangci-lint` and `gosec`
 because those optional executables are not installed; all enforced commands
 returned success.
+
+### 2026-08-25T15:50:00Z
+
+Completed the production architecture audit. The existing Python provider pool
+already shares availability state with marathon implementation and governed
+review failover, and it correctly separates several engineering failures from
+quota exhaustion. It currently probes every registered backend at construction,
+stores only provider-level identity, uses static priority tables, snapshots
+only status strings into campaign state, and does not restore that state on
+restart. Agent registry availability is declarative rather than operator
+authorization, route visibility does not use live capacity, and trajectory
+identity stops at agent/provider plus optional observed model metadata. The
+new work will extend these seams rather than replace them.
+
+The repository also contains `internal/provider`, a Go adapter interface and
+health router with no concrete production adapters and no `ai` command wiring.
+Promoting it would create a second state mechanism beside the established
+Python orchestration path, so it remains an inert compatibility surface.
+
+Architecture alternatives were evaluated as follows.
+
+| Decision | Benefits | Costs | Result |
+| --- | --- | --- | --- |
+| Put all new behavior directly in `provider_pool.py` | One visible module | Excessive coupling and a likely hygiene regression | Rejected |
+| Create a separate resource manager | Easy greenfield modeling | Split readiness and exhaustion truth across subsystems | Rejected |
+| Add focused resource modules used by `ProviderPoolManager` | Keeps typed policy and decision contracts cohesive while preserving one production state owner | Requires compatibility adapters for current agent-oriented APIs | Selected |
+| Make `TaskRouter` perform hard policy and capacity filtering | Fewer call sites initially | Conflates cognitive recommendation with authority and economics | Rejected |
+| Keep `TaskRouter` advisory after pool filtering | Stable future cognitive seam and enforceable precedence | Requires a structured selection decision passed between layers | Selected |
