@@ -15,20 +15,21 @@ PR:
     https://github.com/howlcipher/howlplane/pull/46
 
 CURRENT_EXPERIMENT:
-    EXP-60B-CONTEXT-002: PREREGISTERED
+    EXP-60B-ROUTING-002: PREREGISTERED
 
 COMPLETED_EXPERIMENTS:
-    NONE_FOR_60B
+    EXP-60B-CONTEXT-002: INCONCLUSIVE
 
 TRAJECTORY_COUNTS:
     EXISTING_LIVE: 2
-    NEW_TRUSTWORTHY_60B: 0
+    NEW_TRUSTWORTHY_60B: 2
 
 PROVIDERS_OBSERVED:
     local_ollama
 
 TASK_CLASSES_OBSERVED:
     test_improvement
+    other
 
 KNOWN_FAILURES:
     The two existing live trajectories both record verification_failed.
@@ -38,19 +39,25 @@ KNOWN_FAILURES:
     descriptive task class is not in the production TaskSpec enum. It created
     no arm result and no trajectory. The other original definitions have the
     same planning defect and were not started.
+    EXP-60B-CONTEXT-002 baseline failed exact verification after inventing the
+    threshold and miner names. The candidate passed. The one sample per arm
+    evaluation remains INCONCLUSIVE.
 
 CURRENT_BLOCKERS:
     NONE
 
 NEXT_SAFE_ACTION:
-    Commit and push the corrected preregistration checkpoint, then run the
-    baseline and candidate arms of EXP-60B-CONTEXT-002 without repair.
+    Commit and push the context experiment evidence, then run the baseline and
+    candidate arms of EXP-60B-ROUTING-002 with at most one registered repair.
 
 LAST_VERIFIED_TESTS:
     Targeted #60A suite: 76 passed in 5.78 seconds.
     Initial push hook: 798 Python passed, all Go passed, flake8 passed,
     Bandit found no medium or high issue, Go build passed, docs generated.
     GitHub checks for 64957f8 all passed.
+    Correction push hook at 9533c40: 798 Python passed, all Go passed,
+    flake8 passed, Bandit found no medium or high issue, Go build passed,
+    and docs generated with the previously recorded third party warnings.
 
 ## Campaign Boundaries
 
@@ -75,7 +82,7 @@ PR:
     https://github.com/howlcipher/howlplane/pull/46
 
 EXPERIMENTS_COMPLETED:
-    NONE_FOR_60B
+    EXP-60B-CONTEXT-002
 
 EXPERIMENT_CURRENTLY_INCOMPLETE:
     EXP-60B-CONTEXT-001 is preserved at RUNNING with no arm results after
@@ -92,11 +99,12 @@ PROVIDERS_CURRENTLY_UNAVAILABLE:
 EXACT_EVIDENCE_PATHS:
     documentation/evidence/reasoning/2026-08-24_context_canary.yaml
     documentation/evidence/reasoning/2026-08-25_campaign_plan.yaml
+    documentation/evidence/reasoning/2026-08-25_campaign_results.yaml
     logs/control_plane/milestone_60b_reasoning_evidence/experiments
     logs/control_plane/milestone_60b_reasoning_evidence/trajectories
 
 EXACT_NEXT_EXPERIMENT:
-    EXP-60B-CONTEXT-002
+    EXP-60B-ROUTING-002
 
 TESTS_RUN:
     Targeted #60A suite: 76 passed.
@@ -105,7 +113,7 @@ TESTS_RUN:
     GitHub checks: all six required checks passed for 64957f8.
 
 REPOSITORY_STATUS:
-    Intentional documentation changes for the preregistration correction.
+    Intentional tracked evidence and journal changes for the context checkpoint.
 
 ## Progress Log
 
@@ -154,3 +162,18 @@ Preserved all three original records and preregistered replacement IDs through
 the production coordinator using existing classes `other`, `bug_fix`, and
 `test_improvement`. Hypotheses, strategies, providers, metrics, and
 falsification criteria are unchanged. No provider has been invoked for #60B.
+
+### 2026-08-25T01:32:24Z
+
+Completed EXP-60B-CONTEXT-002 through the production coordinator. Both arms
+used local Ollama with the same task, acceptance criteria, exact verifier, and
+no repair. The task-only baseline invented a threshold and three unregistered
+miner names, so it failed. The bounded relevant-source candidate returned the
+correct threshold and all four miners in source order and passed after the
+preregistered whitespace normalization. Observable latencies were 5.7 and
+6.264 seconds; cost was not observable and was not inferred.
+
+Deterministic evaluation returned INCONCLUSIVE with one sample per arm despite
+the candidate's directional win. Both trajectory digests and the experiment
+prediction digest validate. A completed-run resume check left the trajectory
+count unchanged at two and did not call the executor.

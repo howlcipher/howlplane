@@ -200,7 +200,7 @@ experiment_plan:
     enum or altering #60A instrumentation for an evidence campaign.
   experiments:
     EXP-60B-CONTEXT-002:
-      status: PREREGISTERED
+      status: COMPLETED
       experiment_type: CONTEXT
       task_class: other
       baseline: context.task_plus_acceptance/v1
@@ -222,7 +222,11 @@ experiment_plan:
         PATTERN_MINERS function names in source order.
       repair_policy: no repair, preserving the context dimension
       prediction_digest: c10d649f967190849ffc9cb4788bef97670202a1f5269cc57e490a257897b628
-      next_action: run_baseline
+      result: INCONCLUSIVE
+      trajectory_ids:
+        - traj-b394f235c485620338fb4bbd
+        - traj-1ebfcd581ea8c7ecce27464c
+      next_action: complete
     EXP-60B-ROUTING-002:
       status: PREREGISTERED
       experiment_type: ROUTING

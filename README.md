@@ -127,7 +127,9 @@ unobserved dimensions without manufacturing conclusions. Its corrected,
 immutable preregistration covers architecture context, provider routing, and
 review topology across six bounded trajectories and the canonical `other`,
 `bug_fix`, and `test_improvement` task classes. Rejected definitions remain
-visible rather than being rewritten after execution began.
+visible rather than being rewritten after execution began. The first corrected
+comparison produced one exactly verified and one failed live local trajectory;
+its one-sample result remains `INCONCLUSIVE`.
 
 ---
 

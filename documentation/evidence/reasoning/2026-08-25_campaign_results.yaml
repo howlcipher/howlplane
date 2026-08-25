@@ -1,0 +1,101 @@
+schema: howlplane.reasoning_evidence_campaign_results/v1
+campaign_id: MILESTONE-60B
+updated_at: "2026-08-25T01:32:24Z"
+evidence_classification: LIVE
+scope: observable provider outputs and deterministic verification only
+experiment_results:
+  EXP-60B-CONTEXT-002:
+    experiment_type: CONTEXT
+    task_class: other
+    hypothesis: >-
+      Bounded relevant source context improves exact extraction of the
+      trajectory discovery protocol compared with task and acceptance only.
+    baseline: context.task_plus_acceptance/v1
+    candidate: context.relevant_documentation/v1
+    expected_outcome: >-
+      Candidate passes the exact fact verifier while baseline does not.
+    falsification_criteria:
+      - candidate.verification_pass_rate < baseline.verification_pass_rate
+    metrics:
+      - verification_pass_rate
+      - mean_latency
+    verifier: exact_normalized_lines/v1
+    result: INCONCLUSIVE
+    confidence: baseline_n=1, candidate_n=1, primary_metric=verification_pass_rate
+    metric_comparisons:
+      verification_pass_rate: better
+      mean_latency: worse
+    falsification_failures: []
+    prediction_digest: c10d649f967190849ffc9cb4788bef97670202a1f5269cc57e490a257897b628
+    content_digest: 4dbbd1e12567d86cf4d42ae225b9ebe03982ab96a35d73b90d70ec810e6a132e
+    evidence_refs:
+      - logs/control_plane/milestone_60b_reasoning_evidence/experiments/EXP-60B-CONTEXT-002.json
+      - src/control_plane/reasoning/trajectory_discovery.py
+    arms:
+      baseline:
+        trajectory_id: traj-b394f235c485620338fb4bbd
+        trajectory_digest: 8eec3acade03ad0e7451a5ba3c307b8431a6451769ac27c5c6624c6acd995ea5
+        provider: local_ollama
+        model: qwen2.5-coder:7b-instruct
+        strategy_ids:
+          context: context.task_plus_acceptance/v1
+        selected_context_refs:
+          - task:EXP-60B-CONTEXT-002-BASELINE-1
+        reviewers: []
+        review_topology: no_reviewers
+        repairs: 0
+        provider_completed: true
+        latency_seconds: 5.7
+        cost_observed: null
+        verification_outcome: failed
+        outcome: verification_failed
+        observable_response: |-
+          MIN_PATTERN_OCCURRENCES=3
+          PATTERN_MINERS=findPatterns,extractFeatures,validateResults
+        output_sha256: c365135e0b8449c157485982a501d6c35c839fcd45c039d4cd92776bf838e379
+        failure_evidence:
+          - minimum pattern threshold was incorrect
+          - miner names were invented and did not match the source
+      candidate:
+        trajectory_id: traj-1ebfcd581ea8c7ecce27464c
+        trajectory_digest: 866c883065e219ec55874fec206fbf4d57ded9932f475f7cee6a2239f07d82a6
+        provider: local_ollama
+        model: qwen2.5-coder:7b-instruct
+        strategy_ids:
+          context: context.relevant_documentation/v1
+        selected_context_refs:
+          - task:EXP-60B-CONTEXT-002-CANDIDATE-1
+          - src/control_plane/reasoning/trajectory_discovery.py
+        reviewers: []
+        review_topology: no_reviewers
+        repairs: 0
+        provider_completed: true
+        latency_seconds: 6.264
+        cost_observed: null
+        verification_outcome: passed
+        outcome: success
+        observable_response: "MIN_PATTERN_OCCURRENCES=2  \nPATTERN_MINERS=_find_architecture_omissions,_find_reviewer_dismissal,_find_local_first_success,_find_repeated_routing_problem"
+        output_sha256: 87192ff02028cd7c1a7b29ed89634fb596854a0dcfd634461597e91a2a56f2a7
+    quality_checks:
+      trajectory_digests_valid: 2
+      experiment_prediction_digest_valid: true
+      duplicate_resume_count_before: 2
+      duplicate_resume_count_after: 2
+      hidden_reasoning_stored: false
+      raw_prompt_stored: false
+      secrets_observed: false
+
+campaign_totals:
+  completed_experiments: 1
+  new_trustworthy_trajectories: 2
+  task_classes:
+    other: 2
+  providers:
+    local_ollama: 2
+  outcomes:
+    success: 1
+    verification_failed: 1
+  repairs:
+    no_repair: 2
+  reviewer_topologies:
+    no_reviewers: 2
