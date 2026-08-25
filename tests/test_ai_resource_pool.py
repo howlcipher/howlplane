@@ -3,6 +3,7 @@
 import json
 import subprocess
 from argparse import Namespace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -384,6 +385,7 @@ def test_fake_future_provider_selection_is_recorded_by_generic_trajectory(tmp_pa
     profile = make_profile("fake_future_provider", provider_id="future_org")
     pool = make_pool([profile])
     task = make_task(task_id="FUTURE-TRAJECTORY")
+    task.metadata["failover_from_resource_id"] = "temporarily_unavailable"
     decision = pool.select_resource(task, role="implementation")
     route = TaskRouter(resource_pool=pool).route(task)
     execution = AgentExecutionResult(
@@ -415,6 +417,7 @@ def test_fake_future_provider_selection_is_recorded_by_generic_trajectory(tmp_pa
     )
     assert trajectory.resource_selection["selected"]["provider_id"] == "future_org"
     assert trajectory.provider_events[0]["role"] == "implementation"
+    assert trajectory.failover_from_resource_id == "temporarily_unavailable"
 
 
 @pytest.mark.parametrize(
@@ -554,6 +557,73 @@ def test_subscription_first_and_no_paid_api_fallback():
     assert first.selected.resource_id == "subscription"
     assert second.status == ResourceSelectionStatus.BLOCKED
     assert second.exclusion_for("metered").reason == "PAID_API_FORBIDDEN"
+
+
+def test_metered_budget_counts_attempts_and_blocks_further_spend():
+    metered = make_profile("metered", economics=EconomicClass.METERED_API)
+    pool = make_pool(
+        [metered],
+        policy=ProviderPolicySettings(
+            allow_paid_api=True,
+            max_metered_invocations=1,
+        ),
+    )
+
+    first = pool.select_resource(make_task(), role="implementation")
+    pool.record_result("metered", failed_result("metered", "tests failed"))
+    second = pool.select_resource(make_task(), role="implementation")
+
+    assert first.selected.resource_id == "metered"
+    assert second.status == ResourceSelectionStatus.BLOCKED
+    assert second.exclusion_for("metered").reason == "METERED_BUDGET_EXHAUSTED"
+
+
+def test_configured_model_override_is_used_in_selected_identity():
+    profile = make_profile(
+        "local_runtime",
+        locality=ResourceLocality.LOCAL,
+        economics=EconomicClass.LOCAL,
+        roles=["planning"],
+        repository_access=False,
+        model_id="default-model",
+    )
+    profile.model_configurable = True
+    settings = AppSettings(
+        operating_mode="local_only",
+        providers={
+            "local_runtime": ProviderResourceSettings(
+                enabled=True,
+                model_id="configured-model",
+            )
+        },
+    )
+    pool = ProviderPoolManager.from_settings(
+        settings,
+        registry=AgentRegistry(agents=[profile]),
+        probe_on_start=False,
+    )
+
+    decision = pool.select_resource(make_task(risk="low"), role="planning")
+
+    assert decision.selected.model_id == "configured-model"
+    assert pool.inventory()[0]["identity"]["model_id"] == "configured-model"
+
+
+def test_temporary_rate_limit_recovers_after_bounded_cooldown():
+    backend = CountingBackend("resource")
+    pool = make_pool(
+        [make_profile("resource")], backends={"resource": backend}
+    )
+    state = pool.get_resource_status("resource")
+    state.status = ProviderAvailabilityStatus.RATE_LIMITED
+    state.retry_after = (
+        datetime.now(timezone.utc) - timedelta(seconds=1)
+    ).isoformat()
+
+    decision = pool.select_resource(make_task(), role="implementation")
+
+    assert decision.selected.resource_id == "resource"
+    assert backend.probe_calls == 2
 
 
 def test_explicit_override_bypasses_recommendation_but_not_hard_policy():

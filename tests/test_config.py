@@ -86,3 +86,11 @@ def test_duplicate_canonical_keys_fail_validation(tmp_path):
 
     with pytest.raises(ValueError, match="Duplicate configuration key"):
         ConfigLoader(config_path=canonical)
+
+
+def test_paid_budget_cannot_conflict_with_paid_api_prohibition():
+    with pytest.raises(ValidationError, match="cannot authorize spend"):
+        AppSettings(provider_policy={
+            "allow_paid_api": False,
+            "max_metered_invocations": 2,
+        })

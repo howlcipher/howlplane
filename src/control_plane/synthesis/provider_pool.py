@@ -22,6 +22,7 @@ from src.control_plane.resource_models import (
     ProviderFailureClass,
     ReadinessStatus,
     ResourceExclusion,
+    ResourceIdentity,
     ResourceLocality,
     ResourceSelectionDecision,
     ResourceSelectionStatus,
@@ -152,6 +153,7 @@ class ProviderStatus(DataClassSerializationMixin):
     consecutive_failures: int = 0
     exhaustion_event: Optional[ProviderExhaustionEvent] = None
     success_count: int = 0
+    metered_invocation_count: int = 0
     total_duration_seconds: float = 0.0
     unavailable_reason: Optional[str] = None
     normalized_failure_class: Optional[str] = None
@@ -374,6 +376,17 @@ class ProviderPoolManager:
             model_id=identity.model_id,
         )
 
+    def _resource_identity(self, profile: AgentProfile) -> ResourceIdentity:
+        """Returns configured/observed identity without mutating the profile."""
+        base = profile.resource_identity()
+        state = self._provider_states.get(base.resource_id)
+        return ResourceIdentity(
+            provider_id=base.provider_id,
+            interface_id=base.interface_id,
+            resource_id=base.resource_id,
+            model_id=state.model_id if state is not None else base.model_id,
+        )
+
     def _initialize_states(self, *, probe_on_start: bool) -> None:
         known_ids: Set[str] = set()
         for profile in self.registry.list_resources():
@@ -500,7 +513,7 @@ class ProviderPoolManager:
             resource_config = self.resources.get(resource_id)
             state = self._provider_states[resource_id]
             rows.append({
-                "identity": profile.resource_identity().to_dict(),
+                "identity": self._resource_identity(profile).to_dict(),
                 "name": profile.name,
                 "registered": True,
                 "configured": resource_config is not None,
@@ -514,6 +527,7 @@ class ProviderPoolManager:
                 "observed_at": state.observed_at,
                 "last_success_at": state.last_success_at,
                 "last_failure_at": state.last_failure_at,
+                "metered_invocation_count": state.metered_invocation_count,
                 "retry_after": state.retry_after,
                 "reset_at": state.reset_at,
             })
@@ -626,6 +640,13 @@ class ProviderPoolManager:
         if state is None:
             raise KeyError(f"Unknown resource '{resource_id}'.")
         now = datetime.now(timezone.utc)
+        profile = self.registry.get_resource(resource_id)
+        if (
+            profile is not None
+            and profile.economic_class == EconomicClass.METERED_API.value
+        ):
+            state.metered_invocation_count += 1
+            self._persist()
         if result.success:
             state.status = ProviderAvailabilityStatus.AVAILABLE
             state.normalized_failure_class = None
@@ -798,6 +819,31 @@ class ProviderPoolManager:
         }
         return status.value if status in blocked else None
 
+    def _recover_capacity_if_due(
+        self,
+        resource_id: str,
+        profile: AgentProfile,
+        state: ProviderStatus,
+    ) -> None:
+        """Performs at most one safe re-probe after an observed cooldown."""
+        if not state.retry_after:
+            return
+        try:
+            due = datetime.fromisoformat(state.retry_after)
+        except ValueError:
+            return
+        if datetime.now(timezone.utc) < due:
+            return
+        state.retry_after = None
+        state.exhaustion_event = None
+        state.normalized_failure_class = None
+        state.status = ProviderAvailabilityStatus.UNKNOWN
+        if self.read_only:
+            state.readiness = ReadinessStatus.NOT_PROBED
+            return
+        self._apply_readiness(resource_id, profile, state)
+        self._persist()
+
     def _recommend(
         self,
         task: TaskSpec,
@@ -862,7 +908,7 @@ class ProviderPoolManager:
         """Applies hard filtering, economics, recommendation, and stable tie break."""
         required = self._required_capabilities(task, role)
         registered = [
-            profile.resource_identity() for profile in self.registry.list_resources()
+            self._resource_identity(profile) for profile in self.registry.list_resources()
         ]
         exclusions: List[ResourceExclusion] = []
         candidates: List[AgentProfile] = []
@@ -892,6 +938,7 @@ class ProviderPoolManager:
             if task_forbids_egress and profile.locality != ResourceLocality.LOCAL.value:
                 exclude(profile, "TASK_EGRESS_FORBIDDEN", "egress_policy")
                 continue
+            self._recover_capacity_if_due(resource_id, profile, state)
             if state.readiness in {
                 ReadinessStatus.MISSING_EXECUTABLE,
                 ReadinessStatus.AUTH_REQUIRED,
@@ -925,6 +972,14 @@ class ProviderPoolManager:
             if economics == EconomicClass.METERED_API and not self.policy.allow_paid_api:
                 exclude(profile, "PAID_API_FORBIDDEN", "economic_policy")
                 continue
+            if (
+                economics == EconomicClass.METERED_API
+                and self.policy.max_metered_invocations is not None
+                and state.metered_invocation_count
+                >= self.policy.max_metered_invocations
+            ):
+                exclude(profile, "METERED_BUDGET_EXHAUSTED", "economic_policy")
+                continue
             candidates.append(profile)
 
         recommendation = self._recommend(task, role, candidates)
@@ -948,8 +1003,8 @@ class ProviderPoolManager:
             if selected is not None
             else ResourceSelectionStatus.BLOCKED
         )
-        identities = [profile.resource_identity() for profile in candidates]
-        selected_identity = selected.resource_identity() if selected else None
+        identities = [self._resource_identity(profile) for profile in candidates]
+        selected_identity = self._resource_identity(selected) if selected else None
         if selected_identity is not None:
             identities = [selected_identity] + [
                 identity for identity in identities

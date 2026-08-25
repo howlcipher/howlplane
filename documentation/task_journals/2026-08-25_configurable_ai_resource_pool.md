@@ -21,7 +21,7 @@ LAST_COMPLETED_PHASE:
     cli_configuration_docs_local_only_acceptance
 
 LATEST_CHECKPOINT_COMMIT:
-    88afba0 (governed integration; push pending current checkpoint)
+    38b315b (CLI, documentation, operator overlay, and local-only acceptance)
 
 PROVIDER_ARCHITECTURE_DECISIONS:
     Extend the existing provider pool, routing, capability, review, trajectory,
@@ -98,6 +98,7 @@ TESTS_RUN:
     focused: 89 resource, provider, failover, reviewer, and local tests passed
     focused: 114 governed orchestration, trajectory, failover, and review tests passed
     focused: 132 CLI, config, doctor, orchestration, trajectory, and compatibility tests passed
+    focused: 106 resource, configuration, failover, and historical dogfood tests passed
     SlopsLint: python_src 14/14 and python_tests 29/29 ceilings passed
     live local-only: local_ollama planning selected and returned exactly
     LOCAL_ONLY_OK; hosted adapter lookup count was zero
@@ -112,12 +113,12 @@ UNVERIFIED_WORK:
     verification, exact-head GitHub CI, and merge remain.
 
 NEXT_SAFE_ACTION:
-    Push the CLI/docs/local-only checkpoint, run bounded governed live acceptance,
+    Commit and push capacity hardening, run bounded governed live acceptance,
     then execute the complete repository verification matrix and close the PR.
 
 WORKTREE_STATE:
-    CLI, docs, configuration, and local-only changes are verified and ready for
-    exact-file staging. Operator configuration is outside the worktree.
+    Capacity hardening is verified and ready for exact-file staging. Operator
+    configuration remains outside the worktree.
 
 ## Start Gate Evidence
 
@@ -211,3 +212,18 @@ hosted probe boundaries, no-egress filtering, missing local repository contract,
 review role capability, subscription-first behavior, no paid fallback, explicit
 override constraints, durable restart and reset, normalized failures, review
 diversity, unknown model identity, and generic `fake_future_provider` onboarding.
+
+### 2026-08-25T19:05:00Z
+
+Completed a focused capacity and evidence hardening pass. Metered API attempts
+are durably counted even when execution returns an engineering failure, and a
+configured attempt ceiling excludes further paid calls without interpreting the
+failure as exhaustion. Contradictory paid-API configuration now fails validation.
+Configured model selection is reflected in inventory and final identities only
+for model-configurable adapters; unknown hosted models remain unobserved.
+
+Temporary capacity records perform at most one safe readiness re-probe after an
+observed retry time. Marathon retries annotate the next task attempt with its
+source resource, and trajectory v2 persists that failover provenance while v1
+digest semantics remain unchanged. The focused 106-test matrix, changed-file
+flake8 fatal checks, and whitespace validation all pass.

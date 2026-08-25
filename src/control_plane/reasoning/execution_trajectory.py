@@ -70,6 +70,7 @@ class ExecutionTrajectory(SafeArtifactSerializationMixin):
     resource_selection: Optional[Dict[str, Any]] = None
     role_selections: List[Dict[str, Any]] = field(default_factory=list)
     capacity_after: Dict[str, str] = field(default_factory=dict)
+    failover_from_resource_id: Optional[str] = None
     review_findings: List[Dict[str, Any]] = field(default_factory=list)
     verification_results: Optional[Dict[str, Any]] = None
     repair_cycles: List[Dict[str, Any]] = field(default_factory=list)
@@ -97,7 +98,8 @@ class ExecutionTrajectory(SafeArtifactSerializationMixin):
         payload = self.to_dict()
         if self.schema_version == EXECUTION_TRAJECTORY_SCHEMA_VERSION_V1:
             for field_name in (
-                "resource_selection", "role_selections", "capacity_after"
+                "resource_selection", "role_selections", "capacity_after",
+                "failover_from_resource_id",
             ):
                 payload.pop(field_name, None)
         return canonical_digest(payload, "content_digest")
@@ -341,6 +343,9 @@ class ExecutionTrajectoryBuilder:
             resource_selection=result.resource_selection,
             role_selections=_extract_role_selections(result),
             capacity_after=dict(result.capacity_after),
+            failover_from_resource_id=task_spec.metadata.get(
+                "failover_from_resource_id"
+            ),
             review_findings=_extract_review_findings(result.review_cycles),
             verification_results=result.verification_plan.to_dict() if result.verification_plan else None,
             repair_cycles=_extract_repair_cycles(result.review_cycles),

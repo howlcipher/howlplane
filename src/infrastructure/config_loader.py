@@ -5,7 +5,7 @@ import tomllib
 from typing import Dict, List, Literal, Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.infrastructure.secret_manager import SecretManager
@@ -144,6 +144,17 @@ class ProviderPolicySettings(BaseModel):
     max_metered_invocations: Optional[int] = Field(default=None, ge=0)
 
     model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def validate_economic_budget(self):
+        if (
+            not self.allow_paid_api
+            and self.max_metered_invocations not in (None, 0)
+        ):
+            raise ValueError(
+                "max_metered_invocations cannot authorize spend when allow_paid_api is false"
+            )
+        return self
 
 
 class AppSettings(BaseSettings):

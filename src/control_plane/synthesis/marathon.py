@@ -1373,11 +1373,14 @@ class MarathonDogfoodEngine:
         attempted: set = set()
         result = None
         attempt_index = 0
+        previous_provider: Optional[str] = None
 
         while True:
             attempt_index += 1
             attempted.add(provider)
             gap_probe.preferred_agent = provider
+            gap_probe.metadata["provider_attempt_index"] = attempt_index
+            gap_probe.metadata["failover_from_resource_id"] = previous_provider
             git_rec.provider = provider
             attempt_started = time.time()
             attempt_baseline = None
@@ -1470,6 +1473,7 @@ class MarathonDogfoodEngine:
                 )
                 self._persist_git_record(git_rec, campaign_state, state_dir)
                 return False, git_rec.to_dict()
+            previous_provider = provider
             provider = next_candidates[0]
 
         delta = result.final_delta

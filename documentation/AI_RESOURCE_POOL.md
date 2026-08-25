@@ -99,6 +99,10 @@ Economic classes are `SUBSCRIPTION`, `METERED_API`, `LOCAL`, and `UNKNOWN`.
 `subscription_first` ranks an allowed subscription ahead of local, unknown, and
 metered resources. `allow_paid_api = false` removes metered candidates before
 recommendation, so subscription exhaustion never silently creates spend.
+When paid API use is allowed, `max_metered_invocations` is an attempt budget:
+every invocation is counted even when its engineering result fails, and the
+resource is excluded after the configured limit. Configuration rejects a
+positive metered budget while paid API use is forbidden.
 HowlPlane records no price, quota percentage, or reset time unless observed.
 
 Current states include `AVAILABLE`, `DEGRADED`, `RATE_LIMITED`,
@@ -110,6 +114,12 @@ Engineering failures, failed tests, review defects, malformed output, and
 verifier rejection do not become quota exhaustion. Temporary states recover
 through observed retry/cooldown, targeted reset/re-probe, or later success; no
 resource is permanently blacklisted.
+
+Configured model overrides apply only to adapters that declare model selection
+support. The selected and inventoried identity then records that configured
+model; unobserved hosted CLI models remain JSON `null`. Marathon failover also
+records the prior resource ID on the resulting trajectory, without reclassifying
+the underlying engineering result as capacity exhaustion.
 
 ## Local-only and independent review
 
