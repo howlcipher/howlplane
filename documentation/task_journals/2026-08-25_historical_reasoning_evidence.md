@@ -12,13 +12,15 @@ WORKING_BRANCH:
     dogfood/historical-reasoning-evidence
 
 PR:
-    TBD
+    https://github.com/howlcipher/howlplane/pull/48
 
 CURRENT_HEAD:
-    TBD
+    bfcf023
 
 STAGED_WORK:
     documentation/task_journals/2026-08-25_historical_reasoning_evidence.md
+    dogfood/historical-reasoning-evidence/run_fixture_repair.py
+    dogfood/historical-reasoning-evidence/fixture_catalog.yaml
 
 CURRENT_EXPERIMENT:
     NONE
@@ -35,13 +37,16 @@ COVERAGE_MATRIX:
     Refer to prior #60C coverage matrix; #60D targets the sparse dimensions.
 
 PROVIDER_STATES:
-    To be probed before campaign execution.
+    claude_code: installed, authenticated status TBD
+    codex: installed, authenticated status TBD
+    agy: installed
+    local_ollama: installed and routable (qwen2.5-coder:7b-instruct)
 
 CURRENT_BLOCKERS:
     NONE
 
 NEXT_SAFE_ACTION:
-    Verify instrumentation, build historical fixture catalog, establish leakage controls, then run the first historical repair experiment.
+    Commit the fixture catalog and repair runner, then execute FIX-39 repair with live providers.
 
 ## Campaign Boundaries
 

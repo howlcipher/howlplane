@@ -69,6 +69,9 @@ docs/_layouts/
 docs/_config.yml
 /docs/.build-tmp/
 
+# Campaign-owned isolated historical worktrees (cleaned after evidence persists)
+/.worktrees/
+
 # One-off scratch output at the repo root (logs, patches, archives from debugging sessions)
 /*.log
 /*.diff
