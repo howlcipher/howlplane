@@ -1,0 +1,118 @@
+{
+  "experiment_id": "EXP-60C-REPAIR-001",
+  "schema_version": "howlplane.reasoning_experiment/v1",
+  "campaign_id": "MILESTONE-60C",
+  "opportunity_id": "HISTORICAL-FAILURE-REPAIR",
+  "task_class": "bug_fix",
+  "experiment_type": "RETRIEVAL",
+  "baseline_strategy": {
+    "strategy_id": "retrieval.no_historical/v1",
+    "version": "v1",
+    "strategy_type": "retrieval",
+    "config_digest": "ed53d98e2ce7ab9b385b4517ef1279876a449ab0c682a06fde6714341c44b78e",
+    "full_config": {
+      "sources": []
+    }
+  },
+  "candidate_strategy": {
+    "strategy_id": "retrieval.failure_signature/v1",
+    "version": "v1",
+    "strategy_type": "retrieval",
+    "config_digest": "4925cee0e6723f11dfb5ecc7bae3c945437fa8c1b244ee42da3ecf4773d9f3a3",
+    "full_config": {
+      "max_trajectories": 3,
+      "sources": [
+        "failure_signature"
+      ]
+    }
+  },
+  "baseline_provider": "local_ollama",
+  "candidate_provider": "local_ollama",
+  "baseline_model": null,
+  "candidate_model": null,
+  "context_strategy_id": null,
+  "retrieval_strategy_id": null,
+  "tool_strategy_id": null,
+  "review_strategy_id": null,
+  "decomposition_strategy_id": null,
+  "planning_strategy_id": null,
+  "verification_strategy_id": null,
+  "expected_outcome": "Failure-signature evidence enables success on first pass or after at most one evidence-backed remediation.",
+  "falsification_criteria": [
+    "candidate.verification_pass_rate < baseline.verification_pass_rate"
+  ],
+  "metrics": [
+    "verification_pass_rate",
+    "mean_repair_cycles",
+    "mean_latency"
+  ],
+  "baseline_results": [
+    {
+      "trajectory_id": "traj-e2d04d072ac010e708121140",
+      "task_id": "EXP-60C-REPAIR-001-BASELINE-1",
+      "selected_provider": "local_ollama",
+      "selected_agent": "local_ollama",
+      "selected_reviewers": [],
+      "final_status": "verification_failed",
+      "outcome": "verification_failed",
+      "repair_cycles_count": 0,
+      "verification_status": "failed",
+      "confirmed_defects": 0,
+      "escaped_defects": 1,
+      "reproducible": true,
+      "cost_if_available": null,
+      "latency_if_available": 4.102,
+      "content_digest": "2cfabadd628615d88d057dee5c42003931e21352e4bd16464160dc5cda5e06ff"
+    }
+  ],
+  "candidate_results": [
+    {
+      "trajectory_id": "traj-cd3975d8ae6797ef5d1c475c",
+      "task_id": "EXP-60C-REPAIR-001-CANDIDATE-1",
+      "selected_provider": "local_ollama",
+      "selected_agent": "local_ollama",
+      "selected_reviewers": [],
+      "final_status": "verification_failed",
+      "outcome": "verification_failed",
+      "repair_cycles_count": 1,
+      "verification_status": "failed",
+      "confirmed_defects": 0,
+      "escaped_defects": 1,
+      "reproducible": true,
+      "cost_if_available": null,
+      "latency_if_available": 10.065,
+      "content_digest": "b8aeaa03b5302027c6d42a12897fec84e4d7747b8094b0cfe9b382651da5bfe8"
+    }
+  ],
+  "success_rate": null,
+  "verification_pass_rate": null,
+  "review_escape_rate": null,
+  "repair_cycles": null,
+  "cost_if_available": null,
+  "latency_if_available": null,
+  "provider_failures": 0,
+  "result": "INCONCLUSIVE",
+  "confidence": "baseline_n=1, candidate_n=1, primary_metric=verification_pass_rate",
+  "evidence_refs": [
+    "documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml",
+    "traj-e2d04d072ac010e708121140",
+    "traj-cd3975d8ae6797ef5d1c475c"
+  ],
+  "created_at": "2026-08-25T13:40:33.961681+00:00",
+  "started_at": "2026-08-25T13:44:34.337229+00:00",
+  "completed_at": "2026-08-25T13:44:48.574675+00:00",
+  "lifecycle_stage": "COMPLETE",
+  "evaluation_details": {
+    "baseline_n": 1,
+    "candidate_n": 1,
+    "falsification_failures": [],
+    "metric_comparisons": {
+      "verification_pass_rate": "equal",
+      "mean_repair_cycles": "worse",
+      "mean_latency": "worse"
+    },
+    "primary_metric": "verification_pass_rate"
+  },
+  "prediction_digest": "3e2012bc78e4ce84aa997341ce531317574eb3a1e69a7a9e79ff005b1631d45a",
+  "content_digest": "fca721f7fe7bd2cb9b93337d8274ee6bbe49db2a95ab549303ffb72e4d4502c4"
+}

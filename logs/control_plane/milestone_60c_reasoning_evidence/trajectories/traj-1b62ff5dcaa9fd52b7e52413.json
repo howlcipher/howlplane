@@ -1,0 +1,88 @@
+{
+  "trajectory_id": "traj-1b62ff5dcaa9fd52b7e52413",
+  "task_id": "EXP-60C-REVIEW-001-BASELINE-1",
+  "schema_version": "howlplane.execution_trajectory/v1",
+  "campaign_id": "MILESTONE-60C",
+  "opportunity_id": "SECOND-DEFECT-REVIEW",
+  "experiment_id": "EXP-60C-REVIEW-001",
+  "task_class": "bug_fix",
+  "objective": "Identify the known empty reviewer artifact defect.",
+  "selected_provider": "local_ollama",
+  "selected_model": "qwen2.5-coder:7b-instruct",
+  "selected_agent": "local_ollama",
+  "selected_reviewers": [
+    "general-reviewer"
+  ],
+  "prompt_strategy_id": null,
+  "context_strategy_id": null,
+  "retrieval_strategy_id": null,
+  "tool_strategy_id": null,
+  "decomposition_strategy_id": null,
+  "review_strategy_id": "review.general_single/v1",
+  "verification_strategy_id": null,
+  "input_evidence_refs": [
+    "documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml"
+  ],
+  "selected_context_refs": [
+    ".task_runs/ACCEPTANCE-DOGFOOD-20260824-013739-fba3f8/reviews/correctness-reviewer.md",
+    ".task_runs/ACCEPTANCE-DOGFOOD-20260824-013739-fba3f8/findings.yaml"
+  ],
+  "actions_attempted": [
+    "independent_review",
+    "historical_empty_artifact_oracle"
+  ],
+  "tools_invoked": [
+    "local_ollama"
+  ],
+  "provider_events": [
+    {
+      "agent_id": "local_ollama",
+      "role": "general-reviewer",
+      "command": "ollama_local:qwen2.5-coder:7b-instruct",
+      "exit_code": 0,
+      "duration_seconds": 4.088,
+      "success": true,
+      "timed_out": false,
+      "error_message": null,
+      "metadata": {
+        "provider": "local_ollama",
+        "model": "qwen2.5-coder:7b-instruct",
+        "task_id": "EXP-60C-REVIEW-001-BASELINE-1",
+        "task_class": "bug_fix",
+        "start_time": "2026-08-25T13:46:58.251229+00:00",
+        "finish_time": "2026-08-25T13:47:02.342831+00:00",
+        "context_length": 8192,
+        "keep_alive": 0,
+        "ram_before_gib": 10.662,
+        "ram_after_gib": 10.067,
+        "ram_after_unload_gib": 10.067,
+        "output_sha256": "0a90f75521a9919ea305d1a1357256ecf299bff412b1f21b1ab21807ca712c9b"
+      },
+      "timestamp": "2026-08-25T13:47:02.342864+00:00",
+      "schema": "howlplane.agent_execution/v1"
+    }
+  ],
+  "review_findings": [
+    {
+      "reviewer_role": "general-reviewer",
+      "status": "dismissed",
+      "title": "No confirmed defect",
+      "evidence_ref": ".task_runs/ACCEPTANCE-DOGFOOD-20260824-013739-fba3f8/reviews/correctness-reviewer.md"
+    }
+  ],
+  "verification_results": {
+    "overall_status": "failed",
+    "verifier": "historical_empty_review_oracle/v1",
+    "reproducible": true,
+    "escaped_defects": 1,
+    "observed_output_sha256": "0a90f75521a9919ea305d1a1357256ecf299bff412b1f21b1ab21807ca712c9b"
+  },
+  "repair_cycles": [],
+  "final_status": "verification_failed",
+  "outcome": "verification_failed",
+  "cost_if_available": null,
+  "latency_if_available": 4.088,
+  "created_at": "2026-08-25T13:47:02.343301+00:00",
+  "completed_at": "2026-08-25T13:47:02.344050+00:00",
+  "content_digest": "7997a1d8cb8a96048faba709d22d5eceae2867909c6bbbbb5c4da92c8c2e2ddc"
+}

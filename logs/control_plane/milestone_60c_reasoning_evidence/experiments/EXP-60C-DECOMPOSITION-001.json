@@ -1,0 +1,118 @@
+{
+  "experiment_id": "EXP-60C-DECOMPOSITION-001",
+  "schema_version": "howlplane.reasoning_experiment/v1",
+  "campaign_id": "MILESTONE-60C",
+  "opportunity_id": "MEANINGFUL-DECOMPOSITION",
+  "task_class": "other",
+  "experiment_type": "TASK_DECOMPOSITION",
+  "baseline_strategy": {
+    "strategy_id": "planning.direct_implementation/v1",
+    "version": "v1",
+    "strategy_type": "task_decomposition",
+    "config_digest": "b5cac6d855db7ed721dcb39a33fe78f33b888bc890941dcfce35f6ae85342062",
+    "full_config": {
+      "planning_steps": 0,
+      "reconcile_plans": false
+    }
+  },
+  "candidate_strategy": {
+    "strategy_id": "planning.subsystem_decomposition/v1",
+    "version": "v1",
+    "strategy_type": "task_decomposition",
+    "config_digest": "53754b2bc9029d6849f28e16773bca3e3e8ed0354dbd55967928c19d70ac6eb3",
+    "full_config": {
+      "decompose_by": "subsystem",
+      "planning_steps": 1,
+      "reconcile_plans": false
+    }
+  },
+  "baseline_provider": "local_ollama",
+  "candidate_provider": "local_ollama",
+  "baseline_model": null,
+  "candidate_model": null,
+  "context_strategy_id": null,
+  "retrieval_strategy_id": null,
+  "tool_strategy_id": null,
+  "review_strategy_id": null,
+  "decomposition_strategy_id": null,
+  "planning_strategy_id": null,
+  "verification_strategy_id": null,
+  "expected_outcome": "Two bounded subtasks plus reconciliation verify at least as often as direct execution.",
+  "falsification_criteria": [
+    "candidate.verification_pass_rate < baseline.verification_pass_rate"
+  ],
+  "metrics": [
+    "verification_pass_rate",
+    "mean_latency",
+    "provider_failures"
+  ],
+  "baseline_results": [
+    {
+      "trajectory_id": "traj-ae9d021f99a3d5f824e3cc52",
+      "task_id": "EXP-60C-DECOMPOSITION-001-BASELINE-1",
+      "selected_provider": "local_ollama",
+      "selected_agent": "local_ollama",
+      "selected_reviewers": [],
+      "final_status": "complete",
+      "outcome": "success",
+      "repair_cycles_count": 0,
+      "verification_status": "passed",
+      "confirmed_defects": 0,
+      "escaped_defects": 0,
+      "reproducible": true,
+      "cost_if_available": null,
+      "latency_if_available": 43.704,
+      "content_digest": "0bf3528e65b3fe46d8ab2541d4faf2d72589cfe90aadc701b64b38b3184e880a"
+    }
+  ],
+  "candidate_results": [
+    {
+      "trajectory_id": "traj-664d158f836db3caf8d4df04",
+      "task_id": "EXP-60C-DECOMPOSITION-001-CANDIDATE-1",
+      "selected_provider": "local_ollama",
+      "selected_agent": "local_ollama",
+      "selected_reviewers": [],
+      "final_status": "complete",
+      "outcome": "success",
+      "repair_cycles_count": 0,
+      "verification_status": "passed",
+      "confirmed_defects": 0,
+      "escaped_defects": 0,
+      "reproducible": true,
+      "cost_if_available": null,
+      "latency_if_available": 85.81,
+      "content_digest": "64e7ff090054398d787c7658ac4c7d8d32ca1fb54d125107b6287ce00401a016"
+    }
+  ],
+  "success_rate": null,
+  "verification_pass_rate": null,
+  "review_escape_rate": null,
+  "repair_cycles": null,
+  "cost_if_available": null,
+  "latency_if_available": null,
+  "provider_failures": 0,
+  "result": "INCONCLUSIVE",
+  "confidence": "baseline_n=1, candidate_n=1, primary_metric=verification_pass_rate",
+  "evidence_refs": [
+    "documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml",
+    "traj-ae9d021f99a3d5f824e3cc52",
+    "traj-664d158f836db3caf8d4df04"
+  ],
+  "created_at": "2026-08-25T13:40:33.970915+00:00",
+  "started_at": "2026-08-25T13:44:48.618812+00:00",
+  "completed_at": "2026-08-25T13:46:58.187757+00:00",
+  "lifecycle_stage": "COMPLETE",
+  "evaluation_details": {
+    "baseline_n": 1,
+    "candidate_n": 1,
+    "falsification_failures": [],
+    "metric_comparisons": {
+      "verification_pass_rate": "equal",
+      "mean_latency": "worse",
+      "provider_failures": "equal"
+    },
+    "primary_metric": "verification_pass_rate"
+  },
+  "prediction_digest": "ecd406314cbc9454c1a8e9f12a4c89b3932fed384acd017748670244ed0939aa",
+  "content_digest": "f0cad40bb613d60c4a7c5c5fd42e9a14794d6b65052a19248450f95d28c01b0e"
+}

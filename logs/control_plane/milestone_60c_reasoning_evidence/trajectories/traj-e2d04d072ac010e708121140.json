@@ -1,0 +1,79 @@
+{
+  "trajectory_id": "traj-e2d04d072ac010e708121140",
+  "task_id": "EXP-60C-REPAIR-001-BASELINE-1",
+  "schema_version": "howlplane.execution_trajectory/v1",
+  "campaign_id": "MILESTONE-60C",
+  "opportunity_id": "HISTORICAL-FAILURE-REPAIR",
+  "experiment_id": "EXP-60C-REPAIR-001",
+  "task_class": "bug_fix",
+  "objective": "Classify the failed historical notes fixture and state one evidence-backed remediation.",
+  "selected_provider": "local_ollama",
+  "selected_model": "qwen2.5-coder:7b-instruct",
+  "selected_agent": "local_ollama",
+  "selected_reviewers": [],
+  "prompt_strategy_id": null,
+  "context_strategy_id": null,
+  "retrieval_strategy_id": "retrieval.no_historical/v1",
+  "tool_strategy_id": null,
+  "decomposition_strategy_id": null,
+  "review_strategy_id": null,
+  "verification_strategy_id": null,
+  "input_evidence_refs": [
+    "documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml"
+  ],
+  "selected_context_refs": [
+    ".dogfood_runs/DOGFOOD-20260822-005043-16adca/campaign_state.json"
+  ],
+  "actions_attempted": [
+    "first_pass",
+    "no_remediation",
+    "deterministic_verification"
+  ],
+  "tools_invoked": [
+    "local_ollama"
+  ],
+  "provider_events": [
+    {
+      "agent_id": "local_ollama",
+      "role": "analysis",
+      "command": "ollama_local:qwen2.5-coder:7b-instruct",
+      "exit_code": 0,
+      "duration_seconds": 4.102,
+      "success": true,
+      "timed_out": false,
+      "error_message": null,
+      "metadata": {
+        "provider": "local_ollama",
+        "model": "qwen2.5-coder:7b-instruct",
+        "task_id": "EXP-60C-REPAIR-001-BASELINE-1",
+        "task_class": "bug_fix",
+        "start_time": "2026-08-25T13:44:34.342258+00:00",
+        "finish_time": "2026-08-25T13:44:38.460406+00:00",
+        "context_length": 8192,
+        "keep_alive": 0,
+        "ram_before_gib": 10.167,
+        "ram_after_gib": 9.418,
+        "ram_after_unload_gib": 9.418,
+        "output_sha256": "029ccd6d4d11c3e4497ec0337c699571d1c26cf5a6c266d70e269c4614a9f102"
+      },
+      "timestamp": "2026-08-25T13:44:38.460453+00:00",
+      "schema": "howlplane.agent_execution/v1"
+    }
+  ],
+  "review_findings": [],
+  "verification_results": {
+    "overall_status": "failed",
+    "verifier": "exact_historical_failure_classification/v1",
+    "reproducible": true,
+    "escaped_defects": 1,
+    "observed_output_sha256": "029ccd6d4d11c3e4497ec0337c699571d1c26cf5a6c266d70e269c4614a9f102"
+  },
+  "repair_cycles": [],
+  "final_status": "verification_failed",
+  "outcome": "verification_failed",
+  "cost_if_available": null,
+  "latency_if_available": 4.102,
+  "created_at": "2026-08-25T13:44:38.461006+00:00",
+  "completed_at": "2026-08-25T13:44:38.461875+00:00",
+  "content_digest": "2cfabadd628615d88d057dee5c42003931e21352e4bd16464160dc5cda5e06ff"
+}

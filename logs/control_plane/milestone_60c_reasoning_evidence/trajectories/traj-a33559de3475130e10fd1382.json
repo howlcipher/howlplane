@@ -1,0 +1,79 @@
+{
+  "trajectory_id": "traj-a33559de3475130e10fd1382",
+  "task_id": "EXP-60C-CONTEXT-001-BASELINE-2",
+  "schema_version": "howlplane.execution_trajectory/v1",
+  "campaign_id": "MILESTONE-60C",
+  "opportunity_id": "DISCOVERY-PROTOCOL-CONTEXT-REPLICATION",
+  "experiment_id": "EXP-60C-CONTEXT-001",
+  "task_class": "other",
+  "objective": "Report the trajectory discovery minimum pattern threshold and every registered pattern miner in exact source order.",
+  "selected_provider": "local_ollama",
+  "selected_model": "qwen2.5-coder:7b-instruct",
+  "selected_agent": "local_ollama",
+  "selected_reviewers": [],
+  "prompt_strategy_id": null,
+  "context_strategy_id": "context.task_plus_acceptance/v1",
+  "retrieval_strategy_id": null,
+  "tool_strategy_id": null,
+  "decomposition_strategy_id": null,
+  "review_strategy_id": null,
+  "verification_strategy_id": null,
+  "input_evidence_refs": [
+    "documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml"
+  ],
+  "selected_context_refs": [
+    "task:EXP-60C-CONTEXT-001-BASELINE-2"
+  ],
+  "actions_attempted": [
+    "provider_response_observed",
+    "deterministic_exact_verification"
+  ],
+  "tools_invoked": [
+    "local_ollama"
+  ],
+  "provider_events": [
+    {
+      "agent_id": "local_ollama",
+      "role": "architecture-analysis",
+      "command": "ollama_local:qwen2.5-coder:7b-instruct",
+      "exit_code": 0,
+      "duration_seconds": 4.882,
+      "success": true,
+      "timed_out": false,
+      "error_message": null,
+      "metadata": {
+        "provider": "local_ollama",
+        "model": "qwen2.5-coder:7b-instruct",
+        "task_id": "EXP-60C-CONTEXT-001-BASELINE-2",
+        "task_class": "other",
+        "start_time": "2026-08-25T13:41:17.611441+00:00",
+        "finish_time": "2026-08-25T13:41:22.496639+00:00",
+        "context_length": 8192,
+        "keep_alive": 0,
+        "ram_before_gib": 9.728,
+        "ram_after_gib": 9.701,
+        "ram_after_unload_gib": 9.701,
+        "output_sha256": "0640081b7b009539270b264b89f037205e6dbe867a94cef24c83e7845c62896a"
+      },
+      "timestamp": "2026-08-25T13:41:22.496677+00:00",
+      "schema": "howlplane.agent_execution/v1"
+    }
+  ],
+  "review_findings": [],
+  "verification_results": {
+    "overall_status": "failed",
+    "verifier": "exact_normalized_discovery_protocol_lines/v1",
+    "reproducible": true,
+    "escaped_defects": 1,
+    "expected_output_sha256": "af1c50167500824d57eff340e29f1009dc76738cf85ad6ab176b3f9025582879",
+    "observed_output_sha256": "0640081b7b009539270b264b89f037205e6dbe867a94cef24c83e7845c62896a"
+  },
+  "repair_cycles": [],
+  "final_status": "verification_failed",
+  "outcome": "verification_failed",
+  "cost_if_available": null,
+  "latency_if_available": 4.882,
+  "created_at": "2026-08-25T13:41:22.497106+00:00",
+  "completed_at": "2026-08-25T13:41:22.497872+00:00",
+  "content_digest": "893f01985d0e70dce852a330d99c4a6f5be02bb8c87abe4a680d938b2c611ded"
+}

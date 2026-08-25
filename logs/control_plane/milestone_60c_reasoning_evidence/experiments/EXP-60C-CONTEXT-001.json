@@ -1,0 +1,153 @@
+{
+  "experiment_id": "EXP-60C-CONTEXT-001",
+  "schema_version": "howlplane.reasoning_experiment/v1",
+  "campaign_id": "MILESTONE-60C",
+  "opportunity_id": "DISCOVERY-PROTOCOL-CONTEXT-REPLICATION",
+  "task_class": "other",
+  "experiment_type": "CONTEXT",
+  "baseline_strategy": {
+    "strategy_id": "context.task_plus_acceptance/v1",
+    "version": "v1",
+    "strategy_type": "context",
+    "config_digest": "f27159e8780464663b845638a92eb71e018ae4aa7a95e1c80cc7b511d5c6518e",
+    "full_config": {
+      "include_architecture": false,
+      "max_files": null,
+      "scope": "task_acceptance"
+    }
+  },
+  "candidate_strategy": {
+    "strategy_id": "context.relevant_documentation/v1",
+    "version": "v1",
+    "strategy_type": "context",
+    "config_digest": "da24d69e09691ce00b1ca8ebe7b239155d9d6fc6e3f54f3c2f9277eb0078ef63",
+    "full_config": {
+      "include_architecture": false,
+      "max_files": 5,
+      "scope": "docs"
+    }
+  },
+  "baseline_provider": "local_ollama",
+  "candidate_provider": "local_ollama",
+  "baseline_model": null,
+  "candidate_model": null,
+  "context_strategy_id": null,
+  "retrieval_strategy_id": null,
+  "tool_strategy_id": null,
+  "review_strategy_id": null,
+  "decomposition_strategy_id": null,
+  "planning_strategy_id": null,
+  "verification_strategy_id": null,
+  "expected_outcome": "Candidate verification pass rate is at least baseline pass rate.",
+  "falsification_criteria": [
+    "candidate.verification_pass_rate < baseline.verification_pass_rate"
+  ],
+  "metrics": [
+    "verification_pass_rate",
+    "mean_latency"
+  ],
+  "baseline_results": [
+    {
+      "trajectory_id": "traj-7193bb11ca2158f8d67aa21e",
+      "task_id": "EXP-60C-CONTEXT-001-BASELINE-1",
+      "selected_provider": "local_ollama",
+      "selected_agent": "local_ollama",
+      "selected_reviewers": [],
+      "final_status": "verification_failed",
+      "outcome": "verification_failed",
+      "repair_cycles_count": 0,
+      "verification_status": "failed",
+      "confirmed_defects": 0,
+      "escaped_defects": 1,
+      "reproducible": true,
+      "cost_if_available": null,
+      "latency_if_available": 6.263,
+      "content_digest": "85d49344b0153684d9d247d021fe18d9896e908902ac4153e92d7357a7e56723"
+    },
+    {
+      "trajectory_id": "traj-a33559de3475130e10fd1382",
+      "task_id": "EXP-60C-CONTEXT-001-BASELINE-2",
+      "selected_provider": "local_ollama",
+      "selected_agent": "local_ollama",
+      "selected_reviewers": [],
+      "final_status": "verification_failed",
+      "outcome": "verification_failed",
+      "repair_cycles_count": 0,
+      "verification_status": "failed",
+      "confirmed_defects": 0,
+      "escaped_defects": 1,
+      "reproducible": true,
+      "cost_if_available": null,
+      "latency_if_available": 4.882,
+      "content_digest": "893f01985d0e70dce852a330d99c4a6f5be02bb8c87abe4a680d938b2c611ded"
+    }
+  ],
+  "candidate_results": [
+    {
+      "trajectory_id": "traj-ea633f6ef088a823a6ccfa0c",
+      "task_id": "EXP-60C-CONTEXT-001-CANDIDATE-1",
+      "selected_provider": "local_ollama",
+      "selected_agent": "local_ollama",
+      "selected_reviewers": [],
+      "final_status": "verification_failed",
+      "outcome": "verification_failed",
+      "repair_cycles_count": 0,
+      "verification_status": "failed",
+      "confirmed_defects": 0,
+      "escaped_defects": 1,
+      "reproducible": true,
+      "cost_if_available": null,
+      "latency_if_available": 45.146,
+      "content_digest": "fca3785cce574598e733078283a5e9cca2600d38f2ac507a12e37bbab4ecd053"
+    },
+    {
+      "trajectory_id": "traj-ed1efd6ce25238b858ed0ca7",
+      "task_id": "EXP-60C-CONTEXT-001-CANDIDATE-2",
+      "selected_provider": "local_ollama",
+      "selected_agent": "local_ollama",
+      "selected_reviewers": [],
+      "final_status": "verification_failed",
+      "outcome": "verification_failed",
+      "repair_cycles_count": 0,
+      "verification_status": "failed",
+      "confirmed_defects": 0,
+      "escaped_defects": 1,
+      "reproducible": true,
+      "cost_if_available": null,
+      "latency_if_available": 45.525,
+      "content_digest": "4d23990fe76af36ee57f732ade9ef9c2dff6f214cfaae27ceba33cf0cb93f61a"
+    }
+  ],
+  "success_rate": null,
+  "verification_pass_rate": null,
+  "review_escape_rate": null,
+  "repair_cycles": null,
+  "cost_if_available": null,
+  "latency_if_available": null,
+  "provider_failures": 0,
+  "result": "INCONCLUSIVE",
+  "confidence": "baseline_n=2, candidate_n=2, primary_metric=verification_pass_rate",
+  "evidence_refs": [
+    "documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml",
+    "traj-7193bb11ca2158f8d67aa21e",
+    "traj-a33559de3475130e10fd1382",
+    "traj-ea633f6ef088a823a6ccfa0c",
+    "traj-ed1efd6ce25238b858ed0ca7"
+  ],
+  "created_at": "2026-08-25T13:40:33.946988+00:00",
+  "started_at": "2026-08-25T13:41:11.307274+00:00",
+  "completed_at": "2026-08-25T13:42:53.239097+00:00",
+  "lifecycle_stage": "COMPLETE",
+  "evaluation_details": {
+    "baseline_n": 2,
+    "candidate_n": 2,
+    "falsification_failures": [],
+    "metric_comparisons": {
+      "verification_pass_rate": "equal",
+      "mean_latency": "worse"
+    },
+    "primary_metric": "verification_pass_rate"
+  },
+  "prediction_digest": "0973a642f9cebf0cf05629d2785d2756efa476f5e7cd197974a4c37377e6ace1",
+  "content_digest": "417641bd1ead37df4ba9d39efb3fba05fc7162dd0f65efb52cf98f04a40fa096"
+}
