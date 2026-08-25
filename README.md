@@ -123,7 +123,9 @@ Human Objective / Backlog Item
 Milestone #60B is using this machinery for a bounded evidence collection
 campaign. The campaign seeks diverse, comparable trajectories without learning
 or applying automatic strategy preferences, and it reports unavailable or
-unobserved dimensions without manufacturing conclusions.
+unobserved dimensions without manufacturing conclusions. Its preregistered plan
+covers architecture context, provider routing, and review topology across six
+bounded trajectories and three existing task classes.
 
 ---
 
