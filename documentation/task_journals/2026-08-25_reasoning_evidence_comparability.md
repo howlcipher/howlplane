@@ -3,7 +3,7 @@
 ## Durable State
 
 STATUS:
-    INITIAL_CHECKPOINT_PENDING
+    DRAFT_PR_OPEN_INSTRUMENTATION_VERIFICATION_PENDING
 
 STARTING_MAIN:
     a45458a237c7ceba38fb8cf7d7b27e9a017f7cef
@@ -12,7 +12,7 @@ WORKING_BRANCH:
     dogfood/reasoning-evidence-comparability
 
 PR:
-    PENDING
+    https://github.com/howlcipher/howlplane/pull/47
 
 CURRENT_EXPERIMENT:
     NONE
@@ -73,7 +73,7 @@ LAST_CONFIRMED_REMOTE_MAIN:
     a45458a237c7ceba38fb8cf7d7b27e9a017f7cef
 
 PR:
-    PENDING
+    https://github.com/howlcipher/howlplane/pull/47
 
 EXACT_PRIOR_EVIDENCE_PATHS:
     documentation/evidence/reasoning/2026-08-24_context_canary.yaml
@@ -123,6 +123,10 @@ FREE_TOOLS:
 ### 2026-08-25T09:20:00Z
 
 Verified the canonical checkout at the exact required main SHA with a clean worktree and matching origin main. The required SHA is its own ancestor. No other agent process is using this repository; the observed agy process is rooted in howlchangeops. Loaded repository rules and the continuation, routing, review, reconciliation, verification, ship, and Devin CLI procedures. The prior #60B journal confirms eight current schema live trajectories and the stated sparse dimensions. Created the requested campaign branch. No experiment or provider probe has started.
+
+### 2026-08-25T09:30:00Z
+
+Created signed checkpoint 4a02320 and pushed it through the normal prepush gate. The gate passed 798 Python tests plus the repository Go, lint, Bandit, build, and documentation stages; only the previously documented third party warnings appeared. Opened draft PR 47. The worktree is clean after the push. No experiment or provider probe has started.
 
 ## Handoff Packet
 
