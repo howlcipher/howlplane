@@ -123,9 +123,11 @@ Human Objective / Backlog Item
 Milestone #60B is using this machinery for a bounded evidence collection
 campaign. The campaign seeks diverse, comparable trajectories without learning
 or applying automatic strategy preferences, and it reports unavailable or
-unobserved dimensions without manufacturing conclusions. Its preregistered plan
-covers architecture context, provider routing, and review topology across six
-bounded trajectories and three existing task classes.
+unobserved dimensions without manufacturing conclusions. Its corrected,
+immutable preregistration covers architecture context, provider routing, and
+review topology across six bounded trajectories and the canonical `other`,
+`bug_fix`, and `test_improvement` task classes. Rejected definitions remain
+visible rather than being rewritten after execution began.
 
 ---
 

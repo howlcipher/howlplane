@@ -160,12 +160,49 @@ provider_inventory:
 
 experiment_plan:
   trajectory_target: 6
-  bounds: exactly three experiments and one sample per arm
-  experiments:
+  bounds: >-
+    Exactly three executable experiments and one sample per arm. Three original
+    preregistrations remain preserved as rejected planning evidence because
+    their descriptive task labels are not valid TaskSpec classes.
+  rejected_preregistrations:
     EXP-60B-CONTEXT-001:
+      disposition: ABANDONED_BEFORE_PROVIDER_EXECUTION
+      lifecycle_stage: RUNNING
+      provider_calls: 0
+      trajectories_created: 0
+      reason: >-
+        The arm coordinator marked the experiment started before TaskSpec
+        validation rejected task_class architecture_analysis. The immutable
+        record is retained and is not counted as an experiment or trajectory.
+      replacement: EXP-60B-CONTEXT-002
+    EXP-60B-ROUTING-001:
+      disposition: ABANDONED_BEFORE_PROVIDER_EXECUTION
+      lifecycle_stage: DEFINED
+      provider_calls: 0
+      trajectories_created: 0
+      reason: >-
+        Preflight found task_class failure_classification is outside the
+        canonical TaskSpec enum before this experiment was started.
+      replacement: EXP-60B-ROUTING-002
+    EXP-60B-REVIEW-001:
+      disposition: ABANDONED_BEFORE_PROVIDER_EXECUTION
+      lifecycle_stage: DEFINED
+      provider_calls: 0
+      trajectories_created: 0
+      reason: >-
+        Preflight found task_class review is outside the canonical TaskSpec
+        enum before this experiment was started.
+      replacement: EXP-60B-REVIEW-002
+  correction_rationale: >-
+    The milestone task labels are descriptive examples, while production
+    execution requires one of the existing classes in VALID_TASK_CLASSES.
+    Replacement IDs preserve immutable preregistration and avoid widening the
+    enum or altering #60A instrumentation for an evidence campaign.
+  experiments:
+    EXP-60B-CONTEXT-002:
       status: PREREGISTERED
       experiment_type: CONTEXT
-      task_class: architecture_analysis
+      task_class: other
       baseline: context.task_plus_acceptance/v1
       candidate: context.relevant_documentation/v1
       baseline_provider: local_ollama
@@ -186,10 +223,10 @@ experiment_plan:
       repair_policy: no repair, preserving the context dimension
       prediction_digest: c10d649f967190849ffc9cb4788bef97670202a1f5269cc57e490a257897b628
       next_action: run_baseline
-    EXP-60B-ROUTING-001:
+    EXP-60B-ROUTING-002:
       status: PREREGISTERED
       experiment_type: ROUTING
-      task_class: failure_classification
+      task_class: bug_fix
       baseline: routing.local_first_low_risk/v1
       candidate: routing.frontier_first/v1
       baseline_provider: local_ollama
@@ -215,10 +252,10 @@ experiment_plan:
         exact repair count remain visible.
       prediction_digest: ec4e4bb71cd515479f624cb6a0d577e37d4de830f12ada8ebe5c7d0ea8c58190
       next_action: run_baseline
-    EXP-60B-REVIEW-001:
+    EXP-60B-REVIEW-002:
       status: PREREGISTERED
       experiment_type: REVIEW_TOPOLOGY
-      task_class: review
+      task_class: test_improvement
       baseline: review.general_single/v1
       candidate: review.correctness_regression/v1
       baseline_provider: local_ollama

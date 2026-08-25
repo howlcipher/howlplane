@@ -15,7 +15,7 @@ PR:
     https://github.com/howlcipher/howlplane/pull/46
 
 CURRENT_EXPERIMENT:
-    EXP-60B-CONTEXT-001: PREREGISTERED
+    EXP-60B-CONTEXT-002: PREREGISTERED
 
 COMPLETED_EXPERIMENTS:
     NONE_FOR_60B
@@ -34,13 +34,17 @@ KNOWN_FAILURES:
     The two existing live trajectories both record verification_failed.
     Phase 0 has no measurement failure. The full push gate emits preexisting
     third party Python, Bandit, and pdoc warnings despite a zero exit status.
+    EXP-60B-CONTEXT-001 was rejected before provider execution because its
+    descriptive task class is not in the production TaskSpec enum. It created
+    no arm result and no trajectory. The other original definitions have the
+    same planning defect and were not started.
 
 CURRENT_BLOCKERS:
     NONE
 
 NEXT_SAFE_ACTION:
-    Commit and push the preregistered plan, then run the baseline and candidate
-    arms of EXP-60B-CONTEXT-001 without repair.
+    Commit and push the corrected preregistration checkpoint, then run the
+    baseline and candidate arms of EXP-60B-CONTEXT-002 without repair.
 
 LAST_VERIFIED_TESTS:
     Targeted #60A suite: 76 passed in 5.78 seconds.
@@ -65,7 +69,7 @@ CURRENT_BRANCH:
     dogfood/reasoning-evidence-collection
 
 HEAD:
-    64957f8ab8d57f29faa5e12cd01911add7c7c895
+    f5990871b3b72e7f311287eea1448343c0daaacd
 
 PR:
     https://github.com/howlcipher/howlplane/pull/46
@@ -74,7 +78,9 @@ EXPERIMENTS_COMPLETED:
     NONE_FOR_60B
 
 EXPERIMENT_CURRENTLY_INCOMPLETE:
-    NONE
+    EXP-60B-CONTEXT-001 is preserved at RUNNING with no arm results after
+    pre-provider TaskSpec validation rejection. It is abandoned and replaced
+    rather than mutated.
 
 PROVIDERS_CURRENTLY_AVAILABLE:
     local_ollama service, model, and RAM probe passed. Claude Code, Codex,
@@ -90,7 +96,7 @@ EXACT_EVIDENCE_PATHS:
     logs/control_plane/milestone_60b_reasoning_evidence/trajectories
 
 EXACT_NEXT_EXPERIMENT:
-    EXP-60B-CONTEXT-001
+    EXP-60B-CONTEXT-002
 
 TESTS_RUN:
     Targeted #60A suite: 76 passed.
@@ -99,7 +105,7 @@ TESTS_RUN:
     GitHub checks: all six required checks passed for 64957f8.
 
 REPOSITORY_STATUS:
-    Intentional documentation changes for the initial checkpoint.
+    Intentional documentation changes for the preregistration correction.
 
 ## Progress Log
 
@@ -133,3 +139,18 @@ production loading rejects. None count toward the campaign.
 Preregistered three bounded experiments through the production coordinator.
 Their immutable definitions and prediction digests are durable in the raw store
 and mirrored in the tracked campaign plan. No provider arm has executed.
+
+### 2026-08-25T01:26:21Z
+
+Attempted to enter the first context arm, but production TaskSpec validation
+rejected the descriptive task class `architecture_analysis` before any provider
+call. The coordinator had already advanced EXP-60B-CONTEXT-001 to RUNNING, so
+that immutable record remains visible with zero arm results and zero
+trajectories. Preflight found the same plan defect in the unstarted routing and
+review definitions. This is a campaign preregistration error, not a #60A
+measurement defect: TaskSpec has consistently exposed nine canonical classes.
+
+Preserved all three original records and preregistered replacement IDs through
+the production coordinator using existing classes `other`, `bug_fix`, and
+`test_improvement`. Hypotheses, strategies, providers, metrics, and
+falsification criteria are unchanged. No provider has been invoked for #60B.
