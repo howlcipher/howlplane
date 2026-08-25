@@ -94,3 +94,14 @@ coordinator input and output types.
 
 Both require the same `ExecutionTrajectory`, `ReasoningExperiment`, and
 `StrategyRegistry` abstractions above.
+
+## Milestone #61 resource-selection extension
+
+Execution trajectory v2 now embeds the generic resource candidate decision:
+registered and eligible resources, exclusions, selected four-part identity,
+role, capacity before/after, economic policy, deterministic recommendation,
+reviewer identities, failover, and result. The resource pool remains the owner
+of eligibility and final selection. A future evidence-backed optimizer may
+implement the `CognitiveRecommendation` seam, but it will receive only candidates
+already admitted by hard policy and cannot change authority, egress, spend, or
+configuration. No learned profile or automatic promotion is part of #61.

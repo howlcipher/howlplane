@@ -109,7 +109,8 @@ def test_check_operating_mode():
 
 def test_run_diagnostics():
     checks = run_diagnostics()
-    assert len(checks) == 8
+    assert len(checks) >= 9
+    assert any(c.name == "AI Resource Configuration" for c in checks)
     assert all(c.status in ("ok", "warning", "error") for c in checks)
 
 

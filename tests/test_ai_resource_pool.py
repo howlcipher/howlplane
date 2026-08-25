@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -24,11 +25,20 @@ from src.control_plane.orchestrator import (
     FAILURE_CLASS_NO_ELIGIBLE_RESOURCE,
     GovernedTaskOrchestrator,
     OrchestrationConfig,
+    OrchestrationResult,
+)
+from src.control_plane import launcher
+from src.control_plane.resource_cli import (
+    inventory_document,
+    render_inventory,
+    render_route,
+    resource_diagnostic_rows,
 )
 from src.control_plane.reasoning.execution_trajectory import (
     EXECUTION_TRAJECTORY_SCHEMA_VERSION,
     EXECUTION_TRAJECTORY_SCHEMA_VERSION_V1,
     ExecutionTrajectory,
+    ExecutionTrajectoryBuilder,
 )
 from src.control_plane.router import TaskRouter
 from src.control_plane.synthesis.provider_pool import (
@@ -211,6 +221,75 @@ def test_legacy_trajectory_schema_and_digest_remain_valid():
     assert EXECUTION_TRAJECTORY_SCHEMA_VERSION.endswith("/v2")
 
 
+def test_ai_providers_inventory_has_stable_versioned_json():
+    pool = make_pool([make_profile("claude_code", provider_id="anthropic")])
+
+    document = inventory_document(pool)
+
+    assert document["schema"] == "howlplane.ai_resources/v1"
+    assert document["resources"][0]["identity"] == {
+        "provider_id": "anthropic",
+        "interface_id": "claude_code_interface",
+        "resource_id": "claude_code",
+        "model_id": None,
+    }
+    assert json.loads(json.dumps(document)) == document
+    assert "AI RESOURCE POOL" in render_inventory(pool)
+
+
+def test_ai_route_renderer_explains_capacity_and_selection():
+    pool = make_pool([make_profile("codex")])
+    decision = pool.select_resource(make_task(), role="implementation")
+
+    rendered = render_route(decision)
+
+    assert "Task class: feature" in rendered
+    assert "Eligible:" in rendered
+    assert "Likely selected: codex / codex_interface / unknown" in rendered
+
+
+def test_ai_providers_cli_json_and_targeted_reset_are_audited(
+    monkeypatch, capsys
+):
+    pool = make_pool([make_profile("codex")])
+    entries = []
+
+    class RecordingLedger:
+        def append_entry(self, entry):
+            entries.append(entry)
+
+    monkeypatch.setattr(
+        launcher.ProviderPoolManager,
+        "from_config",
+        classmethod(lambda cls, **kwargs: pool),
+    )
+    monkeypatch.setattr(launcher, "EvidenceLedger", RecordingLedger)
+
+    assert launcher.cmd_providers(Namespace(
+        provider_action=None, resource_id=None, json=True
+    )) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["schema"] == "howlplane.ai_resources/v1"
+
+    assert launcher.cmd_providers(Namespace(
+        provider_action="reset", resource_id="codex", json=False
+    )) == 0
+    assert entries[0].action == "provider_capacity_reset"
+    assert entries[0].metadata["resource_id"] == "codex"
+
+
+def test_resource_doctor_never_consumes_generation():
+    backend = CountingBackend("codex")
+    pool = make_pool(
+        [make_profile("codex")], backends={"codex": backend}
+    )
+
+    rows = resource_diagnostic_rows(pool)
+
+    assert rows[0]["status"] == "ok"
+    assert backend.executed_calls == []
+
+
 def test_resource_identity_keeps_provider_interface_resource_and_model_distinct():
     profile = make_profile(
         "claude_code",
@@ -299,6 +378,43 @@ def test_fake_future_provider_uses_generic_registration_selection_and_capacity(t
     assert decision.selected.resource_id == "fake_future_provider"
     assert pool.get_status("fake_future_provider") == ProviderAvailabilityStatus.AVAILABLE
     assert (tmp_path / "capacity.json").is_file()
+
+
+def test_fake_future_provider_selection_is_recorded_by_generic_trajectory(tmp_path):
+    profile = make_profile("fake_future_provider", provider_id="future_org")
+    pool = make_pool([profile])
+    task = make_task(task_id="FUTURE-TRAJECTORY")
+    decision = pool.select_resource(task, role="implementation")
+    route = TaskRouter(resource_pool=pool).route(task)
+    execution = AgentExecutionResult(
+        agent_id="fake_future_provider",
+        role="implementation",
+        command="fake",
+        exit_code=0,
+        stdout="ok",
+        stderr="",
+        duration_seconds=0.1,
+        success=True,
+    )
+    result = OrchestrationResult(
+        task_id=task.task_id,
+        task_spec=task,
+        final_state="complete",
+        exit_code=0,
+        routing_decision=route,
+        provider_execution=execution,
+        resource_selection=decision.to_dict(),
+        capacity_after=pool.get_all_statuses(),
+        run_dir=str(tmp_path),
+    )
+
+    trajectory = ExecutionTrajectoryBuilder.from_orchestration_result(result)
+
+    assert trajectory.resource_selection["selected"]["resource_id"] == (
+        "fake_future_provider"
+    )
+    assert trajectory.resource_selection["selected"]["provider_id"] == "future_org"
+    assert trajectory.provider_events[0]["role"] == "implementation"
 
 
 @pytest.mark.parametrize(

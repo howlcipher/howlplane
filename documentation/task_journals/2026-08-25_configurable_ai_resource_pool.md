@@ -15,13 +15,13 @@ PR:
     https://github.com/howlcipher/howlplane/pull/49
 
 CURRENT_PHASE:
-    cli_inventory_route_doctor
+    live_acceptance_and_full_verification
 
 LAST_COMPLETED_PHASE:
-    governed_orchestration_and_trajectory_integration
+    cli_configuration_docs_local_only_acceptance
 
 LATEST_CHECKPOINT_COMMIT:
-    f8a09ae (resource foundation; push pending full-gate retry)
+    88afba0 (governed integration; push pending current checkpoint)
 
 PROVIDER_ARCHITECTURE_DECISIONS:
     Extend the existing provider pool, routing, capability, review, trajectory,
@@ -55,13 +55,29 @@ FILES_CHANGED:
     documentation/task_journals/2026-08-25_configurable_ai_resource_pool.md
     src/control_plane/agent_execution.py
     src/control_plane/agent_registry.py
+    src/control_plane/cli.py
+    src/control_plane/launcher.py
     src/control_plane/resource_models.py
+    src/control_plane/resource_cli.py
     src/control_plane/router.py
     src/control_plane/synthesis/marathon.py
     src/control_plane/synthesis/provider_pool.py
     src/infrastructure/config_loader.py
+    src/infrastructure/doctor.py
+    config/provider_resources.example.toml
+    documentation/AI_RESOURCE_POOL.md
+    documentation/CONTROL_PLANE.md
+    documentation/LOCAL_MODEL.md
+    documentation/README.md
+    documentation/USER_GUIDE.md
+    documentation/adr/0005_reasoning_strategy_dogfooding_architecture_gap.md
+    documentation/data_flows.md
     tests/test_ai_resource_pool.py
     tests/test_dogfood_hardening.py
+    tests/test_closed_loop_orchestrator.py
+    tests/test_config.py
+    tests/test_doctor.py
+    tests/test_launcher.py
     tests/test_provider_pool.py
 
 TESTS_RUN:
@@ -81,6 +97,10 @@ TESTS_RUN:
     TDD red: test_ai_resource_pool failed collection before new contracts existed
     focused: 89 resource, provider, failover, reviewer, and local tests passed
     focused: 114 governed orchestration, trajectory, failover, and review tests passed
+    focused: 132 CLI, config, doctor, orchestration, trajectory, and compatibility tests passed
+    SlopsLint: python_src 14/14 and python_tests 29/29 ceilings passed
+    live local-only: local_ollama planning selected and returned exactly
+    LOCAL_ONLY_OK; hosted adapter lookup count was zero
     flake8: changed Python source and tests passed
     SlopsLint: python_src 14/14 and python_tests 29/29 ceilings passed
 
@@ -88,16 +108,16 @@ KNOWN_FAILURES:
     NONE
 
 UNVERIFIED_WORK:
-    CLI, doctor integration, operator-local configuration, documentation, and
-    live acceptance are not yet implemented.
+    Bounded governed multi-provider live acceptance, final repository-wide
+    verification, exact-head GitHub CI, and merge remain.
 
 NEXT_SAFE_ACTION:
-    Add deterministic CLI inventory, read-only route, doctor, and targeted reset
-    tests, then wire those commands to the shared pool without generation.
+    Push the CLI/docs/local-only checkpoint, run bounded governed live acceptance,
+    then execute the complete repository verification matrix and close the PR.
 
 WORKTREE_STATE:
-    Governed orchestration and trajectory changes are verified and ready for
-    exact-file staging. No unrelated worktree changes are present.
+    CLI, docs, configuration, and local-only changes are verified and ready for
+    exact-file staging. Operator configuration is outside the worktree.
 
 ## Start Gate Evidence
 

@@ -51,10 +51,9 @@ ORCHESTRATOR_SCHEMA_VERSION = "howlplane.orchestrator/v1"
 
 # Structured reasons a governed task did not reach "complete" (#59.1 Phase 1).
 # The orchestrator assigns only the classes it can prove from its own gates.
-# PROVIDER_EXHAUSTED / PROVIDER_UNAVAILABLE are assigned by the caller after it
-# runs the observed AgentExecutionResult through ProviderPoolManager
-# .detect_exhaustion() -- the orchestrator holds no provider pool, and wiring one
-# in would duplicate an abstraction that already exists one layer up.
+# When the shared pool is supplied, the orchestrator classifies the observed
+# implementation result through that same pool before returning. Legacy callers
+# without a pool retain caller-side classification compatibility.
 FAILURE_CLASS_ENGINEERING = "ENGINEERING_FAILURE"
 FAILURE_CLASS_AUTHORITY_BLOCKED = "AUTHORITY_BLOCKED"
 FAILURE_CLASS_VERIFICATION = "VERIFICATION_FAILURE"
@@ -472,27 +471,6 @@ class GovernedTaskOrchestrator:
         )
         CheckpointManager.complete_stage(run_dir, "planned")
 
-        if not routing.selected_agent_id:
-            blocked = routing.metadata.get("blocked_outcome") or {
-                "status": "BLOCKED",
-                "reason": FAILURE_CLASS_NO_ELIGIBLE_RESOURCE,
-            }
-            task_spec.transition_to("blocked", blocked["reason"])
-            task_spec.save_to_file(str(run_dir / "task.yaml"))
-            return self._make_result(
-                task_spec,
-                "blocked",
-                3,
-                start_time=start_time,
-                run_dir=run_dir,
-                routing=routing,
-                verif_plan=verif_plan,
-                hf_status=hf_audit_status,
-                hf_match=hf_audit_match,
-                err_msg=json.dumps(blocked, sort_keys=True),
-                failure_class=FAILURE_CLASS_NO_ELIGIBLE_RESOURCE,
-            )
-
         # --------------------------------------------------------------------
         # Stage 2.5: Pre-Execution Human Authority Gating
         # --------------------------------------------------------------------
@@ -542,6 +520,27 @@ class GovernedTaskOrchestrator:
                 remediation_count=0,
             )
             return self._make_result(task_spec, "awaiting_human", 2, **stage_kwargs)
+
+        if not routing.selected_agent_id:
+            blocked = routing.metadata.get("blocked_outcome") or {
+                "status": "BLOCKED",
+                "reason": FAILURE_CLASS_NO_ELIGIBLE_RESOURCE,
+            }
+            task_spec.transition_to("blocked", blocked["reason"])
+            task_spec.save_to_file(str(run_dir / "task.yaml"))
+            return self._make_result(
+                task_spec,
+                "blocked",
+                3,
+                start_time=start_time,
+                run_dir=run_dir,
+                routing=routing,
+                verif_plan=verif_plan,
+                hf_status=hf_audit_status,
+                hf_match=hf_audit_match,
+                err_msg=json.dumps(blocked, sort_keys=True),
+                failure_class=FAILURE_CLASS_NO_ELIGIBLE_RESOURCE,
+            )
 
         # --------------------------------------------------------------------
         # Stage 3: Baseline Capture / Baseline Recovery

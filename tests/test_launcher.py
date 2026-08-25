@@ -12,6 +12,9 @@ import tempfile
 from typing import Optional
 import pytest
 
+import src.control_plane.launcher as launcher_module
+from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+
 from src.control_plane.launcher import (
     find_git_repo_root,
     find_control_plane_root,
@@ -189,14 +192,23 @@ def _make_test_repo(path: Path, files: Optional[dict] = None) -> Path:
     return path
 
 
-def test_ai_route_subcommand(tmp_path, capsys):
+def _use_connected_test_pool(monkeypatch) -> None:
+    pool = ProviderPoolManager(probe_on_start=False)
+    monkeypatch.setattr(
+        launcher_module.ProviderPoolManager,
+        "from_config",
+        classmethod(lambda cls, **kwargs: pool),
+    )
+
+
+def test_ai_route_subcommand(tmp_path, monkeypatch, capsys):
+    _use_connected_test_pool(monkeypatch)
     repo_dir = _make_test_repo(tmp_path / "sample_repo")
     code = launcher_main(["route", "fix issue 101", "--repo", str(repo_dir)])
     assert code == 0
     captured = capsys.readouterr().out
-    assert "TASK ROUTING DECISION" in captured
-    assert "Selected Agent:" in captured
-    assert "Reviewers:" in captured
+    assert "Task class: bug_fix" in captured
+    assert "Likely selected:" in captured
 
 
 def test_ai_doctor_subcommand(tmp_path, capsys):
@@ -216,7 +228,8 @@ def test_ai_status_subcommand(tmp_path, capsys):
     assert "Project Stack:      go" in captured
 
 
-def test_ai_work_subcommand_creates_run_artifacts(tmp_path, capsys):
+def test_ai_work_subcommand_creates_run_artifacts(tmp_path, monkeypatch, capsys):
+    _use_connected_test_pool(monkeypatch)
     repo_dir = _make_test_repo(tmp_path / "work_project", {"go.mod": "module workproj\n"})
     code = launcher_main([
         "work",
@@ -243,7 +256,8 @@ def test_ai_work_subcommand_creates_run_artifacts(tmp_path, capsys):
     assert spec.repository == "work_project"
 
 
-def test_ai_work_human_boundary_awaiting_human(tmp_path, capsys):
+def test_ai_work_human_boundary_awaiting_human(tmp_path, monkeypatch, capsys):
+    _use_connected_test_pool(monkeypatch)
     repo_dir = _make_test_repo(tmp_path / "infra_project")
     code = launcher_main([
         "work",

@@ -459,6 +459,15 @@ findings:
 # ============================================================================
 
 def test_cli_work_execute_and_status(tmp_path, monkeypatch, capsys):
+    from src.control_plane import launcher as launcher_module
+    from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+
+    pool = ProviderPoolManager(probe_on_start=False)
+    monkeypatch.setattr(
+        launcher_module.ProviderPoolManager,
+        "from_config",
+        classmethod(lambda cls, **kwargs: pool),
+    )
     repo = _init_test_git_repo(tmp_path / "cli_repo")
     parser = build_parser()
 

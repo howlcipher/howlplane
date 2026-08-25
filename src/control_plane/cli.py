@@ -681,7 +681,11 @@ def cmd_create(args: argparse.Namespace) -> int:
         print("")
         print("Synthesizing...")
 
-    engine = ProductSynthesizer(ledger=ledger)
+    from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+
+    engine = ProductSynthesizer(
+        provider_pool=ProviderPoolManager.from_config(), ledger=ledger
+    )
     res = engine.create_from_prompt(
         prompt=prompt,
         output_dir=out_dir,
@@ -784,6 +788,7 @@ def cmd_dogfood(args: argparse.Namespace) -> int:
         return cmd_dogfood_status(args)
 
     from src.control_plane.synthesis import MarathonDogfoodEngine
+    from src.control_plane.synthesis.provider_pool import ProviderPoolManager
     benchmarks = [b.strip() for b in args.benchmarks.split(",")] if getattr(args, "benchmarks", None) else None
     max_iters = getattr(args, "max_iterations", 5)
     avoid = getattr(args, "avoid_provider", None)
@@ -793,6 +798,7 @@ def cmd_dogfood(args: argparse.Namespace) -> int:
     ledger = EvidenceLedger(args.ledger_file) if getattr(args, "ledger_file", None) else None
 
     engine = MarathonDogfoodEngine(
+        provider_pool=ProviderPoolManager.from_config(),
         base_output_dir=out_base, ledger=ledger, campaign_dir=campaign_dir,
         target_repo=getattr(args, "target_repo", None) or ".",
         repo_slug=getattr(args, "repo_slug", None),
@@ -831,9 +837,11 @@ def cmd_acceptance(args: argparse.Namespace) -> int:
         return 1
 
     from src.control_plane.synthesis import MarathonDogfoodEngine
+    from src.control_plane.synthesis.provider_pool import ProviderPoolManager
 
     ledger = EvidenceLedger(args.ledger_file) if getattr(args, "ledger_file", None) else None
     engine = MarathonDogfoodEngine(
+        provider_pool=ProviderPoolManager.from_config(),
         campaign_dir=getattr(args, "campaign_dir", None),
         target_repo=getattr(args, "target_repo", None) or ".",
         repo_slug=getattr(args, "repo_slug", None),
@@ -1059,5 +1067,4 @@ def main(args: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
 
