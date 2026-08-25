@@ -119,6 +119,7 @@ Human Objective / Backlog Item
 5. **Durable Evidence Ledger (`logs/control_plane/evidence_ledger.jsonl`)**: Append-only structured record of task lifecycles, review findings, and verification outcomes with automated credential and token redaction.
 6. **Human Authority Boundaries (`src/control_plane/human_boundary.py`)**: Enforces explicit human authorization on consequential actions (production deployments, infrastructure modifications, database drops, package releases, and repository hygiene policy weakenings).
 7. **Reasoning Strategy Dogfooding (`src/control_plane/reasoning/`)**: Records bounded and redacted execution trajectories, immutable pre-registered baseline and candidate definitions, versioned strategy identities, deterministic comparisons, and evidence-linked observations. One shared coordinator supports every experiment type with durable definition, baseline, candidate, and evaluation checkpoints; a fresh process can resume the exact incomplete phase without duplicating trajectories or accounting. Strategy experiments remain orthogonal to authority and never store hidden chain-of-thought or change model weights.
+8. **Configurable AI Resource Pool (`ProviderPoolManager`)**: Separates registered adapters, operator-enabled resources, non-generative readiness, role and capability eligibility, durable capacity, economic policy, deterministic cognitive recommendation, and final selection. Provider, interface, resource, and observed model identities remain distinct; unobserved model IDs stay null. Governed implementation and independent review consume the same pool, and schema-versioned trajectories preserve the full selection decision without hidden reasoning.
 
 Milestone #60B used this machinery for a bounded evidence campaign and
 accepted six new trajectories, bringing the current schema live set to eight.
@@ -140,6 +141,20 @@ attempts with coverage classified `NOT_OBSERVED`. A second empty-review-artifact
 topology fixture was also collected. All six experiment evaluations remain
 `INCONCLUSIVE`; cloud model and all cost fields remain `NOT_OBSERVED`. No
 learned routing or strategy promotion occurred.
+
+Milestone #60D then exercised the same immutable evidence system against real
+historical engineering defects. Milestone #61 now extends the existing shared
+provider pool into a configurable resource registry with separate operator
+permission, readiness, capability, capacity, economic policy, deterministic
+recommendation, and authority stages. The work remains on its feature branch
+until the generic registry, CLI visibility, trajectory integration, local-only
+proof, compatibility, and complete verification are merged.
+
+The implementation extends the production Python `ProviderPoolManager` and its
+existing registry, backend, review, marathon, and trajectory consumers. The
+deterministic `TaskRouter` remains an advisory recommendation layer over an
+already eligible candidate set; it does not grant provider permission, egress,
+spend, capability, or execution authority.
 
 ---
 
@@ -230,6 +245,7 @@ The `ai` launcher locates the HowlPlane control plane using the following order:
 ## Documentation Index
 
 - [Control Plane Architecture](documentation/CONTROL_PLANE.md)
+- [Configurable AI Resource Pool](documentation/AI_RESOURCE_POOL.md)
 - [User Guide & Operator Reference](documentation/USER_GUIDE.md)
 - [Local AI Worker (Ollama) & Bounded Dogfooding](documentation/LOCAL_MODEL.md)
 - [Data Flows & Network Egress Reference](documentation/data_flows.md)
