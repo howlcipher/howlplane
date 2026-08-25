@@ -15,13 +15,13 @@ PR:
     https://github.com/howlcipher/howlplane/pull/49
 
 CURRENT_PHASE:
-    full_verification_and_delivery
+    exact_head_ci_and_delivery
 
 LAST_COMPLETED_PHASE:
-    governed_live_acceptance
+    full_local_verification
 
 LATEST_CHECKPOINT_COMMIT:
-    f335953 (capacity recovery, metered budget, and failover provenance)
+    8dbc9e0 (bounded local-only and governed multi-provider live acceptance)
 
 PROVIDER_ARCHITECTURE_DECISIONS:
     Extend the existing provider pool, routing, capability, review, trajectory,
@@ -91,6 +91,11 @@ TESTS_RUN:
     pre-push: flake8 passed
     pre-push: Bandit found no medium or high severity issues
     pre-push: documentation generation passed with dependency annotation warnings
+    explicit: go vet ./... passed
+    explicit: go build ./... passed
+    explicit: SlopsLint 0.1.0 enforcement passed at source 14 and tests 29
+    explicit: SlopsLint ratchet against origin/main passed
+    explicit: branch diff whitespace and credential-pattern scan passed
     architecture audit: source traced across registry, backends, pool, router,
     governed orchestration, reviewer failover, marathon, CLI, doctor,
     configuration, atomic I/O, evidence ledger, and trajectory persistence
@@ -117,15 +122,15 @@ KNOWN_FAILURES:
     NONE
 
 UNVERIFIED_WORK:
-    Final repository-wide verification, exact-head GitHub CI, and merge remain.
+    Exact-head GitHub CI, PR readiness transition, and merge remain.
 
 NEXT_SAFE_ACTION:
-    Commit and push live acceptance evidence, execute the complete repository
-    verification matrix, then close and merge the PR through normal policy.
+    Push this verification checkpoint, wait for every exact-head GitHub check,
+    mark PR ready, and merge only through normal repository policy.
 
 WORKTREE_STATE:
-    Only live acceptance documentation is modified. The isolated canary and
-    operator configuration remain outside the worktree.
+    Only this final verification journal update is modified. Generated artifacts,
+    the isolated canary, and operator configuration remain outside the worktree.
 
 ## Start Gate Evidence
 
@@ -252,3 +257,14 @@ marker, and the governed state reached `complete`. Shared capacity ended
 full implementation selection decision plus both reviewer resource identities,
 and leaves model IDs null because neither subscription CLI exposed one. No paid
 API resource was configured or invoked.
+
+### 2026-08-25T20:25:00Z
+
+The exact `8dbc9e0` pre-push gate passed all 838 Python tests, all Go tests, Go
+build, fatal flake8 checks, Bandit with no medium/high issues, and documentation
+generation. Explicit `go vet ./...` and `go build ./...` both passed. Pinned
+SlopsLint 0.1.0 enforced the unchanged source/test ceilings of 14/29 and its
+ratchet passed against `origin/main`. Branch whitespace and credential-pattern
+scans were clean. The only observed test warning remains the dependency-level
+Pydantic incomplete-forward-reference warning, and pdoc retains its known
+dependency annotation warnings; neither command failed.
