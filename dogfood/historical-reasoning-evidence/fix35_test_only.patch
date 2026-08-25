@@ -1,0 +1,115 @@
+diff --git a/tests/test_review_integrity.py b/tests/test_review_integrity.py
+index 85deb71..7077b67 100644
+--- a/tests/test_review_integrity.py
++++ b/tests/test_review_integrity.py
+@@ -25,6 +25,7 @@ from src.control_plane.synthesis.provider_pool import (
+     ProviderAvailabilityStatus,
+     ProviderPoolManager,
+ )
++from src.control_plane.task_spec import TaskSpec
+ from tests._dogfood_test_helpers import scripted_result
+ from tests.test_dogfood_hardening import _seed_valid_howl_files
+ 
+@@ -211,3 +212,102 @@ def test_completed_diversity_true_when_a_single_role_completes(tmp_path: Path):
+     # from providers that also fail, so they remain incomplete.
+     assert {i["provider"] for i in completed} == {survivor}
+     assert completed_diversity is True
++
++
++# ---------------------------------------------------------------------------
++# Governed review cycle: failover must be wired through the orchestrator, not
++# only the synthesis path (#59.2 Phase 4).
++# ---------------------------------------------------------------------------
++
++# Verbatim simplicity-reviewer output from live campaign
++# DOGFOOD-20260824-013739-fba3f8: a real low-severity finding written as
++# unfenced prose rather than the findings: YAML contract. It parses as an
++# unstructured shape (correctly malformed_output, never silently "clean"),
++# and before failover was wired through the orchestrator it blocked the whole
++# governed task on the first occurrence with no retry.
++LIVE_PROSE_FINDING_OUTPUT = (
++    "One low-severity finding: the journal repeats the SHA and authority-profile "
++    "digest verbatim in both the Pre-Flight section and the Progress Log, and adds "
++    "a second Progress Log bullet that just restates the \"no success assertion\" "
++    "guardrail already implied by `Status: In progress`."
++)
++
++
++class _ProseThenValidBackend(AgentBackend):
++    """One provider emits the live prose shape; every other emits valid YAML."""
++
++    def __init__(self, agent_id: str, malformed_provider: str = "claude_code"):
++        self.agent_id = agent_id
++        self.malformed_provider = malformed_provider
++
++    def is_available(self) -> bool:
++        return True
++
++    def execute(self, task, cwd, role="implementation", prompt_override=None, **kwargs):
++        malformed = self.agent_id == self.malformed_provider
++        return scripted_result(
++            role, self.agent_id, exit_code=0,
++            stdout=LIVE_PROSE_FINDING_OUTPUT if malformed else "findings: []",
++        )
++
++
++def _register_prose_backends(monkeypatch, providers):
++    from src.control_plane.agent_execution import AgentBackendRegistry
++    for agent_id in providers:
++        monkeypatch.setattr(
++            AgentBackendRegistry, "get_backend",
++            staticmethod(lambda aid, custom_backend=None: _ProseThenValidBackend(aid)),
++        )
++
++
++def _run_prose_review_cycle(monkeypatch, with_pool: bool):
++    """One governed review cycle whose assigned reviewer emits the live prose
++    shape, with failover either enabled (pool supplied) or not."""
++    from src.control_plane.review_runner import ReviewRunner
++
++    _register_prose_backends(monkeypatch, ("claude_code", "codex"))
++    return ReviewRunner.execute_review_cycle(
++        task=TaskSpec(task_id="GOV", repository="r", objective="o",
++                      risk_level="low", task_class="other"),
++        diff_content="+x", reviewer_roles=["simplicity-reviewer"], cwd=".",
++        reviewer_agent_mapping={"simplicity-reviewer": "claude_code"},
++        provider_pool=_pool(available=("claude_code", "codex")) if with_pool else None,
++    )
++
++
++def test_governed_review_cycle_fails_over_on_malformed_output(monkeypatch):
++    """
++    VERIFIED_REPLAY (#59.2 Phase 4): replays campaign DOGFOOD-20260824-013739-
++    fba3f8's malformed simplicity-reviewer output through ReviewRunner. With a
++    provider_pool supplied (as GovernedTaskOrchestrator now does), the role
++    must retry an independent provider and complete rather than block.
++    """
++    res = _run_prose_review_cycle(monkeypatch, with_pool=True)
++
++    role_res = res.reviewer_results["simplicity-reviewer"]
++    assert role_res.status == "clean"
++    assert res.requires_remediation is False
++    assert [a["outcome"] for a in role_res.attempts] == ["malformed_output", "completed"]
++
++
++def test_governed_review_cycle_without_pool_still_blocks_on_malformed_output(monkeypatch):
++    """
++    Failover is opt-in: without a provider_pool the malformed output still
++    blocks, so the gate never silently weakens for callers that inject their
++    own backend/reviewer function.
++    """
++    res = _run_prose_review_cycle(monkeypatch, with_pool=False)
++
++    assert res.reviewer_results["simplicity-reviewer"].status == "malformed_output"
++    assert res.requires_remediation is True
++
++
++def test_orchestration_config_wires_provider_pool_into_review_cycle():
++    """The orchestrator must actually forward its pool -- the gap that left the
++    governed path (used by the acceptance canary) with no reviewer failover."""
++    import inspect
++    from src.control_plane.orchestrator import OrchestrationConfig, GovernedTaskOrchestrator
++
++    assert "provider_pool" in OrchestrationConfig.__dataclass_fields__
++    source = inspect.getsource(GovernedTaskOrchestrator._run_governed_loop)
++    assert "provider_pool=self.config.provider_pool" in source
