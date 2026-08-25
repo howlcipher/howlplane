@@ -3,7 +3,7 @@
 ## Durable State
 
 STATUS:
-    EVIDENCE_COMPLETE_LOCAL_VERIFICATION_GREEN_CI_PENDING
+    EVIDENCE_COMPLETE_CI_GREEN_PENDING_PR_READY
 
 STARTING_MAIN:
     a45458a237c7ceba38fb8cf7d7b27e9a017f7cef
@@ -15,7 +15,7 @@ PR:
     https://github.com/howlcipher/howlplane/pull/47
 
 CURRENT_HEAD:
-    36cc091
+    208896b
 
 STAGED_WORK:
     documentation/task_journals/2026-08-25_reasoning_evidence_comparability.md
@@ -83,7 +83,7 @@ CURRENT_BRANCH:
     dogfood/reasoning-evidence-comparability
 
 HEAD:
-    36cc091
+    208896b
 
 LAST_CONFIRMED_REMOTE_MAIN:
     a45458a237c7ceba38fb8cf7d7b27e9a017f7cef
@@ -171,6 +171,10 @@ Post-campaign audit completed over all 22 current-schema live trajectories. Corr
 ### 2026-08-25T14:05:00Z
 
 Signed evidence checkpoint 36cc091 passed the normal prepush gate and is durable on origin. Explicit final verification passed 798 Python tests with one preexisting third party warning; all Go tests, Go build, go vet, canonical flake8, canonical Bandit with no medium or high issue, SlopsLint classification and enforcement, the origin main ratchet at unchanged ceilings 14 and 29, documentation generation, and diff hygiene. Broad noncanonical flake8 and Bandit probes emitted existing low priority repository baseline findings; the canonical project gates passed and no hygiene policy changed. GitHub checks for 36cc091 currently show Analyze, CodeQL, SlopsLint, lint, and Go passed while Python remains pending.
+
+### 2026-08-25T14:12:00Z
+
+All six required GitHub checks passed on signed head 208896b: Analyze, CodeQL, SlopsLint, lint, Go, and the complete Python workflow. The Python workflow completed in 4 minutes 50 seconds. This metadata checkpoint records the live result before PR readiness; its own required checks must pass before merge.
 
 ## Handoff Packet
 
