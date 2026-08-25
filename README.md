@@ -129,7 +129,9 @@ review topology across six bounded trajectories and the canonical `other`,
 `bug_fix`, and `test_improvement` task classes. Rejected definitions remain
 visible rather than being rewritten after execution began. The first corrected
 comparison produced one exactly verified and one failed live local trajectory;
-its one-sample result remains `INCONCLUSIVE`.
+its one-sample result remains `INCONCLUSIVE`. The provider-routing comparison
+added local and Claude executions plus two bounded remediation attempts, but
+both arms failed exact verification and remain `INCONCLUSIVE`.
 
 ---
 

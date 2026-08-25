@@ -228,7 +228,7 @@ experiment_plan:
         - traj-1ebfcd581ea8c7ecce27464c
       next_action: complete
     EXP-60B-ROUTING-002:
-      status: PREREGISTERED
+      status: COMPLETED
       experiment_type: ROUTING
       task_class: bug_fix
       baseline: routing.local_first_low_risk/v1
@@ -255,7 +255,11 @@ experiment_plan:
         may use its registered Claude escalation target. All attempts and the
         exact repair count remain visible.
       prediction_digest: ec4e4bb71cd515479f624cb6a0d577e37d4de830f12ada8ebe5c7d0ea8c58190
-      next_action: run_baseline
+      result: INCONCLUSIVE
+      trajectory_ids:
+        - traj-0344c4137cf1a00d7ccaaad5
+        - traj-663eed5b31c5a0acf7634224
+      next_action: complete
     EXP-60B-REVIEW-002:
       status: PREREGISTERED
       experiment_type: REVIEW_TOPOLOGY

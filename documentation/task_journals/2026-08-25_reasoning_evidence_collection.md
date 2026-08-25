@@ -15,21 +15,24 @@ PR:
     https://github.com/howlcipher/howlplane/pull/46
 
 CURRENT_EXPERIMENT:
-    EXP-60B-ROUTING-002: PREREGISTERED
+    EXP-60B-REVIEW-002: PREREGISTERED
 
 COMPLETED_EXPERIMENTS:
     EXP-60B-CONTEXT-002: INCONCLUSIVE
+    EXP-60B-ROUTING-002: INCONCLUSIVE
 
 TRAJECTORY_COUNTS:
     EXISTING_LIVE: 2
-    NEW_TRUSTWORTHY_60B: 2
+    NEW_TRUSTWORTHY_60B: 4
 
 PROVIDERS_OBSERVED:
     local_ollama
+    claude_code; provider available, model identifier not observable
 
 TASK_CLASSES_OBSERVED:
     test_improvement
     other
+    bug_fix
 
 KNOWN_FAILURES:
     The two existing live trajectories both record verification_failed.
@@ -42,13 +45,16 @@ KNOWN_FAILURES:
     EXP-60B-CONTEXT-002 baseline failed exact verification after inventing the
     threshold and miner names. The candidate passed. The one sample per arm
     evaluation remains INCONCLUSIVE.
+    Both EXP-60B-ROUTING-002 arms failed first-pass verification and their one
+    bounded remediations also failed. Claude was available; the failures are
+    output-quality evidence, not provider-availability evidence.
 
 CURRENT_BLOCKERS:
     NONE
 
 NEXT_SAFE_ACTION:
-    Commit and push the context experiment evidence, then run the baseline and
-    candidate arms of EXP-60B-ROUTING-002 with at most one registered repair.
+    Commit and push the routing experiment evidence, then run the baseline and
+    candidate arms of EXP-60B-REVIEW-002 without format repair or fallback.
 
 LAST_VERIFIED_TESTS:
     Targeted #60A suite: 76 passed in 5.78 seconds.
@@ -76,13 +82,14 @@ CURRENT_BRANCH:
     dogfood/reasoning-evidence-collection
 
 HEAD:
-    f5990871b3b72e7f311287eea1448343c0daaacd
+    23779d426e34f633c388676d6884420939762c29
 
 PR:
     https://github.com/howlcipher/howlplane/pull/46
 
 EXPERIMENTS_COMPLETED:
     EXP-60B-CONTEXT-002
+    EXP-60B-ROUTING-002
 
 EXPERIMENT_CURRENTLY_INCOMPLETE:
     EXP-60B-CONTEXT-001 is preserved at RUNNING with no arm results after
@@ -104,7 +111,7 @@ EXACT_EVIDENCE_PATHS:
     logs/control_plane/milestone_60b_reasoning_evidence/trajectories
 
 EXACT_NEXT_EXPERIMENT:
-    EXP-60B-ROUTING-002
+    EXP-60B-REVIEW-002
 
 TESTS_RUN:
     Targeted #60A suite: 76 passed.
@@ -113,7 +120,7 @@ TESTS_RUN:
     GitHub checks: all six required checks passed for 64957f8.
 
 REPOSITORY_STATUS:
-    Intentional tracked evidence and journal changes for the context checkpoint.
+    Intentional tracked evidence and journal changes for the routing checkpoint.
 
 ## Progress Log
 
@@ -177,3 +184,20 @@ Deterministic evaluation returned INCONCLUSIVE with one sample per arm despite
 the candidate's directional win. Both trajectory digests and the experiment
 prediction digest validate. A completed-run resume check left the trajectory
 count unchanged at two and did not call the executor.
+
+### 2026-08-25T01:41:51Z
+
+Completed EXP-60B-ROUTING-002 through the production coordinator using the
+same historical agy quota fixture, prompt, context scope, and exact verifier.
+The local-first baseline and Claude-first candidate both failed first-pass
+verification. Each received the one preregistered remediation. Both repairs
+also failed: they used unsupported quality labels, and the candidate repair
+added prose. The failures are classified as reasoning output failures because
+both providers completed their calls; there was no availability failure.
+
+The two trajectories preserve one live repair attempt each, with zero
+successful repairs. Observable total latencies were 15.075 and 31.037 seconds.
+Claude's model identifier and all costs were unobservable and were not inferred.
+Deterministic evaluation returned INCONCLUSIVE. Both trajectory digests and the
+experiment prediction digest validate, provider commands redact prompts, and a
+resume check left the trajectory count unchanged at four.

@@ -1,6 +1,6 @@
 schema: howlplane.reasoning_evidence_campaign_results/v1
 campaign_id: MILESTONE-60B
-updated_at: "2026-08-25T01:32:24Z"
+updated_at: "2026-08-25T01:41:51Z"
 evidence_classification: LIVE
 scope: observable provider outputs and deterministic verification only
 experiment_results:
@@ -84,18 +84,156 @@ experiment_results:
       hidden_reasoning_stored: false
       raw_prompt_stored: false
       secrets_observed: false
+  EXP-60B-ROUTING-002:
+    experiment_type: ROUTING
+    task_class: bug_fix
+    hypothesis: >-
+      Frontier first routing produces a verifiable first pass classification
+      more often than local first routing for the historical agy exhaustion.
+    baseline: routing.local_first_low_risk/v1
+    candidate: routing.frontier_first/v1
+    expected_outcome: >-
+      Candidate has a higher first pass verification rate than baseline.
+    falsification_criteria:
+      - candidate.first_pass_success_rate < baseline.first_pass_success_rate
+    metrics:
+      - first_pass_success_rate
+      - mean_repair_cycles
+      - mean_latency
+      - provider_failures
+    verifier: exact_normalized_lines/v1
+    result: INCONCLUSIVE
+    confidence: baseline_n=1, candidate_n=1, primary_metric=first_pass_success_rate
+    metric_comparisons:
+      first_pass_success_rate: equal
+      mean_repair_cycles: equal
+      mean_latency: worse
+      provider_failures: equal
+    falsification_failures: []
+    prediction_digest: ec4e4bb71cd515479f624cb6a0d577e37d4de830f12ada8ebe5c7d0ea8c58190
+    content_digest: 6446e2293d567bcf2e5e4c777a3182899dc06fb9c7afe51978dd5b8475ec0cc6
+    evidence_refs:
+      - logs/control_plane/milestone_60b_reasoning_evidence/experiments/EXP-60B-ROUTING-002.json
+      - .dogfood_runs/DOGFOOD-20260822-005043-16adca/campaign_state.json
+      - tests/test_provider_failover.py
+    expected_response: |-
+      AVAILABILITY_STATUS=SESSION_EXHAUSTED
+      FAILURE_TYPE=session_limit
+      REASONING_QUALITY=NOT_OBSERVED
+    arms:
+      baseline:
+        trajectory_id: traj-0344c4137cf1a00d7ccaaad5
+        trajectory_digest: a6f684a62eb176c1deedfc1500ed876751dfd399a7fabeb7f7eeb0d51f4fc168
+        provider: local_ollama
+        model: qwen2.5-coder:7b-instruct
+        strategy_ids:
+          routing: routing.local_first_low_risk/v1
+          context: context.task_plus_acceptance/v1
+          retrieval: retrieval.failure_signature/v1
+        selected_context_refs:
+          - fixture:DOGFOOD-20260822-005043-16adca:agy-quota-stderr
+          - tests/test_provider_failover.py:test_live_agy_quota_stderr_is_classified_as_session_exhaustion
+        reviewers: []
+        review_topology: no_reviewers
+        repairs: 1
+        first_pass:
+          provider: local_ollama
+          latency_seconds: 5.75
+          verification_outcome: failed
+          observable_response: |-
+            AVAILABILITY_STATUS=UNKNOWN
+            FAILURE_TYPE=SESSION_LIMIT
+            REASONING_QUALITY=UNKNOWN
+          output_sha256: 448590851d77e620f51741a1fcd2295f0b7626e21eb9a04092796433917c33e8
+        remediation:
+          provider: claude_code
+          model: NOT_OBSERVED
+          latency_seconds: 9.325
+          verification_outcome: failed
+          observable_response: |-
+            AVAILABILITY_STATUS=SESSION_EXHAUSTED
+            FAILURE_TYPE=session_limit
+            REASONING_QUALITY=NOT_APPLICABLE
+          output_sha256: b015959a6d63559de558b1df089b29ec8ff36a2e15cc0677c32939de7fee067f
+        total_latency_seconds: 15.075
+        cost_observed: null
+        verification_outcome: failed
+        outcome: verification_failed
+        failure_evidence:
+          - first pass changed exact enum values
+          - remediation substituted NOT_APPLICABLE for NOT_OBSERVED
+      candidate:
+        trajectory_id: traj-663eed5b31c5a0acf7634224
+        trajectory_digest: 37a94f7502e15e29497c1488beb54d6ce7d5cfbe77a01cf618202b035920a981
+        provider: claude_code
+        model: NOT_OBSERVED
+        strategy_ids:
+          routing: routing.frontier_first/v1
+          context: context.task_plus_acceptance/v1
+          retrieval: retrieval.failure_signature/v1
+        selected_context_refs:
+          - fixture:DOGFOOD-20260822-005043-16adca:agy-quota-stderr
+          - tests/test_provider_failover.py:test_live_agy_quota_stderr_is_classified_as_session_exhaustion
+        reviewers: []
+        review_topology: no_reviewers
+        repairs: 1
+        first_pass:
+          provider: claude_code
+          model: NOT_OBSERVED
+          latency_seconds: 8.487
+          verification_outcome: failed
+          observable_response: |-
+            AVAILABILITY_STATUS=SESSION_EXHAUSTED
+            FAILURE_TYPE=session_limit
+            REASONING_QUALITY=NOT_APPLICABLE_NO_ARTIFACT
+          output_sha256: b9c1509e28b0c975b00eafc58e001167037b3948bf6a3c14ef1f13e7562a45be
+        remediation:
+          provider: claude_code
+          model: NOT_OBSERVED
+          latency_seconds: 22.55
+          verification_outcome: failed
+          observable_response: |-
+            This confirms the production enum values match the fixture exactly. Here's the classification, grounded strictly in the evidence given (availability/failure type from the replay, no inference of reasoning quality since no reasoning artifact exists):
+
+            AVAILABILITY_STATUS=SESSION_EXHAUSTED
+            FAILURE_TYPE=session_limit
+            REASONING_QUALITY=NOT_APPLICABLE
+          output_sha256: 1484afba12f55d61aea4d2492805a9a8a719b07a5670645a49be7ab90cb6e7c8
+        total_latency_seconds: 31.037
+        cost_observed: null
+        verification_outcome: failed
+        outcome: verification_failed
+        failure_evidence:
+          - first pass substituted NOT_APPLICABLE_NO_ARTIFACT for NOT_OBSERVED
+          - remediation substituted NOT_APPLICABLE and added unrequested prose
+    quality_checks:
+      trajectory_digests_valid: 2
+      experiment_prediction_digest_valid: true
+      duplicate_resume_count_before: 4
+      duplicate_resume_count_after: 4
+      hidden_reasoning_stored: false
+      raw_prompt_stored: false
+      provider_commands_redacted: true
+      secrets_observed: false
+      provider_availability_failures: 0
 
 campaign_totals:
-  completed_experiments: 1
-  new_trustworthy_trajectories: 2
+  completed_experiments: 2
+  new_trustworthy_trajectories: 4
   task_classes:
     other: 2
+    bug_fix: 2
   providers:
-    local_ollama: 2
+    local_ollama: 3
+    claude_code: 3
+  primary_provider_attribution:
+    local_ollama: 3
+    claude_code: 1
   outcomes:
     success: 1
-    verification_failed: 1
+    verification_failed: 3
   repairs:
     no_repair: 2
+    one_unsuccessful_repair: 2
   reviewer_topologies:
-    no_reviewers: 2
+    no_reviewers: 4
