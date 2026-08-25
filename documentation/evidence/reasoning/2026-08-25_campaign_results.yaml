@@ -555,7 +555,8 @@ decision_gate:
     - observed costs where a provider exposes them
 
 full_verification:
-  status: PASSED_PENDING_FINAL_PUSH_AND_GITHUB_CI
+  status: PASSED_FOR_EVIDENCE_HEAD
+  verified_evidence_head: 20d06ad3e817a4d27f245a79083c006cd573a104
   completed_at: "2026-08-25T01:57:31Z"
   python:
     command: PYTHONPATH=. pytest tests/ -q
@@ -587,5 +588,12 @@ full_verification:
     result: passed
     warnings: preexisting third party pdoc type-resolution warnings
   diff_check: passed
-  normal_pre_push: PENDING_FINAL_COMMIT
-  github_workflows: PENDING_FINAL_COMMIT
+  normal_pre_push: PASSED_FOR_20d06ad3e817a4d27f245a79083c006cd573a104
+  github_workflows:
+    head: 20d06ad3e817a4d27f245a79083c006cd573a104
+    Analyze: passed
+    CodeQL: passed
+    SlopsLint_Duplication_and_Ceiling_Ratchet: passed
+    lint: passed
+    test_go: passed
+    test_python: passed in 5 minutes 24 seconds

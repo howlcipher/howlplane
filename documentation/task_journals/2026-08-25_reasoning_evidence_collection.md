@@ -3,7 +3,7 @@
 ## Durable State
 
 STATUS:
-    FULL_VERIFICATION_PASSED_PENDING_FINAL_PUSH_AND_CI
+    EVIDENCE_COMPLETE_CI_GREEN_PENDING_PR_READY
 
 STARTING_MAIN:
     30b886211ce75dc132c8ef449ec857bf14df4b3d
@@ -58,9 +58,8 @@ CURRENT_BLOCKERS:
     NONE
 
 NEXT_SAFE_ACTION:
-    Commit the final evidence and verification record, push through the normal
-    gate, observe GitHub CI, mark the draft PR ready, and merge only if policy
-    permits.
+    Commit and push this metadata-only CI closure checkpoint, observe its fresh
+    GitHub checks, mark PR 46 ready, and merge only if policy permits.
 
 LAST_VERIFIED_TESTS:
     Targeted #60A suite: 76 passed in 5.78 seconds.
@@ -74,6 +73,9 @@ LAST_VERIFIED_TESTS:
     build, go vet, flake8, Bandit, SlopsLint check and origin/main ratchet,
     docs build, and diff check all passed. SlopsLint remained at 14 source and
     29 test clones with no ceiling or ignore change.
+    Normal pre-push for evidence head 20d06ad passed the repository gate.
+    GitHub head 20d06ad: Analyze, CodeQL, SlopsLint, lint, test-go, and
+    test-python all passed; test-python completed in 5 minutes 24 seconds.
 
 ## Campaign Boundaries
 
@@ -92,7 +94,7 @@ CURRENT_BRANCH:
     dogfood/reasoning-evidence-collection
 
 HEAD:
-    85c8f22dc0d64e9a54790ea56adef2ecaaaea9a3
+    20d06ad3e817a4d27f245a79083c006cd573a104
 
 PR:
     https://github.com/howlcipher/howlplane/pull/46
@@ -262,6 +264,13 @@ against origin/main, docs generation, and diff hygiene. The committed SlopsLint
 ceilings remain unchanged at 14 source and 29 test clones. The only warnings
 were the already recorded third party Pydantic, pdoc, and Bandit parser output.
 
-Durability so far: six signed checkpoint commits and six normal pushes, no
-handoff and no provider or AI session limit. The final checkpoint and its
-normal push remain before GitHub CI and PR readiness.
+Durability through evidence head 20d06ad: seven signed checkpoint commits and
+seven normal pushes, no handoff and no provider or AI session limit.
+
+### 2026-08-25T02:07:12Z
+
+Signed evidence head 20d06ad passed the normal pre-push gate and all six GitHub
+checks: Analyze, CodeQL, SlopsLint, lint, test-go, and test-python. The Python
+workflow completed in 5 minutes 24 seconds. This metadata-only closure
+checkpoint records those live results; it must receive its own normal push and
+GitHub checks before PR readiness.

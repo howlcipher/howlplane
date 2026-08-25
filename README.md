@@ -137,6 +137,8 @@ known fixture defect, while the two-reviewer topology missed it and was
 `FALSIFIED` for that fixture. The quality audit accepted all six new
 trajectories, but the decision gate is `COLLECT_MORE_TRAJECTORY_EVIDENCE` because
 the comparisons remain one sample per arm and key dimensions are sparse.
+The finalized evidence head passed the normal local gate and all six GitHub
+checks before PR readiness.
 
 ---
 
