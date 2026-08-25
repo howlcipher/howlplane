@@ -15,13 +15,13 @@ PR:
     https://github.com/howlcipher/howlplane/pull/49
 
 CURRENT_PHASE:
-    live_acceptance_and_full_verification
+    full_verification_and_delivery
 
 LAST_COMPLETED_PHASE:
-    cli_configuration_docs_local_only_acceptance
+    governed_live_acceptance
 
 LATEST_CHECKPOINT_COMMIT:
-    38b315b (CLI, documentation, operator overlay, and local-only acceptance)
+    f335953 (capacity recovery, metered budget, and failover provenance)
 
 PROVIDER_ARCHITECTURE_DECISIONS:
     Extend the existing provider pool, routing, capability, review, trajectory,
@@ -99,6 +99,14 @@ TESTS_RUN:
     focused: 114 governed orchestration, trajectory, failover, and review tests passed
     focused: 132 CLI, config, doctor, orchestration, trajectory, and compatibility tests passed
     focused: 106 resource, configuration, failover, and historical dogfood tests passed
+    pre-push: 838 Python tests passed with one dependency warning
+    pre-push: all Go tests and Go build passed
+    pre-push: flake8 fatal checks passed
+    pre-push: Bandit found no medium or high severity issues
+    pre-push: documentation generation passed with dependency annotation warnings
+    live governed: Codex implementation and Claude Code correctness/simplicity
+    reviews completed; one permitted file changed; deterministic verification
+    passed; trajectory v2 digest verified; both invoked resource states AVAILABLE
     SlopsLint: python_src 14/14 and python_tests 29/29 ceilings passed
     live local-only: local_ollama planning selected and returned exactly
     LOCAL_ONLY_OK; hosted adapter lookup count was zero
@@ -109,16 +117,15 @@ KNOWN_FAILURES:
     NONE
 
 UNVERIFIED_WORK:
-    Bounded governed multi-provider live acceptance, final repository-wide
-    verification, exact-head GitHub CI, and merge remain.
+    Final repository-wide verification, exact-head GitHub CI, and merge remain.
 
 NEXT_SAFE_ACTION:
-    Commit and push capacity hardening, run bounded governed live acceptance,
-    then execute the complete repository verification matrix and close the PR.
+    Commit and push live acceptance evidence, execute the complete repository
+    verification matrix, then close and merge the PR through normal policy.
 
 WORKTREE_STATE:
-    Capacity hardening is verified and ready for exact-file staging. Operator
-    configuration remains outside the worktree.
+    Only live acceptance documentation is modified. The isolated canary and
+    operator configuration remain outside the worktree.
 
 ## Start Gate Evidence
 
@@ -227,3 +234,21 @@ observed retry time. Marathon retries annotate the next task attempt with its
 source resource, and trajectory v2 persists that failover provenance while v1
 digest semantics remain unchanged. The focused 106-test matrix, changed-file
 flake8 fatal checks, and whitespace validation all pass.
+
+### 2026-08-25T20:18:00Z
+
+Completed bounded governed live acceptance in an isolated temporary Git
+repository. The configured pool contained only the enabled Claude Code and
+Codex subscription resources. Non-generative readiness admitted both;
+deterministic routing recommended Codex for the implementation role; and the
+shared reviewer selector mapped both correctness and simplicity review roles to
+Claude Code with provider-family diversity achieved.
+
+Codex created only the authorized `answer.py` path. Both real Claude reviewer
+invocations completed cleanly, `python3 verify.py` printed the exact expected
+marker, and the governed state reached `complete`. Shared capacity ended
+`AVAILABLE` for both invoked resources. Trajectory
+`traj-9d31e760474459410a1b8119` uses schema v2, verifies its digest, records the
+full implementation selection decision plus both reviewer resource identities,
+and leaves model IDs null because neither subscription CLI exposed one. No paid
+API resource was configured or invoked.

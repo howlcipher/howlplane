@@ -175,3 +175,14 @@ implementation/reviewer provider events, failover, diversity, verification, and
 result. Version 1 trajectories continue to load and verify against their
 original digest rules. Resume retains stable trajectory identity and does not
 duplicate provider events.
+
+## Acceptance evidence
+
+Milestone #61 used two bounded live canaries. A `local_only` canary selected
+only `local_ollama`, returned the exact expected token, and observed zero hosted
+adapter lookups. A separate isolated governed repository automatically selected
+the Codex subscription resource for implementation and Claude Code for two
+independent reviewer roles. It changed only the permitted file, passed the
+repository's deterministic verifier, left both invoked resource states
+`AVAILABLE`, and produced a digest-valid `howlplane.execution_trajectory/v2`
+artifact. Exact model IDs remained `null` because neither CLI exposed one.
