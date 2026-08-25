@@ -12,7 +12,7 @@ WORKING_BRANCH:
     feat/configurable-ai-resource-pool
 
 PR:
-    PENDING_INITIAL_CHECKPOINT
+    https://github.com/howlcipher/howlplane/pull/49
 
 CURRENT_PHASE:
     architecture_audit
@@ -21,7 +21,7 @@ LAST_COMPLETED_PHASE:
     hard_start_gate
 
 LATEST_CHECKPOINT_COMMIT:
-    PENDING_INITIAL_CHECKPOINT
+    2ea6fbbe0fdee815ecadb44ab3827425fd0a2fcb
 
 PROVIDER_ARCHITECTURE_DECISIONS:
     Extend the existing provider pool, routing, capability, review, trajectory,
@@ -44,6 +44,12 @@ TESTS_RUN:
     gh pr view 48 merge verification
     git merge-base ancestry verification
     git status and post-merge log inspection
+    pre-push: 798 Python tests passed with one dependency warning
+    pre-push: Go tests passed
+    pre-push: Go build passed
+    pre-push: flake8 passed
+    pre-push: Bandit found no medium or high severity issues
+    pre-push: documentation generation passed with dependency annotation warnings
 
 KNOWN_FAILURES:
     NONE
@@ -59,8 +65,8 @@ NEXT_SAFE_ACTION:
     extension seam.
 
 WORKTREE_STATE:
-    Clean post-#60D main was verified before this branch was created. This
-    initial checkpoint contains documentation and recovery metadata only.
+    Clean after the initial signed checkpoint and enforced pre-push suite. The
+    checkpoint contains documentation and recovery metadata only.
 
 ## Start Gate Evidence
 
@@ -93,3 +99,11 @@ Verified the #60D hard start gate against both GitHub PR state and Git ancestry.
 Synchronized a clean local `main` at the actual post-#60D merge SHA, created
 the feature branch, loaded all repository rules and relevant skills, and
 created the durable Milestone #61 recovery header.
+
+### 2026-08-25T15:42:00Z
+
+Created signed checkpoint `2ea6fbb`, passed the repository pre-push suite,
+pushed the branch, and opened draft PR #49. The hook reported pre-existing
+pdoc dependency annotation warnings and skipped `golangci-lint` and `gosec`
+because those optional executables are not installed; all enforced commands
+returned success.
