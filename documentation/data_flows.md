@@ -28,6 +28,15 @@ HowlPlane operates primarily as a **local-first control plane and knowledge base
 | **Google Drive / Docs API** | User runs `scripts/push_to_docs.py` or `scripts/pull_from_docs.py` | Exported markdown docs, OAuth tokens | Google Workspace APIs | `operating_mode: connected` AND `credentials.json` | Off by default (hard-blocked in `local_only` mode) |
 | **GitHub Actions CI/CD** | Git push to remote repository | Repository commits, test execution | GitHub runners (`github.com`) | Standard Git push operations | CI only on push |
 
+Resource selection applies `local_only` and per-task no-egress filters before
+hosted adapter lookup. In local-only mode `ai providers`, `ai doctor`, governed
+planning, implementation, review, remediation, synthesis, and dogfood perform
+zero hosted readiness requests and zero hosted generation. `ai route` is
+read-only in every mode and uses persisted capacity without probing. Local
+Ollama traffic remains loopback-only. Operator configuration and current
+capacity live outside the repository in `~/.config/howlplane/`; neither carries
+credentials.
+
 ---
 
 ## 3. Local Data Stores

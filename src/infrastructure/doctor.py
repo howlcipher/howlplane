@@ -19,7 +19,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -243,9 +243,29 @@ def check_operating_mode(cfg: Optional[Dict] = None) -> DiagnosticCheck:
         )
 
 
-def run_diagnostics(repo_root: Optional[Path] = None) -> List[DiagnosticCheck]:
+def check_ai_resources(provider_pool: Optional[Any] = None) -> List[DiagnosticCheck]:
+    """Reports configured resource readiness without consuming generation."""
+    try:
+        from src.control_plane.resource_cli import resource_diagnostic_rows
+        from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+
+        pool = provider_pool or ProviderPoolManager.from_config(
+            read_only=True, probe_on_start=True
+        )
+        return [DiagnosticCheck(**row) for row in resource_diagnostic_rows(pool)]
+    except Exception as exc:
+        return [DiagnosticCheck(
+            name="AI Resource Configuration",
+            status="error",
+            message=f"Invalid AI resource configuration: {exc}",
+        )]
+
+def run_diagnostics(
+    repo_root: Optional[Path] = None,
+    provider_pool: Optional[Any] = None,
+) -> List[DiagnosticCheck]:
     root = repo_root or Path(__file__).resolve().parent.parent.parent
-    return [
+    checks = [
         check_python_environment(),
         check_dependencies(),
         check_go_toolchain(),
@@ -255,6 +275,8 @@ def run_diagnostics(repo_root: Optional[Path] = None) -> List[DiagnosticCheck]:
         check_control_plane_ledger(root),
         check_operating_mode(),
     ]
+    checks.extend(check_ai_resources(provider_pool))
+    return checks
 
 
 def main() -> int:

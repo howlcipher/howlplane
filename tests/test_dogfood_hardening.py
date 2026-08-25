@@ -183,7 +183,11 @@ def test_scenario_5_all_providers_exhausted_clean_stop(tmp_path: Path):
 
     assert res.success is False
     assert res.status == "PROVIDER_POOL_EXHAUSTED"
-    assert pool.get_status("codex") in (ProviderAvailabilityStatus.SESSION_EXHAUSTED, ProviderAvailabilityStatus.RATE_LIMITED)
+    assert pool.get_status("codex") in (
+        ProviderAvailabilityStatus.QUOTA_EXHAUSTED,
+        ProviderAvailabilityStatus.SESSION_EXHAUSTED,
+        ProviderAvailabilityStatus.RATE_LIMITED,
+    )
     # Full product synthesis is medium risk and never local-eligible (#58 Phase 9):
     # local_ollama must not even be attempted merely because cloud is exhausted.
     assert "local_ollama" not in dispatcher.invocations

@@ -1239,10 +1239,12 @@ class MarathonDogfoodEngine:
         if event is not None:
             status = ProviderAvailabilityStatus.RATE_LIMITED if event.failure_type == "rate_limit" else (
                 ProviderAvailabilityStatus.SESSION_EXHAUSTED if event.failure_type == "session_limit"
+                else ProviderAvailabilityStatus.QUOTA_EXHAUSTED if event.failure_type == "quota_exhausted"
                 else ProviderAvailabilityStatus.UNAVAILABLE
             )
             failure_class = (
-                FAILURE_CLASS_PROVIDER_UNAVAILABLE if event.failure_type == "unavailable"
+                FAILURE_CLASS_PROVIDER_UNAVAILABLE
+                if event.failure_type in ("unavailable", "authentication_required")
                 else FAILURE_CLASS_PROVIDER_EXHAUSTED
             )
             return status.value, failure_class
@@ -1371,11 +1373,14 @@ class MarathonDogfoodEngine:
         attempted: set = set()
         result = None
         attempt_index = 0
+        previous_provider: Optional[str] = None
 
         while True:
             attempt_index += 1
             attempted.add(provider)
             gap_probe.preferred_agent = provider
+            gap_probe.metadata["provider_attempt_index"] = attempt_index
+            gap_probe.metadata["failover_from_resource_id"] = previous_provider
             git_rec.provider = provider
             attempt_started = time.time()
             attempt_baseline = None
@@ -1420,7 +1425,16 @@ class MarathonDogfoodEngine:
             # from summary text -- whether this was an availability failure.
             event = None
             if exec_res is not None:
-                event = self.provider_pool.detect_exhaustion(provider, exec_res, task_id=task_id)
+                if result.failure_class in {
+                    FAILURE_CLASS_PROVIDER_EXHAUSTED,
+                    FAILURE_CLASS_PROVIDER_UNAVAILABLE,
+                }:
+                    state = self.provider_pool.get_resource_status(provider)
+                    event = state.exhaustion_event if state is not None else None
+                else:
+                    event = self.provider_pool.detect_exhaustion(
+                        provider, exec_res, task_id=task_id
+                    )
             attempt_result, failure_class = self._attempt_result_for(event, result.final_state)
 
             reconciled = False
@@ -1459,6 +1473,7 @@ class MarathonDogfoodEngine:
                 )
                 self._persist_git_record(git_rec, campaign_state, state_dir)
                 return False, git_rec.to_dict()
+            previous_provider = provider
             provider = next_candidates[0]
 
         delta = result.final_delta

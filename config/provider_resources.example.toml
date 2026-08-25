@@ -1,0 +1,40 @@
+# Copy the relevant sections into ~/.config/howlplane/config.toml or point
+# HOWLPLANE_LOCAL_CONFIG at a private TOML file. This example grants no secrets.
+
+[ai_resources]
+operating_mode = "connected"
+
+[ai_resources.providers.claude_code]
+enabled = true
+
+[ai_resources.providers.codex]
+enabled = true
+
+[ai_resources.providers.local_ollama]
+enabled = true
+# model_id may be set only when the registered adapter declares it configurable.
+# model_id = "qwen2.5-coder:7b-instruct"
+
+[ai_resources.providers.devin_cli]
+enabled = false
+
+[ai_resources.provider_policy]
+strategy = "adaptive_capacity"
+subscription_first = true
+prefer_existing_capacity = true
+external_before_local = true
+allow_paid_api = false
+preserve_independent_review = true
+preferred_external = []
+preferred_local = []
+cooldown_seconds = 300
+
+# Local-only variant:
+# [ai_resources]
+# operating_mode = "local_only"
+#
+# [ai_resources.providers.local_ollama]
+# enabled = true
+#
+# [ai_resources.provider_policy]
+# allow_paid_api = false

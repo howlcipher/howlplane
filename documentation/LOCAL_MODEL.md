@@ -4,6 +4,13 @@ HowlPlane can use a local, quota-free, private model (`qwen2.5-coder:7b-instruct
 via [Ollama](https://ollama.com)) as a Tier-3 provider for bounded, low-risk
 mechanical engineering work, so cloud AI is not required for every small action.
 
+Ollama is registered as `resource_id=local_ollama` with
+`provider_id=ollama`, `interface_id=local_runtime`, and a model-aware capability
+profile. It is one runtime in the generic
+[AI resource pool](AI_RESOURCE_POOL.md), not a permanent fallback. Additional
+Ollama models or future llama.cpp, vLLM, and self-hosted adapters can register
+separate resource/model profiles without changing the generic selector.
+
 The local model is:
 - cheap, private, quota-free
 - slower and weaker than frontier cloud providers

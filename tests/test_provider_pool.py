@@ -20,7 +20,11 @@ from src.control_plane.synthesis.provider_pool import (
 def test_provider_pool_initialization():
     pool = ProviderPoolManager()
     status = pool.get_status("agy")
-    assert status in (ProviderAvailabilityStatus.AVAILABLE, ProviderAvailabilityStatus.UNAVAILABLE)
+    assert status in (
+        ProviderAvailabilityStatus.AVAILABLE,
+        ProviderAvailabilityStatus.UNAVAILABLE,
+        ProviderAvailabilityStatus.MISSING_EXECUTABLE,
+    )
 
 
 def test_detect_quota_exhaustion_claude():
@@ -76,7 +80,7 @@ def test_detect_quota_exhaustion_agy():
 
     event = pool.detect_exhaustion("agy", res)
     assert event is not None
-    assert pool.get_status("agy") in (ProviderAvailabilityStatus.SESSION_EXHAUSTED, ProviderAvailabilityStatus.RATE_LIMITED)
+    assert pool.get_status("agy") == ProviderAvailabilityStatus.QUOTA_EXHAUSTED
 
 
 def test_engineering_failure_not_classified_as_exhaustion():

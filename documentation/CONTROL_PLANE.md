@@ -125,6 +125,12 @@ Matches task requirements against agent capabilities without making remote LLM c
 - Explicit human overrides (`preferred_agent`) are honored immediately and recorded.
 - Automatically selects specialized reviewer roles based on domain and risk.
 
+Final provider selection belongs to the shared configurable resource pool, not
+the router's legacy static list. The router supplies an advisory recommendation
+only among candidates already admitted by operator permission, egress,
+readiness, role capability, capacity, and economic policy. See
+[Configurable AI Resource Pool](AI_RESOURCE_POOL.md).
+
 ### 3.4 Specialized Independent Reviewer Roles
 Reviewers are instructed explicitly to **challenge assumptions and falsify correctness**:
 1. **`correctness-reviewer`**: Identifies logic bugs, unhandled boundary cases, and contract mismatches.
@@ -360,6 +366,13 @@ ai status
 
 # Deterministically route a task without creating artifacts:
 ai route "patch authentication vulnerability"
+
+# Inspect configured resources and current readiness/capacity:
+ai providers
+ai providers --json
+
+# Reset only one resource's current capacity observation:
+ai providers reset codex
 
 # Run preflight diagnostics:
 ai doctor

@@ -51,15 +51,15 @@ ORCHESTRATOR_SCHEMA_VERSION = "howlplane.orchestrator/v1"
 
 # Structured reasons a governed task did not reach "complete" (#59.1 Phase 1).
 # The orchestrator assigns only the classes it can prove from its own gates.
-# PROVIDER_EXHAUSTED / PROVIDER_UNAVAILABLE are assigned by the caller after it
-# runs the observed AgentExecutionResult through ProviderPoolManager
-# .detect_exhaustion() -- the orchestrator holds no provider pool, and wiring one
-# in would duplicate an abstraction that already exists one layer up.
+# When the shared pool is supplied, the orchestrator classifies the observed
+# implementation result through that same pool before returning. Legacy callers
+# without a pool retain caller-side classification compatibility.
 FAILURE_CLASS_ENGINEERING = "ENGINEERING_FAILURE"
 FAILURE_CLASS_AUTHORITY_BLOCKED = "AUTHORITY_BLOCKED"
 FAILURE_CLASS_VERIFICATION = "VERIFICATION_FAILURE"
 FAILURE_CLASS_PROVIDER_EXHAUSTED = "PROVIDER_EXHAUSTED"
 FAILURE_CLASS_PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
+FAILURE_CLASS_NO_ELIGIBLE_RESOURCE = "NO_ELIGIBLE_AI_RESOURCE"
 
 
 @dataclass
@@ -122,6 +122,8 @@ class OrchestrationResult:
     # human-readable summary text.
     provider_execution: Optional[AgentExecutionResult] = None
     failure_class: Optional[str] = None
+    resource_selection: Optional[Dict[str, Any]] = None
+    capacity_after: Dict[str, str] = field(default_factory=dict)
     trajectory_id: Optional[str] = None
     schema: str = ORCHESTRATOR_SCHEMA_VERSION
 
@@ -152,6 +154,8 @@ class OrchestrationResult:
             "provider_execution": self.provider_execution.to_dict() if self.provider_execution else None,
             "executing_provider": self.executing_provider,
             "failure_class": self.failure_class,
+            "resource_selection": self.resource_selection,
+            "capacity_after": self.capacity_after,
             "trajectory_id": self.trajectory_id,
             "schema": self.schema,
         }
@@ -303,7 +307,7 @@ class GovernedTaskOrchestrator:
         ctx = ProjectAdapter.discover(self.target_repo)
         (run_dir / "project_context.json").write_text(ctx.to_json(), encoding="utf-8")
 
-        router = TaskRouter()
+        router = TaskRouter(resource_pool=self.config.provider_pool)
         routing = router.route(task_spec)
         (run_dir / "route.json").write_text(json.dumps(asdict(routing), indent=2), encoding="utf-8")
 
@@ -517,6 +521,27 @@ class GovernedTaskOrchestrator:
             )
             return self._make_result(task_spec, "awaiting_human", 2, **stage_kwargs)
 
+        if not routing.selected_agent_id:
+            blocked = routing.metadata.get("blocked_outcome") or {
+                "status": "BLOCKED",
+                "reason": FAILURE_CLASS_NO_ELIGIBLE_RESOURCE,
+            }
+            task_spec.transition_to("blocked", blocked["reason"])
+            task_spec.save_to_file(str(run_dir / "task.yaml"))
+            return self._make_result(
+                task_spec,
+                "blocked",
+                3,
+                start_time=start_time,
+                run_dir=run_dir,
+                routing=routing,
+                verif_plan=verif_plan,
+                hf_status=hf_audit_status,
+                hf_match=hf_audit_match,
+                err_msg=json.dumps(blocked, sort_keys=True),
+                failure_class=FAILURE_CLASS_NO_ELIGIBLE_RESOURCE,
+            )
+
         # --------------------------------------------------------------------
         # Stage 3: Baseline Capture / Baseline Recovery
         # --------------------------------------------------------------------
@@ -605,6 +630,14 @@ class GovernedTaskOrchestrator:
 
             (impl_dir / "result.json").write_text(impl_res.to_json(), encoding="utf-8")
 
+            normalized_failure = None
+            if self.config.provider_pool is not None:
+                normalized_failure = self.config.provider_pool.record_result(
+                    routing.selected_agent_id,
+                    impl_res,
+                    task_id=task_spec.task_id,
+                )
+
             if not impl_res.success:
                 err_msg = (
                     impl_res.stderr.strip()
@@ -634,7 +667,18 @@ class GovernedTaskOrchestrator:
                     # detect_exhaustion(); ENGINEERING_FAILURE is only the
                     # default when no provider-availability signal is found.
                     provider_execution=impl_res,
-                    failure_class=FAILURE_CLASS_ENGINEERING,
+                    failure_class=(
+                        FAILURE_CLASS_PROVIDER_EXHAUSTED
+                        if getattr(normalized_failure, "value", None) in {
+                            "QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"
+                        }
+                        else FAILURE_CLASS_PROVIDER_UNAVAILABLE
+                        if getattr(normalized_failure, "value", None) in {
+                            "AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE",
+                            "TRANSPORT_UNAVAILABLE", "MISSING_EXECUTABLE",
+                        }
+                        else FAILURE_CLASS_ENGINEERING
+                    ),
                 )
 
             current_delta = self._capture_scoped_delta(
@@ -710,7 +754,10 @@ class GovernedTaskOrchestrator:
                 cwd=self.target_repo,
                 backend=self.config.custom_backend,
                 cycle_index=cycle_idx,
-                reviewer_agent_mapping=self.config.reviewer_agent_mapping,
+                reviewer_agent_mapping=(
+                    self.config.reviewer_agent_mapping
+                    or routing.metadata.get("reviewer_resource_mapping")
+                ),
                 custom_reviewer_fn=self.config.custom_reviewer_fn,
                 run_dir=run_dir,
                 provider_pool=self.config.provider_pool,
@@ -1110,6 +1157,14 @@ class GovernedTaskOrchestrator:
             run_dir=str(run_dir),
             provider_execution=provider_execution,
             failure_class=failure_class,
+            resource_selection=(
+                routing.metadata.get("resource_selection")
+                if routing is not None else None
+            ),
+            capacity_after=(
+                self.config.provider_pool.get_all_statuses()
+                if self.config.provider_pool is not None else {}
+            ),
         )
 
     def _fail_task(

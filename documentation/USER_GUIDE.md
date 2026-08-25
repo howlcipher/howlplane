@@ -19,6 +19,10 @@ ai status
 # Deterministically route a task and generate reviewer assignments without mutations:
 ai route "patch authentication vulnerability"
 
+# Inspect the operator-enabled AI resource pool:
+ai providers
+ai providers --json
+
 # Run system and toolchain preflight diagnostics:
 ai doctor
 
@@ -63,7 +67,9 @@ You can explore and query the HowlPlane knowledge base interactively:
 
 HowlPlane includes verification, diagnostic, and automation utilities:
 
-* **`ai doctor` (or `python src/infrastructure/doctor.py`)**: Runs complete health diagnostics on Python, Go, Git, evidence ledger integrity, and operating mode egress enforcement.
+* **`ai doctor` (or `python src/infrastructure/doctor.py`)**: Runs complete health diagnostics on Python, Go, Git, evidence ledger integrity, operating mode egress enforcement, and non-generative provider readiness.
+* **`ai route`**: Explains role-aware selection without provider probes, generation, or capacity mutation.
+* **`ai providers`**: Shows the versioned resource inventory; `ai providers reset <resource-id>` re-probes only current state without deleting history.
 * **`python src/infrastructure/build_vector_index.py`**: Scans the knowledge layer and builds a localized ChromaDB vector index for offline semantic retrieval.
 * **`python src/core/adversarial_tester.py`**: Runs prompt-injection and adversarial negative tests against the ruleset.
 * **`scripts/generate_skills_manifest.py`**: Auto-generates the skills manifest table in `AGENTS.md` and rebuilds agent symlinks.

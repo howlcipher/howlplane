@@ -62,6 +62,8 @@ from src.control_plane.project_adapter import ProjectAdapter, ProjectContext
 from src.control_plane.reconciliation import ReconciliationResult
 from src.control_plane.reviewers import get_reviewer_role
 from src.control_plane.router import TaskRouter, RoutingDecision
+from src.control_plane.resource_cli import inventory_document, render_inventory, render_route
+from src.control_plane.synthesis.provider_pool import ProviderPoolManager
 from src.control_plane.task_spec import TaskSpec
 
 
@@ -265,6 +267,7 @@ def create_task_plan(
     target_repo: Path,
     cp_root: Optional[Path],
     args: argparse.Namespace,
+    resource_pool: Optional[ProviderPoolManager] = None,
 ) -> Tuple[TaskSpec, RoutingDecision]:
     """Helper that constructs and routes a TaskSpec from CLI arguments."""
     tid, tclass, risk, tier = infer_task_metadata(
@@ -293,7 +296,7 @@ def create_task_plan(
         preferred_agent=getattr(args, "agent", None),
         metadata=meta,
     )
-    decision = TaskRouter().route(spec)
+    decision = TaskRouter(resource_pool=resource_pool).route(spec)
     return spec, decision
 
 
@@ -398,7 +401,10 @@ def cmd_work(args: argparse.Namespace) -> int:
             return 1
 
     ctx = ProjectAdapter.discover(target_repo)
-    spec, decision = create_task_plan(ctx, target_repo, cp_root, args)
+    resource_pool = ProviderPoolManager.from_config()
+    spec, decision = create_task_plan(
+        ctx, target_repo, cp_root, args, resource_pool=resource_pool
+    )
 
     planned_actions = getattr(args, "actions", None) or []
     orchestrator = GovernedTaskOrchestrator(
@@ -407,6 +413,7 @@ def cmd_work(args: argparse.Namespace) -> int:
         config=OrchestrationConfig(
             force=getattr(args, "force", False),
             skip_doctor=getattr(args, "skip_doctor", False),
+            provider_pool=resource_pool,
         ),
     )
 
@@ -418,6 +425,9 @@ def cmd_work(args: argparse.Namespace) -> int:
     # Dry run / task preparation mode (default when --execute is omitted)
     ctx, decision, plan, run_dir, shadow_audit_res = orchestrator.prepare_task_plan(spec, planned_actions)
     boundary_res = HumanBoundaryGate.evaluate(spec, planned_actions=planned_actions, verification=plan)
+    if not decision.selected_agent_id and not boundary_res.requires_human_approval:
+        print(json.dumps(decision.metadata["blocked_outcome"], indent=2))
+        return 3
     launch_cmd = format_agent_launch_command(decision.selected_agent_id, spec, run_dir, target_repo)
     df_mode = get_dogfood_mode()
 
@@ -485,9 +495,55 @@ def cmd_route(args: argparse.Namespace) -> int:
     """Lightweight read-only routing of an objective against the current target repository."""
     target_repo = find_git_repo_root(args.repo)
     ctx = ProjectAdapter.discover(target_repo)
-    spec, decision = create_task_plan(ctx, target_repo, None, args)
-    print(f"Target Repository: {target_repo} ({ctx.name})\nObjective:         {spec.objective}")
-    print(decision.render_text(spec.task_id))
+    pool = ProviderPoolManager.from_config(read_only=True, probe_on_start=False)
+    spec, _decision = create_task_plan(
+        ctx, target_repo, None, args, resource_pool=pool
+    )
+    selection = pool.select_resource(
+        spec,
+        role=getattr(args, "role", "implementation"),
+        explicit_resource_id=getattr(args, "agent", None),
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(selection.to_dict(), indent=2))
+    else:
+        print(f"Target Repository: {target_repo} ({ctx.name})")
+        print(f"Objective: {spec.objective}\n")
+        print(render_route(selection))
+    return 0 if selection.selected else 3
+
+
+def cmd_providers(args: argparse.Namespace) -> int:
+    """Shows inventory or resets exactly one current capacity record."""
+    action = getattr(args, "provider_action", None)
+    resource_id = getattr(args, "resource_id", None)
+    if action == "reset":
+        if not resource_id:
+            print("ERROR: ai providers reset requires a resource ID", file=sys.stderr)
+            return 1
+        pool = ProviderPoolManager.from_config(probe_on_start=False)
+        state = pool.reset_resource(resource_id, reprobe=True)
+        EvidenceLedger().append_entry(EvidenceEntry(
+            task_id="AI-RESOURCE-POOL",
+            agent_id="operator",
+            action="provider_capacity_reset",
+            result="reset",
+            metadata={
+                "resource_id": resource_id,
+                "capacity": state.status.value,
+                "readiness": state.readiness.value,
+            },
+        ))
+        print(json.dumps(state.to_dict(), indent=2) if args.json else (
+            f"Reset {resource_id}: readiness={state.readiness.value}; "
+            f"capacity={state.status.value}"
+        ))
+        return 0
+    pool = ProviderPoolManager.from_config(read_only=True, probe_on_start=True)
+    print(
+        json.dumps(inventory_document(pool), indent=2)
+        if getattr(args, "json", False) else render_inventory(pool)
+    )
     return 0
 
 
@@ -778,11 +834,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_work.add_argument("--skip-doctor", action="store_true", help="Skip preflight diagnostics")
     p_work.add_argument("--force", action="store_true", help="Proceed even if preflight has warnings")
 
-    subparsers.add_parser(
+    p_route = subparsers.add_parser(
         "route",
         parents=[common_parser, task_base_parser],
         help="Route an objective against the current repository",
     )
+    p_route.add_argument(
+        "--role",
+        choices=["planning", "implementation", "remediation", "review"],
+        default="implementation",
+    )
+    p_route.add_argument("--json", action="store_true", help="Output JSON decision")
+
+    p_providers = subparsers.add_parser(
+        "providers", parents=[common_parser], help="Show the configured AI resource pool"
+    )
+    p_providers.add_argument("provider_action", nargs="?", choices=["reset"])
+    p_providers.add_argument("resource_id", nargs="?")
+    p_providers.add_argument("--json", action="store_true", help="Output versioned JSON")
 
     subparsers.add_parser("doctor", parents=[common_parser], help="Run workspace health diagnostics")
     subparsers.add_parser("status", parents=[common_parser], help="Show project status and verification plan")
@@ -834,6 +903,7 @@ def main(args: Optional[List[str]] = None) -> int:
     actions = {
         "work": cmd_work,
         "route": cmd_route,
+        "providers": cmd_providers,
         "doctor": cmd_doctor,
         "status": cmd_status,
         "approve": cmd_approve,

@@ -23,7 +23,8 @@ from src.control_plane.reasoning.artifact_safety import (
     canonical_digest,
 )
 
-EXECUTION_TRAJECTORY_SCHEMA_VERSION = "howlplane.execution_trajectory/v1"
+EXECUTION_TRAJECTORY_SCHEMA_VERSION_V1 = "howlplane.execution_trajectory/v1"
+EXECUTION_TRAJECTORY_SCHEMA_VERSION = "howlplane.execution_trajectory/v2"
 
 
 # Forward imports are kept local to avoid circular dependency with orchestrator.py.
@@ -66,6 +67,10 @@ class ExecutionTrajectory(SafeArtifactSerializationMixin):
     actions_attempted: List[str] = field(default_factory=list)
     tools_invoked: List[str] = field(default_factory=list)
     provider_events: List[Dict[str, Any]] = field(default_factory=list)
+    resource_selection: Optional[Dict[str, Any]] = None
+    role_selections: List[Dict[str, Any]] = field(default_factory=list)
+    capacity_after: Dict[str, str] = field(default_factory=dict)
+    failover_from_resource_id: Optional[str] = None
     review_findings: List[Dict[str, Any]] = field(default_factory=list)
     verification_results: Optional[Dict[str, Any]] = None
     repair_cycles: List[Dict[str, Any]] = field(default_factory=list)
@@ -90,7 +95,14 @@ class ExecutionTrajectory(SafeArtifactSerializationMixin):
 
     def compute_content_digest(self) -> str:
         """Deterministic digest over the durable content of this trajectory."""
-        return canonical_digest(self.to_dict(), "content_digest")
+        payload = self.to_dict()
+        if self.schema_version == EXECUTION_TRAJECTORY_SCHEMA_VERSION_V1:
+            for field_name in (
+                "resource_selection", "role_selections", "capacity_after",
+                "failover_from_resource_id",
+            ):
+                payload.pop(field_name, None)
+        return canonical_digest(payload, "content_digest")
 
     def finalize(self, final_status: str, outcome: str) -> None:
         """Marks the trajectory complete and recomputes its digest."""
@@ -106,7 +118,10 @@ class ExecutionTrajectory(SafeArtifactSerializationMixin):
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExecutionTrajectory":
         d = dict(data)
-        if d.get("schema_version") != EXECUTION_TRAJECTORY_SCHEMA_VERSION:
+        if d.get("schema_version") not in {
+            EXECUTION_TRAJECTORY_SCHEMA_VERSION,
+            EXECUTION_TRAJECTORY_SCHEMA_VERSION_V1,
+        }:
             raise ArtifactIntegrityError("Unsupported execution trajectory schema.")
         trajectory = cls(**d)
         if not trajectory.verify_digest():
@@ -208,6 +223,20 @@ def _safe_provider_event(provider_execution: Optional[Any]) -> Dict[str, Any]:
     return d
 
 
+def _extract_provider_events(result: Any) -> List[Dict[str, Any]]:
+    """Collects observable provider calls with their truthful execution role."""
+    events: List[Dict[str, Any]] = []
+    implementation = _safe_provider_event(result.provider_execution)
+    if implementation:
+        events.append(implementation)
+    for cycle in result.review_cycles or []:
+        for review in cycle.reviewer_results.values():
+            event = _safe_provider_event(getattr(review, "agent_result", None))
+            if event:
+                events.append(event)
+    return events
+
+
 def _extract_review_findings(review_cycles: Optional[List[Any]]) -> List[Dict[str, Any]]:
     if not review_cycles:
         return []
@@ -236,6 +265,34 @@ def _extract_repair_cycles(review_cycles: Optional[List[Any]]) -> List[Dict[str,
                 "finding_count": len(all_findings or []),
             })
     return cycles
+
+
+def _extract_role_selections(result: Any) -> List[Dict[str, Any]]:
+    """Returns truthful implementation and review role resource evidence."""
+    routing = result.routing_decision
+    selections: List[Dict[str, Any]] = []
+    if result.resource_selection:
+        selections.append(dict(result.resource_selection))
+    if not routing:
+        return selections
+    identities = routing.metadata.get("reviewer_resource_identities", {})
+    for cycle in result.review_cycles or []:
+        for role, review in cycle.reviewer_results.items():
+            attempts = list(getattr(review, "attempts", []) or [])
+            if attempts:
+                for attempt in attempts:
+                    identity = identities.get(role, {})
+                    selections.append({
+                        "role": role,
+                        "resource_id": attempt.get("provider"),
+                        "provider_id": identity.get("provider_id"),
+                        "interface_id": identity.get("interface_id"),
+                        "model_id": identity.get("model_id"),
+                        "outcome": attempt.get("outcome"),
+                    })
+            elif role in identities:
+                selections.append({"role": role, **identities[role]})
+    return selections
 
 
 class ExecutionTrajectoryBuilder:
@@ -282,7 +339,13 @@ class ExecutionTrajectoryBuilder:
             selected_context_refs=task_spec.metadata.get("selected_context_refs", []),
             actions_attempted=task_spec.metadata.get("actions_attempted", []),
             tools_invoked=task_spec.metadata.get("tools_invoked", []),
-            provider_events=[_safe_provider_event(provider_exec)],
+            provider_events=_extract_provider_events(result),
+            resource_selection=result.resource_selection,
+            role_selections=_extract_role_selections(result),
+            capacity_after=dict(result.capacity_after),
+            failover_from_resource_id=task_spec.metadata.get(
+                "failover_from_resource_id"
+            ),
             review_findings=_extract_review_findings(result.review_cycles),
             verification_results=result.verification_plan.to_dict() if result.verification_plan else None,
             repair_cycles=_extract_repair_cycles(result.review_cycles),

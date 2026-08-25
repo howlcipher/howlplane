@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 
+**Milestone #61 Configurable AI Resource Pool Start**: verified that Milestone
+#60D PR #48 is merged into `origin/main`, recorded the post-#60D starting SHA,
+and opened a durable architecture and recovery journal on the dedicated feature
+branch. The implementation will extend the shared provider pool rather than
+introduce a second source of readiness or capacity truth. The production audit
+selected `ProviderPoolManager` as the single final-selection and capacity owner,
+`AgentBackendRegistry` as the adapter boundary, and `TaskRouter` as an advisory
+deterministic cognitive seam after hard filtering. The unwired Go provider
+interface remains a compatibility surface instead of becoming a competing
+runtime.
+
+The resource foundation now extends `AgentProfile` and the existing pool with
+distinct provider, interface, resource, and nullable observed model identities;
+validated dynamic provider and economic policy configuration; non-generative
+adapter readiness; atomic durable capacity state; centralized availability and
+engineering failure taxonomy; role and capability filtering; subscription and
+metered API enforcement; advisory deterministic router recommendations; stable
+tie-breaking; explicit override constraints; reviewer diversity; and targeted
+capacity reset. A CI-only `fake_future_provider` proves that registration,
+configuration, selection, capacity tracking, and onboarding use generic paths.
+The focused new and legacy provider, failover, reviewer, and local Ollama matrix
+passes 89 tests, flake8 passes, and SlopsLint remains within both committed
+ceilings.
+
+Governed routing now consumes the shared pool for implementation and independent
+review roles, returns a structured `NO_ELIGIBLE_AI_RESOURCE` block before any
+provider execution, and updates the same capacity state after implementation.
+Execution trajectory v2 records the complete selection packet, capacity after
+execution, truthful implementation/reviewer roles, and distinct reviewer
+resource identities; v1 artifacts retain their original schema and digest
+verification semantics. The focused orchestration, trajectory, failover, and
+review matrix passes 114 tests.
+
+The production launcher, prompt-to-product synthesis, marathon/dogfood, and
+acceptance entry points now build their configured shared pool. `ai providers`
+and its versioned JSON output expose inventory and policy; targeted `reset`
+re-probes one current record and appends an audit event; `ai route` explains a
+read-only decision; and `ai doctor` reports non-generative readiness. A private
+operator TOML overlay and sanitized example preserve repository-neutral defaults.
+The local-only live canary selected `local_ollama`, returned exactly
+`LOCAL_ONLY_OK`, and recorded zero hosted adapter lookups. CLI, config, doctor,
+orchestration, and trajectory tests pass 132 cases, and SlopsLint remains at the
+committed 14 source and 29 test clone ceilings.
+
+Capacity hardening now enforces configured metered-invocation budgets using
+attempt counts, rejects contradictory paid-API policy, applies supported
+configured model identities without guessing, performs one bounded readiness
+re-probe after an observed cooldown, and records the source resource for
+marathon failover trajectories. The focused resource, configuration, failover,
+and historical dogfood matrix passes 106 tests.
+
+Bounded live acceptance then exercised the production governed path in an
+isolated repository. Automatic selection used Codex for implementation and
+Claude Code for distinct correctness and simplicity review roles, changed only
+the authorized file, passed deterministic verification, retained both shared
+capacity records as available, and emitted a digest-valid trajectory v2. The
+separate local-only canary remains the proof that hosted lookup and generation
+counts are both zero under that operating mode.
+
+The legacy provider-pool initialization test now accepts the explicit
+`MISSING_EXECUTABLE` readiness state on clean CI hosts instead of collapsing a
+missing optional CLI into generic unavailability.
+
 **Milestone #60C Comparable Evidence Campaign**: preregistered six experiments before provider execution and accepted fourteen digest-valid live trajectories: four exact #60B context repetitions, a held constant Claude versus Codex comparison, a bounded repair attempt against a real failed notes fixture, a raw provider composition attempt, a raw task decomposition attempt, and general versus correctness-plus-security review of an empty historical reviewer artifact. Coordinator resume checks produced no duplicates after every experiment. Seven trajectories passed deterministic verification and seven failed; the sole repair was legitimate but unsuccessful. Provider composition and task decomposition are preserved as live trajectories but classified `NOT_OBSERVED` as meaningful coverage because the composition fixture was trivial exact fact extraction with provider events labeled `role=review` for both invocations, and the decomposition fixture manufactured two subtasks for a simple two-fact extraction. All evaluations remain `INCONCLUSIVE`, cloud models and costs remain `NOT_OBSERVED`, and no strategy or authority changed.
 - **Milestone #60B Reasoning Evidence Campaign Start**: created the durable campaign journal and draft PR on the required main SHA, passed all 76 focused #60A measurement tests, inventoried live, replay, deterministic, simulated, and malformed evidence without relabeling it, and preregistered three immutable experiments covering architecture context, provider routing, and review topology across six bounded trajectories and the canonical `other`, `bug_fix`, and `test_improvement` task classes. The first descriptive task label failed production TaskSpec validation before any provider call; all original definitions remain visible, and corrected replacement IDs preserve immutable hypotheses instead of widening the enum or rewriting evidence. No learned preference exists, and unavailable dimensions will be recorded rather than manufactured.
 - **Milestone #60B Context Evidence**: completed the first corrected live experiment with two local Ollama trajectories and no repair. Task-only context invented the discovery threshold and miner names and failed exact verification; bounded relevant source context returned the correct values and passed. The immutable evaluator still reports `INCONCLUSIVE` at one sample per arm, all digests validate, and a resume replay created no duplicate trajectory.
