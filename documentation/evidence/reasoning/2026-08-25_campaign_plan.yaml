@@ -261,7 +261,7 @@ experiment_plan:
         - traj-663eed5b31c5a0acf7634224
       next_action: complete
     EXP-60B-REVIEW-002:
-      status: PREREGISTERED
+      status: COMPLETED
       experiment_type: REVIEW_TOPOLOGY
       task_class: test_improvement
       baseline: review.general_single/v1
@@ -286,7 +286,11 @@ experiment_plan:
         canary identifier mismatch in the historical artifact.
       repair_policy: no format repair or provider fallback, preserving topology
       prediction_digest: 281103cc29f0588b11ec870787183f0c5b523c54f708fd848e19bc2dc1ddd39b
-      next_action: run_baseline
+      result: FALSIFIED
+      trajectory_ids:
+        - traj-474a74feb2c89fd4887ff103
+        - traj-b2069ac127bd493f79048f2a
+      next_action: complete
   bounded_out:
     task_decomposition:
       status: SKIPPED

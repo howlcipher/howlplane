@@ -3,7 +3,7 @@
 ## Durable State
 
 STATUS:
-    IN_PROGRESS
+    EVIDENCE_COMPLETE_PENDING_FULL_VERIFICATION
 
 STARTING_MAIN:
     30b886211ce75dc132c8ef449ec857bf14df4b3d
@@ -15,15 +15,16 @@ PR:
     https://github.com/howlcipher/howlplane/pull/46
 
 CURRENT_EXPERIMENT:
-    EXP-60B-REVIEW-002: PREREGISTERED
+    NONE
 
 COMPLETED_EXPERIMENTS:
     EXP-60B-CONTEXT-002: INCONCLUSIVE
     EXP-60B-ROUTING-002: INCONCLUSIVE
+    EXP-60B-REVIEW-002: FALSIFIED
 
 TRAJECTORY_COUNTS:
     EXISTING_LIVE: 2
-    NEW_TRUSTWORTHY_60B: 4
+    NEW_TRUSTWORTHY_60B: 6
 
 PROVIDERS_OBSERVED:
     local_ollama
@@ -48,13 +49,17 @@ KNOWN_FAILURES:
     Both EXP-60B-ROUTING-002 arms failed first-pass verification and their one
     bounded remediations also failed. Claude was available; the failures are
     output-quality evidence, not provider-availability evidence.
+    The EXP-60B-REVIEW-002 candidate topology completed both reviews but missed
+    the known identifier defect and generated two false positives. The single
+    correctness-reviewer baseline detected the defect. The candidate is
+    FALSIFIED for this fixture only.
 
 CURRENT_BLOCKERS:
     NONE
 
 NEXT_SAFE_ACTION:
-    Commit and push the routing experiment evidence, then run the baseline and
-    candidate arms of EXP-60B-REVIEW-002 without format repair or fallback.
+    Commit and push the review and discovery evidence, then complete the final
+    evidence quality audit and full verification matrix.
 
 LAST_VERIFIED_TESTS:
     Targeted #60A suite: 76 passed in 5.78 seconds.
@@ -82,7 +87,7 @@ CURRENT_BRANCH:
     dogfood/reasoning-evidence-collection
 
 HEAD:
-    23779d426e34f633c388676d6884420939762c29
+    50864def452a08df07ba83c8ae7d838d25dd6387
 
 PR:
     https://github.com/howlcipher/howlplane/pull/46
@@ -90,6 +95,7 @@ PR:
 EXPERIMENTS_COMPLETED:
     EXP-60B-CONTEXT-002
     EXP-60B-ROUTING-002
+    EXP-60B-REVIEW-002
 
 EXPERIMENT_CURRENTLY_INCOMPLETE:
     EXP-60B-CONTEXT-001 is preserved at RUNNING with no arm results after
@@ -111,7 +117,7 @@ EXACT_EVIDENCE_PATHS:
     logs/control_plane/milestone_60b_reasoning_evidence/trajectories
 
 EXACT_NEXT_EXPERIMENT:
-    EXP-60B-REVIEW-002
+    NONE; run evidence quality audit and full verification
 
 TESTS_RUN:
     Targeted #60A suite: 76 passed.
@@ -120,7 +126,7 @@ TESTS_RUN:
     GitHub checks: all six required checks passed for 64957f8.
 
 REPOSITORY_STATUS:
-    Intentional tracked evidence and journal changes for the routing checkpoint.
+    Intentional tracked evidence and journal changes for review and discovery.
 
 ## Progress Log
 
@@ -201,3 +207,25 @@ Claude's model identifier and all costs were unobservable and were not inferred.
 Deterministic evaluation returned INCONCLUSIVE. Both trajectory digests and the
 experiment prediction digest validate, provider commands redact prompts, and a
 resume check left the trajectory count unchanged at four.
+
+### 2026-08-25T01:47:34Z
+
+Completed EXP-60B-REVIEW-002 through the production review runner and parser.
+The single correctness reviewer detected the exact historical identifier
+delimiter defect and passed the deterministic oracle. The correctness plus
+regression topology completed both reviews but missed the defect, produced two
+false positives, and failed. The candidate reviewers naturally disagreed:
+correctness said initiation-only language needed no fix, while regression
+suggested adding a success or failure assertion that the acceptance criteria
+explicitly prohibit. Exact acceptance evidence reconciles the disagreement;
+both candidate findings are dismissed with recorded reasons.
+
+Deterministic evaluation returned FALSIFIED because candidate verification was
+0.0 versus baseline 1.0. This is fixture-specific evidence, not a universal
+topology preference. All trajectory and experiment digests validate, provider
+commands redact prompts, and completed-run resume held six trajectories.
+
+Ran trajectory discovery across two #60A and six #60B records. It created one
+open fingerprinted observation from the two successful low-risk local runs.
+Two identical repeat discovery passes returned zero new observations and kept
+the store at one. No observation was reopened or automatically adopted.

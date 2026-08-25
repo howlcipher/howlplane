@@ -1,6 +1,6 @@
 schema: howlplane.reasoning_evidence_campaign_results/v1
 campaign_id: MILESTONE-60B
-updated_at: "2026-08-25T01:41:51Z"
+updated_at: "2026-08-25T01:47:34Z"
 evidence_classification: LIVE
 scope: observable provider outputs and deterministic verification only
 experiment_results:
@@ -216,24 +216,193 @@ experiment_results:
       provider_commands_redacted: true
       secrets_observed: false
       provider_availability_failures: 0
+  EXP-60B-REVIEW-002:
+    experiment_type: REVIEW_TOPOLOGY
+    task_class: test_improvement
+    hypothesis: >-
+      Split correctness and regression review detects the known historical
+      canary identifier mismatch at least as reliably as one general reviewer.
+    baseline: review.general_single/v1
+    candidate: review.correctness_regression/v1
+    expected_outcome: >-
+      Candidate verification is no worse than baseline and preserves all
+      completed review results and disagreement.
+    falsification_criteria:
+      - candidate.verification_pass_rate < baseline.verification_pass_rate
+    metrics:
+      - verification_pass_rate
+      - mean_latency
+      - provider_failures
+    verifier: known_canary_identifier_oracle/v1
+    result: FALSIFIED
+    confidence: baseline_n=1, candidate_n=1, primary_metric=None
+    falsification_failures:
+      - >-
+        Falsification criterion triggered: candidate.verification_pass_rate <
+        baseline.verification_pass_rate (got 0.0 < 1.0)
+    metric_comparisons: {}
+    prediction_digest: 281103cc29f0588b11ec870787183f0c5b523c54f708fd848e19bc2dc1ddd39b
+    content_digest: a51fee91b8bf9c4d32e50d189190ac706215861c43ffb70971c7f97fb5c87c09
+    evidence_refs:
+      - logs/control_plane/milestone_60b_reasoning_evidence/experiments/EXP-60B-REVIEW-002.json
+      - .task_runs/ACCEPTANCE-DOGFOOD-20260824-110852-033dbb/task.yaml
+      - .task_runs/ACCEPTANCE-DOGFOOD-20260824-110852-033dbb/implementation/diff.patch
+    arms:
+      baseline:
+        trajectory_id: traj-474a74feb2c89fd4887ff103
+        trajectory_digest: 923a980db8cc2b8d841adaace089d88ac534f873fa528f475596b23035a5d4f5
+        provider: local_ollama
+        model: qwen2.5-coder:7b-instruct
+        strategy_ids:
+          review: review.general_single/v1
+          context: context.changed_files_only/v1
+        review_topology:
+          - correctness-reviewer
+        valid_completed_reviews: 1
+        latency_seconds: 24.089
+        repairs: 0
+        cost_observed: null
+        verification_outcome: passed
+        outcome: success
+        raw_output_sha256: 105e7eace685be5ba3d99ead2fe5015aefaacc19ca1303d20d9a7d9e185fb3ff
+        raw_output_ref: >-
+          logs/control_plane/milestone_60b_reasoning_evidence/review_runs/EXP-60B-REVIEW-002-BASELINE-1/reviews/correctness-reviewer.md
+        findings:
+          - id: F001
+            reviewer_role: correctness-reviewer
+            title: Canary Identifier Not Matched
+            production_reconciliation_status: likely
+            campaign_quality_status: confirmed_by_exact_oracle
+            meaningful: true
+            evidence: >-
+              The patch records DOGFOOD 20260824 110852 033dbb while the
+              required identifier is DOGFOOD-20260824-110852-033dbb.
+        disagreement: false
+      candidate:
+        trajectory_id: traj-b2069ac127bd493f79048f2a
+        trajectory_digest: 8e4da8ae1acfdb33d622945af1bda951ae65549f0f777ecfce76f2f5046a8899
+        provider: local_ollama
+        model: qwen2.5-coder:7b-instruct
+        strategy_ids:
+          review: review.correctness_regression/v1
+          context: context.changed_files_only/v1
+        review_topology:
+          - correctness-reviewer
+          - regression-reviewer
+        valid_completed_reviews: 2
+        latency_seconds: 39.281
+        repairs: 0
+        cost_observed: null
+        verification_outcome: failed
+        outcome: verification_failed
+        raw_output_refs:
+          correctness-reviewer:
+            path: >-
+              logs/control_plane/milestone_60b_reasoning_evidence/review_runs/EXP-60B-REVIEW-002-CANDIDATE-1/reviews/correctness-reviewer.md
+            sha256: 7346a51f5e42e65992d515590d5d662b0c5ce4a26b91eb686bb2f6386589bb66
+          regression-reviewer:
+            path: >-
+              logs/control_plane/milestone_60b_reasoning_evidence/review_runs/EXP-60B-REVIEW-002-CANDIDATE-1/reviews/regression-reviewer.md
+            sha256: 77e508804189612d55082abcf2fc442ddc95c540e6706cd278c2a700a887a614
+        findings:
+          - id: F001
+            reviewer_role: correctness-reviewer
+            title: Incomplete Lifecycle Outcome
+            production_reconciliation_status: likely
+            campaign_quality_status: false_positive
+            meaningful: false
+            resolution_reason: >-
+              The finding itself says the initiation-only language satisfies
+              the acceptance criteria and proposes no fix; it does not identify
+              the known delimiter defect.
+          - id: F001
+            reviewer_role: regression-reviewer
+            title: Journal does not assert lifecycle completion
+            production_reconciliation_status: likely
+            campaign_quality_status: false_positive
+            meaningful: false
+            resolution_reason: >-
+              Its proposed completion assertion directly contradicts the exact
+              initiation-only acceptance criterion and misses the delimiter
+              defect.
+        disagreement: true
+        disagreement_evidence: >-
+          Correctness said no fix was needed because initiation-only language
+          was correct; regression proposed adding a merge success or failure
+          assertion. The exact acceptance criterion reconciles this in favor of
+          initiation-only language, while both reviewers missed the identifier
+          defect.
+    quality_checks:
+      trajectory_digests_valid: 2
+      experiment_prediction_digest_valid: true
+      duplicate_resume_count_before: 6
+      duplicate_resume_count_after: 6
+      hidden_reasoning_stored: false
+      raw_prompt_stored: false
+      provider_commands_redacted: true
+      secrets_observed: false
+      parsed_review_findings: 3
+      confirmed_meaningful_findings: 1
+      dismissed_false_positives: 2
+
+trajectory_derived_discovery:
+  trajectories_scanned: 8
+  source_campaigns:
+    MILESTONE-60A: 2
+    MILESTONE-60B: 6
+  observations_created: 1
+  observations:
+    - observation_id: OBS-LOCAL-FIRST-7d18349014334fbe
+      title: Repeated low-risk success with local model
+      status: open
+      fingerprint: 7d18349014334fbe
+      occurrence_count: 2
+      evidence_refs:
+        - traj-1ebfcd581ea8c7ecce27464c
+        - traj-474a74feb2c89fd4887ff103
+      evidence_fingerprints:
+        - 20a8387c009bd042034b2be89f8d68f3fa4187698600f9721a160c8d28bd5c11
+        - e8debac771ad133848ddebdfc02f06722fa6b0f87ec8b93c00a2e9ebb13583c3
+      suggested_experiment_type: ROUTING
+      suggested_baseline: routing.frontier_first/v1
+      suggested_candidate: routing.local_first_low_risk/v1
+      disposition: >-
+        Observation only. No strategy was adopted and no automatic challenge
+        experiment was created.
+  duplicate_suppression:
+    observations_after_first_pass: 1
+    observations_returned_on_identical_second_pass: 0
+    observations_after_identical_second_pass: 1
+    observations_returned_on_identical_third_pass: 0
+    observations_after_identical_third_pass: 1
+  failed_or_falsified_observations: []
+  reopened_observations: []
+  reopening_justification: NOT_APPLICABLE
 
 campaign_totals:
-  completed_experiments: 2
-  new_trustworthy_trajectories: 4
+  completed_experiments: 3
+  new_trustworthy_trajectories: 6
   task_classes:
     other: 2
     bug_fix: 2
+    test_improvement: 2
   providers:
-    local_ollama: 3
+    local_ollama: 6
     claude_code: 3
   primary_provider_attribution:
-    local_ollama: 3
+    local_ollama: 5
     claude_code: 1
   outcomes:
-    success: 1
-    verification_failed: 3
+    success: 2
+    verification_failed: 4
   repairs:
-    no_repair: 2
+    no_repair: 4
     one_unsuccessful_repair: 2
   reviewer_topologies:
     no_reviewers: 4
+    correctness_only: 1
+    correctness_plus_regression: 1
+  completed_reviews: 3
+  meaningful_review_findings: 1
+  dismissed_review_findings: 2
+  reviewer_disagreement_observed: 1

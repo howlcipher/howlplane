@@ -131,7 +131,10 @@ visible rather than being rewritten after execution began. The first corrected
 comparison produced one exactly verified and one failed live local trajectory;
 its one-sample result remains `INCONCLUSIVE`. The provider-routing comparison
 added local and Claude executions plus two bounded remediation attempts, but
-both arms failed exact verification and remain `INCONCLUSIVE`.
+both arms failed exact verification and remain `INCONCLUSIVE`. The final review
+comparison added three completed local reviews: the single reviewer found the
+known fixture defect, while the two-reviewer topology missed it and was
+`FALSIFIED` for that fixture. No universal preference is inferred.
 
 ---
 
