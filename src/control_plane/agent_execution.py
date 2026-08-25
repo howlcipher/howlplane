@@ -17,6 +17,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from src.control_plane.locking import LocalInferenceLock, LockError
+from src.control_plane.resource_models import (
+    AuthenticationStatus,
+    BackendReadiness,
+    ReadinessStatus,
+)
 from src.control_plane.task_spec import TaskSpec, DataClassSerializationMixin
 
 AGENT_EXECUTION_SCHEMA_VERSION = "howlplane.agent_execution/v1"
@@ -183,6 +188,17 @@ class AgentExecutionResult(DataClassSerializationMixin):
 class AgentBackend(ABC):
     """Abstract base class for all agent execution backends."""
 
+    def probe_readiness(self) -> BackendReadiness:
+        """Checks safe runtime readiness without consuming generation capacity."""
+        available = self.is_available()
+        return BackendReadiness(
+            status=(ReadinessStatus.READY if available else ReadinessStatus.UNAVAILABLE),
+            installed=available,
+            reachable=None,
+            authentication=AuthenticationStatus.UNKNOWN,
+            reason=None if available else "BACKEND_UNAVAILABLE",
+        )
+
     @abstractmethod
     def is_available(self) -> bool:
         pass
@@ -216,6 +232,22 @@ class SubprocessAgentBackend(AgentBackend):
 
     def is_available(self) -> bool:
         return shutil.which(self.binary_name) is not None
+
+    def probe_readiness(self) -> BackendReadiness:
+        """Reports executable presence without contacting the hosted provider."""
+        installed = self.is_available()
+        return BackendReadiness(
+            status=(
+                ReadinessStatus.READY
+                if installed
+                else ReadinessStatus.MISSING_EXECUTABLE
+            ),
+            installed=installed,
+            reachable=None,
+            authentication=AuthenticationStatus.UNKNOWN,
+            reason=None if installed else "MISSING_EXECUTABLE",
+            evidence=f"executable:{self.binary_name}",
+        )
 
     def build_command(self, task: TaskSpec, cwd: Path, role: str, prompt: str) -> List[str]:
         if self._builder:
@@ -398,6 +430,28 @@ class OllamaLocalBackend(AgentBackend):
     def is_available(self) -> bool:
         return self.diagnose().available
 
+    def probe_readiness(self) -> BackendReadiness:
+        """Checks the local runtime, model tag, and memory without generation."""
+        diag = self.diagnose()
+        status_by_reason = {
+            OllamaAvailabilityReason.NOT_INSTALLED: ReadinessStatus.MISSING_EXECUTABLE,
+            OllamaAvailabilityReason.SERVICE_UNAVAILABLE: ReadinessStatus.UNREACHABLE,
+            OllamaAvailabilityReason.MODEL_NOT_INSTALLED: ReadinessStatus.UNAVAILABLE,
+            OllamaAvailabilityReason.RESOURCE_CONSTRAINED: ReadinessStatus.UNAVAILABLE,
+            OllamaAvailabilityReason.AVAILABLE: ReadinessStatus.READY,
+        }
+        return BackendReadiness(
+            status=status_by_reason.get(diag.reason, ReadinessStatus.UNKNOWN),
+            installed=(diag.reason != OllamaAvailabilityReason.NOT_INSTALLED),
+            reachable=diag.reason not in (
+                OllamaAvailabilityReason.NOT_INSTALLED,
+                OllamaAvailabilityReason.SERVICE_UNAVAILABLE,
+            ),
+            authentication=AuthenticationStatus.NOT_APPLICABLE,
+            reason=None if diag.available else diag.reason,
+            evidence="local_ollama_diagnostics",
+        )
+
     def _default_http_generate(self, payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -554,6 +608,15 @@ class FakeAgentBackend(AgentBackend):
 
     def is_available(self) -> bool:
         return True
+
+    def probe_readiness(self) -> BackendReadiness:
+        return BackendReadiness(
+            status=ReadinessStatus.READY,
+            installed=True,
+            reachable=True,
+            authentication=AuthenticationStatus.UNKNOWN,
+            evidence="deterministic_fake_backend",
+        )
 
     def execute(
         self,

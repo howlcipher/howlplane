@@ -76,7 +76,7 @@ def test_detect_quota_exhaustion_agy():
 
     event = pool.detect_exhaustion("agy", res)
     assert event is not None
-    assert pool.get_status("agy") in (ProviderAvailabilityStatus.SESSION_EXHAUSTED, ProviderAvailabilityStatus.RATE_LIMITED)
+    assert pool.get_status("agy") == ProviderAvailabilityStatus.QUOTA_EXHAUSTED
 
 
 def test_engineering_failure_not_classified_as_exhaustion():

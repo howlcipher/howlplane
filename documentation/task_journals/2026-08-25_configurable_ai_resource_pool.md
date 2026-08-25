@@ -15,10 +15,10 @@ PR:
     https://github.com/howlcipher/howlplane/pull/49
 
 CURRENT_PHASE:
-    test_driven_resource_foundation
+    governed_orchestration_and_trajectory_integration
 
 LAST_COMPLETED_PHASE:
-    architecture_audit
+    resource_registry_configuration_readiness_capacity_selection
 
 LATEST_CHECKPOINT_COMMIT:
     2ea6fbbe0fdee815ecadb44ab3827425fd0a2fcb
@@ -53,6 +53,15 @@ FILES_CHANGED:
     README.md
     change_log.md
     documentation/task_journals/2026-08-25_configurable_ai_resource_pool.md
+    src/control_plane/agent_execution.py
+    src/control_plane/agent_registry.py
+    src/control_plane/resource_models.py
+    src/control_plane/router.py
+    src/control_plane/synthesis/marathon.py
+    src/control_plane/synthesis/provider_pool.py
+    src/infrastructure/config_loader.py
+    tests/test_ai_resource_pool.py
+    tests/test_provider_pool.py
 
 TESTS_RUN:
     git fetch origin
@@ -68,22 +77,27 @@ TESTS_RUN:
     architecture audit: source traced across registry, backends, pool, router,
     governed orchestration, reviewer failover, marathon, CLI, doctor,
     configuration, atomic I/O, evidence ledger, and trajectory persistence
+    TDD red: test_ai_resource_pool failed collection before new contracts existed
+    focused: 89 resource, provider, failover, reviewer, and local tests passed
+    flake8: changed Python source and tests passed
+    SlopsLint: python_src 14/14 and python_tests 29/29 ceilings passed
 
 KNOWN_FAILURES:
     NONE
 
 UNVERIFIED_WORK:
-    Resource configuration, selection, capacity persistence, CLI, trajectory,
-    and egress acceptance tests have not yet been implemented.
+    Governed orchestration selection wiring, trajectory schema migration, CLI,
+    doctor integration, operator-local configuration, and live acceptance are
+    not yet implemented.
 
 NEXT_SAFE_ACTION:
-    Write failing deterministic tests for resource identity, configuration,
-    readiness, policy, capability, capacity, economics, recommendation,
-    onboarding, subset operation, and structured no-resource outcomes.
+    Write failing trajectory and governed orchestration tests, then wire the
+    shared pool decision into implementation and reviewer role selection while
+    preserving structured no-resource blocking and resume idempotence.
 
 WORKTREE_STATE:
-    Clean after the initial signed checkpoint and enforced pre-push suite. The
-    checkpoint contains documentation and recovery metadata only.
+    Resource-foundation changes are verified and ready for exact-file staging.
+    No unrelated worktree changes are present.
 
 ## Start Gate Evidence
 
@@ -152,3 +166,28 @@ Architecture alternatives were evaluated as follows.
 | Add focused resource modules used by `ProviderPoolManager` | Keeps typed policy and decision contracts cohesive while preserving one production state owner | Requires compatibility adapters for current agent-oriented APIs | Selected |
 | Make `TaskRouter` perform hard policy and capacity filtering | Fewer call sites initially | Conflates cognitive recommendation with authority and economics | Rejected |
 | Keep `TaskRouter` advisory after pool filtering | Stable future cognitive seam and enforceable precedence | Requires a structured selection decision passed between layers | Selected |
+
+### 2026-08-25T16:10:00Z
+
+Completed the test-driven resource foundation. `AgentProfile` now retains its
+legacy agent fields while exposing distinct provider, interface, resource, and
+nullable observed model identities. Dynamic operator configuration validates
+unknown IDs, alias collisions, malformed fields, interface references, model
+references, policy strategy, preference IDs, cooldown bounds, and paid API
+permission without treating startup validation as readiness.
+
+`ProviderPoolManager` remains the sole state owner. It now avoids probes for
+unconfigured, disabled, and local-only hosted resources; performs only safe
+adapter readiness checks; loads and atomically saves detailed capacity state;
+normalizes capacity versus engineering failures; supports bounded reset and
+recovery; applies hard policy, role, capability, capacity, and economics before
+asking `TaskRouter` for an advisory recommendation; and produces a stable
+selection decision with candidates, exclusions, selected identity, policy,
+capacity, and structured blocking. Legacy caller APIs remain covered.
+
+The deterministic matrix proves single and multiple external subsets, mixed
+external and local resources, disabled and missing resources, local-only zero
+hosted probe boundaries, no-egress filtering, missing local repository contract,
+review role capability, subscription-first behavior, no paid fallback, explicit
+override constraints, durable restart and reset, normalized failures, review
+diversity, unknown model identity, and generic `fake_future_provider` onboarding.

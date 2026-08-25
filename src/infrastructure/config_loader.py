@@ -1,12 +1,52 @@
 #!/usr/bin/env python3
 import os
-from typing import Literal
+from pathlib import Path
+import tomllib
+from typing import Dict, List, Literal, Optional
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.infrastructure.secret_manager import SecretManager
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """YAML loader that rejects duplicate configuration keys."""
+
+
+def _construct_unique_mapping(loader, node, deep=False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ValueError(f"Duplicate configuration key: {key}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_unique_mapping,
+)
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Returns a recursive mapping merge without mutating either input."""
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _resource_local_config(local_data: dict) -> dict:
+    """Extracts only supported application overrides from operator TOML."""
+    source = local_data.get("ai_resources", local_data)
+    supported = ("operating_mode", "providers", "provider_policy")
+    return {key: source[key] for key in supported if key in source}
 
 
 class DatabaseSettings(BaseModel):
@@ -72,6 +112,40 @@ class IndexingSettings(BaseModel):
     batch_size: int = 100
 
 
+class ProviderResourceSettings(BaseModel):
+    """Operator permission and optional identity constraints for one resource."""
+
+    enabled: bool = True
+    interface_id: Optional[str] = None
+    model_id: Optional[str] = None
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("interface_id", "model_id")
+    @classmethod
+    def non_blank_optional_identity(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not value.strip():
+            raise ValueError("resource identity overrides cannot be blank")
+        return value
+
+
+class ProviderPolicySettings(BaseModel):
+    """Economic and deterministic preference policy below hard authority."""
+
+    strategy: Literal["adaptive_capacity", "deterministic"] = "adaptive_capacity"
+    subscription_first: bool = True
+    prefer_existing_capacity: bool = True
+    external_before_local: bool = True
+    allow_paid_api: bool = False
+    preserve_independent_review: bool = True
+    preferred_external: List[str] = Field(default_factory=list)
+    preferred_local: List[str] = Field(default_factory=list)
+    cooldown_seconds: int = Field(default=300, ge=0, le=86400)
+    max_metered_invocations: Optional[int] = Field(default=None, ge=0)
+
+    model_config = {"extra": "forbid"}
+
+
 class AppSettings(BaseSettings):
     operating_mode: Literal["local_only", "connected"] = "local_only"
     llm_model: str = "ollama/qwen3:30b-instruct"
@@ -87,6 +161,8 @@ class AppSettings(BaseSettings):
     skill_router: SkillRouterSettings = SkillRouterSettings()
     indexing: IndexingSettings = IndexingSettings()
     payload_pipeline: PayloadPipelineSettings = PayloadPipelineSettings()
+    providers: Dict[str, ProviderResourceSettings] = Field(default_factory=dict)
+    provider_policy: ProviderPolicySettings = ProviderPolicySettings()
     active_mcps: list = []
     mcp_servers: dict = {}
 
@@ -117,7 +193,7 @@ class ConfigLoader:
     as well as common directory paths to apply DRY principles.
     """
 
-    def __init__(self, config_path=None):
+    def __init__(self, config_path=None, local_config_path=None):
         """
         Initializes the ConfigLoader and calculates common paths.
         """
@@ -132,7 +208,21 @@ class ConfigLoader:
         yaml_data = {}
         if os.path.exists(self.config_path):
             with open(self.config_path, "r") as f:
-                yaml_data = yaml.safe_load(f) or {}
+                yaml_data = yaml.load(f, Loader=_UniqueKeyLoader) or {}
+
+        local_candidate = local_config_path
+        if local_candidate is None and config_path is None:
+            local_candidate = (
+                os.environ.get("HOWLPLANE_LOCAL_CONFIG")
+                or Path.home() / ".config" / "howlplane" / "config.toml"
+            )
+        self.local_config_path = (
+            Path(local_candidate).expanduser() if local_candidate else None
+        )
+        if self.local_config_path and self.local_config_path.is_file():
+            with open(self.local_config_path, "rb") as local_file:
+                local_data = tomllib.load(local_file)
+            yaml_data = _deep_merge(yaml_data, _resource_local_config(local_data))
 
         # Load pydantic settings prioritizing .env over yaml_data
         self.settings = AppSettings(**yaml_data)

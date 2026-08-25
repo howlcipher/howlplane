@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from src.control_plane.agent_registry import AgentProfile, AgentRegistry
+from src.control_plane.resource_models import CognitiveRecommendation
 from src.control_plane.task_spec import TaskSpec
 
 
@@ -52,6 +53,71 @@ class TaskRouter:
 
     def __init__(self, registry: Optional[AgentRegistry] = None):
         self.registry = registry or AgentRegistry()
+
+    def recommend_resource(
+        self,
+        task: TaskSpec,
+        candidates: List[AgentProfile],
+        *,
+        role: str,
+        operator_preferences: Optional[List[str]] = None,
+    ) -> CognitiveRecommendation:
+        """Ranks only already eligible resources and grants no authority."""
+        if not candidates:
+            return CognitiveRecommendation(
+                resource_id=None,
+                reason="No policy and capability eligible candidates were supplied.",
+            )
+        by_resource = {
+            profile.resource_id or profile.agent_id: profile
+            for profile in candidates
+        }
+        for preferred in operator_preferences or []:
+            if preferred in by_resource:
+                return CognitiveRecommendation(
+                    resource_id=preferred,
+                    reason="Explicit operator preference among eligible resources.",
+                )
+
+        skills = set(task.required_skills)
+        architectural = bool(skills.intersection({
+            "architectural_guardrails",
+            "systems_logic",
+            "technical_writing",
+            "cyber_security",
+        }))
+        autonomous = (
+            "autonomous_workflow" in task.allowed_tools
+            or task.risk_level in ("high", "critical")
+        )
+        ordered = sorted(
+            candidates,
+            key=lambda profile: profile.resource_id or profile.agent_id,
+        )
+        if task.recommended_reasoning_tier == "tier_1" or architectural:
+            tier = [profile for profile in ordered if profile.reasoning_tier == "tier_1"]
+            if autonomous:
+                autonomous_tier = [
+                    profile for profile in tier
+                    if "autonomous_workflow" in profile.capabilities
+                ]
+                if autonomous_tier:
+                    tier = autonomous_tier
+            selected = (tier or ordered)[0]
+            reason = "Deterministic Tier 1 task and role recommendation."
+        elif task.recommended_reasoning_tier == "tier_3" and task.risk_level == "low":
+            local = [profile for profile in ordered if profile.cost_class == "free_local"]
+            selected = (local or ordered)[0]
+            reason = "Deterministic low risk local task recommendation."
+        else:
+            tier = [profile for profile in ordered if profile.reasoning_tier == "tier_2"]
+            headless = [profile for profile in tier if profile.interface == "headless_cli"]
+            selected = (headless or tier or ordered)[0]
+            reason = f"Deterministic routing preference for role '{role}'."
+        return CognitiveRecommendation(
+            resource_id=selected.resource_id or selected.agent_id,
+            reason=reason,
+        )
 
     def route(self, task: TaskSpec) -> RoutingDecision:
         """

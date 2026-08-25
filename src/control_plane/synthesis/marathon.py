@@ -1239,10 +1239,12 @@ class MarathonDogfoodEngine:
         if event is not None:
             status = ProviderAvailabilityStatus.RATE_LIMITED if event.failure_type == "rate_limit" else (
                 ProviderAvailabilityStatus.SESSION_EXHAUSTED if event.failure_type == "session_limit"
+                else ProviderAvailabilityStatus.QUOTA_EXHAUSTED if event.failure_type == "quota_exhausted"
                 else ProviderAvailabilityStatus.UNAVAILABLE
             )
             failure_class = (
-                FAILURE_CLASS_PROVIDER_UNAVAILABLE if event.failure_type == "unavailable"
+                FAILURE_CLASS_PROVIDER_UNAVAILABLE
+                if event.failure_type in ("unavailable", "authentication_required")
                 else FAILURE_CLASS_PROVIDER_EXHAUSTED
             )
             return status.value, failure_class
