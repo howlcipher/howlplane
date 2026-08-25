@@ -1,0 +1,121 @@
+{
+  "trajectory_id": "traj-4db6472779925e683aba67e8",
+  "task_id": "EXP-60C-REVIEW-001-CANDIDATE-1",
+  "schema_version": "howlplane.execution_trajectory/v1",
+  "campaign_id": "MILESTONE-60C",
+  "opportunity_id": "SECOND-DEFECT-REVIEW",
+  "experiment_id": "EXP-60C-REVIEW-001",
+  "task_class": "bug_fix",
+  "objective": "Identify the known empty reviewer artifact defect.",
+  "selected_provider": "local_ollama",
+  "selected_model": "qwen2.5-coder:7b-instruct",
+  "selected_agent": "local_ollama",
+  "selected_reviewers": [
+    "correctness-reviewer",
+    "security-reviewer"
+  ],
+  "prompt_strategy_id": null,
+  "context_strategy_id": null,
+  "retrieval_strategy_id": null,
+  "tool_strategy_id": null,
+  "decomposition_strategy_id": null,
+  "review_strategy_id": "review.correctness_security_split/v1",
+  "verification_strategy_id": null,
+  "input_evidence_refs": [
+    "documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml"
+  ],
+  "selected_context_refs": [
+    ".task_runs/ACCEPTANCE-DOGFOOD-20260824-013739-fba3f8/reviews/correctness-reviewer.md",
+    ".task_runs/ACCEPTANCE-DOGFOOD-20260824-013739-fba3f8/findings.yaml"
+  ],
+  "actions_attempted": [
+    "independent_review",
+    "historical_empty_artifact_oracle"
+  ],
+  "tools_invoked": [
+    "local_ollama"
+  ],
+  "provider_events": [
+    {
+      "agent_id": "local_ollama",
+      "role": "correctness-reviewer",
+      "command": "ollama_local:qwen2.5-coder:7b-instruct",
+      "exit_code": 0,
+      "duration_seconds": 4.14,
+      "success": true,
+      "timed_out": false,
+      "error_message": null,
+      "metadata": {
+        "provider": "local_ollama",
+        "model": "qwen2.5-coder:7b-instruct",
+        "task_id": "EXP-60C-REVIEW-001-CANDIDATE-1",
+        "task_class": "bug_fix",
+        "start_time": "2026-08-25T13:47:02.363364+00:00",
+        "finish_time": "2026-08-25T13:47:06.506414+00:00",
+        "context_length": 8192,
+        "keep_alive": 0,
+        "ram_before_gib": 10.067,
+        "ram_after_gib": 10.08,
+        "ram_after_unload_gib": 10.08,
+        "output_sha256": "0a90f75521a9919ea305d1a1357256ecf299bff412b1f21b1ab21807ca712c9b"
+      },
+      "timestamp": "2026-08-25T13:47:06.506465+00:00",
+      "schema": "howlplane.agent_execution/v1"
+    },
+    {
+      "agent_id": "local_ollama",
+      "role": "security-reviewer",
+      "command": "ollama_local:qwen2.5-coder:7b-instruct",
+      "exit_code": 0,
+      "duration_seconds": 4.362,
+      "success": true,
+      "timed_out": false,
+      "error_message": null,
+      "metadata": {
+        "provider": "local_ollama",
+        "model": "qwen2.5-coder:7b-instruct",
+        "task_id": "EXP-60C-REVIEW-001-CANDIDATE-1",
+        "task_class": "bug_fix",
+        "start_time": "2026-08-25T13:47:06.506933+00:00",
+        "finish_time": "2026-08-25T13:47:10.871406+00:00",
+        "context_length": 8192,
+        "keep_alive": 0,
+        "ram_before_gib": 10.08,
+        "ram_after_gib": 10.052,
+        "ram_after_unload_gib": 10.052,
+        "output_sha256": "1c9d32173cb2b67fe728c8c461a6edbb475059460445b4482f5b6a2eff62c0c9"
+      },
+      "timestamp": "2026-08-25T13:47:10.871436+00:00",
+      "schema": "howlplane.agent_execution/v1"
+    }
+  ],
+  "review_findings": [
+    {
+      "reviewer_role": "correctness-reviewer",
+      "status": "dismissed",
+      "title": "No confirmed defect",
+      "evidence_ref": ".task_runs/ACCEPTANCE-DOGFOOD-20260824-013739-fba3f8/reviews/correctness-reviewer.md"
+    },
+    {
+      "reviewer_role": "security-reviewer",
+      "status": "confirmed",
+      "title": "Empty reviewer output",
+      "evidence_ref": ".task_runs/ACCEPTANCE-DOGFOOD-20260824-013739-fba3f8/reviews/correctness-reviewer.md"
+    }
+  ],
+  "verification_results": {
+    "overall_status": "passed",
+    "verifier": "historical_empty_review_oracle/v1",
+    "reproducible": true,
+    "escaped_defects": 0,
+    "observed_output_sha256": "0c5bdd985e03dbd341dffb0c9a4677bef27f9304580f8ab806ddea956fe8ed38"
+  },
+  "repair_cycles": [],
+  "final_status": "complete",
+  "outcome": "success",
+  "cost_if_available": null,
+  "latency_if_available": 8.501999999999999,
+  "created_at": "2026-08-25T13:47:10.871821+00:00",
+  "completed_at": "2026-08-25T13:47:10.872922+00:00",
+  "content_digest": "da34dc9f463140947bcbd80099d0c5f9d7ece6c7102d78310a1af3dacd7502ea"
+}

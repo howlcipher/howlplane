@@ -1,0 +1,80 @@
+{
+  "trajectory_id": "traj-ae9d021f99a3d5f824e3cc52",
+  "task_id": "EXP-60C-DECOMPOSITION-001-BASELINE-1",
+  "schema_version": "howlplane.execution_trajectory/v1",
+  "campaign_id": "MILESTONE-60C",
+  "opportunity_id": "MEANINGFUL-DECOMPOSITION",
+  "experiment_id": "EXP-60C-DECOMPOSITION-001",
+  "task_class": "other",
+  "objective": "Extract and reconcile discovery threshold and miner registry.",
+  "selected_provider": "local_ollama",
+  "selected_model": "qwen2.5-coder:7b-instruct",
+  "selected_agent": "local_ollama",
+  "selected_reviewers": [],
+  "prompt_strategy_id": null,
+  "context_strategy_id": null,
+  "retrieval_strategy_id": null,
+  "tool_strategy_id": null,
+  "decomposition_strategy_id": "planning.direct_implementation/v1",
+  "review_strategy_id": null,
+  "verification_strategy_id": null,
+  "input_evidence_refs": [
+    "documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml"
+  ],
+  "selected_context_refs": [
+    "src/control_plane/reasoning/trajectory_discovery.py",
+    "prompt-reference:bounded-subtasks/v1"
+  ],
+  "actions_attempted": [
+    "direct_execution",
+    "deterministic_verification",
+    ""
+  ],
+  "tools_invoked": [
+    "local_ollama"
+  ],
+  "provider_events": [
+    {
+      "agent_id": "local_ollama",
+      "role": "analysis",
+      "command": "ollama_local:qwen2.5-coder:7b-instruct",
+      "exit_code": 0,
+      "duration_seconds": 43.704,
+      "success": true,
+      "timed_out": false,
+      "error_message": null,
+      "metadata": {
+        "provider": "local_ollama",
+        "model": "qwen2.5-coder:7b-instruct",
+        "task_id": "EXP-60C-DECOMPOSITION-001-BASELINE-1",
+        "task_class": "other",
+        "start_time": "2026-08-25T13:44:48.623703+00:00",
+        "finish_time": "2026-08-25T13:45:32.330553+00:00",
+        "context_length": 8192,
+        "keep_alive": 0,
+        "ram_before_gib": 10.351,
+        "ram_after_gib": 9.381,
+        "ram_after_unload_gib": 9.381,
+        "output_sha256": "87192ff02028cd7c1a7b29ed89634fb596854a0dcfd634461597e91a2a56f2a7"
+      },
+      "timestamp": "2026-08-25T13:45:32.330581+00:00",
+      "schema": "howlplane.agent_execution/v1"
+    }
+  ],
+  "review_findings": [],
+  "verification_results": {
+    "overall_status": "passed",
+    "verifier": "exact_normalized_discovery_protocol_lines/v1",
+    "reproducible": true,
+    "escaped_defects": 0,
+    "observed_output_sha256": "af1c50167500824d57eff340e29f1009dc76738cf85ad6ab176b3f9025582879"
+  },
+  "repair_cycles": [],
+  "final_status": "complete",
+  "outcome": "success",
+  "cost_if_available": null,
+  "latency_if_available": 43.704,
+  "created_at": "2026-08-25T13:45:32.330954+00:00",
+  "completed_at": "2026-08-25T13:45:32.331498+00:00",
+  "content_digest": "0bf3528e65b3fe46d8ab2541d4faf2d72589cfe90aadc701b64b38b3184e880a"
+}

@@ -1,0 +1,106 @@
+{
+  "trajectory_id": "traj-664d158f836db3caf8d4df04",
+  "task_id": "EXP-60C-DECOMPOSITION-001-CANDIDATE-1",
+  "schema_version": "howlplane.execution_trajectory/v1",
+  "campaign_id": "MILESTONE-60C",
+  "opportunity_id": "MEANINGFUL-DECOMPOSITION",
+  "experiment_id": "EXP-60C-DECOMPOSITION-001",
+  "task_class": "other",
+  "objective": "Extract and reconcile discovery threshold and miner registry.",
+  "selected_provider": "local_ollama",
+  "selected_model": "qwen2.5-coder:7b-instruct",
+  "selected_agent": "local_ollama",
+  "selected_reviewers": [],
+  "prompt_strategy_id": null,
+  "context_strategy_id": null,
+  "retrieval_strategy_id": null,
+  "tool_strategy_id": null,
+  "decomposition_strategy_id": "planning.subsystem_decomposition/v1",
+  "review_strategy_id": null,
+  "verification_strategy_id": null,
+  "input_evidence_refs": [
+    "documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml"
+  ],
+  "selected_context_refs": [
+    "src/control_plane/reasoning/trajectory_discovery.py",
+    "prompt-reference:bounded-subtasks/v1"
+  ],
+  "actions_attempted": [
+    "threshold_subtask",
+    "miner_subtask",
+    "reconcile_exact_lines"
+  ],
+  "tools_invoked": [
+    "local_ollama"
+  ],
+  "provider_events": [
+    {
+      "agent_id": "local_ollama",
+      "role": "analysis",
+      "command": "ollama_local:qwen2.5-coder:7b-instruct",
+      "exit_code": 0,
+      "duration_seconds": 42.454,
+      "success": true,
+      "timed_out": false,
+      "error_message": null,
+      "metadata": {
+        "provider": "local_ollama",
+        "model": "qwen2.5-coder:7b-instruct",
+        "task_id": "EXP-60C-DECOMPOSITION-001-CANDIDATE-1",
+        "task_class": "other",
+        "start_time": "2026-08-25T13:45:32.350582+00:00",
+        "finish_time": "2026-08-25T13:46:14.807344+00:00",
+        "context_length": 8192,
+        "keep_alive": 0,
+        "ram_before_gib": 9.415,
+        "ram_after_gib": 9.898,
+        "ram_after_unload_gib": 9.898,
+        "output_sha256": "ed06e0a7181725a617bd5ec028015e89d1a50457c4e7aeb73fa31ae2fed43db5"
+      },
+      "timestamp": "2026-08-25T13:46:14.807372+00:00",
+      "schema": "howlplane.agent_execution/v1"
+    },
+    {
+      "agent_id": "local_ollama",
+      "role": "analysis",
+      "command": "ollama_local:qwen2.5-coder:7b-instruct",
+      "exit_code": 0,
+      "duration_seconds": 43.356,
+      "success": true,
+      "timed_out": false,
+      "error_message": null,
+      "metadata": {
+        "provider": "local_ollama",
+        "model": "qwen2.5-coder:7b-instruct",
+        "task_id": "EXP-60C-DECOMPOSITION-001-CANDIDATE-1",
+        "task_class": "other",
+        "start_time": "2026-08-25T13:46:14.807714+00:00",
+        "finish_time": "2026-08-25T13:46:58.167684+00:00",
+        "context_length": 8192,
+        "keep_alive": 0,
+        "ram_before_gib": 9.911,
+        "ram_after_gib": 9.878,
+        "ram_after_unload_gib": 9.878,
+        "output_sha256": "39a28adb7c95bfbdf7a8c865828a7e7f2a80ca59060e8d878371052a0f624e4b"
+      },
+      "timestamp": "2026-08-25T13:46:58.167711+00:00",
+      "schema": "howlplane.agent_execution/v1"
+    }
+  ],
+  "review_findings": [],
+  "verification_results": {
+    "overall_status": "passed",
+    "verifier": "exact_normalized_discovery_protocol_lines/v1",
+    "reproducible": true,
+    "escaped_defects": 0,
+    "observed_output_sha256": "af1c50167500824d57eff340e29f1009dc76738cf85ad6ab176b3f9025582879"
+  },
+  "repair_cycles": [],
+  "final_status": "complete",
+  "outcome": "success",
+  "cost_if_available": null,
+  "latency_if_available": 85.81,
+  "created_at": "2026-08-25T13:46:58.168096+00:00",
+  "completed_at": "2026-08-25T13:46:58.168776+00:00",
+  "content_digest": "64e7ff090054398d787c7658ac4c7d8d32ca1fb54d125107b6287ce00401a016"
+}

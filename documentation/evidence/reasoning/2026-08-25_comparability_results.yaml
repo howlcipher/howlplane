@@ -1,0 +1,555 @@
+schema: howlplane.reasoning_evidence_campaign_results/v1
+campaign_id: MILESTONE-60C
+updated_at: '2026-08-25T13:55:53Z'
+evidence_classification: LIVE
+scope: observable provider outputs and deterministic verification only
+audit_note: Post-campaign audit corrected composition and decomposition classifications from meaningful coverage to NOT_OBSERVED while preserving the trajectories as live executed attempts. Counts, model/cost
+  fields, and the final coverage matrix were derived directly from raw trajectory JSON.
+campaign_totals:
+  completed_experiments: 6
+  new_trustworthy_trajectories: 14
+  outcomes:
+    success: 7
+    verification_failed: 7
+  primary_providers:
+    local_ollama: 10
+    claude_code: 2
+    codex: 2
+  provider_invocations:
+    local_ollama: 13
+    claude_code: 4
+    codex: 2
+  exact_models:
+    local_ollama: qwen2.5-coder:7b-instruct
+    claude_code: NOT_OBSERVED
+    codex: NOT_OBSERVED
+  costs: NOT_OBSERVED
+experiment_results:
+  EXP-60C-CONTEXT-001:
+    result: INCONCLUSIVE
+    comparability: 'Exact #60B task, verifier, providers, and strategy arms; two additional samples per arm.'
+    prediction_digest: 0973a642f9cebf0cf05629d2785d2756efa476f5e7cd197974a4c37377e6ace1
+    content_digest: 417641bd1ead37df4ba9d39efb3fba05fc7162dd0f65efb52cf98f04a40fa096
+    trajectories:
+    - id: traj-7193bb11ca2158f8d67aa21e
+      arm: baseline
+      provider: local_ollama
+      model: qwen2.5-coder:7b-instruct
+      outcome: verification_failed
+      latency_seconds: 6.263
+      repairs: 0
+    - id: traj-a33559de3475130e10fd1382
+      arm: baseline
+      provider: local_ollama
+      model: qwen2.5-coder:7b-instruct
+      outcome: verification_failed
+      latency_seconds: 4.882
+      repairs: 0
+    - id: traj-ea633f6ef088a823a6ccfa0c
+      arm: candidate
+      provider: local_ollama
+      model: qwen2.5-coder:7b-instruct
+      outcome: verification_failed
+      latency_seconds: 45.146
+      repairs: 0
+    - id: traj-ed1efd6ce25238b858ed0ca7
+      arm: candidate
+      provider: local_ollama
+      model: qwen2.5-coder:7b-instruct
+      outcome: verification_failed
+      latency_seconds: 45.525
+      repairs: 0
+  EXP-60C-PROVIDER-001:
+    result: INCONCLUSIVE
+    comparability: Same deterministic task, source context, prompt reference, verifier, tools, and no-repair policy; only provider family differs.
+    prediction_digest: dbd43f91b51c964ddb37ecf5302f0f82e9096f1bad9e0b6ed9c965daf1bde359
+    content_digest: 201a9232ffbdec7430432c67b20f2a3ce906f90b71803b547c13f97ee3103f83
+    trajectories:
+    - id: traj-24c058fdbe4e0bcc7d398f94
+      arm: baseline
+      provider: claude_code
+      model: NOT_OBSERVED
+      outcome: success
+      latency_seconds: 8.437
+      repairs: 0
+    - id: traj-7dbb4a809d9809d4b80bd727
+      arm: candidate
+      provider: codex
+      model: NOT_OBSERVED
+      outcome: success
+      latency_seconds: 11.718
+      repairs: 0
+  EXP-60C-REPAIR-001:
+    result: INCONCLUSIVE
+    comparability: Same real failed notes fixture and exact verifier; candidate received failure-signature evidence and at most one remediation.
+    prediction_digest: 3e2012bc78e4ce84aa997341ce531317574eb3a1e69a7a9e79ff005b1631d45a
+    content_digest: fca721f7fe7bd2cb9b93337d8274ee6bbe49db2a95ab549303ffb72e4d4502c4
+    trajectories:
+    - id: traj-e2d04d072ac010e708121140
+      arm: baseline
+      provider: local_ollama
+      model: qwen2.5-coder:7b-instruct
+      outcome: verification_failed
+      latency_seconds: 4.102
+      repairs: 0
+    - id: traj-cd3975d8ae6797ef5d1c475c
+      arm: candidate
+      provider: local_ollama
+      model: qwen2.5-coder:7b-instruct
+      outcome: verification_failed
+      latency_seconds: 10.065
+      repairs: 1
+  EXP-60C-COMPOSITION-001:
+    result: INCONCLUSIVE
+    comparability: Baseline and candidate both executed on the same trivial exact fact extraction fixture. Provider events label both invocations role=review, so meaningful role-separated provider composition
+      is NOT_OBSERVED.
+    prediction_digest: 8f3c1fb88e8e7cd8f22d6638de8781592ed2c6f0748f6f54c485df7c9a1f7eaf
+    content_digest: d5988eacbf07e6fd03bfc1216da6efa5faf77dcd6c2a032bc356766100637c99
+    trajectories:
+    - id: traj-bf96aa6afe383aba05007f58
+      arm: baseline
+      provider: claude_code
+      model: NOT_OBSERVED
+      outcome: success
+      latency_seconds: 27.356
+      repairs: 0
+    - id: traj-3c9103ca65179ddb00770d10
+      arm: candidate
+      provider: codex
+      model: NOT_OBSERVED
+      outcome: success
+      latency_seconds: 25.451
+      repairs: 0
+    meaningful_provider_composition: NOT_OBSERVED
+    provenance_limitation: provider_events label all invocations role=review despite trajectory actions_attempted claiming planning and implementation; role separation cannot be verified from the observable
+      record
+  EXP-60C-DECOMPOSITION-001:
+    result: INCONCLUSIVE
+    comparability: Same low-risk source extraction and exact verifier; candidate split a simple two-fact extraction into two subtask calls. Preserve as live execution but classify meaningful decomposition
+      as NOT_OBSERVED.
+    prediction_digest: ecd406314cbc9454c1a8e9f12a4c89b3932fed384acd017748670244ed0939aa
+    content_digest: f0cad40bb613d60c4a7c5c5fd42e9a14794d6b65052a19248450f95d28c01b0e
+    trajectories:
+    - id: traj-ae9d021f99a3d5f824e3cc52
+      arm: baseline
+      provider: local_ollama
+      model: qwen2.5-coder:7b-instruct
+      outcome: success
+      latency_seconds: 43.704
+      repairs: 0
+    - id: traj-664d158f836db3caf8d4df04
+      arm: candidate
+      provider: local_ollama
+      model: qwen2.5-coder:7b-instruct
+      outcome: success
+      latency_seconds: 85.81
+      repairs: 0
+    meaningful_task_decomposition: NOT_OBSERVED
+    provenance_limitation: candidate manufactured two subtasks (threshold_subtask, miner_subtask) for a simple two-fact extraction, violating the instruction not to manufacture decomposition on trivial
+      extraction
+  EXP-60C-REVIEW-001:
+    result: INCONCLUSIVE
+    comparability: Same historical empty-review defect oracle; general reviewer versus correctness and security reviewers.
+    prediction_digest: fda1c15afe450784e837c1536b02f3419ed50d87c85b93c292f41679aee70bf7
+    content_digest: 8f20b4f556bf00a90780ea00ce8a3c7318c824e00fab17e3b3d2528748618e56
+    trajectories:
+    - id: traj-1b62ff5dcaa9fd52b7e52413
+      arm: baseline
+      provider: local_ollama
+      model: qwen2.5-coder:7b-instruct
+      outcome: verification_failed
+      latency_seconds: 4.088
+      repairs: 0
+      reviewers:
+      - general-reviewer
+    - id: traj-4db6472779925e683aba67e8
+      arm: candidate
+      provider: local_ollama
+      model: qwen2.5-coder:7b-instruct
+      outcome: success
+      latency_seconds: 8.502
+      repairs: 0
+      reviewers:
+      - correctness-reviewer
+      - security-reviewer
+per_trajectory_comparability:
+  classifications:
+  - trajectory_id: traj-1b62ff5dcaa9fd52b7e52413
+    task_id: EXP-60C-REVIEW-001-BASELINE-1
+    arm: baseline
+    provider: local_ollama
+    model: qwen2.5-coder:7b-instruct
+    outcome: verification_failed
+    latency_seconds: 4.088
+    repairs: 0
+    reviewers:
+    - general-reviewer
+    comparability: PARTIALLY_COMPARABLE
+    comparability_rationale: Same empty-review fixture as candidate; differs only by reviewer topology.
+  - trajectory_id: traj-24c058fdbe4e0bcc7d398f94
+    task_id: EXP-60C-PROVIDER-001-BASELINE-1
+    arm: baseline
+    provider: claude_code
+    model: NOT_OBSERVED
+    outcome: success
+    latency_seconds: 8.437
+    repairs: 0
+    reviewers: []
+    comparability: PARTIALLY_COMPARABLE
+    comparability_rationale: Held-constant task/fixture/verifier with candidate; differs only by provider family.
+  - trajectory_id: traj-3c9103ca65179ddb00770d10
+    task_id: EXP-60C-COMPOSITION-001-CANDIDATE-1
+    arm: candidate
+    provider: codex
+    model: NOT_OBSERVED
+    outcome: success
+    latency_seconds: 25.451
+    repairs: 0
+    reviewers: []
+    comparability: PARTIALLY_COMPARABLE
+    comparability_rationale: Same fixture/verifier as baseline; differs only by provider arrangement, but role separation is not trustworthy.
+  - trajectory_id: traj-4db6472779925e683aba67e8
+    task_id: EXP-60C-REVIEW-001-CANDIDATE-1
+    arm: candidate
+    provider: local_ollama
+    model: qwen2.5-coder:7b-instruct
+    outcome: success
+    latency_seconds: 8.502
+    repairs: 0
+    reviewers:
+    - correctness-reviewer
+    - security-reviewer
+    comparability: PARTIALLY_COMPARABLE
+    comparability_rationale: Same empty-review fixture as baseline; differs only by reviewer topology.
+  - trajectory_id: traj-664d158f836db3caf8d4df04
+    task_id: EXP-60C-DECOMPOSITION-001-CANDIDATE-1
+    arm: candidate
+    provider: local_ollama
+    model: qwen2.5-coder:7b-instruct
+    outcome: success
+    latency_seconds: 85.81
+    repairs: 0
+    reviewers: []
+    comparability: PARTIALLY_COMPARABLE
+    comparability_rationale: Same fixture/verifier as baseline; differs only by direct vs decomposed execution, but subtasks are manufactured.
+  - trajectory_id: traj-7193bb11ca2158f8d67aa21e
+    task_id: EXP-60C-CONTEXT-001-BASELINE-1
+    arm: baseline
+    provider: local_ollama
+    model: qwen2.5-coder:7b-instruct
+    outcome: verification_failed
+    latency_seconds: 6.263
+    repairs: 0
+    reviewers: []
+    comparability: HIGHLY_COMPARABLE
+    comparability_rationale: 'Exact replication of 60B baseline and 60C baseline-2: same experiment, arm, provider, fixture, verifier.'
+  - trajectory_id: traj-7dbb4a809d9809d4b80bd727
+    task_id: EXP-60C-PROVIDER-001-CANDIDATE-1
+    arm: candidate
+    provider: codex
+    model: NOT_OBSERVED
+    outcome: success
+    latency_seconds: 11.718
+    repairs: 0
+    reviewers: []
+    comparability: PARTIALLY_COMPARABLE
+    comparability_rationale: Held-constant task/fixture/verifier with baseline; differs only by provider family.
+  - trajectory_id: traj-a33559de3475130e10fd1382
+    task_id: EXP-60C-CONTEXT-001-BASELINE-2
+    arm: baseline
+    provider: local_ollama
+    model: qwen2.5-coder:7b-instruct
+    outcome: verification_failed
+    latency_seconds: 4.882
+    repairs: 0
+    reviewers: []
+    comparability: HIGHLY_COMPARABLE
+    comparability_rationale: 'Exact replication of 60B baseline and 60C baseline-1: same experiment, arm, provider, fixture, verifier.'
+  - trajectory_id: traj-ae9d021f99a3d5f824e3cc52
+    task_id: EXP-60C-DECOMPOSITION-001-BASELINE-1
+    arm: baseline
+    provider: local_ollama
+    model: qwen2.5-coder:7b-instruct
+    outcome: success
+    latency_seconds: 43.704
+    repairs: 0
+    reviewers: []
+    comparability: PARTIALLY_COMPARABLE
+    comparability_rationale: Same fixture/verifier as candidate; differs only by direct vs decomposed execution, but subtasks are manufactured.
+  - trajectory_id: traj-bf96aa6afe383aba05007f58
+    task_id: EXP-60C-COMPOSITION-001-BASELINE-1
+    arm: baseline
+    provider: claude_code
+    model: NOT_OBSERVED
+    outcome: success
+    latency_seconds: 27.356
+    repairs: 0
+    reviewers: []
+    comparability: PARTIALLY_COMPARABLE
+    comparability_rationale: Same fixture/verifier as candidate; differs only by provider arrangement, but role separation is not trustworthy.
+  - trajectory_id: traj-cd3975d8ae6797ef5d1c475c
+    task_id: EXP-60C-REPAIR-001-CANDIDATE-1
+    arm: candidate
+    provider: local_ollama
+    model: qwen2.5-coder:7b-instruct
+    outcome: verification_failed
+    latency_seconds: 10.065
+    repairs: 1
+    reviewers: []
+    comparability: PARTIALLY_COMPARABLE
+    comparability_rationale: Same real failed fixture as baseline; differs only by retrieval/repair strategy.
+  - trajectory_id: traj-e2d04d072ac010e708121140
+    task_id: EXP-60C-REPAIR-001-BASELINE-1
+    arm: baseline
+    provider: local_ollama
+    model: qwen2.5-coder:7b-instruct
+    outcome: verification_failed
+    latency_seconds: 4.102
+    repairs: 0
+    reviewers: []
+    comparability: PARTIALLY_COMPARABLE
+    comparability_rationale: Same real failed fixture as candidate; differs only by retrieval/repair strategy.
+  - trajectory_id: traj-ea633f6ef088a823a6ccfa0c
+    task_id: EXP-60C-CONTEXT-001-CANDIDATE-1
+    arm: candidate
+    provider: local_ollama
+    model: qwen2.5-coder:7b-instruct
+    outcome: verification_failed
+    latency_seconds: 45.146
+    repairs: 0
+    reviewers: []
+    comparability: HIGHLY_COMPARABLE
+    comparability_rationale: 'Exact replication of 60B candidate and 60C candidate-2: same experiment, arm, provider, fixture, verifier.'
+  - trajectory_id: traj-ed1efd6ce25238b858ed0ca7
+    task_id: EXP-60C-CONTEXT-001-CANDIDATE-2
+    arm: candidate
+    provider: local_ollama
+    model: qwen2.5-coder:7b-instruct
+    outcome: verification_failed
+    latency_seconds: 45.525
+    repairs: 0
+    reviewers: []
+    comparability: HIGHLY_COMPARABLE
+    comparability_rationale: 'Exact replication of 60B candidate and 60C candidate-1: same experiment, arm, provider, fixture, verifier.'
+  counts:
+    PARTIALLY_COMPARABLE: 10
+    HIGHLY_COMPARABLE: 4
+combined_context_evidence:
+  included_campaigns:
+  - MILESTONE-60B
+  - MILESTONE-60C
+  baseline_arm:
+    strategy: context.task_plus_acceptance/v1
+    passes: 0
+    attempts: 3
+    trajectory_ids:
+    - traj-b394f235c485620338fb4bbd
+    - traj-7193bb11ca2158f8d67aa21e
+    - traj-a33559de3475130e10fd1382
+  candidate_arm:
+    strategy: context.relevant_documentation/v1
+    passes: 1
+    attempts: 3
+    trajectory_ids:
+    - traj-1ebfcd581ea8c7ecce27464c
+    - traj-ea633f6ef088a823a6ccfa0c
+    - traj-ed1efd6ce25238b858ed0ca7
+  confounds:
+  - candidate source context directly contains the answer-bearing source excerpt (src/control_plane/reasoning/trajectory_discovery.py)
+  - '#60C candidate failed both repetitions'
+  result: INCONCLUSIVE
+cloud_provider_comparison:
+  experiment: EXP-60C-PROVIDER-001
+  held_constant:
+  - task
+  - source context
+  - prompt reference
+  - verifier
+  - tools
+  - no-repair policy
+  arms:
+  - provider: claude_code
+    outcome: success
+    model_observed: NOT_OBSERVED
+    cost_observed: NOT_OBSERVED
+  - provider: codex
+    outcome: success
+    model_observed: NOT_OBSERVED
+    cost_observed: NOT_OBSERVED
+  authentication_prompt: false
+  result: INCONCLUSIVE
+repair_search:
+  experiment: EXP-60C-REPAIR-001
+  fixture: .dogfood_runs/DOGFOOD-20260822-005043-16adca/campaign_state.json
+  baseline:
+    repairs: 0
+    outcome: verification_failed
+  candidate:
+    repairs: 1
+    repair_outcome: unsuccessful
+    outcome: verification_failed
+  successful_repair: NOT_OBSERVED
+  result: INCONCLUSIVE
+review_topology_metrics:
+  milestone_60c:
+    baseline:
+      reviewers:
+      - general-reviewer
+      outcome: verification_failed
+    candidate:
+      reviewers:
+      - correctness-reviewer
+      - security-reviewer
+      outcome: success
+  combined_with_milestone_60b:
+  - fixture: canary identifier delimiter defect
+    single_reviewer: passed
+    split_topology: failed
+    conclusion: FALSIFIED_FOR_THIS_FIXTURE_ONLY
+  - fixture: empty historical reviewer artifact
+    general_reviewer: failed
+    correctness_plus_security: passed
+    conclusion: INCONCLUSIVE
+  conclusion: No universal reviewer topology default; conclusions are per-fixture only.
+model_and_cost_quality:
+  exact_models_observed:
+    local_ollama: qwen2.5-coder:7b-instruct
+  exact_models_not_observed:
+  - claude_code
+  - codex
+  costs: NOT_OBSERVED for all 22 trajectories
+  authentication_prompts: 0
+trajectory_discovery_result:
+  trajectories_scanned: 22
+  passes: 2
+  new_observations: 0
+  existing_observations:
+  - observation_id: OBS-LOCAL-FIRST-7d18349014334fbe
+    status: open
+    occurrence_count: 2
+    evidence_refs:
+    - traj-1ebfcd581ea8c7ecce27464c
+    - traj-474a74feb2c89fd4887ff103
+  duplicate_or_reopened_observations: 0
+  strategy_changes: 0
+final_coverage_matrix:
+  raw_executed_attempts: 22
+  campaigns:
+    MILESTONE-60A: 2
+    MILESTONE-60B: 6
+    MILESTONE-60C: 14
+  task_classes:
+    test_improvement: 4
+    bug_fix: 6
+    other: 12
+  primary_providers:
+    local_ollama: 17
+    claude_code: 3
+    codex: 2
+  provider_invocations:
+    local_ollama: 21
+    claude_code: 7
+    codex: 2
+  outcomes:
+    verification_failed: 13
+    success: 9
+  repairs:
+    no_repair: 19
+    one_unsuccessful_repair: 3
+    successful_repair: 0
+  reviewer_topologies:
+    no_reviewers: 18
+    correctness-reviewer: 1
+    correctness-reviewer_plus_regression-reviewer: 1
+    general-reviewer: 1
+    correctness-reviewer_plus_security-reviewer: 1
+  context_strategies:
+    context.task_plus_acceptance/v1: 6
+    context.changed_files_plus_architecture/v1: 1
+    context.relevant_documentation/v1: 7
+    context.changed_files_only/v1: 2
+    none: 6
+  retrieval_strategies:
+    none: 18
+    retrieval.failure_signature/v1: 3
+    retrieval.no_historical/v1: 1
+  decomposition_strategies:
+    none: 20
+    planning.subsystem_decomposition/v1: 1
+    planning.direct_implementation/v1: 1
+  review_strategies:
+    none: 18
+    review.general_single/v1: 2
+    review.correctness_regression/v1: 1
+    review.correctness_security_split/v1: 1
+  meaningful_provider_composition: NOT_OBSERVED
+  meaningful_task_decomposition: NOT_OBSERVED
+  cloud_primary_trajectories: 5
+  observable_latency_trajectories: 22
+  costs: NOT_OBSERVED
+evidence_quality_audit:
+  coordinator_resume_dedup_after_each_experiment: passed
+  trajectory_digests_valid: 14
+  experiment_prediction_digests_valid: 6
+  experiment_content_digests_valid: 6
+  raw_prompts_stored: 0
+  hidden_reasoning_stored: 0
+  cloud_provider_commands_redacted: true
+  authentication_required: false
+  trajectory_discovery_consistency: passed
+invalid_or_rejected_quality_interpretations:
+- claim: EXP-60C-COMPOSITION-001 demonstrates trustworthy cross-provider planning and implementation.
+  status: REJECTED
+  reason: The fixture is a trivial exact fact extraction from a source file where role separation is not meaningful, and the stored provider_events label both invocations as role=review, contradicting the
+    claimed planning/implementation separation.
+- claim: EXP-60C-DECOMPOSITION-001 demonstrates meaningful task decomposition.
+  status: REJECTED
+  reason: The candidate manufactured two subtasks for a simple two-fact extraction, violating the instruction not to manufacture decomposition on trivial extraction.
+- claim: 'The one context-candidate pass in #60B proves that relevant source context universally improves extraction.'
+  status: REJECTED
+  reason: 'The candidate context directly contained the answer-bearing source excerpt, and the #60C repetitions of the same arm failed twice.'
+- claim: Cloud provider success in EXP-60C-PROVIDER-001 proves parity between Claude and Codex.
+  status: REJECTED
+  reason: Only one sample per provider family, exact model IDs and costs were not observed, and the task directly supplied the answer source.
+competing_explanations:
+  context_candidate_pass:
+  - answer leakage from directly supplied source excerpt
+  - stochastic local generation
+  - low pattern-threshold sensitivity
+  cloud_provider_success:
+  - task directly supplied the answer source
+  - one sample per provider family
+  - unobserved model and cost differences
+  composition_decomposition_pass:
+  - trivial exact fact extraction
+  - role labels do not match claimed planning/implementation
+  - subtasks manufactured from a two-fact extraction
+  review_topology_variability:
+  - fixture-specific prompt sensitivity
+  - role calibration differences
+  - stochastic local generation
+limitations:
+- All six deterministic experiment evaluations are INCONCLUSIVE at these sample sizes.
+- The legitimate bounded repair was observed but did not succeed; successful repair remains NOT_OBSERVED.
+- Cloud model identifiers and provider costs were not exposed and remain NOT_OBSERVED.
+- Provider composition coverage is NOT_OBSERVED because the fixture was trivial exact fact extraction and the stored provider events label both invocations role=review.
+- Task decomposition coverage is NOT_OBSERVED because the candidate manufactured two subtasks for a simple two-fact extraction.
+- 'The single context-candidate pass in #60B is confounded by answer leakage and is not replicated in #60C.'
+readiness_recommendation:
+  decision: COLLECT_MORE_TRAJECTORY_EVIDENCE
+  rationale: Successful repair is absent, meaningful provider composition and task decomposition are absent, the context candidate passed only 1 of 3 attempts with a direct answer-leakage confound, and
+    coverage remains limited to three task classes with one sample per arm for most comparisons. No strategy or authority change is justified.
+  required_dimensions:
+  - successful repair or remediation outcome
+  - meaningful provider composition on a non-trivial planning/implementation task
+  - meaningful task decomposition on a non-trivial task
+  - additional context repetitions with answer-leakage controls
+  - additional cloud-provider samples with exposed model/cost metadata
+  - additional task classes beyond the current three
+evidence_paths:
+  experiments: logs/control_plane/milestone_60c_reasoning_evidence/experiments
+  trajectories: logs/control_plane/milestone_60c_reasoning_evidence/trajectories
+  plan: documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml
+  prior_results:
+  - documentation/evidence/reasoning/2026-08-25_campaign_results.yaml
+  - documentation/evidence/reasoning/2026-08-24_context_canary.yaml

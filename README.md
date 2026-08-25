@@ -128,14 +128,18 @@ had one sample per arm, cloud primary and successful repair evidence remained
 sparse, and provider composition plus decomposition were unobserved. The
 resulting decision was `COLLECT_MORE_TRAJECTORY_EVIDENCE`.
 
-Milestone #60C continues the same architecture with a second bounded campaign
-focused on comparable repetitions rather than raw trajectory volume. It seeks
-reproduced context evidence, held constant provider comparisons, legitimate
-successful remediation, meaningful provider composition and decomposition,
-and another appropriate review topology fixture. The campaign will preserve
-unknown model and cost fields when providers do not expose trustworthy values,
-will not consume known exhausted capacity, and will not introduce learned
-routing or strategy promotion.
+Milestone #60C completed six preregistered comparisons and accepted fourteen
+new live trajectories. It added two samples per #60B context arm, a held
+constant Claude versus Codex task, and a real bounded but unsuccessful repair.
+Provider composition and task decomposition were executed as raw trajectories
+but did not satisfy the milestone's meaningful-coverage criteria: the
+composition task was trivial exact fact extraction whose provider events label
+both invocations as `role=review`, and the decomposition task manufactured two
+subtasks for a simple two-fact extraction. Both are preserved as live executed
+attempts with coverage classified `NOT_OBSERVED`. A second empty-review-artifact
+topology fixture was also collected. All six experiment evaluations remain
+`INCONCLUSIVE`; cloud model and all cost fields remain `NOT_OBSERVED`. No
+learned routing or strategy promotion occurred.
 
 ---
 

@@ -1,0 +1,121 @@
+{
+  "experiment_id": "EXP-60C-PROVIDER-001",
+  "schema_version": "howlplane.reasoning_experiment/v1",
+  "campaign_id": "MILESTONE-60C",
+  "opportunity_id": "HELD-CONSTANT-CLOUD-PROVIDER",
+  "task_class": "other",
+  "experiment_type": "ROUTING",
+  "baseline_strategy": {
+    "strategy_id": "routing.frontier_first/v1",
+    "version": "v1",
+    "strategy_type": "routing",
+    "config_digest": "f306841e25bfb0ad18c56d437a1880c6795472f81db51b2a31c0a22ecae0bbda",
+    "full_config": {
+      "escalate_on_failure": false,
+      "provider_composition": [
+        "claude_code"
+      ]
+    }
+  },
+  "candidate_strategy": {
+    "strategy_id": "routing.frontier_first/v1",
+    "version": "v1",
+    "strategy_type": "routing",
+    "config_digest": "f306841e25bfb0ad18c56d437a1880c6795472f81db51b2a31c0a22ecae0bbda",
+    "full_config": {
+      "escalate_on_failure": false,
+      "provider_composition": [
+        "claude_code"
+      ]
+    }
+  },
+  "baseline_provider": "claude_code",
+  "candidate_provider": "codex",
+  "baseline_model": null,
+  "candidate_model": null,
+  "context_strategy_id": null,
+  "retrieval_strategy_id": null,
+  "tool_strategy_id": null,
+  "review_strategy_id": null,
+  "decomposition_strategy_id": null,
+  "planning_strategy_id": null,
+  "verification_strategy_id": null,
+  "expected_outcome": "Both installed cloud provider families pass exact verification on the held-constant task.",
+  "falsification_criteria": [
+    "candidate.verification_pass_rate < baseline.verification_pass_rate"
+  ],
+  "metrics": [
+    "verification_pass_rate",
+    "mean_latency",
+    "provider_failures"
+  ],
+  "baseline_results": [
+    {
+      "trajectory_id": "traj-24c058fdbe4e0bcc7d398f94",
+      "task_id": "EXP-60C-PROVIDER-001-BASELINE-1",
+      "selected_provider": "claude_code",
+      "selected_agent": "claude_code",
+      "selected_reviewers": [],
+      "final_status": "complete",
+      "outcome": "success",
+      "repair_cycles_count": 0,
+      "verification_status": "passed",
+      "confirmed_defects": 0,
+      "escaped_defects": 0,
+      "reproducible": true,
+      "cost_if_available": null,
+      "latency_if_available": 8.437,
+      "content_digest": "37440566e7e635685859a6e00e9a4387c19f7dbea76d880155c801763fb06890"
+    }
+  ],
+  "candidate_results": [
+    {
+      "trajectory_id": "traj-7dbb4a809d9809d4b80bd727",
+      "task_id": "EXP-60C-PROVIDER-001-CANDIDATE-1",
+      "selected_provider": "codex",
+      "selected_agent": "codex",
+      "selected_reviewers": [],
+      "final_status": "complete",
+      "outcome": "success",
+      "repair_cycles_count": 0,
+      "verification_status": "passed",
+      "confirmed_defects": 0,
+      "escaped_defects": 0,
+      "reproducible": true,
+      "cost_if_available": null,
+      "latency_if_available": 11.718,
+      "content_digest": "d0f969ce2e8b819a1ddef5c5be4ddf573ba62100459fb116178dd6e3749d8898"
+    }
+  ],
+  "success_rate": null,
+  "verification_pass_rate": null,
+  "review_escape_rate": null,
+  "repair_cycles": null,
+  "cost_if_available": null,
+  "latency_if_available": null,
+  "provider_failures": 0,
+  "result": "INCONCLUSIVE",
+  "confidence": "baseline_n=1, candidate_n=1, primary_metric=verification_pass_rate",
+  "evidence_refs": [
+    "documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml",
+    "traj-24c058fdbe4e0bcc7d398f94",
+    "traj-7dbb4a809d9809d4b80bd727"
+  ],
+  "created_at": "2026-08-25T13:40:33.957426+00:00",
+  "started_at": "2026-08-25T13:43:18.863550+00:00",
+  "completed_at": "2026-08-25T13:43:39.063202+00:00",
+  "lifecycle_stage": "COMPLETE",
+  "evaluation_details": {
+    "baseline_n": 1,
+    "candidate_n": 1,
+    "falsification_failures": [],
+    "metric_comparisons": {
+      "verification_pass_rate": "equal",
+      "mean_latency": "worse",
+      "provider_failures": "equal"
+    },
+    "primary_metric": "verification_pass_rate"
+  },
+  "prediction_digest": "dbd43f91b51c964ddb37ecf5302f0f82e9096f1bad9e0b6ed9c965daf1bde359",
+  "content_digest": "201a9232ffbdec7430432c67b20f2a3ce906f90b71803b547c13f97ee3103f83"
+}

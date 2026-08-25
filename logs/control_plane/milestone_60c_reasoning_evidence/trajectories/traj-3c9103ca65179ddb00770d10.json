@@ -1,0 +1,81 @@
+{
+  "trajectory_id": "traj-3c9103ca65179ddb00770d10",
+  "task_id": "EXP-60C-COMPOSITION-001-CANDIDATE-1",
+  "schema_version": "howlplane.execution_trajectory/v1",
+  "campaign_id": "MILESTONE-60C",
+  "opportunity_id": "PROVIDER-COMPOSITION",
+  "experiment_id": "EXP-60C-COMPOSITION-001",
+  "task_class": "other",
+  "objective": "Plan then produce exact discovery protocol facts.",
+  "selected_provider": "codex",
+  "selected_model": null,
+  "selected_agent": "codex",
+  "selected_reviewers": [],
+  "prompt_strategy_id": null,
+  "context_strategy_id": "context.relevant_documentation/v1",
+  "retrieval_strategy_id": null,
+  "tool_strategy_id": null,
+  "decomposition_strategy_id": null,
+  "review_strategy_id": null,
+  "verification_strategy_id": null,
+  "input_evidence_refs": [
+    "documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml"
+  ],
+  "selected_context_refs": [
+    "src/control_plane/reasoning/trajectory_discovery.py",
+    "prompt-reference:provider-composition/v1"
+  ],
+  "actions_attempted": [
+    "planning:claude_code",
+    "implementation:codex",
+    "deterministic_verification"
+  ],
+  "tools_invoked": [
+    "claude_code",
+    "codex"
+  ],
+  "provider_events": [
+    {
+      "agent_id": "claude_code",
+      "role": "review",
+      "command": "[redacted provider command]",
+      "exit_code": 0,
+      "duration_seconds": 12.673,
+      "success": true,
+      "timed_out": false,
+      "error_message": null,
+      "metadata": {},
+      "timestamp": "2026-08-25T13:47:51.026038+00:00",
+      "schema": "howlplane.agent_execution/v1"
+    },
+    {
+      "agent_id": "codex",
+      "role": "review",
+      "command": "[redacted provider command]",
+      "exit_code": 0,
+      "duration_seconds": 12.778,
+      "success": true,
+      "timed_out": false,
+      "error_message": null,
+      "metadata": {},
+      "timestamp": "2026-08-25T13:48:03.804745+00:00",
+      "schema": "howlplane.agent_execution/v1"
+    }
+  ],
+  "review_findings": [],
+  "verification_results": {
+    "overall_status": "passed",
+    "verifier": "exact_normalized_discovery_protocol_lines/v1",
+    "reproducible": true,
+    "escaped_defects": 0,
+    "observed_output_sha256": "7e615afdb04b8198a6e3284686f7fdba3df209c2cf11cc394defe26cb62643e2"
+  },
+  "repair_cycles": [],
+  "final_status": "complete",
+  "outcome": "success",
+  "cost_if_available": null,
+  "latency_if_available": 25.451,
+  "created_at": "2026-08-25T13:48:03.804838+00:00",
+  "completed_at": "2026-08-25T13:48:03.805373+00:00",
+  "content_digest": "86d36ab0e7eebe516ac93ed33c823105a4428169e5a504f35a49ae45ed0a0086"
+}

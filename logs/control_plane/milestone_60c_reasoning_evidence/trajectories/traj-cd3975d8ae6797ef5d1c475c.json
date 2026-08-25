@@ -1,0 +1,113 @@
+{
+  "trajectory_id": "traj-cd3975d8ae6797ef5d1c475c",
+  "task_id": "EXP-60C-REPAIR-001-CANDIDATE-1",
+  "schema_version": "howlplane.execution_trajectory/v1",
+  "campaign_id": "MILESTONE-60C",
+  "opportunity_id": "HISTORICAL-FAILURE-REPAIR",
+  "experiment_id": "EXP-60C-REPAIR-001",
+  "task_class": "bug_fix",
+  "objective": "Classify the failed historical notes fixture and state one evidence-backed remediation.",
+  "selected_provider": "local_ollama",
+  "selected_model": "qwen2.5-coder:7b-instruct",
+  "selected_agent": "local_ollama",
+  "selected_reviewers": [],
+  "prompt_strategy_id": null,
+  "context_strategy_id": null,
+  "retrieval_strategy_id": "retrieval.failure_signature/v1",
+  "tool_strategy_id": null,
+  "decomposition_strategy_id": null,
+  "review_strategy_id": null,
+  "verification_strategy_id": null,
+  "input_evidence_refs": [
+    "documentation/evidence/reasoning/2026-08-25_comparability_plan.yaml"
+  ],
+  "selected_context_refs": [
+    ".dogfood_runs/DOGFOOD-20260822-005043-16adca/campaign_state.json"
+  ],
+  "actions_attempted": [
+    "first_pass",
+    "bounded_remediation",
+    "deterministic_verification"
+  ],
+  "tools_invoked": [
+    "local_ollama"
+  ],
+  "provider_events": [
+    {
+      "agent_id": "local_ollama",
+      "role": "analysis",
+      "command": "ollama_local:qwen2.5-coder:7b-instruct",
+      "exit_code": 0,
+      "duration_seconds": 4.725,
+      "success": true,
+      "timed_out": false,
+      "error_message": null,
+      "metadata": {
+        "provider": "local_ollama",
+        "model": "qwen2.5-coder:7b-instruct",
+        "task_id": "EXP-60C-REPAIR-001-CANDIDATE-1",
+        "task_class": "bug_fix",
+        "start_time": "2026-08-25T13:44:38.482592+00:00",
+        "finish_time": "2026-08-25T13:44:43.210537+00:00",
+        "context_length": 8192,
+        "keep_alive": 0,
+        "ram_before_gib": 9.451,
+        "ram_after_gib": 9.553,
+        "ram_after_unload_gib": 9.553,
+        "output_sha256": "545f20002bde152a023ecd68a7c217df6fe0e5a513e666e0bc20331d97ca76e3"
+      },
+      "timestamp": "2026-08-25T13:44:43.210569+00:00",
+      "schema": "howlplane.agent_execution/v1"
+    },
+    {
+      "agent_id": "local_ollama",
+      "role": "remediation",
+      "command": "ollama_local:qwen2.5-coder:7b-instruct",
+      "exit_code": 0,
+      "duration_seconds": 5.34,
+      "success": true,
+      "timed_out": false,
+      "error_message": null,
+      "metadata": {
+        "provider": "local_ollama",
+        "model": "qwen2.5-coder:7b-instruct",
+        "task_id": "EXP-60C-REPAIR-001-CANDIDATE-1",
+        "task_class": "bug_fix",
+        "start_time": "2026-08-25T13:44:43.210878+00:00",
+        "finish_time": "2026-08-25T13:44:48.553516+00:00",
+        "context_length": 8192,
+        "keep_alive": 0,
+        "ram_before_gib": 9.565,
+        "ram_after_gib": 9.557,
+        "ram_after_unload_gib": 9.557,
+        "output_sha256": "36f5dfc2b8cba2cc071b397f5c5d2fe67786890053973eff797e8c7b13135a26"
+      },
+      "timestamp": "2026-08-25T13:44:48.553544+00:00",
+      "schema": "howlplane.agent_execution/v1"
+    }
+  ],
+  "review_findings": [],
+  "verification_results": {
+    "overall_status": "failed",
+    "verifier": "exact_historical_failure_classification/v1",
+    "reproducible": true,
+    "escaped_defects": 1,
+    "observed_output_sha256": "36f5dfc2b8cba2cc071b397f5c5d2fe67786890053973eff797e8c7b13135a26"
+  },
+  "repair_cycles": [
+    {
+      "cycle_index": 1,
+      "trigger": "exact_verification_failed",
+      "evidence_ref": ".dogfood_runs/DOGFOOD-20260822-005043-16adca/campaign_state.json",
+      "provider": "local_ollama",
+      "verification_status": "failed"
+    }
+  ],
+  "final_status": "verification_failed",
+  "outcome": "verification_failed",
+  "cost_if_available": null,
+  "latency_if_available": 10.065,
+  "created_at": "2026-08-25T13:44:48.553882+00:00",
+  "completed_at": "2026-08-25T13:44:48.554832+00:00",
+  "content_digest": "b8aeaa03b5302027c6d42a12897fec84e4d7747b8094b0cfe9b382651da5bfe8"
+}
