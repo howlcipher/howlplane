@@ -20,7 +20,11 @@ from src.control_plane.synthesis.provider_pool import (
 def test_provider_pool_initialization():
     pool = ProviderPoolManager()
     status = pool.get_status("agy")
-    assert status in (ProviderAvailabilityStatus.AVAILABLE, ProviderAvailabilityStatus.UNAVAILABLE)
+    assert status in (
+        ProviderAvailabilityStatus.AVAILABLE,
+        ProviderAvailabilityStatus.UNAVAILABLE,
+        ProviderAvailabilityStatus.MISSING_EXECUTABLE,
+    )
 
 
 def test_detect_quota_exhaustion_claude():

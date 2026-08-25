@@ -119,7 +119,10 @@ TESTS_RUN:
     SlopsLint: python_src 14/14 and python_tests 29/29 ceilings passed
 
 KNOWN_FAILURES:
-    NONE
+    Exact-head Python CI initially exposed a stale legacy assertion that allowed
+    only AVAILABLE/UNAVAILABLE for an optional AGY CLI. Production correctly
+    reported MISSING_EXECUTABLE on the clean runner. The assertion is being
+    corrected and must pass on the next exact head.
 
 UNVERIFIED_WORK:
     Exact-head GitHub CI, PR readiness transition, and merge remain.
@@ -268,3 +271,13 @@ ratchet passed against `origin/main`. Branch whitespace and credential-pattern
 scans were clean. The only observed test warning remains the dependency-level
 Pydantic incomplete-forward-reference warning, and pdoc retains its known
 dependency annotation warnings; neither command failed.
+
+### 2026-08-25T20:34:00Z
+
+Exact-head GitHub CI passed CodeQL, lint/security, Go, and SlopsLint but exposed
+one environment-dependent legacy assertion in `test_provider_pool_initialization`.
+The clean runner does not install AGY, so the new truthful readiness contract
+returned `MISSING_EXECUTABLE`; the test still allowed only `AVAILABLE` or generic
+`UNAVAILABLE`. Production behavior matches Milestone #61 and must not be weakened.
+The test is updated to accept the explicit missing-executable state, with focused
+and full verification required before the replacement signed head is pushed.
