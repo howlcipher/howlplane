@@ -157,16 +157,25 @@ run the verifier.
 
 def invoke_provider(provider: str, prompt: str, worktree: Path, role: str = "implementation") -> Dict[str, Any]:
     if provider == "claude_code":
-        cmd = ["claude", "-p", prompt]
+        # Non-interactive print mode with explicit tool allowance; the prompt
+        # itself tells the agent to edit files in the worktree.
+        cmd = [
+            "claude", "-p", prompt,
+            "--allowedTools", "Bash,Edit,Read",
+        ]
     elif provider == "codex":
-        if role.endswith("-reviewer") or role == "review":
-            cmd = ["codex", "exec", prompt]
-        else:
-            cmd = ["codex", "exec", "--sandbox", "workspace-write", prompt]
+        # --approve-for-me routes approvals through automatic review using the
+        # workspace-write sandbox; it is mutually exclusive with --sandbox.
+        cmd = [
+            "codex", "exec",
+            "-C", str(worktree),
+            "--approve-for-me",
+            "--ephemeral",
+            prompt,
+        ]
     elif provider == "agy":
         cmd = ["agy", "-p", prompt, "--mode", "accept-edits"]
     elif provider == "local_ollama":
-        # Local Ollama handled separately via API for simple generation.
         return invoke_ollama(prompt, worktree, role)
     else:
         raise ValueError(f"Unknown provider: {provider}")
@@ -177,7 +186,7 @@ def invoke_provider(provider: str, prompt: str, worktree: Path, role: str = "imp
         cwd=str(worktree),
         capture_output=True,
         text=True,
-        timeout=600,
+        timeout=900,
     )
     elapsed = round(time.time() - start, 3)
     return {
@@ -244,7 +253,8 @@ def main() -> int:
     args = parser.parse_args()
 
     catalog = load_catalog()
-    fixture = next(f for f in catalog["fixtures"] if f["fixture_id"] == args.fixture)
+    fixture = catalog["fixtures"][args.fixture]
+    fixture["fixture_id"] = args.fixture
     base_sha = fixture["historical_base_sha"]
     test_patch = PATCH_DIR / f"{args.fixture.lower().replace('-', '')}_test_only.patch"
 

@@ -26,27 +26,33 @@ CURRENT_EXPERIMENT:
     NONE
 
 COMPLETED_EXPERIMENTS:
-    NONE
+    FIX-39-claude_code-implementation-002: successful repair (initial failed, final passed)
+    FIX-39-codex-implementation-002: successful repair (initial failed, final passed)
+    FIX-35-claude_code-implementation-001: successful repair (initial failed, final passed)
+    FIX-39-composition-claude-impl-001: provider composition (plan + implement, both claude_code) passed
 
 TRAJECTORY_COUNTS:
     EXISTING_CURRENT_SCHEMA_LIVE: 22
-    NEW_TRUSTWORTHY_60D: 0
-    TOTAL_LIVE_CURRENT_SCHEMA: 22
+    NEW_TRUSTWORTHY_60D: 4
+    TOTAL_LIVE_CURRENT_SCHEMA: 26
 
 COVERAGE_MATRIX:
-    Refer to prior #60C coverage matrix; #60D targets the sparse dimensions.
+    Current 60D successful repairs: 3
+    Multi-provider comparison: FIX-39 held constant across claude_code and codex; both passed.
+    Provider composition: FIX-39 with claude_code plan artifact and claude_code implementation passed.
+    Model metadata: exact hosted model IDs not yet observed from CLI outputs.
 
 PROVIDER_STATES:
-    claude_code: installed, authenticated status TBD
-    codex: installed, authenticated status TBD
+    claude_code: installed, authenticated, edits files when --allowedTools is provided
+    codex: installed, authenticated, requires --approve-for-me (mutually exclusive with --sandbox)
     agy: installed
     local_ollama: installed and routable (qwen2.5-coder:7b-instruct)
 
 CURRENT_BLOCKERS:
-    NONE
+    Codex exec mode does not expose model metadata or execution transcript in stdout/stderr.
 
 NEXT_SAFE_ACTION:
-    Commit the fixture catalog and repair runner, then execute FIX-39 repair with live providers.
+    Add context-experiment support to runner, run review topology on FIX-35 patch, attempt FIX-37 or FIX-35 decomposition, and finalize coverage matrix.
 
 ## Campaign Boundaries
 
@@ -83,3 +89,7 @@ FREE_TOOLS:
 ### 2026-08-25T10:00:00Z
 
 Verified main at 47e78e2f with clean worktree and matching origin. Created working branch dogfood/historical-reasoning-evidence and this journal. No fixture catalog yet; subagent exploring historical PRs #35, #37, #39, #41, #42, #43 in parallel.
+
+### 2026-08-25T14:35:00Z
+
+Verified the historical fixture catalog against real repository commits. Worktrees created for FIX-35, FIX-37, and FIX-39 base SHAs; applying only the future test patch at each base reproduces the historical failure. Initial Claude Code direct repair on FIX-39 passed the deterministic verifier. Codex direct repair on FIX-39 also passed after correcting the CLI invocation to use --approve-for-me without --sandbox. FIX-35 direct repair with Claude Code also passed, including both orchestrator.py and marathon.py changes. Provider composition experiment (Claude plan artifact + Claude implementation) on FIX-39 passed. Exact model metadata still not observed from CLI outputs. Composition with Codex as implementer failed because Codex did not emit file edits from the plan artifact; the runner currently captures no stdout/stderr from Codex exec.

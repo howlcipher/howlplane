@@ -1,0 +1,17 @@
+PLAN: Fix explicit reviewer_requirements to replace default baseline reviewers
+
+Location: src/control_plane/router.py, TaskRouter._select_reviewers (approximately lines 172-208 at historical base SHA 5f7f3d6).
+
+Observation: The two baseline add_reviewer calls for correctness-reviewer and test-falsifier run unconditionally before the task.reviewer_requirements block. Because add_reviewer only deduplicates, an explicit reviewer_requirements list gets merged with the baseline rather than replacing it.
+
+Implementation steps:
+1. Open src/control_plane/router.py and locate the _select_reviewers method.
+2. Find the unconditional baseline calls:
+   - add_reviewer("correctness-reviewer", ...)
+   - add_reviewer("test-falsifier", ...)
+3. Wrap those two calls in an else branch of the existing `if task.reviewer_requirements:` check, so they only run when no explicit reviewer_requirements are provided.
+4. Leave the existing for req in task.reviewer_requirements loop as the if branch.
+5. Do not change the risk/skill-triggered reviewers below (security-reviewer, architecture-reviewer, regression-reviewer) or the trailing simplicity-reviewer call.
+6. After editing, run the deterministic verifier:
+   tests/test_control_plane.py::test_reviewer_requirements_replace_baseline
+7. Do not modify tests or other files.
