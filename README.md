@@ -141,6 +141,14 @@ topology fixture was also collected. All six experiment evaluations remain
 `INCONCLUSIVE`; cloud model and all cost fields remain `NOT_OBSERVED`. No
 learned routing or strategy promotion occurred.
 
+Milestone #60D then exercised the same immutable evidence system against real
+historical engineering defects. Milestone #61 now extends the existing shared
+provider pool into a configurable resource registry with separate operator
+permission, readiness, capability, capacity, economic policy, deterministic
+recommendation, and authority stages. The work remains on its feature branch
+until the generic registry, CLI visibility, trajectory integration, local-only
+proof, compatibility, and complete verification are merged.
+
 ---
 
 ## Operating Modes & Egress Governance
