@@ -208,7 +208,11 @@ class ConfigLoader:
         yaml_data = {}
         if os.path.exists(self.config_path):
             with open(self.config_path, "r") as f:
-                yaml_data = yaml.load(f, Loader=_UniqueKeyLoader) or {}
+                loader = _UniqueKeyLoader(f)
+                try:
+                    yaml_data = loader.get_single_data() or {}
+                finally:
+                    loader.dispose()
 
         local_candidate = local_config_path
         if local_candidate is None and config_path is None:

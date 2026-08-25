@@ -1,5 +1,7 @@
 """Deterministic acceptance tests for Milestone #61 resource selection."""
 
+import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,17 @@ from src.control_plane.resource_models import (
     ResourceLocality,
     ResourceSelectionStatus,
 )
+from src.control_plane.orchestrator import (
+    FAILURE_CLASS_NO_ELIGIBLE_RESOURCE,
+    GovernedTaskOrchestrator,
+    OrchestrationConfig,
+)
+from src.control_plane.reasoning.execution_trajectory import (
+    EXECUTION_TRAJECTORY_SCHEMA_VERSION,
+    EXECUTION_TRAJECTORY_SCHEMA_VERSION_V1,
+    ExecutionTrajectory,
+)
+from src.control_plane.router import TaskRouter
 from src.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderConfigurationError,
@@ -141,6 +154,61 @@ def failed_result(resource_id: str, stderr: str, *, exit_code: int = 1) -> Agent
         duration_seconds=0.1,
         success=False,
     )
+
+
+def test_router_uses_shared_pool_and_records_review_resource_identities():
+    implementer = make_profile("codex", provider_id="openai")
+    reviewer = make_profile("claude_code", provider_id="anthropic")
+    pool = make_pool([implementer, reviewer])
+
+    route = TaskRouter(resource_pool=pool).route(make_task(preferred="codex"))
+
+    assert route.selected_agent_id == "codex"
+    assert route.metadata["resource_selection"]["selected"]["provider_id"] == "openai"
+    assert route.metadata["review_diversity_achieved"] is True
+    identities = route.metadata["reviewer_resource_identities"]
+    assert all(item["provider_id"] == "anthropic" for item in identities.values())
+
+
+def test_governed_orchestrator_blocks_structurally_before_provider_execution(tmp_path: Path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    profile = make_profile("disabled")
+    backend = CountingBackend("disabled")
+    pool = make_pool(
+        [profile], enabled={"disabled": False}, backends={"disabled": backend}
+    )
+    orchestrator = GovernedTaskOrchestrator(
+        target_repo=tmp_path,
+        config=OrchestrationConfig(
+            provider_pool=pool,
+            enable_howlframe_audit=False,
+            record_evidence=False,
+            record_trajectory=False,
+            acquire_locks=False,
+        ),
+    )
+
+    result = orchestrator.run(make_task(task_id="POOL-BLOCKED"))
+
+    assert result.final_state == "blocked"
+    assert result.failure_class == FAILURE_CLASS_NO_ELIGIBLE_RESOURCE
+    assert json.loads(result.error_message)["reason"] == "NO_ELIGIBLE_AI_RESOURCE"
+    assert backend.executed_calls == []
+
+
+def test_legacy_trajectory_schema_and_digest_remain_valid():
+    legacy = ExecutionTrajectory(
+        trajectory_id="legacy-trajectory",
+        task_id="legacy-task",
+        schema_version=EXECUTION_TRAJECTORY_SCHEMA_VERSION_V1,
+    )
+    payload = legacy.to_dict()
+
+    loaded = ExecutionTrajectory.from_dict(payload)
+
+    assert loaded.schema_version == EXECUTION_TRAJECTORY_SCHEMA_VERSION_V1
+    assert loaded.verify_digest()
+    assert EXECUTION_TRAJECTORY_SCHEMA_VERSION.endswith("/v2")
 
 
 def test_resource_identity_keeps_provider_interface_resource_and_model_distinct():

@@ -1422,7 +1422,16 @@ class MarathonDogfoodEngine:
             # from summary text -- whether this was an availability failure.
             event = None
             if exec_res is not None:
-                event = self.provider_pool.detect_exhaustion(provider, exec_res, task_id=task_id)
+                if result.failure_class in {
+                    FAILURE_CLASS_PROVIDER_EXHAUSTED,
+                    FAILURE_CLASS_PROVIDER_UNAVAILABLE,
+                }:
+                    state = self.provider_pool.get_resource_status(provider)
+                    event = state.exhaustion_event if state is not None else None
+                else:
+                    event = self.provider_pool.detect_exhaustion(
+                        provider, exec_res, task_id=task_id
+                    )
             attempt_result, failure_class = self._attempt_result_for(event, result.final_state)
 
             reconciled = False

@@ -7,7 +7,7 @@ skills, reasoning tiers, risk levels, and human overrides.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.control_plane.agent_registry import AgentProfile, AgentRegistry
 from src.control_plane.resource_models import CognitiveRecommendation
@@ -26,7 +26,7 @@ class RoutingDecision:
     reviewer_selection_reasons: Dict[str, str] = field(default_factory=dict)
     is_override: bool = False
     alternatives: List[str] = field(default_factory=list)
-    metadata: Dict[str, str] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def render_text(self, task_id: str = "") -> str:
         lines = [
@@ -51,8 +51,15 @@ class TaskRouter:
     without making external API calls.
     """
 
-    def __init__(self, registry: Optional[AgentRegistry] = None):
-        self.registry = registry or AgentRegistry()
+    def __init__(
+        self,
+        registry: Optional[AgentRegistry] = None,
+        resource_pool: Optional[Any] = None,
+    ):
+        self.resource_pool = resource_pool
+        self.registry = registry or (
+            resource_pool.registry if resource_pool is not None else AgentRegistry()
+        )
 
     def recommend_resource(
         self,
@@ -123,6 +130,8 @@ class TaskRouter:
         """
         Calculates the recommended agent and reviewers for a given task specification.
         """
+        if self.resource_pool is not None:
+            return self._route_resource(task)
         reviewers, reviewer_reasons = self._select_reviewers(task)
 
         # 1. Check for human / policy override
@@ -233,6 +242,61 @@ class TaskRouter:
             reviewer_selection_reasons=reviewer_reasons,
             is_override=False,
             alternatives=alternatives,
+        )
+
+    def _route_resource(self, task: TaskSpec) -> RoutingDecision:
+        """Routes through the shared resource pool without bypassing policy."""
+        reviewers, reviewer_reasons = self._select_reviewers(task)
+        decision = self.resource_pool.select_resource(
+            task,
+            role="implementation",
+            explicit_resource_id=task.preferred_agent,
+        )
+        metadata: Dict[str, Any] = {
+            "resource_selection": decision.to_dict(),
+            "blocked_outcome": decision.blocked_outcome() if not decision.selected else None,
+        }
+        if decision.selected is None:
+            return RoutingDecision(
+                selected_agent_id="",
+                selected_agent_name="No eligible AI resource",
+                reasoning_tier=task.recommended_reasoning_tier,
+                rationale="No configured resource passed hard policy, readiness, capability, capacity, and economic filtering.",
+                recommended_reviewers=reviewers,
+                reviewer_selection_reasons=reviewer_reasons,
+                is_override=bool(task.preferred_agent),
+                metadata=metadata,
+            )
+
+        selected = self.registry.get_resource(decision.selected.resource_id)
+        reviewer_mapping, diversity = self.resource_pool.select_reviewers(
+            decision.selected.resource_id,
+            reviewers,
+            task=task,
+        )
+        metadata.update({
+            "reviewer_resource_mapping": reviewer_mapping,
+            "reviewer_resource_identities": {
+                role: self.registry.get_resource(resource_id).resource_identity().to_dict()
+                for role, resource_id in reviewer_mapping.items()
+                if self.registry.get_resource(resource_id) is not None
+            },
+            "review_diversity_achieved": diversity,
+        })
+        recommendation = decision.cognitive_recommendation
+        return RoutingDecision(
+            selected_agent_id=decision.selected.resource_id,
+            selected_agent_name=selected.name if selected else decision.selected.resource_id,
+            reasoning_tier=selected.reasoning_tier if selected else task.recommended_reasoning_tier,
+            rationale=(recommendation.reason if recommendation else "Deterministic resource selection."),
+            recommended_reviewers=reviewers,
+            reviewer_selection_reasons=reviewer_reasons,
+            is_override=decision.explicit_override,
+            alternatives=[
+                identity.resource_id for identity in decision.eligible_resources
+                if identity.resource_id != decision.selected.resource_id
+            ],
+            metadata=metadata,
         )
 
     def _select_reviewers(self, task: TaskSpec) -> Tuple[List[str], Dict[str, str]]:

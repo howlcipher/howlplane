@@ -15,13 +15,13 @@ PR:
     https://github.com/howlcipher/howlplane/pull/49
 
 CURRENT_PHASE:
-    governed_orchestration_and_trajectory_integration
+    cli_inventory_route_doctor
 
 LAST_COMPLETED_PHASE:
-    resource_registry_configuration_readiness_capacity_selection
+    governed_orchestration_and_trajectory_integration
 
 LATEST_CHECKPOINT_COMMIT:
-    2ea6fbbe0fdee815ecadb44ab3827425fd0a2fcb
+    f8a09ae (resource foundation; push pending full-gate retry)
 
 PROVIDER_ARCHITECTURE_DECISIONS:
     Extend the existing provider pool, routing, capability, review, trajectory,
@@ -61,6 +61,7 @@ FILES_CHANGED:
     src/control_plane/synthesis/provider_pool.py
     src/infrastructure/config_loader.py
     tests/test_ai_resource_pool.py
+    tests/test_dogfood_hardening.py
     tests/test_provider_pool.py
 
 TESTS_RUN:
@@ -79,6 +80,7 @@ TESTS_RUN:
     configuration, atomic I/O, evidence ledger, and trajectory persistence
     TDD red: test_ai_resource_pool failed collection before new contracts existed
     focused: 89 resource, provider, failover, reviewer, and local tests passed
+    focused: 114 governed orchestration, trajectory, failover, and review tests passed
     flake8: changed Python source and tests passed
     SlopsLint: python_src 14/14 and python_tests 29/29 ceilings passed
 
@@ -86,18 +88,16 @@ KNOWN_FAILURES:
     NONE
 
 UNVERIFIED_WORK:
-    Governed orchestration selection wiring, trajectory schema migration, CLI,
-    doctor integration, operator-local configuration, and live acceptance are
-    not yet implemented.
+    CLI, doctor integration, operator-local configuration, documentation, and
+    live acceptance are not yet implemented.
 
 NEXT_SAFE_ACTION:
-    Write failing trajectory and governed orchestration tests, then wire the
-    shared pool decision into implementation and reviewer role selection while
-    preserving structured no-resource blocking and resume idempotence.
+    Add deterministic CLI inventory, read-only route, doctor, and targeted reset
+    tests, then wire those commands to the shared pool without generation.
 
 WORKTREE_STATE:
-    Resource-foundation changes are verified and ready for exact-file staging.
-    No unrelated worktree changes are present.
+    Governed orchestration and trajectory changes are verified and ready for
+    exact-file staging. No unrelated worktree changes are present.
 
 ## Start Gate Evidence
 
