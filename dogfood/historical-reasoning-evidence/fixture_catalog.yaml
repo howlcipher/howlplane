@@ -1,0 +1,165 @@
+# Historical Engineering Replay Fixture Catalog (#60D)
+# All defects are HISTORICAL_REAL_FIXTURE from merged HowlPlane history.
+
+schema_version: howlplane.historical_fixture_catalog/v1
+fixtures:
+  FIX-35:
+    task_class: bug_fix
+    historical_base_sha: dd66019fea14f1daca5fe18cc6adf27e9d377574
+    historical_fix_sha: 0bba5ed20e6a3b1a9139a22b8549b1b86015c03a
+    historical_fix_pr: "#35"
+    known_defect_summary: |
+      Bounded reviewer failover existed in ReviewRunner but GovernedTaskOrchestrator
+      did not forward ProviderPoolManager, so the governed engineering path
+      (used by the acceptance canary and every real task) had no alternate-provider
+      retry when a reviewer emitted malformed/unstructured output.
+    deterministic_verifier:
+      - tests/test_review_integrity.py::test_orchestration_config_wires_provider_pool_into_review_cycle
+      - tests/test_review_integrity.py::test_governed_review_cycle_fails_over_on_malformed_output
+      - tests/test_review_integrity.py::test_governed_review_cycle_without_pool_still_blocks_on_malformed_output
+    expected_failing_behavior_at_base:
+      provider_pool field is absent from OrchestrationConfig; the source-inspection
+      test fails and failover is unavailable in the governed path.
+    allowed_paths:
+      - src/control_plane/orchestrator.py
+      - src/control_plane/synthesis/marathon.py
+    difficulty: medium
+    suitability:
+      direct_repair: true
+      composition: true
+      decomposition: false
+      context_experiment: true
+
+  FIX-37:
+    task_class: bug_fix
+    historical_base_sha: ca7751f20938219d0e8bddf6bc03b0919daa4923
+    historical_fix_sha: 4dde0fb8375abf7c8acceb5e0a975e8cdd0736d0
+    historical_fix_pr: "#37"
+    known_defect_summary: |
+      TaskSpec.allowed_paths was only enforced at commit time, after independent
+      review had already seen and objected to out-of-scope edits. Path-scoped tasks
+      therefore cycled through max_remediation_cycles and blocked on the human gate.
+    deterministic_verifier:
+      - tests/test_closed_loop_orchestrator.py::test_allowed_paths_enforcement_reverts_out_of_scope_edits
+    expected_failing_behavior_at_base:
+      Out-of-scope edits produced by implementation/remediation remain in the delta
+      presented to reviewers; the orchestrator final_state is awaiting_human rather
+      than complete and src/auth.py is not reverted.
+    allowed_paths:
+      - src/control_plane/orchestrator.py
+    difficulty: high
+    suitability:
+      direct_repair: true
+      composition: false
+      decomposition: true
+      context_experiment: true
+
+  FIX-39:
+    task_class: bug_fix
+    historical_base_sha: 5f7f3d6f3a71776468b35de963edcd43f50756a7
+    historical_fix_sha: 9ba628f9cb78623e21729369601057805cab2e23
+    historical_fix_pr: "#39"
+    known_defect_summary: |
+      TaskRouter always added correctness-reviewer and test-falsifier to the baseline
+      before merging explicit reviewer_requirements. An evidence-only canary task
+      therefore could not avoid test-falsifier findings against existing unit tests
+      even though it produced no production code.
+    deterministic_verifier:
+      - tests/test_control_plane.py::test_reviewer_requirements_replace_baseline
+    expected_failing_behavior_at_base:
+      test-falsifier is present in recommended_reviewers even when reviewer_requirements
+      explicitly excludes it.
+    allowed_paths:
+      - src/control_plane/router.py
+    difficulty: low
+    suitability:
+      direct_repair: true
+      composition: true
+      decomposition: false
+      context_experiment: true
+
+  FIX-41:
+    task_class: ci_failure_repair
+    historical_base_sha: cb0527b8edd2bea935db1f57e33b57518ed42b2f
+    historical_fix_sha: 0fc79c7f6bee8c03d2cbe0f8d345fca46f3fd004
+    historical_fix_pr: "#41"
+    known_defect_summary: |
+      Acceptance canary journal PRs did not trigger required CI checks because the
+      workflow path filters excluded documentation-only changes.
+    deterministic_verifier:
+      - Workflow/config behavior where deterministically testable.
+    expected_failing_behavior_at_base:
+      Hygiene/test/lint workflows skip documentation-only PRs.
+    allowed_paths:
+      - .github/workflows/hygiene.yml
+      - .github/workflows/lint.yml
+      - .github/workflows/test.yml
+    difficulty: low
+    suitability:
+      direct_repair: false
+      composition: false
+      decomposition: false
+      context_experiment: false
+
+  FIX-42:
+    task_class: bug_fix
+    historical_base_sha: 8cd3d702915f4a86b22b2f5fcaa4c1333b1f1fec
+    historical_fix_sha: 16a5d4109c9c00acd566c1c511eca5433e492f39
+    historical_fix_pr: "#42"
+    known_defect_summary: |
+      git push timeout was too short for the pre-push verification suite to finish,
+      causing pushes to abort during the local gate.
+    deterministic_verifier:
+      - src/control_plane/git_integration.py timeout contract
+    expected_failing_behavior_at_base:
+      Git push operation times out before verification completes.
+    allowed_paths:
+      - src/control_plane/git_integration.py
+    difficulty: trivial
+    suitability:
+      direct_repair: false
+      composition: false
+      decomposition: false
+      context_experiment: false
+
+  FIX-43:
+    task_class: test_improvement
+    historical_base_sha: d4d213ea6294ff64bf93cc663de27657460d7807
+    historical_fix_sha: 7ad4575dfbf56d68ea8774613f492a13e970556f
+    historical_fix_pr: "#43"
+    known_defect_summary: |
+      Environment contamination from prior tests broke the deterministic canary
+      verification suite. The fix isolates environment state in conftest fixtures.
+    deterministic_verifier:
+      - tests/test_local_ollama_provider.py
+    expected_failing_behavior_at_base:
+      Tests fail deterministically due to leaked environment state.
+    allowed_paths:
+      - tests/conftest.py
+      - tests/test_local_ollama_provider.py
+    difficulty: medium
+    suitability:
+      direct_repair: false
+      composition: false
+      decomposition: false
+      context_experiment: false
+
+leakage_controls:
+  historical_cutoff_sha_per_fixture:
+    FIX-35: dd66019fea14f1daca5fe18cc6adf27e9d377574
+    FIX-37: ca7751f20938219d0e8bddf6bc03b0919daa4923
+    FIX-39: 5f7f3d6f3a71776468b35de963edcd43f50756a7
+    FIX-41: cb0527b8edd2bea935db1f57e33b57518ed42b2f
+    FIX-42: 8cd3d702915f4a86b22b2f5fcaa4c1333b1f1fec
+    FIX-43: d4d213ea6294ff64bf93cc663de27657460d7807
+  prohibited_for_providers:
+    - post-fix commits
+    - fixing PR bodies
+    - future test additions as implementation hints
+    - post-fix documentation
+    - known patch / git diff showing solution
+  allowed_for_providers:
+    - task description
+    - failing verifier output
+    - permitted source files at base commit
+    - architecture docs existing at base commit
