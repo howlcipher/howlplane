@@ -1,0 +1,12 @@
+This task has two natural subsystems to modify. Complete subtask A before subtask B, then run the verifier.
+
+Subtask A - Orchestrator wiring:
+Edit src/control_plane/orchestrator.py only.
+Add `provider_pool: Optional[Any] = None` to the OrchestrationConfig dataclass.
+Forward it into the call to ReviewRunner.execute_review_cycle inside GovernedTaskOrchestrator._run_governed_loop as `provider_pool=self.config.provider_pool`.
+
+Subtask B - Campaign engine integration:
+Edit src/control_plane/synthesis/marathon.py only.
+In MarathonDogfoodEngine where OrchestrationConfig is constructed, pass `provider_pool=self.provider_pool` so the campaign's provider pool is shared with governed reviews.
+
+Allowed files: src/control_plane/orchestrator.py, src/control_plane/synthesis/marathon.py.

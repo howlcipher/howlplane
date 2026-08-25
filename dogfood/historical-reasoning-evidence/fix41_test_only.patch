@@ -1,0 +1,35 @@
+diff --git a/tests/test_historical_fix41_ci_triggers.py b/tests/test_historical_fix41_ci_triggers.py
+new file mode 100644
+index 0000000..ee65c56
+--- /dev/null
++++ b/tests/test_historical_fix41_ci_triggers.py
+@@ -0,0 +1,29 @@
++import yaml
++from pathlib import Path
++
++REPO_ROOT = Path(__file__).resolve().parent.parent
++
++
++def load_workflow(name: str) -> dict:
++    with open(REPO_ROOT / ".github" / "workflows" / name, "r", encoding="utf-8") as fh:
++        return yaml.safe_load(fh)
++
++
++def test_lint_pull_request_has_no_paths_ignore():
++    wf = load_workflow("lint.yml")
++    pr = wf.get("on", {}).get("pull_request")
++    assert pr is not None
++    assert not isinstance(pr, dict) or "paths-ignore" not in pr
++
++
++def test_test_pull_request_has_no_paths_ignore():
++    wf = load_workflow("test.yml")
++    pr = wf.get("on", {}).get("pull_request")
++    assert pr is not None
++    assert not isinstance(pr, dict) or "paths-ignore" not in pr
++
++
++def test_hygiene_includes_canary_journal_paths():
++    wf = load_workflow("hygiene.yml")
++    paths = wf.get("on", {}).get("pull_request", {}).get("paths", [])
++    assert "documentation/task_journals/**" in paths

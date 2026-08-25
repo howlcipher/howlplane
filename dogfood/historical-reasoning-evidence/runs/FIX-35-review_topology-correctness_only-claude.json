@@ -1,0 +1,23 @@
+{
+  "run_id": "FIX-35-correctness_only-claude_code-145539",
+  "fixture_id": "FIX-35",
+  "provider": "claude_code",
+  "topology": "correctness_only",
+  "base_sha": "dd66019fea14f1daca5fe18cc6adf27e9d377574",
+  "worktree": "/run/media/system/tallgeese/dev/howlplane/.worktrees/fix35-claude-001",
+  "roles": [
+    "correctness-reviewer"
+  ],
+  "findings": [],
+  "raw_outputs": [
+    "{\"findings\": []}\n\n"
+  ],
+  "provider_commands": [
+    "claude -p 'You are a correctness-reviewer reviewing a proposed code change in an isolated historical worktree.\n\nTask context:\n- Fixture: FIX-35\n- This is a historical engineering replay; the diff under review is a proposed fix for a real defect.\n- Do not read future commits, PR descriptions, or known historical patches.\n\nReview the diff below and identify any findings that match your specialty. For each finding, provide:\n- id: short unique identifier\n- severity: blocker, high, medium, low, or informational\n- category: correctness, regression, security, architecture, simplicity, or test\n- location: file and approximate line(s)\n- claim: concise problem statement\n- evidence: why the diff supports the claim\n- suggested_fix: how to address it\n\nIf you find no issues, return an empty findings list.\n\nDIFF:\n```diff\ndiff --git a/src/control_plane/orchestrator.py b/src/control_plane/orchestrator.py\nindex bf4b3fb..e437aa0 100644\n--- a/src/control_plane/orchestrator.py\n+++ b/src/control_plane/orchestrator.py\n@@ -76,6 +76,11 @@ class OrchestrationConfig:\n     custom_reviewer_fn: Optional[Callable[[str, str, TaskSpec], str]] = None\n     custom_remediation_fn: Optional[Callable[[TaskSpec, Path, List[ReviewFinding]], None]] = None\n     reviewer_agent_mapping: Optional[Dict[str, str]] = None\n+    # ProviderPoolManager instance (#59.2 Phase 4). Typed Any to avoid an\n+    # import-cycle with synthesis.provider_pool; forwarded verbatim into\n+    # ReviewRunner.execute_review_cycle so a reviewer that emits malformed\n+    # output can fail over to an independent provider instead of blocking.\n+    provider_pool: Optional[Any] = None\n \n \n @dataclass\n@@ -618,6 +623,7 @@ class GovernedTaskOrchestrator:\n                 reviewer_agent_mapping=self.config.reviewer_agent_mapping,\n                 custom_reviewer_fn=self.config.custom_reviewer_fn,\n                 run_dir=run_dir,\n+                provider_pool=self.config.provider_pool,\n             )\n             review_cycles.append(cycle_res)\n             latest_reconciliation = cycle_res.reconciliation\ndiff --git a/src/control_plane/synthesis/marathon.py b/src/control_plane/synthesis/marathon.py\nindex bdd10a0..9bd2af5 100644\n--- a/src/control_plane/synthesis/marathon.py\n+++ b/src/control_plane/synthesis/marathon.py\n@@ -1353,7 +1353,9 @@ class MarathonDogfoodEngine:\n         # only grows, and any provider already tried is filtered out of the\n         # next selection, so the loop cannot spin.\n         # --------------------------------------------------------------------\n-        orch_config = OrchestrationConfig(acquire_locks=True, record_evidence=bool(self.ledger))\n+        orch_config = OrchestrationConfig(\n+            acquire_locks=True, record_evidence=bool(self.ledger), provider_pool=self.provider_pool,\n+        )\n         attempted: set = set()\n         result = None\n         attempt_index = 0\n\n```\n\nRespond ONLY with a JSON object in this exact shape (no markdown fences, no extra prose):\n{\"findings\": [{\"id\": \"...\", \"severity\": \"...\", \"category\": \"...\", \"location\": \"...\", \"claim\": \"...\", \"evidence\": \"...\", \"suggested_fix\": \"...\"}]}\n'"
+  ],
+  "provider_exit_codes": [
+    0
+  ],
+  "created_at": "2026-08-25T14:55:39.469070+00:00",
+  "completed_at": "2026-08-25T14:56:47.475916+00:00"
+}

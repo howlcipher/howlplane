@@ -58,7 +58,10 @@ class RepairRun:
     provider_stderr: str = ""
     provider_exit_code: int = -1
     provider_duration_seconds: float = 0.0
+    observed_model_id: Optional[str] = None
+    cost_if_available: Optional[float] = None
     files_changed: List[str] = field(default_factory=list)
+    context_docs: List[str] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     completed_at: Optional[str] = None
 
@@ -77,7 +80,10 @@ class RepairRun:
             "provider_command": self.provider_command,
             "provider_exit_code": self.provider_exit_code,
             "provider_duration_seconds": self.provider_duration_seconds,
+            "observed_model_id": self.observed_model_id,
+            "cost_if_available": self.cost_if_available,
             "files_changed": self.files_changed,
+            "context_docs": self.context_docs,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
         }
@@ -103,8 +109,35 @@ def create_worktree(base_sha: str, worktree: Path) -> None:
     git(["worktree", "add", "--detach", str(worktree), base_sha], cwd=ROOT)
 
 
-def build_prompt(fixture: Dict[str, Any], initial_failure: str, role: str = "implementation", plan_artifact: Optional[str] = None) -> str:
+def _read_context_docs(context_docs: List[Path], worktree: Path, base_sha: str) -> str:
+    parts = []
+    for doc in context_docs:
+        # Resolve relative to worktree when a path is relative; absolute paths
+        # (e.g. files in the main campaign repo) are used as-is.
+        target = worktree / doc if not doc.is_absolute() else doc
+        if target.exists():
+            content = target.read_text(encoding="utf-8")
+        else:
+            # Fallback: read from the historical base commit via git show.
+            result = git(["show", f"{base_sha}:{doc}"], cwd=worktree, check=False)
+            content = result.stdout if result.returncode == 0 else f"[context doc {doc} not found]"
+        parts.append(f"--- {doc} ---\n{content[:6000]}\n")
+    return "\n".join(parts)
+
+
+def build_prompt(
+    fixture: Dict[str, Any],
+    initial_failure: str,
+    role: str = "implementation",
+    plan_artifact: Optional[str] = None,
+    context_docs: Optional[List[Path]] = None,
+    worktree: Optional[Path] = None,
+    base_sha: Optional[str] = None,
+) -> str:
     allowed = "\n".join(f"  - {p}" for p in fixture["allowed_paths"])
+    context_block = ""
+    if context_docs and worktree and base_sha:
+        context_block = "\nAdditional pre-fix architecture context (does not contain the fix):\n\n" + _read_context_docs(context_docs, worktree, base_sha)
     prompt = f"""You are a senior software engineer working in an isolated historical worktree.
 
 TASK: Fix a real historical HowlPlane defect.
@@ -121,7 +154,7 @@ Deterministic verifier that must pass after your fix:
 Current verifier output (failing):
 ```
 {initial_failure[:4000]}
-```
+```{context_block}
 
 Constraints:
 - Do not add new dependencies.
@@ -155,22 +188,73 @@ run the verifier.
     return prompt
 
 
+def _extract_claude_model_and_cost(stdout: str) -> tuple:
+    observed_model_id = None
+    cost_usd = None
+    if stdout.strip().startswith("{"):
+        try:
+            data = json.loads(stdout.strip().splitlines()[-1])
+        except json.JSONDecodeError:
+            try:
+                data = json.loads(stdout.strip())
+            except json.JSONDecodeError:
+                data = None
+        if data:
+            model_usage = data.get("modelUsage") or {}
+            candidates = [
+                (key, info)
+                for key, info in model_usage.items()
+                if isinstance(info, dict) and info.get("costUSD")
+            ]
+            # Prefer the model that produced the final response (higher output
+            # tokens) rather than a fast tool-routing model.
+            candidates.sort(
+                key=lambda item: item[1].get("outputTokens", 0),
+                reverse=True,
+            )
+            if candidates:
+                observed_model_id = candidates[0][1].get("canonicalModel") or candidates[0][0]
+                cost_usd = candidates[0][1].get("costUSD")
+            if cost_usd is None and "total_cost_usd" in data:
+                cost_usd = data.get("total_cost_usd")
+    return observed_model_id, cost_usd
+
+
+def _extract_codex_model_and_cost(stdout: str) -> tuple:
+    observed_model_id = None
+    cost_usd = None
+    for line in stdout.strip().splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "turn.completed":
+            usage = event.get("usage") or {}
+            if usage.get("output_tokens") is not None:
+                # Codex does not expose exact model here; record family if known.
+                observed_model_id = event.get("model") or "codex-gpt-5-family"
+    return observed_model_id, cost_usd
+
+
 def invoke_provider(provider: str, prompt: str, worktree: Path, role: str = "implementation") -> Dict[str, Any]:
     if provider == "claude_code":
-        # Non-interactive print mode with explicit tool allowance; the prompt
-        # itself tells the agent to edit files in the worktree.
+        # Non-interactive print mode with explicit tool allowance; JSON output
+        # exposes canonical model identity and cost metadata.
         cmd = [
             "claude", "-p", prompt,
             "--allowedTools", "Bash,Edit,Read",
+            "--output-format", "json",
         ]
     elif provider == "codex":
         # --approve-for-me routes approvals through automatic review using the
         # workspace-write sandbox; it is mutually exclusive with --sandbox.
+        # --json emits JSONL events that may include usage/model metadata.
         cmd = [
             "codex", "exec",
             "-C", str(worktree),
             "--approve-for-me",
             "--ephemeral",
+            "--json",
             prompt,
         ]
     elif provider == "agy":
@@ -247,6 +331,7 @@ def main() -> int:
     parser.add_argument("--provider", required=True)
     parser.add_argument("--role", default="implementation", choices=["implementation", "plan"])
     parser.add_argument("--plan-artifact", default=None)
+    parser.add_argument("--context-docs", nargs="*", default=None)
     parser.add_argument("--worktree-base", required=True)
     parser.add_argument("--out-dir", default=str(ROOT / "dogfood" / "historical-reasoning-evidence" / "runs"))
     parser.add_argument("--run-id", default=None)
@@ -257,6 +342,7 @@ def main() -> int:
     fixture["fixture_id"] = args.fixture
     base_sha = fixture["historical_base_sha"]
     test_patch = PATCH_DIR / f"{args.fixture.lower().replace('-', '')}_test_only.patch"
+    context_docs = [Path(d) for d in (args.context_docs or [])]
 
     run_id = args.run_id or f"{args.fixture}-{args.provider}-{args.role}-{hashlib.sha256(os.urandom(16)).hexdigest()[:8]}"
     worktree = Path(args.worktree_base)
@@ -272,6 +358,7 @@ def main() -> int:
         worktree=worktree,
         test_patch=test_patch,
         verifier=fixture["deterministic_verifier"],
+        context_docs=[str(d) for d in context_docs],
     )
 
     print(f"[{run_id}] Creating worktree at {worktree} from {base_sha}")
@@ -292,7 +379,15 @@ def main() -> int:
         _write_run(run, out_dir)
         return 0
 
-    prompt = build_prompt(fixture, run.initial_output, args.role, args.plan_artifact)
+    prompt = build_prompt(
+        fixture,
+        run.initial_output,
+        args.role,
+        args.plan_artifact,
+        context_docs=context_docs,
+        worktree=worktree,
+        base_sha=base_sha,
+    )
     print(f"[{run_id}] Invoking provider {args.provider} as {args.role}")
     result = invoke_provider(args.provider, prompt, worktree, args.role)
     run.provider_command = result["command"]
@@ -300,6 +395,14 @@ def main() -> int:
     run.provider_stderr = result["stderr"]
     run.provider_exit_code = result["exit_code"]
     run.provider_duration_seconds = result["duration_seconds"]
+    if args.provider == "claude_code":
+        model, cost = _extract_claude_model_and_cost(result["stdout"])
+        run.observed_model_id = model
+        run.cost_if_available = cost
+    elif args.provider == "codex":
+        model, cost = _extract_codex_model_and_cost(result["stdout"])
+        run.observed_model_id = model
+        run.cost_if_available = cost
 
     print(f"[{run_id}] Running final verifier")
     final = run_pytest(worktree, fixture["deterministic_verifier"])

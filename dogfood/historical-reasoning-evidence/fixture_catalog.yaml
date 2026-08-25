@@ -79,7 +79,7 @@ fixtures:
       context_experiment: true
 
   FIX-41:
-    task_class: ci_failure_repair
+    task_class: infrastructure
     historical_base_sha: cb0527b8edd2bea935db1f57e33b57518ed42b2f
     historical_fix_sha: 0fc79c7f6bee8c03d2cbe0f8d345fca46f3fd004
     historical_fix_pr: "#41"
@@ -87,7 +87,7 @@ fixtures:
       Acceptance canary journal PRs did not trigger required CI checks because the
       workflow path filters excluded documentation-only changes.
     deterministic_verifier:
-      - Workflow/config behavior where deterministically testable.
+      - tests/test_historical_fix41_ci_triggers.py
     expected_failing_behavior_at_base:
       Hygiene/test/lint workflows skip documentation-only PRs.
     allowed_paths:
@@ -96,7 +96,7 @@ fixtures:
       - .github/workflows/test.yml
     difficulty: low
     suitability:
-      direct_repair: false
+      direct_repair: true
       composition: false
       decomposition: false
       context_experiment: false
