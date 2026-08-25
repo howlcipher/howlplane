@@ -1,0 +1,599 @@
+schema: howlplane.reasoning_evidence_campaign_results/v1
+campaign_id: MILESTONE-60B
+updated_at: "2026-08-25T01:47:34Z"
+evidence_classification: LIVE
+scope: observable provider outputs and deterministic verification only
+experiment_results:
+  EXP-60B-CONTEXT-002:
+    experiment_type: CONTEXT
+    task_class: other
+    hypothesis: >-
+      Bounded relevant source context improves exact extraction of the
+      trajectory discovery protocol compared with task and acceptance only.
+    baseline: context.task_plus_acceptance/v1
+    candidate: context.relevant_documentation/v1
+    expected_outcome: >-
+      Candidate passes the exact fact verifier while baseline does not.
+    falsification_criteria:
+      - candidate.verification_pass_rate < baseline.verification_pass_rate
+    metrics:
+      - verification_pass_rate
+      - mean_latency
+    verifier: exact_normalized_lines/v1
+    result: INCONCLUSIVE
+    confidence: baseline_n=1, candidate_n=1, primary_metric=verification_pass_rate
+    metric_comparisons:
+      verification_pass_rate: better
+      mean_latency: worse
+    falsification_failures: []
+    prediction_digest: c10d649f967190849ffc9cb4788bef97670202a1f5269cc57e490a257897b628
+    content_digest: 4dbbd1e12567d86cf4d42ae225b9ebe03982ab96a35d73b90d70ec810e6a132e
+    evidence_refs:
+      - logs/control_plane/milestone_60b_reasoning_evidence/experiments/EXP-60B-CONTEXT-002.json
+      - src/control_plane/reasoning/trajectory_discovery.py
+    arms:
+      baseline:
+        trajectory_id: traj-b394f235c485620338fb4bbd
+        trajectory_digest: 8eec3acade03ad0e7451a5ba3c307b8431a6451769ac27c5c6624c6acd995ea5
+        provider: local_ollama
+        model: qwen2.5-coder:7b-instruct
+        strategy_ids:
+          context: context.task_plus_acceptance/v1
+        selected_context_refs:
+          - task:EXP-60B-CONTEXT-002-BASELINE-1
+        reviewers: []
+        review_topology: no_reviewers
+        repairs: 0
+        provider_completed: true
+        latency_seconds: 5.7
+        cost_observed: null
+        verification_outcome: failed
+        outcome: verification_failed
+        observable_response: |-
+          MIN_PATTERN_OCCURRENCES=3
+          PATTERN_MINERS=findPatterns,extractFeatures,validateResults
+        output_sha256: c365135e0b8449c157485982a501d6c35c839fcd45c039d4cd92776bf838e379
+        failure_evidence:
+          - minimum pattern threshold was incorrect
+          - miner names were invented and did not match the source
+      candidate:
+        trajectory_id: traj-1ebfcd581ea8c7ecce27464c
+        trajectory_digest: 866c883065e219ec55874fec206fbf4d57ded9932f475f7cee6a2239f07d82a6
+        provider: local_ollama
+        model: qwen2.5-coder:7b-instruct
+        strategy_ids:
+          context: context.relevant_documentation/v1
+        selected_context_refs:
+          - task:EXP-60B-CONTEXT-002-CANDIDATE-1
+          - src/control_plane/reasoning/trajectory_discovery.py
+        reviewers: []
+        review_topology: no_reviewers
+        repairs: 0
+        provider_completed: true
+        latency_seconds: 6.264
+        cost_observed: null
+        verification_outcome: passed
+        outcome: success
+        observable_response: "MIN_PATTERN_OCCURRENCES=2  \nPATTERN_MINERS=_find_architecture_omissions,_find_reviewer_dismissal,_find_local_first_success,_find_repeated_routing_problem"
+        output_sha256: 87192ff02028cd7c1a7b29ed89634fb596854a0dcfd634461597e91a2a56f2a7
+    quality_checks:
+      trajectory_digests_valid: 2
+      experiment_prediction_digest_valid: true
+      duplicate_resume_count_before: 2
+      duplicate_resume_count_after: 2
+      hidden_reasoning_stored: false
+      raw_prompt_stored: false
+      secrets_observed: false
+  EXP-60B-ROUTING-002:
+    experiment_type: ROUTING
+    task_class: bug_fix
+    hypothesis: >-
+      Frontier first routing produces a verifiable first pass classification
+      more often than local first routing for the historical agy exhaustion.
+    baseline: routing.local_first_low_risk/v1
+    candidate: routing.frontier_first/v1
+    expected_outcome: >-
+      Candidate has a higher first pass verification rate than baseline.
+    falsification_criteria:
+      - candidate.first_pass_success_rate < baseline.first_pass_success_rate
+    metrics:
+      - first_pass_success_rate
+      - mean_repair_cycles
+      - mean_latency
+      - provider_failures
+    verifier: exact_normalized_lines/v1
+    result: INCONCLUSIVE
+    confidence: baseline_n=1, candidate_n=1, primary_metric=first_pass_success_rate
+    metric_comparisons:
+      first_pass_success_rate: equal
+      mean_repair_cycles: equal
+      mean_latency: worse
+      provider_failures: equal
+    falsification_failures: []
+    prediction_digest: ec4e4bb71cd515479f624cb6a0d577e37d4de830f12ada8ebe5c7d0ea8c58190
+    content_digest: 6446e2293d567bcf2e5e4c777a3182899dc06fb9c7afe51978dd5b8475ec0cc6
+    evidence_refs:
+      - logs/control_plane/milestone_60b_reasoning_evidence/experiments/EXP-60B-ROUTING-002.json
+      - .dogfood_runs/DOGFOOD-20260822-005043-16adca/campaign_state.json
+      - tests/test_provider_failover.py
+    expected_response: |-
+      AVAILABILITY_STATUS=SESSION_EXHAUSTED
+      FAILURE_TYPE=session_limit
+      REASONING_QUALITY=NOT_OBSERVED
+    arms:
+      baseline:
+        trajectory_id: traj-0344c4137cf1a00d7ccaaad5
+        trajectory_digest: a6f684a62eb176c1deedfc1500ed876751dfd399a7fabeb7f7eeb0d51f4fc168
+        provider: local_ollama
+        model: qwen2.5-coder:7b-instruct
+        strategy_ids:
+          routing: routing.local_first_low_risk/v1
+          context: context.task_plus_acceptance/v1
+          retrieval: retrieval.failure_signature/v1
+        selected_context_refs:
+          - fixture:DOGFOOD-20260822-005043-16adca:agy-quota-stderr
+          - tests/test_provider_failover.py:test_live_agy_quota_stderr_is_classified_as_session_exhaustion
+        reviewers: []
+        review_topology: no_reviewers
+        repairs: 1
+        first_pass:
+          provider: local_ollama
+          latency_seconds: 5.75
+          verification_outcome: failed
+          observable_response: |-
+            AVAILABILITY_STATUS=UNKNOWN
+            FAILURE_TYPE=SESSION_LIMIT
+            REASONING_QUALITY=UNKNOWN
+          output_sha256: 448590851d77e620f51741a1fcd2295f0b7626e21eb9a04092796433917c33e8
+        remediation:
+          provider: claude_code
+          model: NOT_OBSERVED
+          latency_seconds: 9.325
+          verification_outcome: failed
+          observable_response: |-
+            AVAILABILITY_STATUS=SESSION_EXHAUSTED
+            FAILURE_TYPE=session_limit
+            REASONING_QUALITY=NOT_APPLICABLE
+          output_sha256: b015959a6d63559de558b1df089b29ec8ff36a2e15cc0677c32939de7fee067f
+        total_latency_seconds: 15.075
+        cost_observed: null
+        verification_outcome: failed
+        outcome: verification_failed
+        failure_evidence:
+          - first pass changed exact enum values
+          - remediation substituted NOT_APPLICABLE for NOT_OBSERVED
+      candidate:
+        trajectory_id: traj-663eed5b31c5a0acf7634224
+        trajectory_digest: 37a94f7502e15e29497c1488beb54d6ce7d5cfbe77a01cf618202b035920a981
+        provider: claude_code
+        model: NOT_OBSERVED
+        strategy_ids:
+          routing: routing.frontier_first/v1
+          context: context.task_plus_acceptance/v1
+          retrieval: retrieval.failure_signature/v1
+        selected_context_refs:
+          - fixture:DOGFOOD-20260822-005043-16adca:agy-quota-stderr
+          - tests/test_provider_failover.py:test_live_agy_quota_stderr_is_classified_as_session_exhaustion
+        reviewers: []
+        review_topology: no_reviewers
+        repairs: 1
+        first_pass:
+          provider: claude_code
+          model: NOT_OBSERVED
+          latency_seconds: 8.487
+          verification_outcome: failed
+          observable_response: |-
+            AVAILABILITY_STATUS=SESSION_EXHAUSTED
+            FAILURE_TYPE=session_limit
+            REASONING_QUALITY=NOT_APPLICABLE_NO_ARTIFACT
+          output_sha256: b9c1509e28b0c975b00eafc58e001167037b3948bf6a3c14ef1f13e7562a45be
+        remediation:
+          provider: claude_code
+          model: NOT_OBSERVED
+          latency_seconds: 22.55
+          verification_outcome: failed
+          observable_response: |-
+            This confirms the production enum values match the fixture exactly. Here's the classification, grounded strictly in the evidence given (availability/failure type from the replay, no inference of reasoning quality since no reasoning artifact exists):
+
+            AVAILABILITY_STATUS=SESSION_EXHAUSTED
+            FAILURE_TYPE=session_limit
+            REASONING_QUALITY=NOT_APPLICABLE
+          output_sha256: 1484afba12f55d61aea4d2492805a9a8a719b07a5670645a49be7ab90cb6e7c8
+        total_latency_seconds: 31.037
+        cost_observed: null
+        verification_outcome: failed
+        outcome: verification_failed
+        failure_evidence:
+          - first pass substituted NOT_APPLICABLE_NO_ARTIFACT for NOT_OBSERVED
+          - remediation substituted NOT_APPLICABLE and added unrequested prose
+    quality_checks:
+      trajectory_digests_valid: 2
+      experiment_prediction_digest_valid: true
+      duplicate_resume_count_before: 4
+      duplicate_resume_count_after: 4
+      hidden_reasoning_stored: false
+      raw_prompt_stored: false
+      provider_commands_redacted: true
+      secrets_observed: false
+      provider_availability_failures: 0
+  EXP-60B-REVIEW-002:
+    experiment_type: REVIEW_TOPOLOGY
+    task_class: test_improvement
+    hypothesis: >-
+      Split correctness and regression review detects the known historical
+      canary identifier mismatch at least as reliably as one general reviewer.
+    baseline: review.general_single/v1
+    candidate: review.correctness_regression/v1
+    expected_outcome: >-
+      Candidate verification is no worse than baseline and preserves all
+      completed review results and disagreement.
+    falsification_criteria:
+      - candidate.verification_pass_rate < baseline.verification_pass_rate
+    metrics:
+      - verification_pass_rate
+      - mean_latency
+      - provider_failures
+    verifier: known_canary_identifier_oracle/v1
+    result: FALSIFIED
+    confidence: baseline_n=1, candidate_n=1, primary_metric=None
+    falsification_failures:
+      - >-
+        Falsification criterion triggered: candidate.verification_pass_rate <
+        baseline.verification_pass_rate (got 0.0 < 1.0)
+    metric_comparisons: {}
+    prediction_digest: 281103cc29f0588b11ec870787183f0c5b523c54f708fd848e19bc2dc1ddd39b
+    content_digest: a51fee91b8bf9c4d32e50d189190ac706215861c43ffb70971c7f97fb5c87c09
+    evidence_refs:
+      - logs/control_plane/milestone_60b_reasoning_evidence/experiments/EXP-60B-REVIEW-002.json
+      - .task_runs/ACCEPTANCE-DOGFOOD-20260824-110852-033dbb/task.yaml
+      - .task_runs/ACCEPTANCE-DOGFOOD-20260824-110852-033dbb/implementation/diff.patch
+    arms:
+      baseline:
+        trajectory_id: traj-474a74feb2c89fd4887ff103
+        trajectory_digest: 923a980db8cc2b8d841adaace089d88ac534f873fa528f475596b23035a5d4f5
+        provider: local_ollama
+        model: qwen2.5-coder:7b-instruct
+        strategy_ids:
+          review: review.general_single/v1
+          context: context.changed_files_only/v1
+        review_topology:
+          - correctness-reviewer
+        valid_completed_reviews: 1
+        latency_seconds: 24.089
+        repairs: 0
+        cost_observed: null
+        verification_outcome: passed
+        outcome: success
+        raw_output_sha256: 105e7eace685be5ba3d99ead2fe5015aefaacc19ca1303d20d9a7d9e185fb3ff
+        raw_output_ref: >-
+          logs/control_plane/milestone_60b_reasoning_evidence/review_runs/EXP-60B-REVIEW-002-BASELINE-1/reviews/correctness-reviewer.md
+        findings:
+          - id: F001
+            reviewer_role: correctness-reviewer
+            title: Canary Identifier Not Matched
+            production_reconciliation_status: likely
+            campaign_quality_status: confirmed_by_exact_oracle
+            meaningful: true
+            evidence: >-
+              The patch records DOGFOOD 20260824 110852 033dbb while the
+              required identifier is DOGFOOD-20260824-110852-033dbb.
+        disagreement: false
+      candidate:
+        trajectory_id: traj-b2069ac127bd493f79048f2a
+        trajectory_digest: 8e4da8ae1acfdb33d622945af1bda951ae65549f0f777ecfce76f2f5046a8899
+        provider: local_ollama
+        model: qwen2.5-coder:7b-instruct
+        strategy_ids:
+          review: review.correctness_regression/v1
+          context: context.changed_files_only/v1
+        review_topology:
+          - correctness-reviewer
+          - regression-reviewer
+        valid_completed_reviews: 2
+        latency_seconds: 39.281
+        repairs: 0
+        cost_observed: null
+        verification_outcome: failed
+        outcome: verification_failed
+        raw_output_refs:
+          correctness-reviewer:
+            path: >-
+              logs/control_plane/milestone_60b_reasoning_evidence/review_runs/EXP-60B-REVIEW-002-CANDIDATE-1/reviews/correctness-reviewer.md
+            sha256: 7346a51f5e42e65992d515590d5d662b0c5ce4a26b91eb686bb2f6386589bb66
+          regression-reviewer:
+            path: >-
+              logs/control_plane/milestone_60b_reasoning_evidence/review_runs/EXP-60B-REVIEW-002-CANDIDATE-1/reviews/regression-reviewer.md
+            sha256: 77e508804189612d55082abcf2fc442ddc95c540e6706cd278c2a700a887a614
+        findings:
+          - id: F001
+            reviewer_role: correctness-reviewer
+            title: Incomplete Lifecycle Outcome
+            production_reconciliation_status: likely
+            campaign_quality_status: false_positive
+            meaningful: false
+            resolution_reason: >-
+              The finding itself says the initiation-only language satisfies
+              the acceptance criteria and proposes no fix; it does not identify
+              the known delimiter defect.
+          - id: F001
+            reviewer_role: regression-reviewer
+            title: Journal does not assert lifecycle completion
+            production_reconciliation_status: likely
+            campaign_quality_status: false_positive
+            meaningful: false
+            resolution_reason: >-
+              Its proposed completion assertion directly contradicts the exact
+              initiation-only acceptance criterion and misses the delimiter
+              defect.
+        disagreement: true
+        disagreement_evidence: >-
+          Correctness said no fix was needed because initiation-only language
+          was correct; regression proposed adding a merge success or failure
+          assertion. The exact acceptance criterion reconciles this in favor of
+          initiation-only language, while both reviewers missed the identifier
+          defect.
+    quality_checks:
+      trajectory_digests_valid: 2
+      experiment_prediction_digest_valid: true
+      duplicate_resume_count_before: 6
+      duplicate_resume_count_after: 6
+      hidden_reasoning_stored: false
+      raw_prompt_stored: false
+      provider_commands_redacted: true
+      secrets_observed: false
+      parsed_review_findings: 3
+      confirmed_meaningful_findings: 1
+      dismissed_false_positives: 2
+
+trajectory_derived_discovery:
+  trajectories_scanned: 8
+  source_campaigns:
+    MILESTONE-60A: 2
+    MILESTONE-60B: 6
+  observations_created: 1
+  observations:
+    - observation_id: OBS-LOCAL-FIRST-7d18349014334fbe
+      title: Repeated low-risk success with local model
+      status: open
+      fingerprint: 7d18349014334fbe
+      occurrence_count: 2
+      evidence_refs:
+        - traj-1ebfcd581ea8c7ecce27464c
+        - traj-474a74feb2c89fd4887ff103
+      evidence_fingerprints:
+        - 20a8387c009bd042034b2be89f8d68f3fa4187698600f9721a160c8d28bd5c11
+        - e8debac771ad133848ddebdfc02f06722fa6b0f87ec8b93c00a2e9ebb13583c3
+      suggested_experiment_type: ROUTING
+      suggested_baseline: routing.frontier_first/v1
+      suggested_candidate: routing.local_first_low_risk/v1
+      disposition: >-
+        Observation only. No strategy was adopted and no automatic challenge
+        experiment was created.
+  duplicate_suppression:
+    observations_after_first_pass: 1
+    observations_returned_on_identical_second_pass: 0
+    observations_after_identical_second_pass: 1
+    observations_returned_on_identical_third_pass: 0
+    observations_after_identical_third_pass: 1
+  failed_or_falsified_observations: []
+  reopened_observations: []
+  reopening_justification: NOT_APPLICABLE
+
+campaign_totals:
+  completed_experiments: 3
+  new_trustworthy_trajectories: 6
+  task_classes:
+    other: 2
+    bug_fix: 2
+    test_improvement: 2
+  providers:
+    local_ollama: 6
+    claude_code: 3
+  primary_provider_attribution:
+    local_ollama: 5
+    claude_code: 1
+  outcomes:
+    success: 2
+    verification_failed: 4
+  repairs:
+    no_repair: 4
+    one_unsuccessful_repair: 2
+  reviewer_topologies:
+    no_reviewers: 4
+    correctness_only: 1
+    correctness_plus_regression: 1
+  completed_reviews: 3
+  meaningful_review_findings: 1
+  dismissed_review_findings: 2
+  reviewer_disagreement_observed: 1
+
+evidence_quality_audit:
+  audited_at: "2026-08-25T01:53:16Z"
+  accepted_live_60b_trajectories: 6
+  malformed_or_rejected_live_60b_trajectories: 0
+  rejected_preregistrations: 3
+  rejected_preregistration_disposition: >-
+    Preserved and excluded because descriptive task labels failed the canonical
+    TaskSpec contract before provider execution. They produced no trajectories.
+  rejected_deterministic_test_residue:
+    digest_mismatch: 40
+    disposition: >-
+      General-store test artifacts predating the campaign. Production loading
+      rejects them; they are not relabeled or counted as live.
+  valid_strategy_links: 6
+  verified_file_evidence_refs: 16
+  provider_events: 9
+  completed_reviews: 3
+  repair_cycles: 2
+  experiment_prediction_digests_valid: 3
+  trajectory_content_digests_valid: 6
+  observation_fingerprints_valid: 1
+  duplicate_prevention:
+    completed_experiments_replayed: 3
+    trajectory_count_before: 6
+    trajectory_count_after: 6
+  redaction:
+    hidden_reasoning_fields_found: 0
+    raw_prompt_fields_found: 0
+    unredacted_cloud_provider_commands: 0
+    secret_like_values_found: 0
+  audit_issues: []
+
+final_coverage_matrix:
+  total_current_schema_live_trajectories: 8
+  new_trustworthy_60b_trajectories: 6
+  task_classes:
+    test_improvement: 4
+    other: 2
+    bug_fix: 2
+  primary_providers:
+    local_ollama: 7
+    claude_code: 1
+  provider_invocations:
+    local_ollama: 8
+    claude_code: 3
+  successful_verification_outcomes: 2
+  failed_verification_outcomes: 6
+  repair_outcomes:
+    successful_repair: 0
+    unsuccessful_live_repair: 2
+    no_repair: 6
+  reviewer_topologies:
+    no_reviewers: 6
+    correctness_only: 1
+    correctness_plus_regression: 1
+  review_participation:
+    trajectories_with_reviewers: 2
+    completed_reviews: 3
+    meaningful_findings: 1
+    dismissed_findings: 2
+    natural_disagreements: 1
+  context_strategies:
+    context.task_plus_acceptance/v1: 4
+    context.changed_files_plus_architecture/v1: 1
+    context.relevant_documentation/v1: 1
+    context.changed_files_only/v1: 2
+  retrieval_strategies:
+    retrieval.failure_signature/v1: 2
+    no_explicit_retrieval: 6
+  routing_strategies:
+    routing.local_first_low_risk/v1: 1
+    routing.frontier_first/v1: 1
+    no_routing_comparison_assignment: 6
+  decomposition_strategies:
+    NOT_OBSERVED: 8
+  provider_composition_experiment: NOT_OBSERVED
+  costs: NOT_OBSERVED
+  observable_latency_trajectories: 8
+
+apparent_patterns:
+  bounded_source_context_helped_one_exact_fact_task:
+    evidence: >-
+      Candidate passed and baseline failed EXP-60B-CONTEXT-002 with the same
+      local provider and exact verifier.
+    sample_size: one trajectory per arm in task class other
+    competing_explanations:
+      - the candidate was directly supplied the answer-bearing source excerpt
+      - one stochastic local generation per arm
+      - no reproduction on another fact task or provider
+    confidence: WEAKLY_SUPPORTED
+    actionable: false
+    reason: requires comparable repetitions across tasks and providers
+  frontier_first_did_not_improve_exact_failure_classification:
+    evidence: >-
+      Both routing arms and both one-cycle remediations failed exact
+      verification; no provider availability failure occurred.
+    sample_size: one trajectory per arm in task class bug_fix
+    competing_explanations:
+      - exact enum wording dominated general semantic correctness
+      - Claude model identity was not observable
+      - one historical failure fixture cannot characterize a provider family
+    confidence: INCONCLUSIVE
+    actionable: false
+    reason: no winning strategy and no replicated provider comparison
+  single_reviewer_outperformed_split_topology_on_one_fixture:
+    evidence: >-
+      Baseline found the known delimiter defect; both candidate reviewers
+      missed it, and the candidate falsification criterion triggered.
+    sample_size: one historical fixture with one baseline and two candidate reviews
+    competing_explanations:
+      - stochastic generations from the same local model
+      - role prompt calibration may matter more than reviewer count
+      - candidate reviewers focused on lifecycle language instead of traceability
+    confidence: FALSIFIED_FOR_THIS_FIXTURE_ONLY
+    actionable: false
+    reason: no universal topology default follows from one fixture
+  repeated_low_risk_local_success:
+    evidence: >-
+      Discovery fingerprint 7d18349014334fbe links two successful local
+      trajectories in different task classes.
+    sample_size: two successes selected from eight current live trajectories
+    competing_explanations:
+      - task selection favored bounded low-risk local work
+      - six other current live trajectories failed verification
+      - no comparable frontier arms exist for both successful tasks
+    confidence: REQUIRES_MORE_EVIDENCE
+    actionable: false
+    reason: observation remains open and unadopted
+
+decision_gate:
+  decision: COLLECT_MORE_TRAJECTORY_EVIDENCE
+  rationale: >-
+    The campaign materially broadened evidence but does not yet provide enough
+    diversity and comparability for a learned strategy system. Each strategy
+    comparison has one sample per arm, only one primary Claude trajectory was
+    observed, no repair succeeded, and review topology used one historical
+    fixture.
+  dimensions_too_sparse:
+    - repeated comparable tasks within each task class
+    - more than one primary cloud-provider trajectory and observable model IDs
+    - successful repair or remediation outcomes
+    - additional review fixtures and reviewer role combinations
+    - independent context comparison reproductions
+    - provider composition experiments
+    - meaningful task decomposition experiments
+    - observed costs where a provider exposes them
+
+full_verification:
+  status: PASSED_FOR_EVIDENCE_HEAD
+  verified_evidence_head: 20d06ad3e817a4d27f245a79083c006cd573a104
+  completed_at: "2026-08-25T01:57:31Z"
+  python:
+    command: PYTHONPATH=. pytest tests/ -q
+    result: 798 passed in 123.54 seconds
+    warnings: 1 third party Pydantic settings forward-reference warning
+  go_test:
+    command: go test ./...
+    result: passed all packages
+  go_build:
+    command: go build ./...
+    result: passed
+  go_vet:
+    command: go vet ./...
+    result: passed
+  flake8:
+    command: flake8 src/ scripts/ tests/ --count --select=E9,F63,F7,F82
+    result: 0
+  bandit:
+    command: bandit -r src/ scripts/ tests/ -ll -ii
+    result: 0 medium and 0 high issues
+    warnings: preexisting comment and nosec parser warnings
+  slopslint:
+    check: passed with python_src=14 and python_tests=29 active clones
+    ratchet: passed against origin/main
+    ceilings_changed: false
+    ignores_added: false
+  docs:
+    command: make docs
+    result: passed
+    warnings: preexisting third party pdoc type-resolution warnings
+  diff_check: passed
+  normal_pre_push: PASSED_FOR_20d06ad3e817a4d27f245a79083c006cd573a104
+  github_workflows:
+    head: 20d06ad3e817a4d27f245a79083c006cd573a104
+    Analyze: passed
+    CodeQL: passed
+    SlopsLint_Duplication_and_Ceiling_Ratchet: passed
+    lint: passed
+    test_go: passed
+    test_python: passed in 5 minutes 24 seconds
