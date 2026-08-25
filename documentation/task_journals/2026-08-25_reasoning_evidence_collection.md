@@ -3,7 +3,7 @@
 ## Durable State
 
 STATUS:
-    EVIDENCE_COMPLETE_PENDING_FULL_VERIFICATION
+    FULL_VERIFICATION_PASSED_PENDING_FINAL_PUSH_AND_CI
 
 STARTING_MAIN:
     30b886211ce75dc132c8ef449ec857bf14df4b3d
@@ -58,8 +58,9 @@ CURRENT_BLOCKERS:
     NONE
 
 NEXT_SAFE_ACTION:
-    Commit and push the review and discovery evidence, then complete the final
-    evidence quality audit and full verification matrix.
+    Commit the final evidence and verification record, push through the normal
+    gate, observe GitHub CI, mark the draft PR ready, and merge only if policy
+    permits.
 
 LAST_VERIFIED_TESTS:
     Targeted #60A suite: 76 passed in 5.78 seconds.
@@ -69,6 +70,10 @@ LAST_VERIFIED_TESTS:
     Correction push hook at 9533c40: 798 Python passed, all Go passed,
     flake8 passed, Bandit found no medium or high issue, Go build passed,
     and docs generated with the previously recorded third party warnings.
+    Final explicit matrix: 798 Python passed in 123.54 seconds; Go test, Go
+    build, go vet, flake8, Bandit, SlopsLint check and origin/main ratchet,
+    docs build, and diff check all passed. SlopsLint remained at 14 source and
+    29 test clones with no ceiling or ignore change.
 
 ## Campaign Boundaries
 
@@ -87,7 +92,7 @@ CURRENT_BRANCH:
     dogfood/reasoning-evidence-collection
 
 HEAD:
-    50864def452a08df07ba83c8ae7d838d25dd6387
+    85c8f22dc0d64e9a54790ea56adef2ecaaaea9a3
 
 PR:
     https://github.com/howlcipher/howlplane/pull/46
@@ -126,7 +131,7 @@ TESTS_RUN:
     GitHub checks: all six required checks passed for 64957f8.
 
 REPOSITORY_STATUS:
-    Intentional tracked evidence and journal changes for review and discovery.
+    Intentional tracked evidence, coverage, quality, and decision-gate changes.
 
 ## Progress Log
 
@@ -229,3 +234,34 @@ Ran trajectory discovery across two #60A and six #60B records. It created one
 open fingerprinted observation from the two successful low-risk local runs.
 Two identical repeat discovery passes returned zero new observations and kept
 the store at one. No observation was reopened or automatically adopted.
+
+### 2026-08-25T01:53:16Z
+
+Completed the final quality audit. All six #60B trajectories load through the
+production store and validate their content digests, linked immutable strategy
+definitions, provider and reviewer attribution, verification evidence, repair
+counts, and tracked evidence digests. Sixteen file evidence references exist,
+nine provider events are attributed, three reviews completed, and two repair
+cycles are present. No hidden reasoning field, raw prompt, unredacted Claude
+command, secret-like value, malformed #60B trajectory, or duplicate resume was
+found.
+
+The three invalid original preregistrations remain visible and excluded. Forty
+pre-campaign deterministic test artifacts with digest mismatches remain rejected
+by production loading and excluded from live counts. The decision gate is
+COLLECT_MORE_TRAJECTORY_EVIDENCE because all comparisons have one sample per
+arm, cloud-provider coverage has one primary trajectory, no repair succeeded,
+and decomposition and provider-composition evidence remain unobserved.
+
+### 2026-08-25T01:57:31Z
+
+The explicit final verification matrix passed: 798 Python tests, all Go tests,
+Go build, go vet, flake8 with zero selected errors, Bandit with no medium or
+high issue, SlopsLint classification and enforcement, the SlopsLint ratchet
+against origin/main, docs generation, and diff hygiene. The committed SlopsLint
+ceilings remain unchanged at 14 source and 29 test clones. The only warnings
+were the already recorded third party Pydantic, pdoc, and Bandit parser output.
+
+Durability so far: six signed checkpoint commits and six normal pushes, no
+handoff and no provider or AI session limit. The final checkpoint and its
+normal push remain before GitHub CI and PR readiness.

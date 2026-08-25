@@ -406,3 +406,186 @@ campaign_totals:
   meaningful_review_findings: 1
   dismissed_review_findings: 2
   reviewer_disagreement_observed: 1
+
+evidence_quality_audit:
+  audited_at: "2026-08-25T01:53:16Z"
+  accepted_live_60b_trajectories: 6
+  malformed_or_rejected_live_60b_trajectories: 0
+  rejected_preregistrations: 3
+  rejected_preregistration_disposition: >-
+    Preserved and excluded because descriptive task labels failed the canonical
+    TaskSpec contract before provider execution. They produced no trajectories.
+  rejected_deterministic_test_residue:
+    digest_mismatch: 40
+    disposition: >-
+      General-store test artifacts predating the campaign. Production loading
+      rejects them; they are not relabeled or counted as live.
+  valid_strategy_links: 6
+  verified_file_evidence_refs: 16
+  provider_events: 9
+  completed_reviews: 3
+  repair_cycles: 2
+  experiment_prediction_digests_valid: 3
+  trajectory_content_digests_valid: 6
+  observation_fingerprints_valid: 1
+  duplicate_prevention:
+    completed_experiments_replayed: 3
+    trajectory_count_before: 6
+    trajectory_count_after: 6
+  redaction:
+    hidden_reasoning_fields_found: 0
+    raw_prompt_fields_found: 0
+    unredacted_cloud_provider_commands: 0
+    secret_like_values_found: 0
+  audit_issues: []
+
+final_coverage_matrix:
+  total_current_schema_live_trajectories: 8
+  new_trustworthy_60b_trajectories: 6
+  task_classes:
+    test_improvement: 4
+    other: 2
+    bug_fix: 2
+  primary_providers:
+    local_ollama: 7
+    claude_code: 1
+  provider_invocations:
+    local_ollama: 8
+    claude_code: 3
+  successful_verification_outcomes: 2
+  failed_verification_outcomes: 6
+  repair_outcomes:
+    successful_repair: 0
+    unsuccessful_live_repair: 2
+    no_repair: 6
+  reviewer_topologies:
+    no_reviewers: 6
+    correctness_only: 1
+    correctness_plus_regression: 1
+  review_participation:
+    trajectories_with_reviewers: 2
+    completed_reviews: 3
+    meaningful_findings: 1
+    dismissed_findings: 2
+    natural_disagreements: 1
+  context_strategies:
+    context.task_plus_acceptance/v1: 4
+    context.changed_files_plus_architecture/v1: 1
+    context.relevant_documentation/v1: 1
+    context.changed_files_only/v1: 2
+  retrieval_strategies:
+    retrieval.failure_signature/v1: 2
+    no_explicit_retrieval: 6
+  routing_strategies:
+    routing.local_first_low_risk/v1: 1
+    routing.frontier_first/v1: 1
+    no_routing_comparison_assignment: 6
+  decomposition_strategies:
+    NOT_OBSERVED: 8
+  provider_composition_experiment: NOT_OBSERVED
+  costs: NOT_OBSERVED
+  observable_latency_trajectories: 8
+
+apparent_patterns:
+  bounded_source_context_helped_one_exact_fact_task:
+    evidence: >-
+      Candidate passed and baseline failed EXP-60B-CONTEXT-002 with the same
+      local provider and exact verifier.
+    sample_size: one trajectory per arm in task class other
+    competing_explanations:
+      - the candidate was directly supplied the answer-bearing source excerpt
+      - one stochastic local generation per arm
+      - no reproduction on another fact task or provider
+    confidence: WEAKLY_SUPPORTED
+    actionable: false
+    reason: requires comparable repetitions across tasks and providers
+  frontier_first_did_not_improve_exact_failure_classification:
+    evidence: >-
+      Both routing arms and both one-cycle remediations failed exact
+      verification; no provider availability failure occurred.
+    sample_size: one trajectory per arm in task class bug_fix
+    competing_explanations:
+      - exact enum wording dominated general semantic correctness
+      - Claude model identity was not observable
+      - one historical failure fixture cannot characterize a provider family
+    confidence: INCONCLUSIVE
+    actionable: false
+    reason: no winning strategy and no replicated provider comparison
+  single_reviewer_outperformed_split_topology_on_one_fixture:
+    evidence: >-
+      Baseline found the known delimiter defect; both candidate reviewers
+      missed it, and the candidate falsification criterion triggered.
+    sample_size: one historical fixture with one baseline and two candidate reviews
+    competing_explanations:
+      - stochastic generations from the same local model
+      - role prompt calibration may matter more than reviewer count
+      - candidate reviewers focused on lifecycle language instead of traceability
+    confidence: FALSIFIED_FOR_THIS_FIXTURE_ONLY
+    actionable: false
+    reason: no universal topology default follows from one fixture
+  repeated_low_risk_local_success:
+    evidence: >-
+      Discovery fingerprint 7d18349014334fbe links two successful local
+      trajectories in different task classes.
+    sample_size: two successes selected from eight current live trajectories
+    competing_explanations:
+      - task selection favored bounded low-risk local work
+      - six other current live trajectories failed verification
+      - no comparable frontier arms exist for both successful tasks
+    confidence: REQUIRES_MORE_EVIDENCE
+    actionable: false
+    reason: observation remains open and unadopted
+
+decision_gate:
+  decision: COLLECT_MORE_TRAJECTORY_EVIDENCE
+  rationale: >-
+    The campaign materially broadened evidence but does not yet provide enough
+    diversity and comparability for a learned strategy system. Each strategy
+    comparison has one sample per arm, only one primary Claude trajectory was
+    observed, no repair succeeded, and review topology used one historical
+    fixture.
+  dimensions_too_sparse:
+    - repeated comparable tasks within each task class
+    - more than one primary cloud-provider trajectory and observable model IDs
+    - successful repair or remediation outcomes
+    - additional review fixtures and reviewer role combinations
+    - independent context comparison reproductions
+    - provider composition experiments
+    - meaningful task decomposition experiments
+    - observed costs where a provider exposes them
+
+full_verification:
+  status: PASSED_PENDING_FINAL_PUSH_AND_GITHUB_CI
+  completed_at: "2026-08-25T01:57:31Z"
+  python:
+    command: PYTHONPATH=. pytest tests/ -q
+    result: 798 passed in 123.54 seconds
+    warnings: 1 third party Pydantic settings forward-reference warning
+  go_test:
+    command: go test ./...
+    result: passed all packages
+  go_build:
+    command: go build ./...
+    result: passed
+  go_vet:
+    command: go vet ./...
+    result: passed
+  flake8:
+    command: flake8 src/ scripts/ tests/ --count --select=E9,F63,F7,F82
+    result: 0
+  bandit:
+    command: bandit -r src/ scripts/ tests/ -ll -ii
+    result: 0 medium and 0 high issues
+    warnings: preexisting comment and nosec parser warnings
+  slopslint:
+    check: passed with python_src=14 and python_tests=29 active clones
+    ratchet: passed against origin/main
+    ceilings_changed: false
+    ignores_added: false
+  docs:
+    command: make docs
+    result: passed
+    warnings: preexisting third party pdoc type-resolution warnings
+  diff_check: passed
+  normal_pre_push: PENDING_FINAL_COMMIT
+  github_workflows: PENDING_FINAL_COMMIT

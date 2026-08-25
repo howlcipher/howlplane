@@ -134,7 +134,9 @@ added local and Claude executions plus two bounded remediation attempts, but
 both arms failed exact verification and remain `INCONCLUSIVE`. The final review
 comparison added three completed local reviews: the single reviewer found the
 known fixture defect, while the two-reviewer topology missed it and was
-`FALSIFIED` for that fixture. No universal preference is inferred.
+`FALSIFIED` for that fixture. The quality audit accepted all six new
+trajectories, but the decision gate is `COLLECT_MORE_TRAJECTORY_EVIDENCE` because
+the comparisons remain one sample per arm and key dimensions are sparse.
 
 ---
 
