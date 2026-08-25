@@ -3,7 +3,7 @@
 ## Durable State
 
 STATUS:
-    POST_CAMPAIGN_AUDIT_COMPLETE_AWAITING_COMMIT_AND_FULL_VERIFICATION
+    EVIDENCE_COMPLETE_LOCAL_VERIFICATION_GREEN_CI_PENDING
 
 STARTING_MAIN:
     a45458a237c7ceba38fb8cf7d7b27e9a017f7cef
@@ -15,12 +15,9 @@ PR:
     https://github.com/howlcipher/howlplane/pull/47
 
 CURRENT_HEAD:
-    f48f5ee9f8e11d9dc8d420fa9aa03662fa298a31
+    36cc091
 
 STAGED_WORK:
-    README.md
-    change_log.md
-    documentation/evidence/reasoning/2026-08-25_comparability_results.yaml
     documentation/task_journals/2026-08-25_reasoning_evidence_comparability.md
 
 CURRENT_EXPERIMENT:
@@ -72,7 +69,7 @@ CURRENT_BLOCKERS:
     NONE
 
 NEXT_SAFE_ACTION:
-    Commit and push the staged audit update as a durability checkpoint, then run the full verification matrix (Python, Go, lint, Bandit, SlopsLint, docs) before marking the PR ready for review.
+    Commit and push the local verification checkpoint, wait for all required GitHub checks, then mark PR 47 ready only if they pass.
 
 ## Campaign Boundaries
 
@@ -86,7 +83,7 @@ CURRENT_BRANCH:
     dogfood/reasoning-evidence-comparability
 
 HEAD:
-    f48f5ee9f8e11d9dc8d420fa9aa03662fa298a31
+    36cc091
 
 LAST_CONFIRMED_REMOTE_MAIN:
     a45458a237c7ceba38fb8cf7d7b27e9a017f7cef
@@ -171,6 +168,10 @@ EXP-60C-REVIEW-001 used a different historical defect class: an empty correctnes
 
 Post-campaign audit completed over all 22 current-schema live trajectories. Corrected EXP-60C-COMPOSITION-001 classification to NOT_OBSERVED for meaningful provider composition because the fixture was trivial exact fact extraction and the stored provider_events label both invocations role=review. Corrected EXP-60C-DECOMPOSITION-001 classification to NOT_OBSERVED for meaningful task decomposition because the candidate manufactured two subtasks for a simple two-fact extraction. Combined context evidence across #60B and #60C is baseline 0/3 passes, candidate 1/3 passes, with the single candidate pass confounded by directly supplied answer-bearing source context and both #60C candidate repetitions failing. Trajectory discovery ran two passes over all 22 trajectories and returned zero new observations; existing OBS-LOCAL-FIRST-7d18349014334fbe remained open at occurrence_count 2 with 2 evidence refs, no fingerprints were duplicated or reopened, and no strategy changed. Final coverage matrix, model/cost quality, cloud comparison details, repair search result, review topology metrics, evidence quality audit, invalid/rejected interpretations, competing explanations, and the readiness recommendation COLLECT_MORE_TRAJECTORY_EVIDENCE were written to documentation/evidence/reasoning/2026-08-25_comparability_results.yaml. README.md and change_log.md were updated to avoid claiming meaningful composition or decomposition. No raw trajectory or experiment JSON was modified.
 
+### 2026-08-25T14:05:00Z
+
+Signed evidence checkpoint 36cc091 passed the normal prepush gate and is durable on origin. Explicit final verification passed 798 Python tests with one preexisting third party warning; all Go tests, Go build, go vet, canonical flake8, canonical Bandit with no medium or high issue, SlopsLint classification and enforcement, the origin main ratchet at unchanged ceilings 14 and 29, documentation generation, and diff hygiene. Broad noncanonical flake8 and Bandit probes emitted existing low priority repository baseline findings; the canonical project gates passed and no hygiene policy changed. GitHub checks for 36cc091 currently show Analyze, CodeQL, SlopsLint, lint, and Go passed while Python remains pending.
+
 ## Handoff Packet
 
 SESSION_INTERRUPTION:
@@ -186,4 +187,4 @@ NEXT_EXPERIMENT:
     NONE until additional trajectory evidence is collected per the readiness recommendation COLLECT_MORE_TRAJECTORY_EVIDENCE.
 
 NEXT_SAFE_ACTION:
-    Commit and push the staged audit update as a durability checkpoint, then run the full verification matrix (Python, Go, lint, Bandit, SlopsLint, docs) before marking the PR ready for review.
+    Commit and push the local verification checkpoint, wait for all required GitHub checks, then mark PR 47 ready only if they pass.
