@@ -28,13 +28,15 @@ def render_inventory(pool: Any) -> str:
         f"External before local: {str(policy['external_before_local']).lower()}",
         f"Independent review: {str(policy['preserve_independent_review']).lower()}",
         "",
-        f"{'RESOURCE':<20} {'TYPE':<14} {'ENABLED':<8} {'READINESS':<20} CAPACITY",
+        f"{'RESOURCE':<20} {'TYPE':<14} {'ENABLED':<8} {'READINESS':<20} {'MUTATION':<10} CAPACITY",
     ]
     for row in document["resources"]:
+        mutation = row.get("unattended_mutation_capable")
+        mutation_str = "yes" if mutation is True else ("no" if mutation is False else "-")
         lines.append(
             f"{row['name']:<20} {row['economic_class']:<14} "
             f"{('yes' if row['enabled'] else 'no'):<8} "
-            f"{row['readiness']:<20} {row['capacity']}"
+            f"{row['readiness']:<20} {mutation_str:<10} {row['capacity']}"
         )
     return "\n".join(lines)
 

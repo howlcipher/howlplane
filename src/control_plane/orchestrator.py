@@ -17,7 +17,14 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
-from src.control_plane.agent_execution import AgentBackend, AgentBackendRegistry, AgentExecutionResult, AgentUnavailableError
+from src.control_plane.agent_execution import (
+    AgentBackend,
+    AgentBackendRegistry,
+    AgentExecutionResult,
+    AgentUnavailableError,
+    TOOL_PERMISSION_DENIED,
+    TOOL_PERMISSION_KEY,
+)
 from src.control_plane.atomic_io import (
     atomic_write_json,
     atomic_write_text,
@@ -461,6 +468,7 @@ class GovernedTaskOrchestrator:
             ProviderFailureClass.PROVIDER_UNAVAILABLE,
             ProviderFailureClass.TRANSPORT_UNAVAILABLE,
             ProviderFailureClass.MISSING_EXECUTABLE,
+            ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED,
         }
 
     def _map_failure_class_to_orchestrator_class(
@@ -478,6 +486,7 @@ class GovernedTaskOrchestrator:
             "PROVIDER_UNAVAILABLE",
             "TRANSPORT_UNAVAILABLE",
             "MISSING_EXECUTABLE",
+            "EXECUTION_PERMISSION_REQUIRED",
         }:
             return FAILURE_CLASS_PROVIDER_UNAVAILABLE
         return FAILURE_CLASS_ENGINEERING
@@ -1054,6 +1063,24 @@ class GovernedTaskOrchestrator:
                 current_delta = self._capture_scoped_delta(
                     task_spec, baseline, current_impl_resource_id, stage="implementation"
                 )
+
+                denial_outcome = (
+                    (impl_res.metadata or {}).get(TOOL_PERMISSION_KEY)
+                    if impl_res is not None else None
+                )
+                if (
+                    impl_res is not None
+                    and impl_res.success
+                    and denial_outcome == TOOL_PERMISSION_DENIED
+                    and current_delta.is_empty
+                ):
+                    impl_res.success = False
+                    if not impl_res.error_message:
+                        impl_res.error_message = (
+                            "Required tool permissions were unavailable and zero delta produced"
+                        )
+                    if self.config.provider_pool is not None:
+                        normalized_failure = ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
 
                 attempt_record = self._record_implementation_attempt(
                     run_dir=run_dir,

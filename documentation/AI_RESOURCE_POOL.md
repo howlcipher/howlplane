@@ -136,6 +136,25 @@ from the implementer. Routing records `review_diversity_achieved` truthfully. A
 same-provider/model request is not described as independent, and unavailable
 diversity does not weaken required review.
 
+## Execution profiles and unattended provider permissions
+
+Headless CLI providers (such as Claude Code) require explicit tool permissions
+to perform unattended implementation or remediation work without waiting for an
+interactive terminal prompt. HowlPlane derives these per-invocation permissions
+from the target project's discovered test/build/lint verification commands and
+read-only Git commands.
+
+Operators can configure overrides under `[ai_resources.providers.<name>.execution_profile]`:
+* `extra_allowed_bash`: list of additional command patterns to permit (e.g. `["pytest -q:*"]`).
+* `disallowed_tools`: list of tools to deny (denials always take precedence).
+* `permission_mode`: headless permission mode (`"acceptEdits"`, `"plan"`, `"manual"`, `"dontAsk"`).
+  Dangerous bypasses (`bypassPermissions`, `--dangerously-skip-permissions`) are strictly forbidden.
+
+Readiness distinguishes between executable presence (`status: READY`) and mutation capability
+(`unattended_mutation_capable: true/false`). A provider lacking required mutation tools fails
+with `EXECUTION_PERMISSION_REQUIRED`, triggering bounded provider failover rather than misreporting
+a false success.
+
 ## CLI
 
 `ai providers` shows all registered resources and distinct configured, enabled,

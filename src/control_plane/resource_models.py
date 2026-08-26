@@ -64,6 +64,11 @@ class ProviderFailureClass(str, Enum):
     MALFORMED_OUTPUT = "MALFORMED_OUTPUT"
     CAPABILITY_FAILURE = "CAPABILITY_FAILURE"
     POLICY_FAILURE = "POLICY_FAILURE"
+    # The provider launched and reasoned, but was denied a tool the task
+    # required and therefore produced no work. Distinct from MISSING_EXECUTABLE
+    # (never launched), AUTHENTICATION_REQUIRED (launched but not signed in),
+    # and TRANSPORT_UNAVAILABLE (launched but could not reach the provider).
+    EXECUTION_PERMISSION_REQUIRED = "EXECUTION_PERMISSION_REQUIRED"
     UNKNOWN = "UNKNOWN"
 
 
@@ -86,7 +91,15 @@ class ResourceIdentity(DataClassSerializationMixin):
 
 @dataclass
 class BackendReadiness(DataClassSerializationMixin):
-    """Safe adapter readiness result that never requires generation."""
+    """Safe adapter readiness result that never requires generation.
+
+    `status` answers only "can this executable be launched". Whether the
+    launched provider can actually exercise the mutation tools a task needs is
+    a separate question, reported by `unattended_mutation_capable`, so a
+    provider is never described as READY for work it cannot perform
+    unattended. Conflating the two is what let the HOWLFRAM-SLOPFIX-04 canary
+    select a provider that could start but not edit.
+    """
 
     status: ReadinessStatus
     installed: Optional[bool] = None
@@ -94,6 +107,8 @@ class BackendReadiness(DataClassSerializationMixin):
     authentication: AuthenticationStatus = AuthenticationStatus.UNKNOWN
     reason: Optional[str] = None
     evidence: Optional[str] = None
+    unattended_mutation_capable: Optional[bool] = None
+    capability_reason: Optional[str] = None
 
 
 @dataclass(frozen=True)

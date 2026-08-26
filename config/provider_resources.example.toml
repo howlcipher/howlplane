@@ -6,6 +6,11 @@ operating_mode = "connected"
 
 [ai_resources.providers.claude_code]
 enabled = true
+# Optional headless tool execution profile overrides:
+# [ai_resources.providers.claude_code.execution_profile]
+# extra_allowed_bash = ["pytest -q:*"]
+# disallowed_tools = []
+# permission_mode = "acceptEdits" # "acceptEdits" | "plan" | "manual" | "dontAsk" (bypassPermissions is forbidden)
 
 [ai_resources.providers.codex]
 enabled = true
