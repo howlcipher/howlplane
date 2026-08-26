@@ -21,7 +21,7 @@ Deterministic tests for failure-handling defects exposed by real dogfood runs:
 from io import StringIO
 from pathlib import Path
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import pytest
 
 from src.control_plane.agent_execution import (

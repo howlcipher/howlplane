@@ -430,6 +430,30 @@ class GovernedTaskOrchestrator:
         except Exception:
             pass
 
+    def _write_delta_patch(
+        self,
+        delta: RepositoryDelta,
+        stage_dir: Path,
+        run_dir: Path,
+    ) -> None:
+        """Publishes a captured patch as the stage artifact and the run's current diff."""
+        (stage_dir / "diff.patch").write_text(delta.diff_content, encoding="utf-8")
+        (run_dir / "diff.patch").write_text(delta.diff_content, encoding="utf-8")
+
+    def _record_delta_captured(
+        self,
+        task_spec: TaskSpec,
+        delta: Optional[RepositoryDelta] = None,
+    ) -> None:
+        """Records the repository_delta_captured event for a captured delta."""
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id="control_plane",
+            action="repository_delta_captured",
+            spec=task_spec,
+            metadata=delta.to_event_metadata() if delta is not None else None,
+        )
+
     def prepare_task_plan(
         self,
         task_spec: TaskSpec,
@@ -791,6 +815,36 @@ class GovernedTaskOrchestrator:
             attempted_impl_resource_ids: Set[str] = set()
             final_impl_resource_id: Optional[str] = None
 
+            def fail_implementation(
+                err_msg: str,
+                failure_class: str,
+                exit_code: int = 1,
+            ) -> OrchestrationResult:
+                """Terminal-fails the run from inside the implementation attempt loop.
+
+                Reads the attempt-scoped locals (delta, provider execution, attempt
+                records) at call time, so every terminal path reports the state as of
+                the attempt that failed.
+                """
+                return self._fail_task(
+                    task_spec,
+                    run_dir,
+                    err_msg,
+                    start_time,
+                    exit_code=exit_code,
+                    agent_id="control_plane",
+                    progress_tracker=progress,
+                    routing=routing,
+                    initial_delta=current_delta,
+                    current_delta=current_delta,
+                    verif_plan=verif_plan,
+                    hf_status=hf_audit_status,
+                    hf_match=hf_audit_match,
+                    provider_execution=impl_res,
+                    failure_class=failure_class,
+                    implementation_attempts=implementation_attempts,
+                )
+
             for attempt_num in range(1, self.config.max_provider_failover_attempts + 1):
                 impl_res = None
                 normalized_failure = None
@@ -880,8 +934,7 @@ class GovernedTaskOrchestrator:
                 if impl_res is not None and impl_res.success:
                     final_impl_resource_id = current_impl_resource_id
                     (impl_dir / "result.json").write_text(impl_res.to_json(), encoding="utf-8")
-                    (impl_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
-                    (run_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
+                    self._write_delta_patch(current_delta, impl_dir, run_dir)
                     self._record_event(
                         task_id=task_spec.task_id,
                         agent_id=current_impl_resource_id,
@@ -893,13 +946,7 @@ class GovernedTaskOrchestrator:
                             "attempt": attempt_num,
                         },
                     )
-                    self._record_event(
-                        task_id=task_spec.task_id,
-                        agent_id="control_plane",
-                        action="repository_delta_captured",
-                        spec=task_spec,
-                        metadata=current_delta.to_event_metadata(),
-                    )
+                    self._record_delta_captured(task_spec, current_delta)
                     break
 
                 # Failed attempt: determine whether to failover or terminal-fail.
@@ -916,23 +963,10 @@ class GovernedTaskOrchestrator:
                 )
 
                 if not self._is_failover_eligible_failure(normalized_failure):
-                    return self._fail_task(
-                        task_spec,
-                        run_dir,
+                    return fail_implementation(
                         err_msg,
-                        start_time,
+                        self._map_failure_class_to_orchestrator_class(normalized_failure),
                         exit_code=impl_res.exit_code if impl_res and impl_res.exit_code != 0 else 1,
-                        agent_id="control_plane",
-                        progress_tracker=progress,
-                        routing=routing,
-                        initial_delta=current_delta,
-                        current_delta=current_delta,
-                        verif_plan=verif_plan,
-                        hf_status=hf_audit_status,
-                        hf_match=hf_audit_match,
-                        provider_execution=impl_res,
-                        failure_class=self._map_failure_class_to_orchestrator_class(normalized_failure),
-                        implementation_attempts=implementation_attempts,
                     )
 
                 if attempt_num >= self.config.max_provider_failover_attempts:
@@ -940,24 +974,7 @@ class GovernedTaskOrchestrator:
                         f"Implementation failed on {current_impl_resource_id} ({failure_class_value}); "
                         f"max failover attempts ({self.config.max_provider_failover_attempts}) reached."
                     )
-                    return self._fail_task(
-                        task_spec,
-                        run_dir,
-                        err_msg,
-                        start_time,
-                        exit_code=1,
-                        agent_id="control_plane",
-                        progress_tracker=progress,
-                        routing=routing,
-                        initial_delta=current_delta,
-                        current_delta=current_delta,
-                        verif_plan=verif_plan,
-                        hf_status=hf_audit_status,
-                        hf_match=hf_audit_match,
-                        provider_execution=impl_res,
-                        failure_class=FAILURE_CLASS_PROVIDER_EXHAUSTED,
-                        implementation_attempts=implementation_attempts,
-                    )
+                    return fail_implementation(err_msg, FAILURE_CLASS_PROVIDER_EXHAUSTED)
 
                 # Select next eligible implementation resource.
                 next_resource_id = None
@@ -976,24 +993,7 @@ class GovernedTaskOrchestrator:
                     or next_resource_id in attempted_impl_resource_ids
                 ):
                     err_msg = f"Implementation failed on {current_impl_resource_id} ({failure_class_value}) and no eligible failover resource remains."
-                    return self._fail_task(
-                        task_spec,
-                        run_dir,
-                        err_msg,
-                        start_time,
-                        exit_code=1,
-                        agent_id="control_plane",
-                        progress_tracker=progress,
-                        routing=routing,
-                        initial_delta=current_delta,
-                        current_delta=current_delta,
-                        verif_plan=verif_plan,
-                        hf_status=hf_audit_status,
-                        hf_match=hf_audit_match,
-                        provider_execution=impl_res,
-                        failure_class=FAILURE_CLASS_PROVIDER_EXHAUSTED,
-                        implementation_attempts=implementation_attempts,
-                    )
+                    return fail_implementation(err_msg, FAILURE_CLASS_PROVIDER_EXHAUSTED)
 
                 # Restore repository to baseline before the next attempt.
                 restored_ok, restore_err = restore_repository_to_baseline(
@@ -1001,24 +1001,7 @@ class GovernedTaskOrchestrator:
                 )
                 if not restored_ok:
                     err_msg = f"Implementation failover aborted: cannot safely restore baseline ({restore_err})."
-                    return self._fail_task(
-                        task_spec,
-                        run_dir,
-                        err_msg,
-                        start_time,
-                        exit_code=1,
-                        agent_id="control_plane",
-                        progress_tracker=progress,
-                        routing=routing,
-                        initial_delta=current_delta,
-                        current_delta=current_delta,
-                        verif_plan=verif_plan,
-                        hf_status=hf_audit_status,
-                        hf_match=hf_audit_match,
-                        provider_execution=impl_res,
-                        failure_class=FAILURE_CLASS_PROVIDER_UNAVAILABLE,
-                        implementation_attempts=implementation_attempts,
-                    )
+                    return fail_implementation(err_msg, FAILURE_CLASS_PROVIDER_UNAVAILABLE)
 
                 progress.emit_failover(
                     current_impl_resource_id,
@@ -1278,8 +1261,7 @@ class GovernedTaskOrchestrator:
             current_delta = self._capture_scoped_delta(
                 task_spec, baseline, routing.selected_agent_id, stage="remediation"
             )
-            (rem_cycle_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
-            (run_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
+            self._write_delta_patch(current_delta, rem_cycle_dir, run_dir)
 
             self._record_event(
                 task_id=task_spec.task_id,
@@ -1288,12 +1270,7 @@ class GovernedTaskOrchestrator:
                 spec=task_spec,
                 metadata={"cycle": remediation_count, "files_modified": len(current_delta.files_modified)},
             )
-            self._record_event(
-                task_id=task_spec.task_id,
-                agent_id="control_plane",
-                action="repository_delta_captured",
-                spec=task_spec,
-            )
+            self._record_delta_captured(task_spec)
             CheckpointManager.complete_stage(
                 run_dir,
                 "remediating",

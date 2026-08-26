@@ -195,7 +195,6 @@ class CheckpointManager:
         stage: str,
         output_artifacts: Optional[List[str]] = None,
         result_summary: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
     ) -> StageCheckpoint:
         """Marks a stage checkpoint as completed."""
         return cls._finalize_stage(
@@ -204,7 +203,6 @@ class CheckpointManager:
             stage=stage,
             output_artifacts=output_artifacts,
             result_summary=result_summary,
-            metadata=metadata,
         )
 
     @classmethod

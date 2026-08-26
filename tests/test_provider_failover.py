@@ -51,39 +51,25 @@ def _init_test_repo(tmp_path: Path) -> Path:
     return init_minimal_python_repo(tmp_path)
 
 
+def _profile(agent_id: str, name: str, provider: str, **overrides) -> AgentProfile:
+    """Builds a deterministic subscription-included CLI resource profile."""
+    fields = dict(
+        interface="headless_cli",
+        capabilities=["code_generation", "file_editing", "code_review"],
+        reasoning_tier="tier_2",
+        supports_repository_access=True,
+        cost_class="subscription_included",
+    )
+    fields.update(overrides)
+    return AgentProfile(agent_id=agent_id, name=name, provider=provider, **fields)
+
+
 def _make_registry(extra: Optional[List[AgentProfile]] = None) -> AgentRegistry:
     """Builds a small deterministic registry for failover tests."""
     profiles: List[AgentProfile] = [
-        AgentProfile(
-            agent_id="resource_a",
-            name="Resource A",
-            provider="provider_x",
-            interface="headless_cli",
-            capabilities=["code_generation", "file_editing", "code_review"],
-            reasoning_tier="tier_2",
-            supports_repository_access=True,
-            cost_class="subscription_included",
-        ),
-        AgentProfile(
-            agent_id="resource_b",
-            name="Resource B",
-            provider="provider_y",
-            interface="headless_cli",
-            capabilities=["code_generation", "file_editing", "code_review"],
-            reasoning_tier="tier_2",
-            supports_repository_access=True,
-            cost_class="subscription_included",
-        ),
-        AgentProfile(
-            agent_id="resource_c",
-            name="Resource C",
-            provider="provider_y",
-            interface="headless_cli",
-            capabilities=["code_generation", "file_editing", "code_review"],
-            reasoning_tier="tier_2",
-            supports_repository_access=True,
-            cost_class="subscription_included",
-        ),
+        _profile("resource_a", "Resource A", "provider_x"),
+        _profile("resource_b", "Resource B", "provider_y"),
+        _profile("resource_c", "Resource C", "provider_y"),
     ]
     if extra:
         profiles.extend(extra)
@@ -93,36 +79,9 @@ def _make_registry(extra: Optional[List[AgentProfile]] = None) -> AgentRegistry:
 def _make_registry_three_providers() -> AgentRegistry:
     """Registry where every resource has a different provider, enabling independent review."""
     return AgentRegistry([
-        AgentProfile(
-            agent_id="resource_a",
-            name="Resource A",
-            provider="provider_x",
-            interface="headless_cli",
-            capabilities=["code_generation", "file_editing", "code_review"],
-            reasoning_tier="tier_2",
-            supports_repository_access=True,
-            cost_class="subscription_included",
-        ),
-        AgentProfile(
-            agent_id="resource_b",
-            name="Resource B",
-            provider="provider_y",
-            interface="headless_cli",
-            capabilities=["code_generation", "file_editing", "code_review"],
-            reasoning_tier="tier_2",
-            supports_repository_access=True,
-            cost_class="subscription_included",
-        ),
-        AgentProfile(
-            agent_id="resource_c",
-            name="Resource C",
-            provider="provider_z",
-            interface="headless_cli",
-            capabilities=["code_generation", "file_editing", "code_review"],
-            reasoning_tier="tier_2",
-            supports_repository_access=True,
-            cost_class="subscription_included",
-        ),
+        _profile("resource_a", "Resource A", "provider_x"),
+        _profile("resource_b", "Resource B", "provider_y"),
+        _profile("resource_c", "Resource C", "provider_z"),
     ])
 
 
@@ -245,6 +204,30 @@ def _capture_stderr(func: Callable[[], OrchestrationResult]) -> str:
     return stream.getvalue(), result
 
 
+_TIMEOUT_STDERR = "Error: timeout waiting for response\n"
+
+
+def _timeout_then_success_resolver(**overrides) -> _FakeBackendResolver:
+    """resource_a fails with an AGY-style transport timeout; resource_b succeeds.
+
+    `overrides` merges extra keys into a resource's plan, e.g.
+    `_timeout_then_success_resolver(resource_a={"side_effect": fn})`.
+    """
+    plan = {
+        "resource_a": {"success": False, "stderr": _TIMEOUT_STDERR},
+        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
+    }
+    for resource_id, extra in overrides.items():
+        plan[resource_id] = {**plan.get(resource_id, {}), **extra}
+    return _FakeBackendResolver(plan)
+
+
+def _run_timeout_failover(tmp_path: Path, **kwargs) -> OrchestrationResult:
+    """Runs the canonical timeout-then-failover scenario in a fresh repo."""
+    repo = _init_test_repo(tmp_path / "repo")
+    return _run_failover_task(repo, _timeout_then_success_resolver(), **kwargs)
+
+
 # ---------------------------------------------------------------------------
 # Scenario 1: first implementation resource succeeds, no failover
 # ---------------------------------------------------------------------------
@@ -267,13 +250,7 @@ def test_first_resource_succeeds_no_failover(tmp_path: Path):
 # ---------------------------------------------------------------------------
 def test_first_resource_fails_zero_edits_second_selected(tmp_path: Path):
     repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {
-            "success": False,
-            "stderr": "Error: timeout waiting for response\n",
-        },
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
+    resolver = _timeout_then_success_resolver()
     res = _run_failover_task(repo, resolver)
 
     assert res.final_state == "complete"
@@ -297,17 +274,9 @@ def test_timeout_partial_work_preserved_and_repo_restored(tmp_path: Path):
         target = Path(cwd) / "src" / "feature.py"
         target.write_text("def run():\n    return 'partial from a'\n", encoding="utf-8")
 
-    resolver = _FakeBackendResolver({
-        "resource_a": {
-            "success": False,
-            "stderr": "Error: timeout waiting for response\n",
-            "side_effect": a_side_effect,
-        },
-        "resource_b": {
-            "success": True,
-            "side_effect": _edit_feature_to_true,
-        },
-    })
+    resolver = _timeout_then_success_resolver(
+        resource_a={"side_effect": a_side_effect},
+    )
     res = _run_failover_task(repo, resolver)
 
     assert res.final_state == "complete"
@@ -341,14 +310,9 @@ def test_added_file_preserved_as_evidence_and_removed_before_failover(tmp_path: 
         target = Path(cwd) / "src" / "added_by_a.py"
         target.write_text("x = 1\n", encoding="utf-8")
 
-    resolver = _FakeBackendResolver({
-        "resource_a": {
-            "success": False,
-            "stderr": "Error: timeout waiting for response\n",
-            "side_effect": a_side_effect,
-        },
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
+    resolver = _timeout_then_success_resolver(
+        resource_a={"side_effect": a_side_effect},
+    )
     res = _run_failover_task(repo, resolver)
 
     assert res.final_state == "complete"
@@ -382,14 +346,10 @@ def test_pre_existing_modified_file_survives_rollback(tmp_path: Path):
         # preserved the pre-existing content.
         (Path(cwd) / "src" / "added_by_b.py").write_text("y = 2\n", encoding="utf-8")
 
-    resolver = _FakeBackendResolver({
-        "resource_a": {
-            "success": False,
-            "stderr": "Error: timeout waiting for response\n",
-            "side_effect": a_side_effect,
-        },
-        "resource_b": {"success": True, "side_effect": b_side_effect},
-    })
+    resolver = _timeout_then_success_resolver(
+        resource_a={"side_effect": a_side_effect},
+        resource_b={"side_effect": b_side_effect},
+    )
     res = _run_failover_task(repo, resolver)
 
     assert res.final_state == "complete"
@@ -406,13 +366,7 @@ def test_pre_existing_untracked_file_survives_rollback(tmp_path: Path):
     untracked = repo / "notes.txt"
     untracked.write_text("keep me\n", encoding="utf-8")
 
-    resolver = _FakeBackendResolver({
-        "resource_a": {
-            "success": False,
-            "stderr": "Error: timeout waiting for response\n",
-        },
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
+    resolver = _timeout_then_success_resolver()
     res = _run_failover_task(repo, resolver)
 
     assert res.final_state == "complete"
@@ -429,13 +383,7 @@ def test_task_runs_survives_rollback_and_not_attributed(tmp_path: Path):
     old_task.mkdir(parents=True, exist_ok=True)
     (old_task / "task.yaml").write_text("task_id: OLD-TASK\n", encoding="utf-8")
 
-    resolver = _FakeBackendResolver({
-        "resource_a": {
-            "success": False,
-            "stderr": "Error: timeout waiting for response\n",
-        },
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
+    resolver = _timeout_then_success_resolver()
     res = _run_failover_task(repo, resolver)
 
     assert res.final_state == "complete"
@@ -493,12 +441,7 @@ def test_all_availability_attempts_fail_bounded(tmp_path: Path):
 # Scenario 10: failed resource is not immediately reselected while unavailable/cooling down
 # ---------------------------------------------------------------------------
 def test_failed_resource_not_immediately_reselected(tmp_path: Path):
-    repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {"success": False, "stderr": "Error: timeout waiting for response\n"},
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
-    res = _run_failover_task(repo, resolver)
+    res = _run_timeout_failover(tmp_path)
 
     assert res.final_state == "complete"
     attempts = res.implementation_attempts
@@ -510,23 +453,10 @@ def test_failed_resource_not_immediately_reselected(tmp_path: Path):
 # ---------------------------------------------------------------------------
 def test_paid_api_policy_remains_enforced(tmp_path: Path):
     registry = _make_registry([
-        AgentProfile(
-            agent_id="paid_api",
-            name="Paid API",
-            provider="provider_z",
-            interface="api",
-            capabilities=["code_generation", "file_editing", "code_review"],
-            reasoning_tier="tier_2",
-            supports_repository_access=True,
-            cost_class="paid_api",
-        ),
+        _profile("paid_api", "Paid API", "provider_z",
+                 interface="api", cost_class="paid_api"),
     ])
-    repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {"success": False, "stderr": "Error: timeout waiting for response\n"},
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
-    res = _run_failover_task(repo, resolver, registry=registry)
+    res = _run_timeout_failover(tmp_path, registry=registry)
 
     assert res.final_state == "complete"
     attempts = res.implementation_attempts
@@ -538,10 +468,7 @@ def test_paid_api_policy_remains_enforced(tmp_path: Path):
 # ---------------------------------------------------------------------------
 def test_task_state_valid_across_attempts(tmp_path: Path):
     repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {"success": False, "stderr": "Error: timeout waiting for response\n"},
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
+    resolver = _timeout_then_success_resolver()
     task = _make_task()
     res = _run_failover_task(repo, resolver, task=task)
 
@@ -553,12 +480,7 @@ def test_task_state_valid_across_attempts(tmp_path: Path):
 # Scenario 13: successful second provider becomes actual implementation identity
 # ---------------------------------------------------------------------------
 def test_second_provider_becomes_actual_identity(tmp_path: Path):
-    repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {"success": False, "stderr": "Error: timeout waiting for response\n"},
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
-    res = _run_failover_task(repo, resolver)
+    res = _run_timeout_failover(tmp_path)
 
     assert res.final_state == "complete"
     assert res.executing_provider == "resource_b"
@@ -570,12 +492,7 @@ def test_second_provider_becomes_actual_identity(tmp_path: Path):
 # Scenario 14: initial routing identity remains preserved in history
 # ---------------------------------------------------------------------------
 def test_initial_routing_identity_preserved(tmp_path: Path):
-    repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {"success": False, "stderr": "Error: timeout waiting for response\n"},
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
-    res = _run_failover_task(repo, resolver)
+    res = _run_timeout_failover(tmp_path)
 
     routing = res.routing_decision
     assert routing is not None
@@ -591,10 +508,7 @@ def test_initial_routing_identity_preserved(tmp_path: Path):
 # ---------------------------------------------------------------------------
 def test_reviewer_assignment_recomputed_after_failover(tmp_path: Path):
     repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {"success": False, "stderr": "Error: timeout waiting for response\n"},
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
+    resolver = _timeout_then_success_resolver()
     registry = _make_registry_three_providers()
     res = _run_failover_task(repo, resolver, registry=registry)
 
@@ -614,33 +528,10 @@ def test_reviewer_assignment_recomputed_after_failover(tmp_path: Path):
 def test_independent_review_truthfully_reported(tmp_path: Path):
     # Use only two resources from the same provider so diversity is impossible.
     registry = AgentRegistry([
-        AgentProfile(
-            agent_id="resource_a",
-            name="Resource A",
-            provider="provider_y",
-            interface="headless_cli",
-            capabilities=["code_generation", "file_editing", "code_review"],
-            reasoning_tier="tier_2",
-            supports_repository_access=True,
-            cost_class="subscription_included",
-        ),
-        AgentProfile(
-            agent_id="resource_b",
-            name="Resource B",
-            provider="provider_y",
-            interface="headless_cli",
-            capabilities=["code_generation", "file_editing", "code_review"],
-            reasoning_tier="tier_2",
-            supports_repository_access=True,
-            cost_class="subscription_included",
-        ),
+        _profile("resource_a", "Resource A", "provider_y"),
+        _profile("resource_b", "Resource B", "provider_y"),
     ])
-    repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {"success": False, "stderr": "Error: timeout waiting for response\n"},
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
-    res = _run_failover_task(repo, resolver, registry=registry)
+    res = _run_timeout_failover(tmp_path, registry=registry)
 
     assert res.final_state == "complete"
     routing = res.routing_decision
@@ -651,12 +542,7 @@ def test_independent_review_truthfully_reported(tmp_path: Path):
 # Scenario 17: verification plan survives failover
 # ---------------------------------------------------------------------------
 def test_verification_plan_survives_failover(tmp_path: Path):
-    repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {"success": False, "stderr": "Error: timeout waiting for response\n"},
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
-    res = _run_failover_task(repo, resolver)
+    res = _run_timeout_failover(tmp_path)
 
     assert res.final_state == "complete"
     assert res.verification_plan is not None
@@ -667,12 +553,7 @@ def test_verification_plan_survives_failover(tmp_path: Path):
 # Scenario 18: verification executes after successful failover
 # ---------------------------------------------------------------------------
 def test_verification_executes_after_successful_failover(tmp_path: Path):
-    repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {"success": False, "stderr": "Error: timeout waiting for response\n"},
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
-    res = _run_failover_task(repo, resolver)
+    res = _run_timeout_failover(tmp_path)
 
     assert res.final_state == "complete"
     assert res.verification_plan is not None
@@ -683,12 +564,7 @@ def test_verification_executes_after_successful_failover(tmp_path: Path):
 # Scenario 19: progress prints IMPLEMENTATION FAILED rather than IMPLEMENTATION COMPLETE
 # ---------------------------------------------------------------------------
 def test_progress_prints_implementation_failed(tmp_path: Path):
-    repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {"success": False, "stderr": "Error: timeout waiting for response\n"},
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
-    stderr, res = _capture_stderr(lambda: _run_failover_task(repo, resolver))
+    stderr, res = _capture_stderr(lambda: _run_timeout_failover(tmp_path))
 
     assert res.final_state == "complete"
     assert "IMPLEMENTATION FAILED" in stderr
@@ -702,12 +578,7 @@ def test_progress_prints_implementation_failed(tmp_path: Path):
 # Scenario 20: progress emits a clear failover event
 # ---------------------------------------------------------------------------
 def test_progress_emits_failover_event(tmp_path: Path):
-    repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {"success": False, "stderr": "Error: timeout waiting for response\n"},
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
-    stderr, res = _capture_stderr(lambda: _run_failover_task(repo, resolver))
+    stderr, res = _capture_stderr(lambda: _run_timeout_failover(tmp_path))
 
     assert res.final_state == "complete"
     assert "FAILOVER" in stderr
@@ -719,12 +590,7 @@ def test_progress_emits_failover_event(tmp_path: Path):
 # Scenario 21: trajectory records source, target, failure class, attempts, outcome
 # ---------------------------------------------------------------------------
 def test_trajectory_records_failover_chain(tmp_path: Path):
-    repo = _init_test_repo(tmp_path / "repo")
-    resolver = _FakeBackendResolver({
-        "resource_a": {"success": False, "stderr": "Error: timeout waiting for response\n"},
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
-    res = _run_failover_task(repo, resolver)
+    res = _run_timeout_failover(tmp_path)
 
     assert res.final_state == "complete"
     assert res.trajectory_id is not None
