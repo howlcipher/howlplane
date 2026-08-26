@@ -169,7 +169,12 @@ class VerificationPlan(DataClassSerializationMixin):
         )
         self.steps.append(step)
 
-    def execute_step(self, step: VerificationStep, cwd: Optional[str] = None) -> None:
+    def execute_step(
+        self,
+        step: VerificationStep,
+        cwd: Optional[str] = None,
+        progress_tracker: Optional[Any] = None,
+    ) -> None:
         """
         Executes a single step deterministically using subprocess without shell=True.
         Enforces provider integrity for repository hygiene gates.
@@ -222,15 +227,30 @@ class VerificationPlan(DataClassSerializationMixin):
             if candidate_bin.is_file() and os.access(candidate_bin, os.X_OK):
                 cmd_args[0] = str(candidate_bin)
 
+        cmd_display = (
+            " ".join(shlex.quote(c) for c in cmd_args)
+            if isinstance(cmd_args, list)
+            else str(cmd_args)
+        )
+
+        from src.control_plane.progress import track_operation
         try:
-            res = subprocess.run(
-                cmd_args,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=300,
-            )
+            with track_operation(
+                progress_tracker,
+                phase="VERIFYING",
+                resource_id=step.category,
+                details=cmd_display,
+                role="verification",
+            ):
+                res = subprocess.run(
+                    cmd_args,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=300,
+                )
+
             step.duration_seconds = round(time.time() - start_time, 3)
             step.exit_code = res.returncode
             step.stdout = res.stdout
@@ -248,7 +268,12 @@ class VerificationPlan(DataClassSerializationMixin):
             step.stderr = str(e)
             step.status = "failed"
 
-    def execute_all(self, cwd: Optional[str] = None, stop_on_failure: bool = False) -> str:
+    def execute_all(
+        self,
+        cwd: Optional[str] = None,
+        stop_on_failure: bool = False,
+        progress_tracker: Optional[Any] = None,
+    ) -> str:
         """
         Executes all steps in order and computes the overall status.
         """
@@ -256,7 +281,7 @@ class VerificationPlan(DataClassSerializationMixin):
         all_passed = True
 
         for step in self.steps:
-            self.execute_step(step, cwd=cwd)
+            self.execute_step(step, cwd=cwd, progress_tracker=progress_tracker)
             if step.status == "failed":
                 any_failed = True
                 if step.required:

@@ -134,52 +134,95 @@ class CheckpointManager:
         return checkpoint
 
     @classmethod
+    def _finalize_stage(
+        cls,
+        run_dir: Union[str, Path],
+        target_status: str,
+        stage: Optional[str] = None,
+        reason: Optional[str] = None,
+        output_artifacts: Optional[List[str]] = None,
+        result_summary: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> StageCheckpoint:
+        r_dir = Path(run_dir).resolve()
+        latest = cls.load_latest_checkpoint(r_dir)
+        target_stage = stage or (latest.stage if latest else "unknown")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        dur = 0.0
+
+        if latest and (stage is None or latest.stage == stage):
+            try:
+                start_dt = datetime.fromisoformat(latest.stage_started_at)
+                dur = round((datetime.now(timezone.utc) - start_dt).total_seconds(), 3)
+            except Exception:
+                pass
+            latest.status = target_status
+            latest.stage_completed_at = now_iso
+            latest.duration_seconds = dur
+            if output_artifacts:
+                latest.output_artifacts.extend(output_artifacts)
+            if result_summary:
+                latest.result_summary = result_summary
+            elif reason:
+                latest.result_summary = {"error": reason}
+            if metadata:
+                latest.metadata.update(metadata)
+            checkpoint = latest
+        else:
+            meta = dict(metadata or {})
+            if reason:
+                meta["interruption_reason"] = reason
+            checkpoint = StageCheckpoint(
+                task_id=latest.task_id if latest else "UNKNOWN",
+                stage=target_stage,
+                status=target_status,
+                stage_started_at=now_iso,
+                stage_completed_at=now_iso,
+                output_artifacts=output_artifacts or [],
+                result_summary=result_summary or ({"error": reason} if reason else None),
+                metadata=meta,
+            )
+
+        c_dir = cls.get_checkpoints_dir(r_dir)
+        atomic_write_json(r_dir / "stage_checkpoint.json", checkpoint.to_dict())
+        atomic_write_json(c_dir / f"{target_stage}_{checkpoint.attempt_number:02d}.json", checkpoint.to_dict())
+        return checkpoint
+
+    @classmethod
     def complete_stage(
         cls,
         run_dir: Union[str, Path],
         stage: str,
         output_artifacts: Optional[List[str]] = None,
         result_summary: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
     ) -> StageCheckpoint:
         """Marks a stage checkpoint as completed."""
-        r_dir = Path(run_dir).resolve()
-        latest = cls.load_latest_checkpoint(r_dir)
-        now_iso = datetime.now(timezone.utc).isoformat()
+        return cls._finalize_stage(
+            run_dir,
+            "completed",
+            stage=stage,
+            output_artifacts=output_artifacts,
+            result_summary=result_summary,
+        )
 
-        if latest and latest.stage == stage:
-            try:
-                start_dt = datetime.fromisoformat(latest.stage_started_at)
-                duration = round((datetime.now(timezone.utc) - start_dt).total_seconds(), 3)
-            except Exception:
-                duration = 0.0
-
-            latest.status = "completed"
-            latest.stage_completed_at = now_iso
-            latest.duration_seconds = duration
-            if output_artifacts:
-                latest.output_artifacts.extend(output_artifacts)
-            if result_summary:
-                latest.result_summary = result_summary
-            if metadata:
-                latest.metadata.update(metadata)
-            checkpoint = latest
-        else:
-            checkpoint = StageCheckpoint(
-                task_id=latest.task_id if latest else "UNKNOWN",
-                stage=stage,
-                status="completed",
-                stage_started_at=now_iso,
-                stage_completed_at=now_iso,
-                output_artifacts=output_artifacts or [],
-                result_summary=result_summary,
-                metadata=metadata or {},
-            )
-
-        c_dir = cls.get_checkpoints_dir(r_dir)
-        atomic_write_json(r_dir / "stage_checkpoint.json", checkpoint.to_dict())
-        atomic_write_json(c_dir / f"{stage}_{checkpoint.attempt_number:02d}.json", checkpoint.to_dict())
-        return checkpoint
+    @classmethod
+    def fail_stage(
+        cls,
+        run_dir: Union[str, Path],
+        stage: Optional[str] = None,
+        reason: Optional[str] = None,
+        result_summary: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> StageCheckpoint:
+        """Marks a stage checkpoint as failed with completed timestamp and summary."""
+        return cls._finalize_stage(
+            run_dir,
+            "failed",
+            stage=stage,
+            reason=reason,
+            result_summary=result_summary,
+            metadata=metadata,
+        )
 
     @classmethod
     def record_interrupted(
@@ -190,31 +233,13 @@ class CheckpointManager:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> StageCheckpoint:
         """Records an interrupted checkpoint status."""
-        r_dir = Path(run_dir).resolve()
-        latest = cls.load_latest_checkpoint(r_dir)
-        target_stage = stage or (latest.stage if latest else "unknown")
-        now_iso = datetime.now(timezone.utc).isoformat()
-
-        if latest:
-            latest.status = "interrupted"
-            latest.stage_completed_at = now_iso
-            if reason:
-                latest.metadata["interruption_reason"] = reason
-            if metadata:
-                latest.metadata.update(metadata)
-            checkpoint = latest
-        else:
-            checkpoint = StageCheckpoint(
-                task_id="UNKNOWN",
-                stage=target_stage,
-                status="interrupted",
-                stage_started_at=now_iso,
-                stage_completed_at=now_iso,
-                metadata={"interruption_reason": reason or "Process interruption"} | (metadata or {}),
-            )
-
-        atomic_write_json(r_dir / "stage_checkpoint.json", checkpoint.to_dict())
-        return checkpoint
+        return cls._finalize_stage(
+            run_dir,
+            "interrupted",
+            stage=stage,
+            reason=reason,
+            metadata=metadata,
+        )
 
     @classmethod
     def load_latest_checkpoint(cls, run_dir: Union[str, Path]) -> Optional[StageCheckpoint]:

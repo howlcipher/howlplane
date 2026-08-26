@@ -411,6 +411,7 @@ class ReviewRunner:
         custom_reviewer_fn: Optional[Callable[[str, str, TaskSpec], str]] = None,
         run_dir: Optional[Union[str, Path]] = None,
         provider_pool: Optional[Any] = None,
+        progress_tracker: Optional[Any] = None,
     ) -> ReviewCycleResult:
         """
         Executes each specified reviewer independently against the actual implementation diff.
@@ -494,46 +495,57 @@ class ReviewRunner:
             duration = 0.0
 
             attempts_log: List[Dict[str, Any]] = []
-            if custom_reviewer_fn:
-                try:
-                    raw_output = custom_reviewer_fn(role_id, diff_content, task)
-                except Exception as exc:
-                    err_message = str(exc)
-                    has_failure = True
-            elif provider_pool is not None and not backend:
-                agent_id = (reviewer_agent_mapping or {}).get(role_id) or "claude_code"
-                candidates = build_reviewer_candidates(role_id, agent_id, provider_pool, task)
-                winner, agent_res, attempts_log = invoke_reviewer_with_failover(
-                    role_id=role_id,
-                    candidates=candidates,
-                    task=task,
-                    cwd=target_cwd,
-                    prompt_override=brief,
-                    backend_lookup=lambda aid: AgentBackendRegistry.get_backend(aid),
-                    provider_pool=provider_pool,
-                )
-                duration = agent_res.duration_seconds if agent_res else 0.0
-                if winner and agent_res:
-                    raw_output = agent_res.stdout
+            assigned_agent = (reviewer_agent_mapping or {}).get(role_id) or "claude_code"
+            if backend:
+                assigned_agent = getattr(backend, "agent_id", assigned_agent)
+
+            from src.control_plane.progress import track_operation
+            with track_operation(
+                progress_tracker,
+                phase="REVIEWING",
+                resource_id=assigned_agent,
+                role="review",
+                cycle=cycle_index,
+                details=f"cycle {cycle_index}",
+            ):
+                if custom_reviewer_fn:
+                    try:
+                        raw_output = custom_reviewer_fn(role_id, diff_content, task)
+                    except Exception as exc:
+                        err_message = str(exc)
+                        has_failure = True
+                elif provider_pool is not None and not backend:
+                    candidates = build_reviewer_candidates(role_id, assigned_agent, provider_pool, task)
+                    winner, agent_res, attempts_log = invoke_reviewer_with_failover(
+                        role_id=role_id,
+                        candidates=candidates,
+                        task=task,
+                        cwd=target_cwd,
+                        prompt_override=brief,
+                        backend_lookup=lambda aid: AgentBackendRegistry.get_backend(aid),
+                        provider_pool=provider_pool,
+                    )
+                    duration = agent_res.duration_seconds if agent_res else 0.0
+                    if winner and agent_res:
+                        raw_output = agent_res.stdout
+                    else:
+                        err_message = "All candidate reviewers failed or were unavailable"
+                        has_failure = True
                 else:
-                    err_message = "All candidate reviewers failed or were unavailable"
-                    has_failure = True
-            else:
-                agent_id = (reviewer_agent_mapping or {}).get(role_id) or "claude_code"
-                selected_backend = backend or AgentBackendRegistry.get_backend(agent_id)
-                agent_res = selected_backend.execute(
-                    task=task,
-                    cwd=target_cwd,
-                    role=role_id,
-                    prompt_override=brief,
-                    timeout_seconds=REVIEW_TIMEOUT_SECONDS,
-                )
-                duration = agent_res.duration_seconds
-                if agent_res.success:
-                    raw_output = agent_res.stdout
-                else:
-                    err_message = agent_res.stderr or agent_res.error_message
-                    has_failure = True
+                    selected_backend = backend or AgentBackendRegistry.get_backend(assigned_agent)
+                    agent_res = selected_backend.execute(
+                        task=task,
+                        cwd=target_cwd,
+                        role=role_id,
+                        prompt_override=brief,
+                        timeout_seconds=REVIEW_TIMEOUT_SECONDS,
+                    )
+                    duration = agent_res.duration_seconds
+                    if agent_res.success:
+                        raw_output = agent_res.stdout
+                    else:
+                        err_message = agent_res.stderr or agent_res.error_message
+                        has_failure = True
 
             findings, parse_err, is_valid_output = parse_and_validate_findings(raw_output, role_id)
             if parse_err:

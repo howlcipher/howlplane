@@ -71,6 +71,10 @@ class ExecutionTrajectory(SafeArtifactSerializationMixin):
     role_selections: List[Dict[str, Any]] = field(default_factory=list)
     capacity_after: Dict[str, str] = field(default_factory=dict)
     failover_from_resource_id: Optional[str] = None
+    failover_events: List[Dict[str, Any]] = field(default_factory=list)
+    implementation_attempts: List[Dict[str, Any]] = field(default_factory=list)
+    initial_implementation_resource: Optional[str] = None
+    final_implementation_resource: Optional[str] = None
     review_findings: List[Dict[str, Any]] = field(default_factory=list)
     verification_results: Optional[Dict[str, Any]] = None
     repair_cycles: List[Dict[str, Any]] = field(default_factory=list)
@@ -226,8 +230,17 @@ def _safe_provider_event(provider_execution: Optional[Any]) -> Dict[str, Any]:
 def _extract_provider_events(result: Any) -> List[Dict[str, Any]]:
     """Collects observable provider calls with their truthful execution role."""
     events: List[Dict[str, Any]] = []
+    # Preserve every implementation attempt, not just the final one.
+    for attempt in getattr(result, "implementation_attempts", []) or []:
+        ev = dict(attempt)
+        ev.pop("delta", None)
+        ev.pop("capacity_after", None)
+        events.append(ev)
     implementation = _safe_provider_event(result.provider_execution)
-    if implementation:
+    if implementation and not any(
+        e.get("agent_id") == implementation.get("agent_id") and e.get("success")
+        for e in events
+    ):
         events.append(implementation)
     for cycle in result.review_cycles or []:
         for review in cycle.reviewer_results.values():
@@ -317,6 +330,8 @@ class ExecutionTrajectoryBuilder:
                 str(task_spec.metadata.get("experiment_sample_id", "0")),
             ])
             identity = f"traj-{canonical_digest({'event': event_key})[:24]}"
+        final_impl_resource = result.executing_provider or (provider_exec.agent_id if provider_exec else None)
+        initial_impl_resource = routing.selected_agent_id if routing else final_impl_resource
         traj = ExecutionTrajectory(
             trajectory_id=identity,
             task_id=task_spec.task_id,
@@ -325,8 +340,8 @@ class ExecutionTrajectoryBuilder:
             experiment_id=task_spec.metadata.get("experiment_id"),
             task_class=task_spec.task_class,
             objective=task_spec.objective,
-            selected_provider=provider_exec.agent_id if provider_exec else (routing.selected_agent_id if routing else None),
-            selected_agent=routing.selected_agent_id if routing else None,
+            selected_provider=final_impl_resource,
+            selected_agent=final_impl_resource,
             selected_reviewers=list(routing.recommended_reviewers) if routing else [],
             prompt_strategy_id=task_spec.metadata.get("prompt_strategy_id"),
             context_strategy_id=task_spec.metadata.get("context_strategy_id"),
@@ -346,6 +361,21 @@ class ExecutionTrajectoryBuilder:
             failover_from_resource_id=task_spec.metadata.get(
                 "failover_from_resource_id"
             ),
+            failover_events=[
+                {
+                    "attempt": attempt.get("attempt"),
+                    "source_resource": attempt.get("resource_id"),
+                    "target_resource": next_attempt.get("resource_id"),
+                    "failure_class": attempt.get("failure_class"),
+                }
+                for attempt, next_attempt in zip(
+                    result.implementation_attempts,
+                    result.implementation_attempts[1:],
+                )
+            ],
+            implementation_attempts=list(getattr(result, "implementation_attempts", []) or []),
+            initial_implementation_resource=initial_impl_resource,
+            final_implementation_resource=final_impl_resource,
             review_findings=_extract_review_findings(result.review_cycles),
             verification_results=result.verification_plan.to_dict() if result.verification_plan else None,
             repair_cycles=_extract_repair_cycles(result.review_cycles),

@@ -297,6 +297,31 @@ class SubprocessAgentBackend(AgentBackend):
                 timeout=timeout_seconds,
             )
             elapsed = round(time.time() - start_t, 3)
+            is_timeout = False
+            combined_err = f"{completed.stderr}\n{completed.stdout}".lower()
+            timeout_markers = (
+                "error: timeout waiting for response",
+                "timeout waiting for response",
+                "timed out",
+                "request timed out",
+                "connection timed out",
+                "gateway timeout",
+                "operation timed out",
+                "deadline exceeded",
+                "timeout after",
+            )
+            if any(marker in combined_err for marker in timeout_markers):
+                is_timeout = True
+
+            err_msg = None
+            if completed.returncode != 0:
+                if is_timeout and completed.stderr and completed.stderr.strip():
+                    err_msg = completed.stderr.strip()
+                elif is_timeout:
+                    err_msg = "Error: timeout waiting for response"
+                else:
+                    err_msg = f"Process exited with code {completed.returncode}"
+
             return AgentExecutionResult(
                 agent_id=self.agent_id,
                 role=role,
@@ -306,7 +331,8 @@ class SubprocessAgentBackend(AgentBackend):
                 stderr=completed.stderr,
                 duration_seconds=elapsed,
                 success=(completed.returncode == 0),
-                error_message=None if completed.returncode == 0 else f"Process exited with code {completed.returncode}",
+                timed_out=is_timeout,
+                error_message=err_msg,
             )
         except subprocess.TimeoutExpired as exc:
             dur = round(time.time() - start_t, 3)

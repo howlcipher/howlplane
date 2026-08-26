@@ -27,7 +27,13 @@ from src.control_plane.atomic_io import (
 )
 from src.control_plane.checkpoints import CheckpointManager, StageCheckpoint
 from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
-from src.control_plane.git_baseline import GitBaseline, RepositoryDelta, capture_baseline, capture_delta
+from src.control_plane.git_baseline import (
+    GitBaseline,
+    RepositoryDelta,
+    capture_baseline,
+    capture_delta,
+    restore_repository_to_baseline,
+)
 from src.control_plane.git_integration import run_git
 from src.control_plane.howlframe_runner import HowlFrameAuditRunner, get_dogfood_mode, DEFAULT_INSTRUCTION_BUDGET
 from src.control_plane.human_boundary import HumanBoundaryGate, BoundaryCheckResult, HumanDecisionPacket
@@ -39,7 +45,14 @@ from src.control_plane.recovery import CrashRecoveryEngine
 from src.control_plane.review_runner import ReviewRunner, ReviewCycleResult, SingleReviewResult
 from src.control_plane.reviewers import get_reviewer_role, build_skill_context
 from src.control_plane.router import TaskRouter, RoutingDecision
+from src.control_plane.progress import (
+    DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+    TaskPhase,
+    TaskProgressState,
+    TaskProgressTracker,
+)
 from src.control_plane.proposed_action import ProposedAction, infer_proposed_actions
+from src.control_plane.resource_models import ProviderFailureClass
 from src.control_plane.task_spec import TaskSpec
 from src.control_plane.verification import VerificationPlan, VerificationStep
 from src.control_plane.reasoning.execution_trajectory import (
@@ -83,6 +96,12 @@ class OrchestrationConfig:
     custom_reviewer_fn: Optional[Callable[[str, str, TaskSpec], str]] = None
     custom_remediation_fn: Optional[Callable[[TaskSpec, Path, List[ReviewFinding]], None]] = None
     reviewer_agent_mapping: Optional[Dict[str, str]] = None
+    # Maximum number of implementation providers to try before giving up.
+    # Each provider/resource is attempted at most once per task.
+    max_provider_failover_attempts: int = 3
+    # Optional resolver that overrides AgentBackendRegistry.get_backend. Useful
+    # in deterministic tests to inject per-resource fake backends.
+    backend_resolver: Optional[Callable[[str], AgentBackend]] = None
     # Enables bounded reviewer failover (#59.2 Phase 4) in the governed review
     # cycle: a reviewer whose assigned provider fails, times out, or emits
     # invalid/malformed output gets one alternate-provider attempt instead of
@@ -92,6 +111,10 @@ class OrchestrationConfig:
     # custom_backend/custom_reviewer_fn, which keeps deterministic tests on the
     # prior single-attempt path.
     provider_pool: Optional[Any] = None
+    heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS
+    progress_stream: Optional[Any] = None
+    progress_mode: str = "auto"
+    progress_tracker: Optional[Any] = None
 
 
 @dataclass
@@ -125,6 +148,8 @@ class OrchestrationResult:
     resource_selection: Optional[Dict[str, Any]] = None
     capacity_after: Dict[str, str] = field(default_factory=dict)
     trajectory_id: Optional[str] = None
+    # Additive record of every implementation provider attempt, successful or not.
+    implementation_attempts: List[Dict[str, Any]] = field(default_factory=list)
     schema: str = ORCHESTRATOR_SCHEMA_VERSION
 
     @property
@@ -157,6 +182,7 @@ class OrchestrationResult:
             "resource_selection": self.resource_selection,
             "capacity_after": self.capacity_after,
             "trajectory_id": self.trajectory_id,
+            "implementation_attempts": self.implementation_attempts,
             "schema": self.schema,
         }
 
@@ -254,6 +280,117 @@ class GovernedTaskOrchestrator:
             )
         return delta
 
+    def _record_implementation_attempt(
+        self,
+        run_dir: Path,
+        attempts_dir: Path,
+        attempt_num: int,
+        resource_id: str,
+        impl_res: Optional[AgentExecutionResult],
+        delta: RepositoryDelta,
+        failure_class: Optional[str],
+        capacity_before: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Persists attempt-level evidence and returns an additive record."""
+        attempt_dir = attempts_dir / f"{attempt_num:02d}-{resource_id}"
+        attempt_dir.mkdir(parents=True, exist_ok=True)
+
+        if impl_res is not None:
+            (attempt_dir / "result.json").write_text(impl_res.to_json(), encoding="utf-8")
+        (attempt_dir / "diff.patch").write_text(delta.diff_content, encoding="utf-8")
+        if not delta.is_empty:
+            (attempt_dir / "partial_work.patch").write_text(delta.diff_content, encoding="utf-8")
+
+        capacity_after: Dict[str, str] = {}
+        if self.config.provider_pool is not None:
+            # record_result already mutated state; capture after.
+            capacity_after = self.config.provider_pool.get_all_statuses()
+
+        record: Dict[str, Any] = {
+            "attempt": attempt_num,
+            "resource_id": resource_id,
+            "agent_id": impl_res.agent_id if impl_res else resource_id,
+            "success": impl_res.success if impl_res else False,
+            "exit_code": impl_res.exit_code if impl_res else None,
+            "duration_seconds": impl_res.duration_seconds if impl_res else 0.0,
+            "failure_class": failure_class,
+            "delta": delta.to_dict(),
+            "capacity_before": capacity_before,
+            "capacity_after": capacity_after,
+            "evidence_dir": str(attempt_dir.relative_to(run_dir)),
+        }
+        (attempt_dir / "attempt_record.json").write_text(
+            json.dumps(record, indent=2), encoding="utf-8"
+        )
+        return record
+
+    def _is_failover_eligible_failure(self, failure_class: Optional[Any]) -> bool:
+        """Returns True when the normalized failure class justifies provider failover."""
+        if failure_class is None:
+            return False
+        return failure_class in {
+            ProviderFailureClass.QUOTA_EXHAUSTED,
+            ProviderFailureClass.SESSION_LIMIT,
+            ProviderFailureClass.RATE_LIMITED,
+            ProviderFailureClass.AUTHENTICATION_REQUIRED,
+            ProviderFailureClass.PROVIDER_UNAVAILABLE,
+            ProviderFailureClass.TRANSPORT_UNAVAILABLE,
+            ProviderFailureClass.MISSING_EXECUTABLE,
+        }
+
+    def _map_failure_class_to_orchestrator_class(
+        self,
+        failure_class: Optional[Any],
+    ) -> str:
+        """Maps a provider failure class to the orchestrator's coarse failure class."""
+        if failure_class is None:
+            return FAILURE_CLASS_ENGINEERING
+        value = getattr(failure_class, "value", str(failure_class))
+        if value in {"QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"}:
+            return FAILURE_CLASS_PROVIDER_EXHAUSTED
+        if value in {
+            "AUTHENTICATION_REQUIRED",
+            "PROVIDER_UNAVAILABLE",
+            "TRANSPORT_UNAVAILABLE",
+            "MISSING_EXECUTABLE",
+        }:
+            return FAILURE_CLASS_PROVIDER_UNAVAILABLE
+        return FAILURE_CLASS_ENGINEERING
+
+    def _recompute_reviewers(
+        self,
+        routing: Any,
+        task_spec: TaskSpec,
+        final_impl_resource_id: str,
+    ) -> None:
+        """Re-evaluates reviewer independence after implementation failover."""
+        if self.config.provider_pool is None:
+            return
+        mapping, diversity = self.config.provider_pool.select_reviewers(
+            final_impl_resource_id,
+            routing.recommended_reviewers,
+            task=task_spec,
+        )
+        routing.metadata["reviewer_resource_mapping"] = mapping
+        routing.metadata["reviewer_resource_identities"] = {
+            role: self.config.provider_pool.registry.get_resource(resource_id).resource_identity().to_dict()
+            for role, resource_id in mapping.items()
+            if self.config.provider_pool.registry.get_resource(resource_id) is not None
+        }
+        routing.metadata["review_diversity_achieved"] = diversity
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id="control_plane",
+            action="reviewers_recomputed_after_failover",
+            spec=task_spec,
+            metadata={
+                "final_implementation_resource": final_impl_resource_id,
+                "initial_implementation_resource": routing.selected_agent_id,
+                "reviewer_mapping": mapping,
+                "diversity_achieved": diversity,
+            },
+        )
+
     def _record_event(
         self,
         task_id: str,
@@ -292,6 +429,30 @@ class GovernedTaskOrchestrator:
             self.ledger.append_entry(entry)
         except Exception:
             pass
+
+    def _write_delta_patch(
+        self,
+        delta: RepositoryDelta,
+        stage_dir: Path,
+        run_dir: Path,
+    ) -> None:
+        """Publishes a captured patch as the stage artifact and the run's current diff."""
+        (stage_dir / "diff.patch").write_text(delta.diff_content, encoding="utf-8")
+        (run_dir / "diff.patch").write_text(delta.diff_content, encoding="utf-8")
+
+    def _record_delta_captured(
+        self,
+        task_spec: TaskSpec,
+        delta: Optional[RepositoryDelta] = None,
+    ) -> None:
+        """Records the repository_delta_captured event for a captured delta."""
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id="control_plane",
+            action="repository_delta_captured",
+            spec=task_spec,
+            metadata=delta.to_event_metadata() if delta is not None else None,
+        )
 
     def prepare_task_plan(
         self,
@@ -382,6 +543,30 @@ class GovernedTaskOrchestrator:
         mutual-exclusion locks and durable checkpoint guarantees.
         """
         start_time = time.time()
+        run_dir = self.target_repo / ".task_runs" / task_spec.task_id
+
+        # Setup Progress Tracker
+        progress = self.config.progress_tracker
+        if progress is None:
+            enabled = (self.config.progress_mode != "never")
+            stream = (
+                self.config.progress_stream
+                if self.config.progress_stream is not None
+                else sys.stderr
+            )
+            progress = TaskProgressTracker(
+                task_id=task_spec.task_id,
+                run_dir=run_dir,
+                stream=stream,
+                heartbeat_interval=self.config.heartbeat_interval,
+                enabled=enabled,
+            )
+
+        progress.start(
+            task_id=task_spec.task_id,
+            run_dir=run_dir,
+            initial_phase=TaskPhase.PREPARING.value,
+        )
 
         # Acquire Locks if enabled
         repo_lock = (
@@ -401,23 +586,33 @@ class GovernedTaskOrchestrator:
             task_lock.acquire()
 
         try:
-            result = self._run_governed_loop(task_spec, planned_actions, start_time)
+            result = self._run_governed_loop(
+                task_spec, planned_actions, start_time, progress=progress
+            )
             if self.trajectory_store is not None:
                 traj = ExecutionTrajectoryBuilder.from_orchestration_result(result)
                 self.trajectory_store.save(traj)
                 result.trajectory_id = traj.trajectory_id
             return result
         except Exception as exc:
-            run_dir = self.target_repo / ".task_runs" / task_spec.task_id
+            progress.record_terminal(
+                TaskProgressState.FAILED,
+                TaskPhase.FAILED,
+                error_message=str(exc),
+            )
             if run_dir.is_dir():
                 try:
-                    CheckpointManager.record_interrupted(
-                        run_dir, stage=task_spec.current_state, reason=str(exc)
+                    CheckpointManager.fail_stage(
+                        run_dir,
+                        stage=task_spec.current_state,
+                        reason=str(exc),
+                        result_summary={"error": str(exc), "interrupted": True},
                     )
                 except Exception:
                     pass
             raise
         finally:
+            progress.close()
             if task_lock:
                 task_lock.release()
             if repo_lock:
@@ -428,8 +623,19 @@ class GovernedTaskOrchestrator:
         task_spec: TaskSpec,
         planned_actions: Optional[List[str]] = None,
         start_time: Optional[float] = None,
+        progress: Optional[TaskProgressTracker] = None,
     ) -> OrchestrationResult:
         start_time = start_time or time.time()
+        if progress is None:
+            progress = TaskProgressTracker(
+                task_id=task_spec.task_id,
+                run_dir=None,
+                enabled=False,
+            )
+
+        progress.transition(
+            TaskPhase.ROUTING, details="selecting implementation resource"
+        )
         ctx, routing, verif_plan, run_dir, hf_res = self.prepare_task_plan(task_spec, planned_actions)
         reviews_dir = run_dir / "reviews"
         remediation_base_dir = run_dir / "remediation"
@@ -482,7 +688,10 @@ class GovernedTaskOrchestrator:
         self._bind_decision_packet(pre_boundary, run_dir)
 
         if pre_boundary.requires_human_approval:
-
+            progress.record_terminal(
+                TaskProgressState.AWAITING_AUTHORIZATION,
+                TaskPhase.AWAITING_AUTHORIZATION,
+            )
             CheckpointManager.start_stage(
                 run_dir,
                 task_spec.task_id,
@@ -526,6 +735,11 @@ class GovernedTaskOrchestrator:
                 "status": "BLOCKED",
                 "reason": FAILURE_CLASS_NO_ELIGIBLE_RESOURCE,
             }
+            progress.record_terminal(
+                TaskProgressState.FAILED,
+                TaskPhase.FAILED,
+                error_message=blocked.get("reason"),
+            )
             task_spec.transition_to("blocked", blocked["reason"])
             task_spec.save_to_file(str(run_dir / "task.yaml"))
             return self._make_result(
@@ -559,32 +773,20 @@ class GovernedTaskOrchestrator:
         # --------------------------------------------------------------------
         # Stage 4: Implementation (implementing) / Reconcile on Recovery
         # --------------------------------------------------------------------
-        impl_backend = self.config.custom_backend or AgentBackendRegistry.get_backend(routing.selected_agent_id)
-        if not impl_backend.is_available() and not self.config.custom_backend:
-            err_msg = f"Selected agent '{routing.selected_agent_id}' is not installed or available on PATH."
-            return self._fail_task(
-                task_spec,
-                run_dir,
-                err_msg,
-                start_time,
-                exit_code=1,
-                agent_id=routing.selected_agent_id,
-                routing=routing,
-                hf_status=hf_audit_status,
-                hf_match=hf_audit_match,
-            )
-
         has_existing_delta, rec_delta, rec_msg = CrashRecoveryEngine.reconcile_interrupted_implementation(
             self.target_repo, run_dir, task_spec
         )
 
         impl_dir = run_dir / "implementation"
         impl_dir.mkdir(parents=True, exist_ok=True)
+        attempts_dir = impl_dir / "attempts"
+        attempts_dir.mkdir(parents=True, exist_ok=True)
 
         # Stays None on the crash-recovery path, where an interrupted
         # implementation's delta is reconciled rather than re-run: there is no
         # provider execution in *this* process to report (#59.1 Phase 1).
         impl_res: Optional[AgentExecutionResult] = None
+        implementation_attempts: List[Dict[str, Any]] = []
 
         if has_existing_delta and rec_delta:
             current_delta = rec_delta
@@ -608,108 +810,259 @@ class GovernedTaskOrchestrator:
             if self.config.failure_injection_hook:
                 self.config.failure_injection_hook("implementing", run_dir, task_spec)
 
-            if task_spec.current_state != "implementing":
-                task_spec.transition_to("implementing", f"Launching implementation agent: {routing.selected_agent_id}")
-                task_spec.save_to_file(str(run_dir / "task.yaml"))
-
-            self._record_event(
-                task_id=task_spec.task_id,
-                agent_id=routing.selected_agent_id,
-                action="implementation_started",
-                spec=task_spec,
-            )
-
             impl_prompt = self._build_implementation_prompt(task_spec, ctx)
-            impl_res = impl_backend.execute(
-                task=task_spec,
-                cwd=self.target_repo,
-                role="implementation",
-                prompt_override=impl_prompt,
-                timeout_seconds=self.config.timeout_seconds,
-            )
+            current_impl_resource_id = routing.selected_agent_id
+            attempted_impl_resource_ids: Set[str] = set()
+            final_impl_resource_id: Optional[str] = None
 
-            (impl_dir / "result.json").write_text(impl_res.to_json(), encoding="utf-8")
+            def fail_implementation(
+                err_msg: str,
+                failure_class: str,
+                exit_code: int = 1,
+            ) -> OrchestrationResult:
+                """Terminal-fails the run from inside the implementation attempt loop.
 
-            normalized_failure = None
-            if self.config.provider_pool is not None:
-                normalized_failure = self.config.provider_pool.record_result(
-                    routing.selected_agent_id,
-                    impl_res,
-                    task_id=task_spec.task_id,
+                Reads the attempt-scoped locals (delta, provider execution, attempt
+                records) at call time, so every terminal path reports the state as of
+                the attempt that failed.
+                """
+                return self._fail_task(
+                    task_spec,
+                    run_dir,
+                    err_msg,
+                    start_time,
+                    exit_code=exit_code,
+                    agent_id="control_plane",
+                    progress_tracker=progress,
+                    routing=routing,
+                    initial_delta=current_delta,
+                    current_delta=current_delta,
+                    verif_plan=verif_plan,
+                    hf_status=hf_audit_status,
+                    hf_match=hf_audit_match,
+                    provider_execution=impl_res,
+                    failure_class=failure_class,
+                    implementation_attempts=implementation_attempts,
                 )
 
-            if not impl_res.success:
+            for attempt_num in range(1, self.config.max_provider_failover_attempts + 1):
+                impl_res = None
+                normalized_failure = None
+
+                if self.config.custom_backend is not None:
+                    impl_backend = self.config.custom_backend
+                elif self.config.backend_resolver is not None:
+                    impl_backend = self.config.backend_resolver(current_impl_resource_id)
+                else:
+                    impl_backend = AgentBackendRegistry.get_backend(current_impl_resource_id)
+
+                if not impl_backend.is_available():
+                    impl_res = AgentExecutionResult(
+                        agent_id=current_impl_resource_id,
+                        role="implementation",
+                        command=f"backend:{current_impl_resource_id}",
+                        exit_code=127,
+                        stdout="",
+                        stderr=f"Agent binary '{current_impl_resource_id}' is not installed or available on PATH.",
+                        duration_seconds=0.0,
+                        success=False,
+                        error_message=f"Agent '{current_impl_resource_id}' unavailable",
+                    )
+                else:
+                    if task_spec.current_state != "implementing":
+                        task_spec.transition_to(
+                            "implementing",
+                            f"Launching implementation attempt {attempt_num}: {current_impl_resource_id}",
+                        )
+                        task_spec.save_to_file(str(run_dir / "task.yaml"))
+
+                    task_spec.actual_agent = current_impl_resource_id
+                    task_spec.save_to_file(str(run_dir / "task.yaml"))
+
+                    self._record_event(
+                        task_id=task_spec.task_id,
+                        agent_id=current_impl_resource_id,
+                        action="implementation_started",
+                        spec=task_spec,
+                        metadata={"attempt": attempt_num},
+                    )
+
+                    impl_agent_id = getattr(impl_backend, "agent_id", None) or current_impl_resource_id
+                    with progress.operation(
+                        phase=TaskPhase.IMPLEMENTING,
+                        resource_id=impl_agent_id,
+                        role="implementation",
+                        details="started",
+                        suppress_completion=True,
+                    ):
+                        impl_res = impl_backend.execute(
+                            task=task_spec,
+                            cwd=self.target_repo,
+                            role="implementation",
+                            prompt_override=impl_prompt,
+                            timeout_seconds=self.config.timeout_seconds,
+                        )
+
+                if self.config.provider_pool is not None and impl_res is not None:
+                    normalized_failure = self.config.provider_pool.record_result(
+                        current_impl_resource_id,
+                        impl_res,
+                        task_id=task_spec.task_id,
+                    )
+
+                current_delta = self._capture_scoped_delta(
+                    task_spec, baseline, current_impl_resource_id, stage="implementation"
+                )
+
+                capacity_before: Dict[str, str] = (
+                    self.config.provider_pool.get_all_statuses()
+                    if self.config.provider_pool is not None else {}
+                )
+
+                attempt_record = self._record_implementation_attempt(
+                    run_dir=run_dir,
+                    attempts_dir=attempts_dir,
+                    attempt_num=attempt_num,
+                    resource_id=current_impl_resource_id,
+                    impl_res=impl_res,
+                    delta=current_delta,
+                    failure_class=normalized_failure.value if normalized_failure else None,
+                    capacity_before=capacity_before,
+                )
+                implementation_attempts.append(attempt_record)
+
+                if impl_res is not None and impl_res.success:
+                    final_impl_resource_id = current_impl_resource_id
+                    (impl_dir / "result.json").write_text(impl_res.to_json(), encoding="utf-8")
+                    self._write_delta_patch(current_delta, impl_dir, run_dir)
+                    self._record_event(
+                        task_id=task_spec.task_id,
+                        agent_id=current_impl_resource_id,
+                        action="implementation_completed",
+                        result="success",
+                        spec=task_spec,
+                        metadata={
+                            "files_changed": len(current_delta.files_modified) + len(current_delta.files_added),
+                            "attempt": attempt_num,
+                        },
+                    )
+                    self._record_delta_captured(task_spec, current_delta)
+                    break
+
+                # Failed attempt: determine whether to failover or terminal-fail.
                 err_msg = (
                     impl_res.stderr.strip()
-                    if impl_res.stderr and impl_res.stderr.strip()
-                    else (impl_res.error_message or f"Implementation failed with exit code {impl_res.exit_code}")
+                    if impl_res and impl_res.stderr and impl_res.stderr.strip()
+                    else (impl_res.error_message if impl_res else f"Implementation failed on {current_impl_resource_id}")
+                )
+                failure_class_value = normalized_failure.value if normalized_failure else None
+
+                progress.emit_implementation_failed(
+                    current_impl_resource_id,
+                    reason=failure_class_value or err_msg,
+                )
+
+                if not self._is_failover_eligible_failure(normalized_failure):
+                    return fail_implementation(
+                        err_msg,
+                        self._map_failure_class_to_orchestrator_class(normalized_failure),
+                        exit_code=impl_res.exit_code if impl_res and impl_res.exit_code != 0 else 1,
+                    )
+
+                if attempt_num >= self.config.max_provider_failover_attempts:
+                    err_msg = (
+                        f"Implementation failed on {current_impl_resource_id} ({failure_class_value}); "
+                        f"max failover attempts ({self.config.max_provider_failover_attempts}) reached."
+                    )
+                    return fail_implementation(err_msg, FAILURE_CLASS_PROVIDER_EXHAUSTED)
+
+                # Select next eligible implementation resource.
+                next_resource_id = None
+                if self.config.provider_pool is not None:
+                    next_decision = self.config.provider_pool.select_resource(
+                        task_spec,
+                        role="implementation",
+                        avoid_resource_id=current_impl_resource_id,
+                    )
+                    if next_decision.selected:
+                        next_resource_id = next_decision.selected.resource_id
+
+                if (
+                    not next_resource_id
+                    or next_resource_id == current_impl_resource_id
+                    or next_resource_id in attempted_impl_resource_ids
+                ):
+                    err_msg = f"Implementation failed on {current_impl_resource_id} ({failure_class_value}) and no eligible failover resource remains."
+                    return fail_implementation(err_msg, FAILURE_CLASS_PROVIDER_EXHAUSTED)
+
+                # Restore repository to baseline before the next attempt.
+                restored_ok, restore_err = restore_repository_to_baseline(
+                    self.target_repo, baseline, current_delta
+                )
+                if not restored_ok:
+                    err_msg = f"Implementation failover aborted: cannot safely restore baseline ({restore_err})."
+                    return fail_implementation(err_msg, FAILURE_CLASS_PROVIDER_UNAVAILABLE)
+
+                progress.emit_failover(
+                    current_impl_resource_id,
+                    next_resource_id,
+                    failure_class=failure_class_value,
                 )
                 self._record_event(
                     task_id=task_spec.task_id,
-                    agent_id=routing.selected_agent_id,
-                    action="implementation_completed",
-                    result="failure",
+                    agent_id="control_plane",
+                    action="implementation_failover",
                     spec=task_spec,
-                    metadata={"exit_code": impl_res.exit_code, "error": err_msg},
+                    metadata={
+                        "attempt": attempt_num,
+                        "source_resource": current_impl_resource_id,
+                        "target_resource": next_resource_id,
+                        "failure_class": failure_class_value,
+                    },
+                )
+
+                attempted_impl_resource_ids.add(current_impl_resource_id)
+                current_impl_resource_id = next_resource_id
+
+            if impl_res is None or not impl_res.success:
+                err_msg = (
+                    f"Implementation exhausted all {self.config.max_provider_failover_attempts} "
+                    "attempted provider(s) without success."
                 )
                 return self._fail_task(
                     task_spec,
                     run_dir,
                     err_msg,
                     start_time,
-                    exit_code=impl_res.exit_code if impl_res.exit_code != 0 else 1,
+                    exit_code=1,
                     agent_id="control_plane",
+                    progress_tracker=progress,
                     routing=routing,
+                    current_delta=current_delta if "current_delta" in locals() else None,
+                    verif_plan=verif_plan,
                     hf_status=hf_audit_status,
                     hf_match=hf_audit_match,
-                    # Propagate the provider's own execution evidence verbatim
-                    # (#59.1 Phase 1). The caller re-classifies this through
-                    # detect_exhaustion(); ENGINEERING_FAILURE is only the
-                    # default when no provider-availability signal is found.
                     provider_execution=impl_res,
-                    failure_class=(
-                        FAILURE_CLASS_PROVIDER_EXHAUSTED
-                        if getattr(normalized_failure, "value", None) in {
-                            "QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"
-                        }
-                        else FAILURE_CLASS_PROVIDER_UNAVAILABLE
-                        if getattr(normalized_failure, "value", None) in {
-                            "AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE",
-                            "TRANSPORT_UNAVAILABLE", "MISSING_EXECUTABLE",
-                        }
-                        else FAILURE_CLASS_ENGINEERING
-                    ),
+                    failure_class=FAILURE_CLASS_PROVIDER_EXHAUSTED,
+                    implementation_attempts=implementation_attempts,
                 )
 
-            current_delta = self._capture_scoped_delta(
-                task_spec, baseline, routing.selected_agent_id, stage="implementation"
-            )
-            (impl_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
-            (run_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
-
-            self._record_event(
-                task_id=task_spec.task_id,
-                agent_id=routing.selected_agent_id,
-                action="implementation_completed",
-                result="success",
-                spec=task_spec,
-                metadata={"files_changed": len(current_delta.files_modified) + len(current_delta.files_added)},
-            )
-            self._record_event(
-                task_id=task_spec.task_id,
-                agent_id="control_plane",
-                action="repository_delta_captured",
-                spec=task_spec,
-                metadata={
-                    "files_added": current_delta.files_added,
-                    "files_modified": current_delta.files_modified,
-                    "files_deleted": current_delta.files_deleted,
-                    "insertions": current_delta.insertions,
-                    "deletions": current_delta.deletions,
-                },
-            )
             initial_delta = current_delta
-            CheckpointManager.complete_stage(run_dir, "implementing", output_artifacts=[str(run_dir / "diff.patch")])
+            CheckpointManager.complete_stage(
+                run_dir,
+                "implementing",
+                output_artifacts=[str(run_dir / "diff.patch")],
+            )
+
+            # If the final implementation resource differs from the initially
+            # routed one, recompute reviewer assignments so independence claims
+            # are truthful (#59.2 Phase 9).
+            if (
+                final_impl_resource_id is not None
+                and final_impl_resource_id != routing.selected_agent_id
+                and self.config.provider_pool is not None
+            ):
+                self._recompute_reviewers(routing, task_spec, final_impl_resource_id)
 
             if self.config.failure_injection_hook:
                 self.config.failure_injection_hook("post_implementation", run_dir, task_spec)
@@ -761,6 +1114,7 @@ class GovernedTaskOrchestrator:
                 custom_reviewer_fn=self.config.custom_reviewer_fn,
                 run_dir=run_dir,
                 provider_pool=self.config.provider_pool,
+                progress_tracker=progress,
             )
             review_cycles.append(cycle_res)
             latest_reconciliation = cycle_res.reconciliation
@@ -814,6 +1168,11 @@ class GovernedTaskOrchestrator:
                 err_msg = (
                     f"Remediation limit reached ({self.config.max_remediation_cycles} cycles) with "
                     f"{findings_summary['blocker']} blockers and {findings_summary['high']} high findings remaining."
+                )
+                progress.record_terminal(
+                    TaskProgressState.AWAITING_AUTHORIZATION,
+                    TaskPhase.AWAITING_AUTHORIZATION,
+                    error_message=err_msg,
                 )
                 task_spec.transition_to("awaiting_human", f"Max remediation cycles exceeded: {err_msg}")
                 task_spec.save_to_file(str(run_dir / "task.yaml"))
@@ -878,24 +1237,31 @@ class GovernedTaskOrchestrator:
             rem_cycle_dir = remediation_base_dir / f"cycle-{remediation_count:02d}"
             rem_cycle_dir.mkdir(parents=True, exist_ok=True)
 
-            if self.config.custom_remediation_fn:
-                self.config.custom_remediation_fn(task_spec, self.target_repo, cycle_res.all_findings)
-            else:
-                rem_prompt = self._build_remediation_prompt(task_spec, current_delta.diff_content, cycle_res.all_findings)
-                rem_res = impl_backend.execute(
-                    task=task_spec,
-                    cwd=self.target_repo,
-                    role="remediation",
-                    prompt_override=rem_prompt,
-                    timeout_seconds=self.config.timeout_seconds,
-                )
-                (rem_cycle_dir / "result.json").write_text(rem_res.to_json(), encoding="utf-8")
+            rem_agent_id = getattr(impl_backend, "agent_id", None) or routing.selected_agent_id
+            with progress.operation(
+                phase=TaskPhase.REMEDIATING,
+                resource_id=rem_agent_id,
+                role="remediation",
+                cycle=remediation_count,
+                details=f"cycle {remediation_count}",
+            ):
+                if self.config.custom_remediation_fn:
+                    self.config.custom_remediation_fn(task_spec, self.target_repo, cycle_res.all_findings)
+                else:
+                    rem_prompt = self._build_remediation_prompt(task_spec, current_delta.diff_content, cycle_res.all_findings)
+                    rem_res = impl_backend.execute(
+                        task=task_spec,
+                        cwd=self.target_repo,
+                        role="remediation",
+                        prompt_override=rem_prompt,
+                        timeout_seconds=self.config.timeout_seconds,
+                    )
+                    (rem_cycle_dir / "result.json").write_text(rem_res.to_json(), encoding="utf-8")
 
             current_delta = self._capture_scoped_delta(
                 task_spec, baseline, routing.selected_agent_id, stage="remediation"
             )
-            (rem_cycle_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
-            (run_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
+            self._write_delta_patch(current_delta, rem_cycle_dir, run_dir)
 
             self._record_event(
                 task_id=task_spec.task_id,
@@ -904,12 +1270,7 @@ class GovernedTaskOrchestrator:
                 spec=task_spec,
                 metadata={"cycle": remediation_count, "files_modified": len(current_delta.files_modified)},
             )
-            self._record_event(
-                task_id=task_spec.task_id,
-                agent_id="control_plane",
-                action="repository_delta_captured",
-                spec=task_spec,
-            )
+            self._record_delta_captured(task_spec)
             CheckpointManager.complete_stage(
                 run_dir,
                 "remediating",
@@ -954,6 +1315,7 @@ class GovernedTaskOrchestrator:
         verif_status = verif_plan.execute_all(
             cwd=str(self.target_repo),
             stop_on_failure=self.config.stop_on_verification_failure,
+            progress_tracker=progress,
         )
         (run_dir / "verification_result.json").write_text(verif_plan.to_json(), encoding="utf-8")
 
@@ -982,6 +1344,7 @@ class GovernedTaskOrchestrator:
                 err_msg,
                 start_time,
                 exit_code=1,
+                progress_tracker=progress,
                 routing=routing,
                 initial_delta=initial_delta,
                 current_delta=current_delta,
@@ -1024,9 +1387,14 @@ class GovernedTaskOrchestrator:
             hf_match=hf_audit_match,
             remediation_count=remediation_count,
             provider_execution=impl_res,
+            implementation_attempts=implementation_attempts,
         )
 
         if boundary_res.requires_human_approval:
+            progress.record_terminal(
+                TaskProgressState.AWAITING_AUTHORIZATION,
+                TaskPhase.AWAITING_AUTHORIZATION,
+            )
             CheckpointManager.start_stage(
                 run_dir,
                 task_spec.task_id,
@@ -1090,6 +1458,10 @@ class GovernedTaskOrchestrator:
             output_artifacts=[str(run_dir / "summary.md")],
         )
 
+        progress.record_terminal(
+            TaskProgressState.COMPLETE,
+            TaskPhase.COMPLETE,
+        )
         return self._make_result(task_spec, "complete", 0, **stage_kwargs)
 
     def _record_human_boundary_events(
@@ -1136,6 +1508,7 @@ class GovernedTaskOrchestrator:
         err_msg: Optional[str] = None,
         provider_execution: Optional[AgentExecutionResult] = None,
         failure_class: Optional[str] = None,
+        implementation_attempts: Optional[List[Dict[str, Any]]] = None,
     ) -> OrchestrationResult:
         return OrchestrationResult(
             task_id=task_spec.task_id,
@@ -1165,6 +1538,7 @@ class GovernedTaskOrchestrator:
                 self.config.provider_pool.get_all_statuses()
                 if self.config.provider_pool is not None else {}
             ),
+            implementation_attempts=implementation_attempts or [],
         )
 
     def _fail_task(
@@ -1175,10 +1549,39 @@ class GovernedTaskOrchestrator:
         start_time: float,
         exit_code: int = 1,
         agent_id: str = "control_plane",
+        progress_tracker: Optional[Any] = None,
         **kwargs,
     ) -> OrchestrationResult:
+        if progress_tracker is not None:
+            progress_tracker.record_terminal(
+                TaskProgressState.FAILED,
+                TaskPhase.FAILED,
+                error_message=err_msg,
+            )
         task_spec.transition_to("failed", err_msg)
         task_spec.save_to_file(str(run_dir / "task.yaml"))
+
+        # Terminalize current stage checkpoint so it does not remain permanently in_progress
+        try:
+            delta = kwargs.get("current_delta") or kwargs.get("initial_delta")
+            summary: Dict[str, Any] = {
+                "error": err_msg,
+                "exit_code": exit_code,
+            }
+            if kwargs.get("failure_class"):
+                summary["failure_class"] = kwargs.get("failure_class")
+            if delta is not None:
+                summary.update(delta.to_event_metadata())
+                summary["partial_work"] = not delta.is_empty
+            CheckpointManager.fail_stage(
+                run_dir,
+                stage=kwargs.get("stage") or task_spec.current_state,
+                reason=err_msg,
+                result_summary=summary,
+            )
+        except Exception:
+            pass
+
         self._record_event(
             task_id=task_spec.task_id,
             agent_id=agent_id,
@@ -1282,10 +1685,15 @@ class GovernedTaskOrchestrator:
             f"- **Objective:** {task.objective}",
             f"- **Repository:** {self.target_repo.name}",
             f"- **Final State:** `{task.current_state.upper()}`",
-            f"- **Implementing Agent:** {routing.selected_agent_name} (`{routing.selected_agent_id}`)",
+            f"- **Implementing Agent:** {task.actual_agent or routing.selected_agent_id} (`{task.actual_agent or routing.selected_agent_id}`)",
             f"- **Reasoning Tier:** {routing.reasoning_tier}",
             f"- **HowlFrame Shadow Audit:** {hf_status or 'N/A'}",
             "",
+        ]
+        if task.actual_agent and task.actual_agent != routing.selected_agent_id:
+            lines.append(f"- **Initial Route:** {routing.selected_agent_name} (`{routing.selected_agent_id}`)")
+            lines.append("")
+        lines.extend([
             "## Repository Changes",
             f"- **Files Added:** {len(delta.files_added)}",
             f"- **Files Modified:** {len(delta.files_modified)}",
@@ -1296,7 +1704,7 @@ class GovernedTaskOrchestrator:
             "## Review & Remediation",
             f"- **Total Review Cycles:** {len(review_cycles)}",
             f"- **Remediation Cycles:** {remediation_count}",
-        ]
+        ])
         if review_cycles:
             last_cycle = review_cycles[-1]
             lines.append(f"- **Final Review Status:** `{last_cycle.status}`")
@@ -1308,9 +1716,18 @@ class GovernedTaskOrchestrator:
             "## Deterministic Verification",
             f"- **Overall Status:** `{verif_plan.overall_status.upper()}`",
         ])
+        executed_steps = [
+            s for s in verif_plan.steps
+            if s.exit_code is not None or s.status in ("verified", "failed")
+        ]
+        if not executed_steps and verif_plan.steps:
+            lines.append(f"- **Discovered:** {len(verif_plan.steps)} steps (not executed — implementation failed before verification)")
         for step in verif_plan.steps:
-            mark = "✓" if step.status == "verified" else "✗"
-            lines.append(f"- [{mark}] **{step.name}** (`{step.category}`): {step.status} (exit {step.exit_code})")
+            if step.exit_code is not None or step.status in ("verified", "failed"):
+                mark = "✓" if step.status == "verified" else "✗"
+                lines.append(f"- [{mark}] **{step.name}** (`{step.category}`): {step.status} (exit {step.exit_code})")
+            else:
+                lines.append(f"- [ ] **{step.name}** (`{step.category}`): {step.status}")
 
         lines.extend([
             "",

@@ -617,9 +617,11 @@ class ProviderPoolManager:
             "malformed", "invalid json", "invalid yaml", "parse error",
         )):
             return ProviderFailureClass.MALFORMED_OUTPUT
-        if any(marker in combined for marker in (
+        if result.timed_out or any(marker in combined for marker in (
             "connection refused", "transport unavailable", "network unreachable",
-            "timed out",
+            "timed out", "timeout waiting for response", "request timed out",
+            "connection timed out", "gateway timeout", "read timeout",
+            "operation timed out", "deadline exceeded", "timeout after",
         )):
             return ProviderFailureClass.TRANSPORT_UNAVAILABLE
         if any(marker in combined for marker in (

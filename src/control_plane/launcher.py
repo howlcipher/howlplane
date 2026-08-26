@@ -62,6 +62,8 @@ from src.control_plane.project_adapter import ProjectAdapter, ProjectContext
 from src.control_plane.reconciliation import ReconciliationResult
 from src.control_plane.reviewers import get_reviewer_role
 from src.control_plane.router import TaskRouter, RoutingDecision
+from src.control_plane.atomic_io import safe_load_json
+from src.control_plane.progress import format_elapsed, format_last_heartbeat
 from src.control_plane.resource_cli import inventory_document, render_inventory, render_route
 from src.control_plane.synthesis.provider_pool import ProviderPoolManager
 from src.control_plane.task_spec import TaskSpec
@@ -323,19 +325,41 @@ def _print_orchestration_summary(
     print(f"  HowlFrame:       {hf_str}")
     print("")
     print("Routing:")
-    print(f"  Implementation:  {decision.selected_agent_name}")
+    final_impl_name = res.executing_provider or decision.selected_agent_name
+    print(f"  Implementation:  {final_impl_name}")
+    if res.executing_provider and res.executing_provider != decision.selected_agent_id:
+        print(f"  Initial route:   {decision.selected_agent_name}")
     print(f"  Reasoning Tier:  {decision.reasoning_tier}")
     print("")
     print("Implementation:")
     delta = res.final_delta
-    if delta:
-        print(f"  Files Changed:   {len(delta.files_modified) + len(delta.files_added)}")
-        print(f"  Insertions:       {delta.insertions}")
-        print(f"  Deletions:       {delta.deletions}")
+    is_failed_impl = (
+        res.final_state == "failed"
+        and res.provider_execution is not None
+        and not res.provider_execution.success
+    )
+    if is_failed_impl:
+        print("  Status:                     FAILED")
+        provider_name = res.executing_provider or decision.selected_agent_name
+        print(f"  Provider:                   {provider_name}")
+        has_partial = delta is not None and not delta.is_empty
+        print(f"  Partial repository changes: {'YES' if has_partial else 'NO'}")
+        fc = (len(delta.files_modified) + len(delta.files_added)) if has_partial else 0
+        ins = delta.insertions if has_partial else 0
+        dels = delta.deletions if has_partial else 0
+        print(f"  Files Changed:              {fc}")
+        print(f"  Insertions:                  {ins}")
+        print(f"  Deletions:                  {dels}")
+        if has_partial:
+            print("  Changes reviewed:           NO")
+            print("  Changes verified:           NO")
     else:
-        print("  Files Changed:   0")
-        print("  Insertions:       0")
-        print("  Deletions:       0")
+        fc = (len(delta.files_modified) + len(delta.files_added)) if delta else 0
+        ins = delta.insertions if delta else 0
+        dels = delta.deletions if delta else 0
+        print(f"  Files Changed:   {fc}")
+        print(f"  Insertions:       {ins}")
+        print(f"  Deletions:       {dels}")
     print("")
     print("Review:")
     if res.review_cycles:
@@ -361,9 +385,22 @@ def _print_orchestration_summary(
     print("")
     print("Verification:")
     if res.verification_plan and res.verification_plan.steps:
-        for s in res.verification_plan.steps:
-            status_tag = "VERIFIED" if s.status == "verified" else s.status.upper()
-            print(f"  {s.name:<17} {status_tag}")
+        executed_steps = [
+            s for s in res.verification_plan.steps
+            if s.exit_code is not None or s.status in ("verified", "failed")
+        ]
+        if not executed_steps:
+            total_steps = len(res.verification_plan.steps)
+            print(f"  Discovered:      {total_steps} steps")
+            print("  Executed:        0")
+            if res.final_state == "failed":
+                print("  Status:          NOT RUN — implementation failed before verification")
+            else:
+                print(f"  Status:          NOT RUN — task {res.final_state} before verification")
+        else:
+            for s in res.verification_plan.steps:
+                status_tag = "VERIFIED" if s.status == "verified" else s.status.upper()
+                print(f"  {s.name:<17} {status_tag}")
     else:
         print("  (No automated verification steps discovered)")
     print("")
@@ -407,6 +444,10 @@ def cmd_work(args: argparse.Namespace) -> int:
     )
 
     planned_actions = getattr(args, "actions", None) or []
+    progress_mode = getattr(args, "progress", "auto")
+    if getattr(args, "quiet", False):
+        progress_mode = "never"
+
     orchestrator = GovernedTaskOrchestrator(
         target_repo=target_repo,
         control_plane_root=cp_root,
@@ -414,6 +455,7 @@ def cmd_work(args: argparse.Namespace) -> int:
             force=getattr(args, "force", False),
             skip_doctor=getattr(args, "skip_doctor", False),
             provider_pool=resource_pool,
+            progress_mode=progress_mode,
         ),
     )
 
@@ -666,6 +708,14 @@ def cmd_status(args: argparse.Namespace) -> int:
                     else str(dp_file)
                 )
 
+                prog_file = t_dir / "progress.json"
+                prog_data = None
+                if prog_file.is_file():
+                    try:
+                        prog_data = safe_load_json(prog_file)
+                    except Exception:
+                        prog_data = None
+
                 if t_spec.current_state == "awaiting_human":
                     dec_record = HumanLifecycleManager.load_decision(t_dir)
                     current_fp = compute_repository_fingerprint(target_repo, t_dir)
@@ -720,6 +770,36 @@ def cmd_status(args: argparse.Namespace) -> int:
                         if dec_record.reason:
                             print(f"  Reason:             {dec_record.reason}")
                         print("  Terminal state:     FAILED (Rejected)")
+                    print("-" * 40)
+                elif prog_data and prog_data.get("state") == "RUNNING":
+                    p_phase = prog_data.get("phase", t_spec.current_state.upper())
+                    p_resource = prog_data.get("resource_id") or t_spec.actual_agent or t_spec.recommended_agent or "N/A"
+                    p_elapsed = format_elapsed(prog_data.get("elapsed_seconds", 0))
+                    p_heartbeat = format_last_heartbeat(prog_data.get("updated_at"))
+                    p_pid = prog_data.get("pid")
+
+                    is_proc_alive = False
+                    if rec_diag.get("is_process_running"):
+                        is_proc_alive = True
+                    elif p_pid:
+                        import socket
+                        from src.control_plane.locking import is_process_alive as check_pid_alive
+                        is_proc_alive, _ = check_pid_alive(p_pid, socket.gethostname())
+
+                    state_label = "RUNNING" if is_proc_alive else "STALE (Process not running)"
+
+                    print(f"  {t_spec.task_id}")
+                    print(f"    State:          {state_label}")
+                    print(f"    Phase:          {p_phase}")
+                    print(f"    Resource:       {p_resource}")
+                    print(f"    Elapsed:        {p_elapsed}")
+                    print(f"    Last heartbeat: {p_heartbeat}")
+                    c_revs = rec_diag.get("completed_reviewers", [])
+                    if c_revs:
+                        print(f"    Completed Reviews: {', '.join(c_revs)}")
+                    if not is_proc_alive:
+                        rec_action = rec_diag.get('recommendation') or f"ai resume {t_spec.task_id}"
+                        print(f"    Recommendation:    {rec_action}")
                     print("-" * 40)
                 elif t_spec.current_state in ("interrupted", "cancelled", "implementing", "reviewing", "remediating", "verifying"):
                     print(f"  Task:               {t_spec.task_id}")
@@ -833,6 +913,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_work.add_argument("--dry-run", action="store_true", help="Generate plan without launching")
     p_work.add_argument("--skip-doctor", action="store_true", help="Skip preflight diagnostics")
     p_work.add_argument("--force", action="store_true", help="Proceed even if preflight has warnings")
+    p_work.add_argument(
+        "--progress",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Operator progress output mode (auto, always, never)",
+    )
+    p_work.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress operator progress output",
+    )
 
     p_route = subparsers.add_parser(
         "route",
