@@ -356,7 +356,24 @@ def _print_orchestration_summary(
     print("")
     print("Project Context:")
     print("  ProjectAdapter:  OK")
-    hf_str = res.howlframe_audit_status or ("PASS / MATCH (shadow)" if res.howlframe_audit_match else "MISMATCH")
+    hf_status = res.howlframe_audit_status
+    if not hf_status and getattr(res, "run_dir", None):
+        audit_path = Path(res.run_dir) / "howlframe_audit.json"
+        if audit_path.exists():
+            try:
+                audit_data = json.loads(audit_path.read_text(encoding="utf-8"))
+                hf_status = audit_data.get("audit_status") or audit_data.get("status")
+            except Exception:
+                pass
+
+    if hf_status:
+        hf_str = hf_status
+    elif res.howlframe_audit_match is True:
+        hf_str = "PASS / MATCH (shadow)"
+    elif res.howlframe_audit_match is False:
+        hf_str = "MISMATCH"
+    else:
+        hf_str = "NOT COMPUTED"
     print(f"  HowlFrame:       {hf_str}")
     print("")
     print("Routing:")
