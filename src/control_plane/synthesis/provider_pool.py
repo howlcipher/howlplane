@@ -5,12 +5,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from src.control_plane.agent_execution import (
     AgentBackend,
     AgentBackendRegistry,
     AgentExecutionResult,
+    LAUNCH_OUTCOME_KEY,
+    LAUNCH_OUTCOME_LAUNCHED,
+    LAUNCH_OUTCOME_NOT_INSTALLED,
+    LAUNCH_OUTCOME_SPAWN_FAILED,
+    TIMEOUT_SOURCE_HARNESS,
+    TIMEOUT_SOURCE_KEY,
 )
 from src.control_plane.agent_registry import AgentProfile, AgentRegistry
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
@@ -585,9 +591,28 @@ class ProviderPoolManager:
         combined = "\n".join(
             [result.error_message or "", result.stderr or "", result.stdout or ""]
         ).lower()
-        if result.exit_code == 127 or any(marker in combined for marker in (
-            "command not found", "binary not found", "not installed",
-        )):
+        # Structural execution evidence outranks transcript text. A long agent
+        # transcript is arbitrary third-party content that routinely contains the
+        # very phrases these markers look for, so where the harness observed the
+        # process directly, that observation wins (SLOPFIX-03).
+        metadata = result.metadata or {}
+        launch_outcome = metadata.get(LAUNCH_OUTCOME_KEY)
+        if launch_outcome in (LAUNCH_OUTCOME_NOT_INSTALLED, LAUNCH_OUTCOME_SPAWN_FAILED):
+            return ProviderFailureClass.MISSING_EXECUTABLE
+        if metadata.get(TIMEOUT_SOURCE_KEY) == TIMEOUT_SOURCE_HARNESS:
+            return ProviderFailureClass.TRANSPORT_UNAVAILABLE
+        # A provider that demonstrably started cannot be a missing executable,
+        # whatever its session log says about commands that were not found.
+        # Backends that stamp no markers keep the older text-based behavior, with
+        # one correction: a timeout verdict is the more specific signal and so
+        # outranks the substring scan. Exit 127 stays decisive either way, since
+        # the shell reserves it for a command it could not execute.
+        if launch_outcome != LAUNCH_OUTCOME_LAUNCHED and (
+            result.exit_code == 127
+            or (not result.timed_out and any(marker in combined for marker in (
+                "command not found", "binary not found", "not installed",
+            )))
+        ):
             return ProviderFailureClass.MISSING_EXECUTABLE
         if any(marker in combined for marker in (
             "authentication required", "not authenticated", "login required",
@@ -906,9 +931,19 @@ class ProviderPoolManager:
         role: str,
         explicit_resource_id: Optional[str] = None,
         avoid_resource_id: Optional[str] = None,
+        exclude_resource_ids: Optional[Iterable[str]] = None,
     ) -> ResourceSelectionDecision:
-        """Applies hard filtering, economics, recommendation, and stable tie break."""
+        """Applies hard filtering, economics, recommendation, and stable tie break.
+
+        ``avoid_resource_id`` is a soft preference that only demotes a resource in
+        the ranking. ``exclude_resource_ids`` is a hard prohibition, used by
+        bounded failover so a resource whose cooldown elapsed mid-attempt cannot
+        be re-offered and dead-end the loop.
+        """
         required = self._required_capabilities(task, role)
+        excluded_ids = {
+            self._normalize(item) for item in (exclude_resource_ids or []) if item
+        }
         registered = [
             self._resource_identity(profile) for profile in self.registry.list_resources()
         ]
@@ -969,6 +1004,9 @@ class ProviderPoolManager:
             capacity_reason = self._capacity_exclusion(state.status)
             if capacity_reason:
                 exclude(profile, capacity_reason, "capacity")
+                continue
+            if resource_id in excluded_ids:
+                exclude(profile, "ALREADY_ATTEMPTED", "failover_policy")
                 continue
             economics = EconomicClass(profile.economic_class or EconomicClass.UNKNOWN)
             if economics == EconomicClass.METERED_API and not self.policy.allow_paid_api:

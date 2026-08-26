@@ -73,6 +73,7 @@ class ExecutionTrajectory(SafeArtifactSerializationMixin):
     failover_from_resource_id: Optional[str] = None
     failover_events: List[Dict[str, Any]] = field(default_factory=list)
     implementation_attempts: List[Dict[str, Any]] = field(default_factory=list)
+    failover_summary: Optional[Dict[str, Any]] = None
     initial_implementation_resource: Optional[str] = None
     final_implementation_resource: Optional[str] = None
     review_findings: List[Dict[str, Any]] = field(default_factory=list)
@@ -374,6 +375,7 @@ class ExecutionTrajectoryBuilder:
                 )
             ],
             implementation_attempts=list(getattr(result, "implementation_attempts", []) or []),
+            failover_summary=getattr(result, "failover_summary", None),
             initial_implementation_resource=initial_impl_resource,
             final_implementation_resource=final_impl_resource,
             review_findings=_extract_review_findings(result.review_cycles),
