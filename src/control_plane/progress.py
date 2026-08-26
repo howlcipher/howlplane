@@ -199,6 +199,7 @@ class TaskProgressTracker:
         resource_id: Optional[str] = None, role: Optional[str] = None,
         details: Optional[str] = None, cycle: int = 0,
         completion_message: Optional[str] = None,
+        suppress_completion: bool = False,
     ) -> Iterator[None]:
         self.transition(phase=phase, resource_id=resource_id, role=role, details=details, cycle=cycle)
         self._start_ticker()
@@ -216,13 +217,40 @@ class TaskProgressTracker:
                 self._record.updated_at = _now_utc_str()
                 self._flush_json()
 
-            if completion_message:
-                self._write_stream(completion_message)
-            elif p_str == TaskPhase.IMPLEMENTING.value and resource_id:
-                self._write_stream(
-                    f"[HowlPlane] IMPLEMENTATION COMPLETE | {resource_id} | "
-                    f"elapsed {format_elapsed(dur)}"
-                )
+            if not suppress_completion:
+                if completion_message:
+                    self._write_stream(completion_message)
+                elif p_str == TaskPhase.IMPLEMENTING.value and resource_id:
+                    self._write_stream(
+                        f"[HowlPlane] IMPLEMENTATION COMPLETE | {resource_id} | "
+                        f"elapsed {format_elapsed(dur)}"
+                    )
+
+    def emit_failover(
+        self,
+        source_resource_id: str,
+        target_resource_id: str,
+        failure_class: Optional[str] = None,
+    ) -> None:
+        """Emits a concise provider failover event to the progress stream."""
+        parts = [
+            "[HowlPlane] FAILOVER",
+            f"{source_resource_id} -> {target_resource_id}",
+        ]
+        if failure_class:
+            parts.append(failure_class)
+        self._write_stream(" | ".join(parts))
+
+    def emit_implementation_failed(
+        self,
+        resource_id: str,
+        reason: Optional[str] = None,
+    ) -> None:
+        """Emits explicit implementation-failure terminology for a failed attempt."""
+        parts = ["[HowlPlane] IMPLEMENTATION FAILED", resource_id]
+        if reason:
+            parts.append(reason)
+        self._write_stream(" | ".join(parts))
 
     def record_terminal(
         self,
@@ -322,6 +350,7 @@ def track_operation(
     role: Optional[str] = None,
     cycle: Optional[int] = None,
     details: Optional[str] = None,
+    suppress_completion: bool = False,
 ) -> Iterator[None]:
     """Scoped helper that enters tracker operation when tracker is provided."""
     if tracker is not None:
@@ -331,6 +360,7 @@ def track_operation(
             role=role,
             cycle=cycle,
             details=details,
+            suppress_completion=suppress_completion,
         ):
             yield
     else:

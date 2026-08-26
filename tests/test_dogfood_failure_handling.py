@@ -205,6 +205,7 @@ def _run_task_with_backend(
             provider_pool=pool,
             acquire_locks=False,
             enable_howlframe_audit=False,
+            max_provider_failover_attempts=1,
         ),
     )
     return orch.run(task), repo / ".task_runs" / task_id
@@ -222,9 +223,11 @@ def test_provider_fails_nonzero_without_modifying_repo(tmp_path):
     result, run_dir = _run_task_with_backend(repo, "TEST-FAIL-01", backend)
 
     assert result.final_state == "failed"
-    assert result.failure_class == FAILURE_CLASS_PROVIDER_UNAVAILABLE
+    assert result.failure_class == FAILURE_CLASS_PROVIDER_EXHAUSTED
     assert result.final_delta is not None
     assert result.final_delta.is_empty is True
+    assert result.provider_execution is not None
+    assert "timeout" in result.provider_execution.error_message.lower()
 
     # Checkpoint verification
     chk = CheckpointManager.load_latest_checkpoint(run_dir)
@@ -252,7 +255,9 @@ def test_provider_fails_nonzero_after_modifying_one_file(tmp_path):
     result, run_dir = _run_task_with_backend(repo, "TEST-FAIL-02", backend)
 
     assert result.final_state == "failed"
-    assert result.failure_class == FAILURE_CLASS_PROVIDER_UNAVAILABLE
+    assert result.failure_class == FAILURE_CLASS_PROVIDER_EXHAUSTED
+    assert result.provider_execution is not None
+    assert "timeout" in result.provider_execution.error_message.lower()
 
     # Delta must detect the modification truthfully
     assert result.final_delta is not None
@@ -260,11 +265,12 @@ def test_provider_fails_nonzero_after_modifying_one_file(tmp_path):
     assert "src/feature.py" in result.final_delta.files_modified
     assert len(result.final_delta.files_modified) == 1
 
-    # Partial patch must be preserved in run artifacts
-    assert (run_dir / "implementation" / "partial_work.patch").is_file()
-    assert (run_dir / "implementation" / "diff.patch").is_file()
-    assert (run_dir / "diff.patch").is_file()
-    patch_content = (run_dir / "implementation" / "partial_work.patch").read_text(encoding="utf-8")
+    # Partial patch must be preserved in per-attempt evidence.
+    attempt_dir = run_dir / "implementation" / "attempts" / "01-agy"
+    assert (attempt_dir / "partial_work.patch").is_file()
+    assert (attempt_dir / "diff.patch").is_file()
+    assert (attempt_dir / "result.json").is_file()
+    patch_content = (attempt_dir / "partial_work.patch").read_text(encoding="utf-8")
     assert "return 42" in patch_content
 
     # Stage checkpoint must be terminalized as failed
@@ -307,6 +313,7 @@ def test_partial_changes_not_presented_as_reviewed_or_verified(tmp_path):
             custom_backend=backend,
             acquire_locks=False,
             enable_howlframe_audit=False,
+            max_provider_failover_attempts=1,
         ),
     )
 

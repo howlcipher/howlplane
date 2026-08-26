@@ -325,7 +325,10 @@ def _print_orchestration_summary(
     print(f"  HowlFrame:       {hf_str}")
     print("")
     print("Routing:")
-    print(f"  Implementation:  {decision.selected_agent_name}")
+    final_impl_name = res.executing_provider or decision.selected_agent_name
+    print(f"  Implementation:  {final_impl_name}")
+    if res.executing_provider and res.executing_provider != decision.selected_agent_id:
+        print(f"  Initial route:   {decision.selected_agent_name}")
     print(f"  Reasoning Tier:  {decision.reasoning_tier}")
     print("")
     print("Implementation:")
