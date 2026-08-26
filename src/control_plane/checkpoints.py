@@ -18,6 +18,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
+from src.control_plane.git_env import run_git_in_repo
 from src.control_plane.task_spec import DataClassSerializationMixin, VALID_TASK_STATES
 
 CHECKPOINT_SCHEMA_VERSION = "howlplane.stage_checkpoint/v1"
@@ -50,15 +51,14 @@ class StageCheckpoint(DataClassSerializationMixin):
 
 def compute_stage_repo_fingerprint(repo_path: Union[str, Path]) -> Dict[str, Any]:
     """Computes a lightweight repository fingerprint for stage checkpointing."""
-    import subprocess
     target = Path(repo_path).resolve()
 
-    def _run(cmd):
-        r = subprocess.run(cmd, cwd=str(target), capture_output=True, text=True, check=False)
+    def _run(args):
+        r = run_git_in_repo(target, args)
         return r.stdout if r.returncode == 0 else ""
 
-    commit = _run(["git", "rev-parse", "HEAD"]).strip()
-    status = _run(["git", "status", "--porcelain"])
+    commit = _run(["rev-parse", "HEAD"]).strip()
+    status = _run(["status", "--porcelain"])
     lines = [l for l in status.splitlines() if l.strip()]
 
     return {

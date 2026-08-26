@@ -41,6 +41,7 @@ from src.control_plane.cli import (
     register_synthesis_subparsers,
 )
 from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+from src.control_plane.git_env import run_git_in_repo
 from src.control_plane.locking import get_repo_lock_path, is_process_alive
 from src.control_plane.recovery import CrashRecoveryEngine
 from src.control_plane.howlframe_runner import (
@@ -88,12 +89,7 @@ def find_git_repo_root(start_dir: Optional[Union[str, Path]] = None) -> Path:
     """Discovers the root directory of the current Git repository using `git rev-parse`."""
     target = Path(start_dir or os.getcwd()).resolve()
     try:
-        res = subprocess.run(
-            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        res = run_git_in_repo(target, ["rev-parse", "--show-toplevel"])
         if res.returncode == 0 and res.stdout.strip():
             return Path(res.stdout.strip()).resolve()
     except Exception:

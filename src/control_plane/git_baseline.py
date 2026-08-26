@@ -14,6 +14,7 @@ from pathlib import Path
 import subprocess
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+from src.control_plane.git_env import run_git_in_repo
 from src.control_plane.task_spec import DataClassSerializationMixin
 
 GIT_BASELINE_SCHEMA_VERSION = "howlplane.git_baseline/v1"
@@ -87,13 +88,12 @@ class RepositoryDelta(DataClassSerializationMixin):
 
 
 def _run_git_cmd(repo_root: Union[str, Path], args: List[str]) -> subprocess.CompletedProcess:
-    """Executes a git command deterministically without shell=True."""
-    return subprocess.run(
-        ["git", "-C", str(repo_root)] + args,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    """Executes a git command deterministically without shell=True.
+
+    An inherited GIT_DIR overrides `git -C`, so the environment is sanitized
+    before every invocation (see git_env.GIT_REPOSITORY_SELECTION_ENV_VARS).
+    """
+    return run_git_in_repo(repo_root, args)
 
 
 def is_internal_control_plane_path(path: str) -> bool:

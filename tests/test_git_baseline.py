@@ -12,20 +12,18 @@ from src.control_plane.git_baseline import (
     capture_baseline,
     capture_delta,
 )
+from tests._git_test_helpers import init_git_repo
 
 
 def _init_git_repo(path: Path) -> Path:
     """Helper to initialize a real git repository for testing."""
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-b", "main"], cwd=str(path), check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(path), check=True)
-    subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(path), check=True)
-    # Initial commit
-    (path / "README.md").write_text("# Test Repo\n", encoding="utf-8")
-    (path / "existing.py").write_text("def old_fn():\n    return 1\n", encoding="utf-8")
-    subprocess.run(["git", "add", "."], cwd=str(path), check=True)
-    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=str(path), check=True)
-    return path
+    return init_git_repo(
+        path,
+        files={
+            "README.md": "# Test Repo\n",
+            "existing.py": "def old_fn():\n    return 1\n",
+        },
+    )
 
 
 def test_capture_baseline_clean_repo(tmp_path):

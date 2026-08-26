@@ -14,6 +14,7 @@ import hashlib, json, os, shutil, subprocess, time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from src.control_plane.git_env import run_git_in_repo
 from src.control_plane.proposed_action import ProposedAction
 from src.control_plane.task_spec import DataClassSerializationMixin
 
@@ -518,12 +519,7 @@ class HowlChangeOpsExecutor(AuthorityExecutor):
         native_data: Optional[Dict[str, Any]],
     ) -> ExecutionReceipt:
         """Helper to construct ExecutionReceipt from native HowlChangeOps proof."""
-        c_res = subprocess.run(
-            ["git", "-C", str(target_dir), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        c_res = run_git_in_repo(target_dir, ["rev-parse", "HEAD"])
         commit_sha = c_res.stdout.strip() if c_res.returncode == 0 else ""
         exec_at = (
             native_data.get("timestamp", datetime.now(timezone.utc).isoformat())

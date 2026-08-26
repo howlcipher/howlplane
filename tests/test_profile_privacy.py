@@ -1,27 +1,18 @@
 import subprocess
 import os
 import pathlib
+from src.control_plane.git_env import run_git_in_repo
 
 def test_user_profile_is_gitignored():
     """Assert USER_PROFILE.md is present in .gitignore and USER_PROFILE.example.md is tracked."""
     repo_root = pathlib.Path(__file__).parent.parent
     
     # Check if USER_PROFILE.example.md is tracked
-    result = subprocess.run(
-        ["git", "ls-files", "USER_PROFILE.example.md"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True
-    )
+    result = run_git_in_repo(repo_root, ["ls-files", "USER_PROFILE.example.md"])
     assert "USER_PROFILE.example.md" in result.stdout
 
     # Check if USER_PROFILE.md is ignored
-    result_ignore = subprocess.run(
-        ["git", "check-ignore", "USER_PROFILE.md"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True
-    )
+    result_ignore = run_git_in_repo(repo_root, ["check-ignore", "USER_PROFILE.md"])
     assert result_ignore.returncode == 0
     assert "USER_PROFILE.md" in result_ignore.stdout or "USER_PROFILE.md" in result_ignore.stderr or result_ignore.returncode == 0
 
@@ -37,12 +28,7 @@ def test_no_real_profile_data_tracked():
     ]
     
     # Get all tracked files
-    result = subprocess.run(
-        ["git", "ls-files"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True
-    )
+    result = run_git_in_repo(repo_root, ["ls-files"])
     tracked_files = result.stdout.splitlines()
     
     allowed_files = {

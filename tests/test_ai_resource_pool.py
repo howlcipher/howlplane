@@ -53,6 +53,7 @@ from src.infrastructure.config_loader import (
     ProviderPolicySettings,
     ProviderResourceSettings,
 )
+from tests._git_test_helpers import init_git_repo
 
 
 class CountingBackend(FakeAgentBackend):
@@ -182,7 +183,7 @@ def test_router_uses_shared_pool_and_records_review_resource_identities():
 
 
 def test_governed_orchestrator_blocks_structurally_before_provider_execution(tmp_path: Path):
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    init_git_repo(tmp_path, initial_commit=False)
     profile = make_profile("disabled")
     backend = CountingBackend("disabled")
     pool = make_pool(

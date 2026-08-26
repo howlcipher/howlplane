@@ -49,6 +49,7 @@ from src.control_plane.synthesis.provider_pool import (
 from src.infrastructure.config_loader import ProviderResourceSettings
 from src.control_plane.task_spec import TaskSpec
 from tests._dogfood_test_helpers import init_minimal_python_repo
+from tests._git_test_helpers import commit_all, git_in_repo
 
 
 def _init_test_repo(tmp_path: Path) -> Path:
@@ -871,10 +872,7 @@ def test_pre_existing_work_not_attributed_across_three_attempts(tmp_path: Path):
     repo = _init_test_repo(tmp_path / "repo")
     pre_existing = repo / "src" / "untouched.py"
     pre_existing.write_text("PRE = 'existing'\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "pre-existing"], cwd=repo, check=True, capture_output=True
-    )
+    commit_all(repo, "pre-existing")
     pre_existing.write_text("PRE = 'modified by user'\n", encoding="utf-8")
 
     resolver = _three_hop_resolver(

@@ -4,6 +4,8 @@ import shutil
 import tempfile
 import pytest
 
+from src.control_plane.git_env import GIT_REPOSITORY_SELECTION_ENV_VARS
+
 
 # Real HowlFrame compiler integration tests deliberately exercise the genuine
 # `HOWLFRAME_BIN` env override -> `command -v howlframe` -> "unavailable" discovery
@@ -31,6 +33,20 @@ def _cleanup_tmp_git_contamination():
         except OSError:
             pass
     yield
+
+
+@pytest.fixture(autouse=True)
+def _scrub_inherited_git_repository_selection(monkeypatch):
+    """Removes inherited Git repository-selection variables for every test.
+
+    Defense in depth only. The real fix is that test helpers and production
+    code launch git through `src.control_plane.git_env`, which sanitizes the
+    environment itself -- a fresh clone must be safe even with no conftest and
+    no patched hook. Tests that deliberately prove that guarantee re-set these
+    variables with `monkeypatch.setenv`, which wins over this fixture.
+    """
+    for name in GIT_REPOSITORY_SELECTION_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)

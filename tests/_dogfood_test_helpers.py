@@ -39,46 +39,27 @@ from src.control_plane.router import RoutingDecision
 from src.control_plane.task_spec import TaskSpec
 from src.control_plane.verification import VerificationPlan
 
+from tests._git_test_helpers import init_git_repo
+
 
 def init_minimal_python_repo(path: Path) -> Path:
     """Create the shared minimal real Git repository used by reasoning tests."""
-    path.mkdir(parents=True, exist_ok=True)
-    commands = (
-        ["git", "init", "-b", "main"],
-        ["git", "config", "user.email", "ci@howlplane.local"],
-        ["git", "config", "user.name", "HowlPlane CI"],
+    return init_git_repo(
+        path,
+        files={
+            "AGENTS.md": "# Test Project\n",
+            "pyproject.toml": (
+                "[project]\nname = \"test_service\"\nversion = \"0.1.0\"\n"
+            ),
+            "src/__init__.py": "",
+            "src/feature.py": "def run():\n    return True\n",
+            "tests/__init__.py": "",
+            "tests/test_feature.py": (
+                "from src.feature import run\n\n\ndef test_run():\n"
+                "    assert run() is True\n"
+            ),
+        },
     )
-    for command in commands:
-        subprocess.run(command, cwd=str(path), check=True, capture_output=True)
-
-    files = {
-        "AGENTS.md": "# Test Project\n",
-        "pyproject.toml": (
-            "[project]\nname = \"test_service\"\nversion = \"0.1.0\"\n"
-        ),
-        "src/__init__.py": "",
-        "src/feature.py": "def run():\n    return True\n",
-        "tests/__init__.py": "",
-        "tests/test_feature.py": (
-            "from src.feature import run\n\n\ndef test_run():\n"
-            "    assert run() is True\n"
-        ),
-    }
-    for relative_path, content in files.items():
-        target = path / relative_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-
-    subprocess.run(
-        ["git", "add", "."], cwd=str(path), check=True, capture_output=True,
-    )
-    subprocess.run(
-        ["git", "commit", "-m", "Initial commit"],
-        cwd=str(path),
-        check=True,
-        capture_output=True,
-    )
-    return path
 
 
 def reasoning_strategy(

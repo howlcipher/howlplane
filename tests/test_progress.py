@@ -39,37 +39,12 @@ from src.control_plane.progress import (
 )
 from src.control_plane.task_spec import TaskSpec
 from src.control_plane.verification import VerificationPlan
+from tests._git_test_helpers import init_git_repo
 
 
 def _init_test_git_repo(repo_path: Path) -> None:
     """Initializes a minimal git repository for testing."""
-    str_path = str(repo_path)
-    subprocess.run(
-        ["git", "init", "-b", "main", str_path],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str_path, "config", "user.name", "Test Runner"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str_path, "config", "user.email", "test@example.com"],
-        check=True,
-        capture_output=True,
-    )
-    (repo_path / "README.md").write_text("# Test Repo\n", encoding="utf-8")
-    subprocess.run(
-        ["git", "-C", str_path, "add", "README.md"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str_path, "commit", "-m", "Initial commit"],
-        check=True,
-        capture_output=True,
-    )
+    init_git_repo(repo_path, files={"README.md": "# Test Repo\n"})
 
 
 class SlowMockBackend(AgentBackend):

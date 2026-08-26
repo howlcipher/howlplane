@@ -39,6 +39,7 @@ from src.control_plane.authority_envelope import (
     AuthorityEnvelope,
     evaluate_action_against_envelope,
 )
+from src.control_plane.git_env import run_git_in_repo, sanitized_git_env
 from src.control_plane.proposed_action import ProposedAction
 
 GIT_INTEGRATION_EXECUTOR_VERSION = "1.0"
@@ -114,25 +115,26 @@ class GitIntegrationError(Exception):
 
 
 def run_git(repo_root: Union[str, Path], args: List[str], timeout: int = 60) -> subprocess.CompletedProcess:
-    """Executes a git command deterministically without shell=True."""
-    return subprocess.run(
-        ["git", "-C", str(repo_root)] + args,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+    """Executes a git command deterministically without shell=True.
+
+    An inherited GIT_DIR overrides `git -C`, so the environment is sanitized
+    before every invocation (see git_env.GIT_REPOSITORY_SELECTION_ENV_VARS).
+    """
+    return run_git_in_repo(repo_root, args, timeout=timeout)
 
 
 def run_gh(repo_root: Union[str, Path], args: List[str], timeout: int = 120) -> subprocess.CompletedProcess:
     """Executes a `gh` CLI command deterministically without shell=True."""
-    return subprocess.run(
+    return subprocess.run(  # nosec B603 B607 - fixed argv, no shell
         ["gh"] + args,
         capture_output=True,
         text=True,
         timeout=timeout,
         cwd=str(repo_root),
         check=False,
+        # `gh` shells out to git for repo detection; the same inherited
+        # repository-selection variables would redirect it.
+        env=sanitized_git_env(),
     )
 
 

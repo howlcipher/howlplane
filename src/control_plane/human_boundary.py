@@ -10,11 +10,12 @@ Enforces that human approval is NOT execution, and completion requires verified 
 
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-import hashlib, json, os, subprocess
+import hashlib, json, os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+from src.control_plane.git_env import run_git_in_repo
 from src.control_plane.hygiene_policy import (
     PolicyChangeType,
     PolicyEvaluationResult,
@@ -559,20 +560,10 @@ def compute_repository_fingerprint(
     Uses git HEAD commit SHA, status porcelain, and attributable diff content.
     """
     root = Path(repo_dir).resolve()
-    res_sha = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    res_sha = run_git_in_repo(root, ["rev-parse", "HEAD"])
     commit_sha = res_sha.stdout.strip() if res_sha.returncode == 0 else "HEAD_UNKNOWN"
 
-    res_status = subprocess.run(
-        ["git", "-C", str(root), "status", "--porcelain"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    res_status = run_git_in_repo(root, ["status", "--porcelain"])
     status_out = res_status.stdout if res_status.returncode == 0 else ""
     dirty = bool(status_out.strip())
 
@@ -603,12 +594,7 @@ def compute_repository_fingerprint(
             pass
 
     if not diff_text:
-        res_diff = subprocess.run(
-            ["git", "-C", str(root), "diff", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        res_diff = run_git_in_repo(root, ["diff", "HEAD"])
         diff_text = res_diff.stdout if res_diff.returncode == 0 else ""
         for f_name in sorted(files):
             f_path = root / f_name
