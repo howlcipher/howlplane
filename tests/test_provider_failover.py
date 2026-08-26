@@ -8,6 +8,7 @@ loop with fake backends and temporary Git repositories, verifying rollback,
 evidence preservation, progress messaging, and final identity/reviewer behavior.
 """
 
+from datetime import datetime, timedelta, timezone
 import json
 from io import StringIO
 from pathlib import Path
@@ -20,6 +21,10 @@ from src.control_plane.agent_execution import (
     AgentBackendRegistry,
     AgentExecutionResult,
     FakeAgentBackend,
+    LAUNCH_OUTCOME_KEY,
+    LAUNCH_OUTCOME_LAUNCHED,
+    TIMEOUT_SOURCE_HARNESS,
+    TIMEOUT_SOURCE_KEY,
 )
 from src.control_plane.agent_registry import AgentProfile, AgentRegistry
 from src.control_plane.git_baseline import (
@@ -129,6 +134,8 @@ class _FakeBackendResolver:
             default_stderr=behavior.get("stderr", ""),
             default_stdout=behavior.get("stdout", ""),
             side_effect=wrapped_side_effect,
+            default_timed_out=behavior.get("timed_out", False),
+            default_metadata=behavior.get("metadata"),
         )
 
 
@@ -141,24 +148,29 @@ def _run_failover_task(
     policy_allow_paid: bool = False,
     progress_stream: Optional[StringIO] = None,
     registry: Optional[AgentRegistry] = None,
+    pool_hook: Optional[Callable[[ProviderPoolManager], None]] = None,
+    pool: Optional[ProviderPoolManager] = None,
 ) -> OrchestrationResult:
     """Runs the orchestrator with the given fake backend resolver."""
     task = task or _make_task()
     registry = registry or _make_registry()
-    resources = {
-        profile.resource_id: ProviderResourceSettings(enabled=True)
-        for profile in registry.list_resources()
-    }
-    pool = ProviderPoolManager(
-        registry=registry,
-        backend_resolver=resolver,
-        probe_on_start=False,
-        policy=None,
-        resources=resources,
-        operating_mode="connected",
-    )
+    if pool is None:
+        resources = {
+            profile.resource_id: ProviderResourceSettings(enabled=True)
+            for profile in registry.list_resources()
+        }
+        pool = ProviderPoolManager(
+            registry=registry,
+            backend_resolver=resolver,
+            probe_on_start=False,
+            policy=None,
+            resources=resources,
+            operating_mode="connected",
+        )
     if not policy_allow_paid:
         pool.policy.allow_paid_api = False
+    if pool_hook is not None:
+        pool_hook(pool)
 
     config = OrchestrationConfig(
         provider_pool=pool,
@@ -207,19 +219,83 @@ def _capture_stderr(func: Callable[[], OrchestrationResult]) -> str:
 _TIMEOUT_STDERR = "Error: timeout waiting for response\n"
 
 
+def _resolver_from_plan(
+    plan: Dict[str, Dict[str, Any]],
+    overrides: Dict[str, Dict[str, Any]],
+) -> _FakeBackendResolver:
+    """Builds a resolver from a base plan with per-resource keys merged in."""
+    merged = {
+        resource_id: {**behavior, **overrides.get(resource_id, {})}
+        for resource_id, behavior in plan.items()
+    }
+    merged.update({
+        resource_id: extra
+        for resource_id, extra in overrides.items()
+        if resource_id not in plan
+    })
+    return _FakeBackendResolver(merged)
+
+
+def _three_hop_resolver(**overrides) -> _FakeBackendResolver:
+    """resource_a and resource_b both transport-fail; resource_c succeeds."""
+    return _resolver_from_plan({
+        "resource_a": {"success": False, "stderr": _TIMEOUT_STDERR},
+        "resource_b": {"success": False, "stderr": _TIMEOUT_STDERR},
+        "resource_c": {"success": True, "side_effect": _edit_feature_to_true},
+    }, overrides)
+
+
+def _expire_cooldown_for(pool_holder: Dict[str, Any], resource_id: str) -> Callable:
+    """Back-dates a resource's cooldown, as a long next attempt would in real time."""
+    def _side_effect(_task, _cwd, _prompt) -> None:
+        state = pool_holder["pool"].get_resource_status(resource_id)
+        state.retry_after = (
+            datetime.now(timezone.utc) - timedelta(seconds=1)
+        ).isoformat()
+    return _side_effect
+
+
+def _capture_pool(pool_holder: Dict[str, Any]) -> Callable[[ProviderPoolManager], None]:
+    """Exposes the orchestrator's pool to a test's backend side effects."""
+    def _hook(pool: ProviderPoolManager) -> None:
+        pool_holder["pool"] = pool
+    return _hook
+
+
 def _timeout_then_success_resolver(**overrides) -> _FakeBackendResolver:
     """resource_a fails with an AGY-style transport timeout; resource_b succeeds.
 
     `overrides` merges extra keys into a resource's plan, e.g.
     `_timeout_then_success_resolver(resource_a={"side_effect": fn})`.
     """
-    plan = {
+    return _resolver_from_plan({
         "resource_a": {"success": False, "stderr": _TIMEOUT_STDERR},
         "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    }
-    for resource_id, extra in overrides.items():
-        plan[resource_id] = {**plan.get(resource_id, {}), **extra}
-    return _FakeBackendResolver(plan)
+    }, overrides)
+
+
+def _all_fail_resolver(*resource_ids: str) -> _FakeBackendResolver:
+    """Every named resource fails with an AGY-style transport timeout."""
+    return _FakeBackendResolver({
+        resource_id: {"success": False, "stderr": _TIMEOUT_STDERR}
+        for resource_id in resource_ids
+    })
+
+
+def _assert_completed_on_third_hop(res: OrchestrationResult) -> None:
+    """Asserts bounded failover walked a -> b -> c and finished on resource_c."""
+    assert res.final_state == "complete"
+    assert res.executing_provider == "resource_c"
+    assert [a["resource_id"] for a in res.implementation_attempts] == [
+        "resource_a", "resource_b", "resource_c",
+    ]
+
+
+def _run_all_fail(tmp_path: Path, **kwargs) -> OrchestrationResult:
+    """Runs a three-resource pool in which no implementation attempt succeeds."""
+    repo = _init_test_repo(tmp_path / "repo")
+    resolver = _all_fail_resolver("resource_a", "resource_b", "resource_c")
+    return _run_failover_task(repo, resolver, **kwargs)
 
 
 def _run_timeout_failover(tmp_path: Path, **kwargs) -> OrchestrationResult:
@@ -703,3 +779,413 @@ def test_restore_repository_to_baseline_preserves_untracked(tmp_path: Path):
     assert ok, reason
 
     assert untracked.read_text(encoding="utf-8") == "keep\n"
+
+
+# ---------------------------------------------------------------------------
+# HOWLFRAM-SLOPFIX-03 regression: bounded failover must reach a third provider
+#
+# Live behavior: agy transport-failed (300s cooldown), codex then ran for 600s
+# and also failed. By selection time agy's cooldown had lapsed, so the pool
+# re-offered agy -- the deterministic router's top-ranked candidate -- and the
+# orchestrator terminated on "already attempted" instead of trying claude_code
+# or devin_cli, both still eligible with one attempt of three unused.
+# ---------------------------------------------------------------------------
+def test_second_availability_failure_reaches_third_provider(tmp_path: Path):
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_failover_task(repo, _three_hop_resolver(), max_attempts=3)
+
+    _assert_completed_on_third_hop(res)
+
+
+def test_recovered_first_provider_does_not_dead_end_failover(tmp_path: Path):
+    """The exact live condition: attempt 1's cooldown lapses during attempt 2."""
+    repo = _init_test_repo(tmp_path / "repo")
+    pool_holder: Dict[str, Any] = {}
+    resolver = _three_hop_resolver(
+        resource_b={"side_effect": _expire_cooldown_for(pool_holder, "resource_a")},
+    )
+    res = _run_failover_task(
+        repo, resolver, max_attempts=3, pool_hook=_capture_pool(pool_holder),
+    )
+
+    # resource_a is healthy and top-ranked again at selection time, but spent.
+    assert pool_holder["pool"].get_resource_status("resource_a").retry_after is None
+    _assert_completed_on_third_hop(res)
+    second = res.implementation_attempts[1]["next_selection"]
+    assert second["selected_resource_id"] == "resource_c"
+    assert {
+        exclusion["resource_id"]: exclusion["reason"]
+        for exclusion in second["exclusions"]
+    }["resource_a"] == "ALREADY_ATTEMPTED"
+
+
+def test_rollback_precedes_each_failover_hop(tmp_path: Path):
+    """Baseline is restored before provider B and again before provider C."""
+    repo = _init_test_repo(tmp_path / "repo")
+    observed: List[str] = []
+
+    def _record_then_edit(marker: str):
+        def _side_effect(_task, cwd: Path, _prompt) -> None:
+            observed.append(_read_file(cwd, "src/feature.py"))
+            (cwd / "src" / "feature.py").write_text(
+                f"def run():\n    return '{marker}'\n", encoding="utf-8"
+            )
+        return _side_effect
+
+    def _record_then_succeed(_task, cwd: Path, prompt) -> None:
+        observed.append(_read_file(cwd, "src/feature.py"))
+        _edit_feature_to_true(_task, cwd, prompt)
+
+    resolver = _three_hop_resolver(
+        resource_a={"side_effect": _record_then_edit("a")},
+        resource_b={"side_effect": _record_then_edit("b")},
+        resource_c={"side_effect": _record_then_succeed},
+    )
+    res = _run_failover_task(repo, resolver, max_attempts=3)
+
+    assert res.final_state == "complete"
+    # Each provider started from the pristine baseline, never a predecessor's edit.
+    assert observed == ["def run():\n    return True\n"] * 3
+
+
+def test_every_attempt_keeps_its_own_evidence(tmp_path: Path):
+    repo = _init_test_repo(tmp_path / "repo")
+    resolver = _three_hop_resolver(
+        resource_a={"side_effect": _edit_feature_to_false},
+        resource_b={"side_effect": _edit_feature_to_false},
+    )
+    res = _run_failover_task(repo, resolver, max_attempts=3)
+
+    attempts_dir = Path(res.run_dir) / "implementation" / "attempts"
+    assert sorted(d.name for d in attempts_dir.iterdir()) == [
+        "01-resource_a", "02-resource_b", "03-resource_c",
+    ]
+    for name in ("01-resource_a", "02-resource_b"):
+        assert (attempts_dir / name / "attempt_record.json").exists()
+        assert (attempts_dir / name / "diff.patch").exists()
+        assert (attempts_dir / name / "partial_work.patch").exists()
+
+
+def test_pre_existing_work_not_attributed_across_three_attempts(tmp_path: Path):
+    """Mirrors the SLOPFIX-03 caveat: the repo was already dirty beforehand."""
+    repo = _init_test_repo(tmp_path / "repo")
+    pre_existing = repo / "src" / "untouched.py"
+    pre_existing.write_text("PRE = 'existing'\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "pre-existing"], cwd=repo, check=True, capture_output=True
+    )
+    pre_existing.write_text("PRE = 'modified by user'\n", encoding="utf-8")
+
+    resolver = _three_hop_resolver(
+        resource_a={"side_effect": _edit_feature_to_false},
+        resource_b={"side_effect": _edit_feature_to_false},
+    )
+    res = _run_failover_task(repo, resolver, max_attempts=3)
+
+    assert res.final_state == "complete"
+    for attempt in res.implementation_attempts:
+        assert "src/untouched.py" not in attempt["delta"]["files_modified"]
+    # The user's own edit survives all three attempts and both rollbacks.
+    assert pre_existing.read_text(encoding="utf-8") == "PRE = 'modified by user'\n"
+
+
+def test_third_provider_identity_and_reviewers_recomputed(tmp_path: Path):
+    """Reviewer independence is recomputed against the provider that actually ran."""
+    registry = AgentRegistry([
+        _profile("resource_a", "Resource A", "provider_x"),
+        _profile("resource_b", "Resource B", "provider_y"),
+        _profile("resource_c", "Resource C", "provider_z"),
+        # Never used for implementation (resource_c outranks it), so it stays
+        # healthy and can serve as a genuinely independent reviewer.
+        _profile("resource_d", "Resource D", "provider_w"),
+    ])
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_failover_task(
+        repo, _three_hop_resolver(), max_attempts=3, registry=registry,
+    )
+
+    assert res.executing_provider == "resource_c"
+    assert res.task_spec.actual_agent == "resource_c"
+    mapping = res.routing_decision.metadata["reviewer_resource_mapping"]
+    assert mapping
+    # Recomputed for resource_c: the implementer never reviews its own work.
+    assert "resource_c" not in mapping.values()
+    assert res.routing_decision.metadata["review_diversity_achieved"] is True
+
+
+# ---------------------------------------------------------------------------
+# Attempt-bound accounting: exact, with no off-by-one at either edge
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("max_attempts", [1, 2, 3])
+def test_attempt_bound_is_exact(tmp_path: Path, max_attempts: int):
+    res = _run_all_fail(tmp_path, max_attempts=max_attempts)
+
+    assert res.final_state == "failed"
+    assert res.failure_class == FAILURE_CLASS_PROVIDER_EXHAUSTED
+    assert len(res.implementation_attempts) == max_attempts
+    assert res.failover_summary["attempts_used"] == max_attempts
+    assert res.failover_summary["attempts_allowed"] == max_attempts
+
+
+def test_exhaustion_reason_recorded_when_bound_reached(tmp_path: Path):
+    res = _run_all_fail(tmp_path, max_attempts=2)
+
+    summary = res.failover_summary
+    assert summary["termination_reason"] == "max_attempts_reached"
+    assert [entry["resource_id"] for entry in summary["attempted_resources"]] == [
+        "resource_a", "resource_b",
+    ]
+    assert all(
+        entry["failure_class"] == ProviderFailureClass.TRANSPORT_UNAVAILABLE.value
+        for entry in summary["attempted_resources"]
+    )
+
+
+def test_exhaustion_reason_recorded_when_pool_runs_out(tmp_path: Path):
+    """Only two resources exist, so a third attempt has nowhere to go."""
+    registry = AgentRegistry([
+        _profile("resource_a", "Resource A", "provider_x"),
+        _profile("resource_b", "Resource B", "provider_y"),
+    ])
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_failover_task(
+        repo,
+        _all_fail_resolver("resource_a", "resource_b"),
+        max_attempts=3,
+        registry=registry,
+    )
+
+    summary = res.failover_summary
+    assert res.failure_class == FAILURE_CLASS_PROVIDER_EXHAUSTED
+    assert summary["termination_reason"] == "no_eligible_resource"
+    assert summary["attempts_used"] == 2
+    assert summary["attempts_allowed"] == 3
+    assert summary["remaining_eligible"] == []
+    # Both are truthfully reported; capacity is the reason observed first.
+    assert summary["excluded"]["resource_a"] == "UNREACHABLE"
+    assert summary["excluded"]["resource_b"] == "UNREACHABLE"
+
+
+def test_policy_filtered_resource_reported_truthfully(tmp_path: Path):
+    """A paid-API resource is excluded for its real reason, not silently dropped."""
+    registry = _make_registry([
+        _profile("paid_api", "Paid API", "provider_z",
+                 interface="api", cost_class="paid_api"),
+    ])
+    res = _run_all_fail(tmp_path, max_attempts=3, registry=registry)
+
+    excluded = res.failover_summary["excluded"]
+    assert excluded["paid_api"] == "PAID_API_FORBIDDEN"
+    assert all(a["resource_id"] != "paid_api" for a in res.implementation_attempts)
+
+
+def test_capacity_before_precedes_the_attempt_it_describes(tmp_path: Path):
+    """capacity_before must be the pre-attempt state, not a post-hoc copy."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_failover_task(repo, _timeout_then_success_resolver())
+
+    first = res.implementation_attempts[0]
+    assert first["capacity_before"]["resource_a"] != "UNREACHABLE"
+    assert first["capacity_after"]["resource_a"] == "UNREACHABLE"
+
+
+def test_summary_reports_attempts_and_termination(tmp_path: Path):
+    """The operator-facing summary explains exhaustion without guesswork."""
+    from src.control_plane.launcher import _print_failover_accounting
+    import io
+    import contextlib
+
+    res = _run_all_fail(tmp_path, max_attempts=2)
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        _print_failover_accounting(res)
+    output = buffer.getvalue()
+
+    assert "Implementation attempts:" in output
+    assert "1. resource_a     TRANSPORT_UNAVAILABLE" in output
+    assert "2. resource_b     TRANSPORT_UNAVAILABLE" in output
+    assert "Attempts used:                2/2" in output
+    assert "Termination reason:           max_attempts_reached" in output
+    assert "resource_c" in output
+
+
+def _recover_now(pool: ProviderPoolManager, resource_id: str) -> None:
+    """Back-dates a resource's cooldown so the pool treats it as healthy again."""
+    state = pool.get_resource_status(resource_id)
+    state.retry_after = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+
+
+def test_attempt_exclusion_is_task_local_not_global(tmp_path: Path):
+    """A resource spent by one task is still offered to the next one.
+
+    Bounded failover must not become a back-door global suppression: resource_a
+    is barred from finishing the task that already tried it, but once its
+    cooldown lapses it is an ordinary candidate for any other task.
+    """
+    pool_holder: Dict[str, Any] = {}
+    first = _run_failover_task(
+        _init_test_repo(tmp_path / "repo_one"),
+        _three_hop_resolver(),
+        max_attempts=3,
+        pool_hook=_capture_pool(pool_holder),
+    )
+    _assert_completed_on_third_hop(first)
+
+    pool = pool_holder["pool"]
+    _recover_now(pool, "resource_a")
+    decision = pool.select_resource(_make_task("TEST-FAILOVER-02"), role="implementation")
+
+    # A different task carries no attempt history, so nothing bars resource_a.
+    assert "resource_a" in [
+        identity.resource_id for identity in decision.eligible_resources
+    ]
+    assert "ALREADY_ATTEMPTED" not in [
+        exclusion.reason for exclusion in decision.exclusions
+    ]
+
+    second = _run_failover_task(
+        _init_test_repo(tmp_path / "repo_two"),
+        _three_hop_resolver(),
+        task=_make_task("TEST-FAILOVER-02"),
+        max_attempts=3,
+        pool=pool,
+    )
+    assert second.final_state == "complete"
+
+
+def test_progress_narrates_both_failover_hops(tmp_path: Path):
+    """Human progress output names every hop, so a two-hop run is never silent."""
+    repo = _init_test_repo(tmp_path / "repo")
+    stderr, res = _capture_stderr(
+        lambda: _run_failover_task(repo, _three_hop_resolver(), max_attempts=3)
+    )
+
+    _assert_completed_on_third_hop(res)
+    transport = ProviderFailureClass.TRANSPORT_UNAVAILABLE.value
+    assert f"FAILOVER | resource_a -> resource_b | {transport}" in stderr
+    assert f"FAILOVER | resource_b -> resource_c | {transport}" in stderr
+    for resource_id in ("resource_a", "resource_b", "resource_c"):
+        assert stderr.count(f"IMPLEMENTING | {resource_id} | started") == 1
+    # Only the two abandoned attempts are reported as failures.
+    assert stderr.count("IMPLEMENTATION FAILED") == 2
+    assert "IMPLEMENTATION FAILED | resource_c" not in stderr
+    # Downstream phases name the provider that actually delivered.
+    assert "REVIEWING | resource_c" in stderr
+
+
+def test_verification_survives_two_hops_and_runs_only_after_success(tmp_path: Path):
+    """The plan is carried across both hops and executed once, after resource_c."""
+    repo = _init_test_repo(tmp_path / "repo")
+    stderr, res = _capture_stderr(
+        lambda: _run_failover_task(repo, _three_hop_resolver(), max_attempts=3)
+    )
+
+    _assert_completed_on_third_hop(res)
+    assert res.verification_plan is not None
+    assert len(res.verification_plan.steps) > 0
+    assert res.verification_plan.overall_status == "passed"
+    # Nothing was verified while providers were still being tried.
+    assert stderr.index("VERIFYING") > stderr.index("IMPLEMENTING | resource_c")
+    assert [attempt["success"] for attempt in res.implementation_attempts] == [
+        False, False, True,
+    ]
+
+
+# ---------------------------------------------------------------------------
+# HOWLFRAM-SLOPFIX-03 acceptance canary
+#
+# Reproduces the live run end to end with fakes: a launched provider killed by
+# the harness deadline whose own transcript contains an inner "command not
+# found", and a first provider whose cooldown lapses while the second one runs.
+# The chain must be a -> b -> c, never a -> b -> a.
+# ---------------------------------------------------------------------------
+_INNER_COMMAND_NOT_FOUND = (
+    "exec /usr/bin/bash -lc \"command -v jscpd\" in /repo\n"
+    "/usr/bin/bash: line 1: file: command not found\n"
+)
+
+
+def _assert_pristine_then_edit(marker: str) -> Callable:
+    """Fails the run unless the repo was rolled back before this attempt began."""
+    def _side_effect(_task, cwd: Path, _prompt) -> None:
+        assert _read_file(cwd, "src/feature.py") == "def run():\n    return True\n"
+        (cwd / "src" / "feature.py").write_text(
+            f"def run():\n    return '{marker}'\n", encoding="utf-8"
+        )
+    return _side_effect
+
+
+def test_slopfix03_canary_walks_three_providers(tmp_path: Path):
+    repo = _init_test_repo(tmp_path / "repo")
+    pool_holder: Dict[str, Any] = {}
+
+    def _b_side_effect(task, cwd: Path, prompt) -> None:
+        _assert_pristine_then_edit("b")(task, cwd, prompt)
+        # Attempt 1's cooldown lapses mid-attempt, as agy's did during codex.
+        _recover_now(pool_holder["pool"], "resource_a")
+
+    def _c_side_effect(task, cwd: Path, prompt) -> None:
+        _assert_pristine_then_edit("c")(task, cwd, prompt)
+        _edit_feature_to_true(task, cwd, prompt)
+
+    # resource_a launched, was killed by the harness, and its transcript blames a
+    # tool *it* invoked -- the exact shape that misclassified codex.
+    resolver = _FakeBackendResolver({
+        "resource_a": {
+            "success": False,
+            "stderr": _INNER_COMMAND_NOT_FOUND,
+            "timed_out": True,
+            "metadata": {
+                LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_LAUNCHED,
+                TIMEOUT_SOURCE_KEY: TIMEOUT_SOURCE_HARNESS,
+            },
+            "side_effect": _edit_feature_to_false,
+        },
+        "resource_b": {
+            "success": False,
+            "stderr": _TIMEOUT_STDERR,
+            "side_effect": _b_side_effect,
+        },
+        "resource_c": {"success": True, "side_effect": _c_side_effect},
+    })
+    res = _run_failover_task(
+        repo,
+        resolver,
+        max_attempts=3,
+        registry=_make_registry_three_providers(),
+        pool_hook=_capture_pool(pool_holder),
+    )
+
+    _assert_completed_on_third_hop(res)
+    transport = ProviderFailureClass.TRANSPORT_UNAVAILABLE.value
+    missing = ProviderFailureClass.MISSING_EXECUTABLE.value
+
+    # 1. A launched provider's inner tooling never demotes it to a missing binary.
+    assert res.implementation_attempts[0]["failure_class"] == transport
+    assert res.implementation_attempts[0]["failure_class"] != missing
+    assert res.implementation_attempts[1]["failure_class"] == transport
+
+    # 2. resource_a was healthy and top-ranked at selection time, yet not reused.
+    assert pool_holder["pool"].get_resource_status("resource_a").retry_after is None
+    assert {
+        exclusion["resource_id"]: exclusion["reason"]
+        for exclusion in res.implementation_attempts[1]["next_selection"]["exclusions"]
+    }["resource_a"] == "ALREADY_ATTEMPTED"
+
+    # 3. Both abandoned attempts kept their evidence and were rolled back cleanly.
+    attempts_dir = Path(res.run_dir) / "implementation" / "attempts"
+    for name in ("01-resource_a", "02-resource_b"):
+        assert (attempts_dir / name / "partial_work.patch").is_file()
+    for attempt in res.implementation_attempts[:2]:
+        assert attempt["rollback"] == {"restored": True, "error": None}
+        assert attempt["identity"]["resource_id"] == attempt["resource_id"]
+
+    # 4. Truthful final identity, independent review, passing verification.
+    assert res.task_spec.actual_agent == "resource_c"
+    mapping = res.routing_decision.metadata["reviewer_resource_mapping"]
+    assert mapping and "resource_c" not in mapping.values()
+    assert res.verification_plan.overall_status == "passed"
+    assert res.failover_summary["termination_reason"] == "implementation_succeeded"
+    assert res.failover_summary["attempts_used"] == 3

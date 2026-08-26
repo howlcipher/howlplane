@@ -26,6 +26,26 @@ from src.control_plane.task_spec import TaskSpec, DataClassSerializationMixin
 
 AGENT_EXECUTION_SCHEMA_VERSION = "howlplane.agent_execution/v1"
 
+# Structural launch evidence (SLOPFIX-03). Failure classification must be able
+# to tell "the provider executable is missing" apart from "the provider ran and
+# something inside its session failed". Only the backend that spawns the process
+# knows which happened, so it stamps the outcome here instead of leaving the
+# distinction to be guessed from transcript text.
+LAUNCH_OUTCOME_KEY = "launch_outcome"
+# The executable was absent before any spawn was attempted.
+LAUNCH_OUTCOME_NOT_INSTALLED = "not_installed"
+# A spawn was attempted and the OS refused it (ENOENT, EACCES, ENOTDIR).
+LAUNCH_OUTCOME_SPAWN_FAILED = "spawn_failed"
+# The process started. Anything it printed is session output, not launch evidence.
+LAUNCH_OUTCOME_LAUNCHED = "launched"
+
+# Where a timeout verdict came from. "harness" means this process enforced the
+# deadline and killed the provider, which is structural fact. "transcript" means
+# the verdict was inferred from provider output and is only as good as that text.
+TIMEOUT_SOURCE_KEY = "timeout_source"
+TIMEOUT_SOURCE_HARNESS = "harness"
+TIMEOUT_SOURCE_TRANSCRIPT = "transcript"
+
 # Local Ollama defaults (milestone #58). Intentionally conservative: a single
 # 7B-instruct model, a bounded 8K context window, and one inference at a time
 # on modest consumer hardware. See documentation/LOCAL_MODEL.md.
@@ -166,6 +186,17 @@ class AgentUnavailableError(AgentExecutionError):
     pass
 
 
+def _launch_metadata(
+    launch_outcome: str,
+    timeout_source: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Builds the structural execution markers classification relies on."""
+    metadata: Dict[str, Any] = {LAUNCH_OUTCOME_KEY: launch_outcome}
+    if timeout_source:
+        metadata[TIMEOUT_SOURCE_KEY] = timeout_source
+    return metadata
+
+
 @dataclass
 class AgentExecutionResult(DataClassSerializationMixin):
     """Normalized result of an agent execution invocation."""
@@ -276,6 +307,7 @@ class SubprocessAgentBackend(AgentBackend):
                 duration_seconds=0.0,
                 success=False,
                 error_message=f"Agent '{self.agent_id}' unavailable",
+                metadata={LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_NOT_INSTALLED},
             )
 
         prompt = prompt_override or f"Execute task {task.task_id}: {task.objective}"
@@ -333,6 +365,10 @@ class SubprocessAgentBackend(AgentBackend):
                 success=(completed.returncode == 0),
                 timed_out=is_timeout,
                 error_message=err_msg,
+                metadata=_launch_metadata(
+                    LAUNCH_OUTCOME_LAUNCHED,
+                    TIMEOUT_SOURCE_TRANSCRIPT if is_timeout else None,
+                ),
             )
         except subprocess.TimeoutExpired as exc:
             dur = round(time.time() - start_t, 3)
@@ -349,6 +385,25 @@ class SubprocessAgentBackend(AgentBackend):
                 success=False,
                 timed_out=True,
                 error_message=f"Timeout after {timeout_seconds}s",
+                metadata=_launch_metadata(
+                    LAUNCH_OUTCOME_LAUNCHED, TIMEOUT_SOURCE_HARNESS
+                ),
+            )
+        except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
+            # The OS refused the spawn, so the executable really is missing or
+            # unusable. This is the only in-flight error that means that.
+            dur = round(time.time() - start_t, 3)
+            return AgentExecutionResult(
+                agent_id=self.agent_id,
+                role=role,
+                command=cmd_str,
+                exit_code=127,
+                stdout="",
+                stderr=str(exc),
+                duration_seconds=dur,
+                success=False,
+                error_message=str(exc),
+                metadata={LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_SPAWN_FAILED},
             )
         except Exception as exc:
             dur = round(time.time() - start_t, 3)
@@ -623,6 +678,8 @@ class FakeAgentBackend(AgentBackend):
         default_stderr: str = "",
         side_effect: Optional[Callable[[TaskSpec, Path, str], None]] = None,
         duration: float = 0.05,
+        default_timed_out: bool = False,
+        default_metadata: Optional[Dict[str, Any]] = None,
     ):
         self.agent_id = agent_id
         self.default_exit_code = default_exit_code
@@ -630,6 +687,8 @@ class FakeAgentBackend(AgentBackend):
         self.default_stderr = default_stderr
         self.side_effect = side_effect
         self.duration = duration
+        self.default_timed_out = default_timed_out
+        self.default_metadata = dict(default_metadata or {})
         self.executed_calls: List[Dict[str, Any]] = []
 
     def is_available(self) -> bool:
@@ -689,7 +748,9 @@ class FakeAgentBackend(AgentBackend):
             stderr=self.default_stderr,
             duration_seconds=self.duration,
             success=ok,
+            timed_out=self.default_timed_out,
             error_message=None if ok else f"Exit code {self.default_exit_code}",
+            metadata=dict(self.default_metadata),
         )
 
 

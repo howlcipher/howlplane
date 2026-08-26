@@ -61,6 +61,7 @@ from src.control_plane.reasoning.execution_trajectory import (
 )
 
 ORCHESTRATOR_SCHEMA_VERSION = "howlplane.orchestrator/v1"
+FAILOVER_SUMMARY_SCHEMA_VERSION = "howlplane.failover_summary/v1"
 
 # Structured reasons a governed task did not reach "complete" (#59.1 Phase 1).
 # The orchestrator assigns only the classes it can prove from its own gates.
@@ -73,6 +74,15 @@ FAILURE_CLASS_VERIFICATION = "VERIFICATION_FAILURE"
 FAILURE_CLASS_PROVIDER_EXHAUSTED = "PROVIDER_EXHAUSTED"
 FAILURE_CLASS_PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
 FAILURE_CLASS_NO_ELIGIBLE_RESOURCE = "NO_ELIGIBLE_AI_RESOURCE"
+
+# Why bounded implementation failover stopped. Recorded verbatim in the run's
+# failover summary so an operator never has to infer it from a message string.
+TERMINATION_MAX_ATTEMPTS_REACHED = "max_attempts_reached"
+TERMINATION_NO_ELIGIBLE_RESOURCE = "no_eligible_resource"
+TERMINATION_NON_FAILOVER_FAILURE = "non_failover_failure"
+TERMINATION_ROLLBACK_FAILED = "rollback_failed"
+TERMINATION_ATTEMPTS_EXHAUSTED = "attempts_exhausted"
+TERMINATION_IMPLEMENTATION_SUCCEEDED = "implementation_succeeded"
 
 
 @dataclass
@@ -150,6 +160,8 @@ class OrchestrationResult:
     trajectory_id: Optional[str] = None
     # Additive record of every implementation provider attempt, successful or not.
     implementation_attempts: List[Dict[str, Any]] = field(default_factory=list)
+    # Why bounded failover stopped, and what was still eligible when it did.
+    failover_summary: Optional[Dict[str, Any]] = None
     schema: str = ORCHESTRATOR_SCHEMA_VERSION
 
     @property
@@ -183,6 +195,7 @@ class OrchestrationResult:
             "capacity_after": self.capacity_after,
             "trajectory_id": self.trajectory_id,
             "implementation_attempts": self.implementation_attempts,
+            "failover_summary": self.failover_summary,
             "schema": self.schema,
         }
 
@@ -310,6 +323,7 @@ class GovernedTaskOrchestrator:
             "attempt": attempt_num,
             "resource_id": resource_id,
             "agent_id": impl_res.agent_id if impl_res else resource_id,
+            "identity": self._resource_identity_fields(resource_id),
             "success": impl_res.success if impl_res else False,
             "exit_code": impl_res.exit_code if impl_res else None,
             "duration_seconds": impl_res.duration_seconds if impl_res else 0.0,
@@ -319,10 +333,121 @@ class GovernedTaskOrchestrator:
             "capacity_after": capacity_after,
             "evidence_dir": str(attempt_dir.relative_to(run_dir)),
         }
-        (attempt_dir / "attempt_record.json").write_text(
-            json.dumps(record, indent=2), encoding="utf-8"
-        )
+        self._persist_attempt_record(record, attempts_dir)
         return record
+
+    def _resource_identity_fields(self, resource_id: str) -> Dict[str, Any]:
+        """Names which provider, interface, and model actually ran this attempt."""
+        state = (
+            self.config.provider_pool.get_resource_status(resource_id)
+            if self.config.provider_pool is not None else None
+        )
+        if state is None:
+            return {
+                "provider_id": None,
+                "interface_id": None,
+                "resource_id": resource_id,
+                "model_id": None,
+            }
+        return {
+            "provider_id": state.provider_id,
+            "interface_id": state.interface_id,
+            "resource_id": state.resource_id or resource_id,
+            "model_id": state.model_id,
+        }
+
+    @staticmethod
+    def _persist_attempt_record(
+        attempt_record: Dict[str, Any],
+        attempts_dir: Path,
+    ) -> None:
+        """Rewrites an attempt's record in place as later evidence is amended.
+
+        Attempt evidence is additive and is filled in across the attempt's
+        lifetime -- the result first, then the failover selection, then the
+        rollback outcome -- so every amendment goes through here rather than
+        opening its own write path.
+        """
+        record_path = (
+            attempts_dir
+            / f"{attempt_record['attempt']:02d}-{attempt_record['resource_id']}"
+            / "attempt_record.json"
+        )
+        record_path.write_text(json.dumps(attempt_record, indent=2), encoding="utf-8")
+
+    def _attach_next_selection(
+        self,
+        attempt_record: Dict[str, Any],
+        attempts_dir: Path,
+        decision: Any,
+    ) -> None:
+        """Records which resource failover chose next, and why the others lost."""
+        selected = getattr(decision, "selected", None)
+        attempt_record["next_selection"] = {
+            "selected_resource_id": selected.resource_id if selected else None,
+            "blocked_reason": getattr(decision, "blocked_reason", None),
+            "eligible_resources": [
+                identity.resource_id
+                for identity in getattr(decision, "eligible_resources", []) or []
+            ],
+            "exclusions": [
+                {
+                    "resource_id": exclusion.resource_id,
+                    "reason": exclusion.reason,
+                    "stage": exclusion.stage,
+                }
+                for exclusion in getattr(decision, "exclusions", []) or []
+            ],
+        }
+        self._persist_attempt_record(attempt_record, attempts_dir)
+
+    def _attach_rollback_result(
+        self,
+        attempt_record: Dict[str, Any],
+        attempts_dir: Path,
+        restored: bool,
+        error: Optional[str],
+    ) -> None:
+        """Records whether this attempt's work was safely undone before the next."""
+        attempt_record["rollback"] = {"restored": restored, "error": error}
+        self._persist_attempt_record(attempt_record, attempts_dir)
+
+    def _build_failover_summary(
+        self,
+        implementation_attempts: List[Dict[str, Any]],
+        termination_reason: str,
+        last_decision: Any,
+    ) -> Dict[str, Any]:
+        """Explains exhaustion so an operator never has to guess why it stopped."""
+        remaining: List[str] = []
+        excluded: Dict[str, str] = {}
+        if last_decision is not None:
+            selected = getattr(last_decision, "selected", None)
+            remaining = [
+                identity.resource_id
+                for identity in getattr(last_decision, "eligible_resources", []) or []
+                if selected is None or identity.resource_id != selected.resource_id
+            ]
+            excluded = {
+                exclusion.resource_id: exclusion.reason
+                for exclusion in getattr(last_decision, "exclusions", []) or []
+            }
+        return {
+            "attempts_used": len(implementation_attempts),
+            "attempts_allowed": self.config.max_provider_failover_attempts,
+            "termination_reason": termination_reason,
+            "attempted_resources": [
+                {
+                    "attempt": attempt.get("attempt"),
+                    "resource_id": attempt.get("resource_id"),
+                    "failure_class": attempt.get("failure_class"),
+                }
+                for attempt in implementation_attempts
+            ],
+            "remaining_eligible": remaining,
+            "excluded": excluded,
+            "schema": FAILOVER_SUMMARY_SCHEMA_VERSION,
+        }
 
     def _is_failover_eligible_failure(self, failure_class: Optional[Any]) -> bool:
         """Returns True when the normalized failure class justifies provider failover."""
@@ -787,6 +912,9 @@ class GovernedTaskOrchestrator:
         # provider execution in *this* process to report (#59.1 Phase 1).
         impl_res: Optional[AgentExecutionResult] = None
         implementation_attempts: List[Dict[str, Any]] = []
+        # Declared out here because a resumed run can skip the attempt loop
+        # entirely and still needs to report failover accounting.
+        last_selection_decision: Optional[Any] = None
 
         if has_existing_delta and rec_delta:
             current_delta = rec_delta
@@ -819,6 +947,7 @@ class GovernedTaskOrchestrator:
                 err_msg: str,
                 failure_class: str,
                 exit_code: int = 1,
+                termination_reason: str = TERMINATION_NON_FAILOVER_FAILURE,
             ) -> OrchestrationResult:
                 """Terminal-fails the run from inside the implementation attempt loop.
 
@@ -843,6 +972,11 @@ class GovernedTaskOrchestrator:
                     provider_execution=impl_res,
                     failure_class=failure_class,
                     implementation_attempts=implementation_attempts,
+                    failover_summary=self._build_failover_summary(
+                        implementation_attempts,
+                        termination_reason,
+                        last_selection_decision,
+                    ),
                 )
 
             for attempt_num in range(1, self.config.max_provider_failover_attempts + 1):
@@ -903,6 +1037,13 @@ class GovernedTaskOrchestrator:
                             timeout_seconds=self.config.timeout_seconds,
                         )
 
+                # Snapshot capacity before record_result mutates it, so the
+                # recorded "before" is genuinely the pre-attempt state.
+                capacity_before: Dict[str, str] = (
+                    self.config.provider_pool.get_all_statuses()
+                    if self.config.provider_pool is not None else {}
+                )
+
                 if self.config.provider_pool is not None and impl_res is not None:
                     normalized_failure = self.config.provider_pool.record_result(
                         current_impl_resource_id,
@@ -912,11 +1053,6 @@ class GovernedTaskOrchestrator:
 
                 current_delta = self._capture_scoped_delta(
                     task_spec, baseline, current_impl_resource_id, stage="implementation"
-                )
-
-                capacity_before: Dict[str, str] = (
-                    self.config.provider_pool.get_all_statuses()
-                    if self.config.provider_pool is not None else {}
                 )
 
                 attempt_record = self._record_implementation_attempt(
@@ -962,11 +1098,18 @@ class GovernedTaskOrchestrator:
                     reason=failure_class_value or err_msg,
                 )
 
+                # This resource is spent for this task from here on, whatever
+                # happens next. Recording it before selection is what stops a
+                # resource whose cooldown elapsed mid-attempt from being offered
+                # back and dead-ending the loop (SLOPFIX-03).
+                attempted_impl_resource_ids.add(current_impl_resource_id)
+
                 if not self._is_failover_eligible_failure(normalized_failure):
                     return fail_implementation(
                         err_msg,
                         self._map_failure_class_to_orchestrator_class(normalized_failure),
                         exit_code=impl_res.exit_code if impl_res and impl_res.exit_code != 0 else 1,
+                        termination_reason=TERMINATION_NON_FAILOVER_FAILURE,
                     )
 
                 if attempt_num >= self.config.max_provider_failover_attempts:
@@ -974,16 +1117,24 @@ class GovernedTaskOrchestrator:
                         f"Implementation failed on {current_impl_resource_id} ({failure_class_value}); "
                         f"max failover attempts ({self.config.max_provider_failover_attempts}) reached."
                     )
-                    return fail_implementation(err_msg, FAILURE_CLASS_PROVIDER_EXHAUSTED)
+                    return fail_implementation(
+                        err_msg,
+                        FAILURE_CLASS_PROVIDER_EXHAUSTED,
+                        termination_reason=TERMINATION_MAX_ATTEMPTS_REACHED,
+                    )
 
-                # Select next eligible implementation resource.
+                # Select next eligible implementation resource. Everything already
+                # attempted is a hard exclusion, not merely a demotion.
                 next_resource_id = None
                 if self.config.provider_pool is not None:
                     next_decision = self.config.provider_pool.select_resource(
                         task_spec,
                         role="implementation",
                         avoid_resource_id=current_impl_resource_id,
+                        exclude_resource_ids=attempted_impl_resource_ids,
                     )
+                    last_selection_decision = next_decision
+                    self._attach_next_selection(attempt_record, attempts_dir, next_decision)
                     if next_decision.selected:
                         next_resource_id = next_decision.selected.resource_id
 
@@ -993,15 +1144,26 @@ class GovernedTaskOrchestrator:
                     or next_resource_id in attempted_impl_resource_ids
                 ):
                     err_msg = f"Implementation failed on {current_impl_resource_id} ({failure_class_value}) and no eligible failover resource remains."
-                    return fail_implementation(err_msg, FAILURE_CLASS_PROVIDER_EXHAUSTED)
+                    return fail_implementation(
+                        err_msg,
+                        FAILURE_CLASS_PROVIDER_EXHAUSTED,
+                        termination_reason=TERMINATION_NO_ELIGIBLE_RESOURCE,
+                    )
 
                 # Restore repository to baseline before the next attempt.
                 restored_ok, restore_err = restore_repository_to_baseline(
                     self.target_repo, baseline, current_delta
                 )
+                self._attach_rollback_result(
+                    attempt_record, attempts_dir, restored_ok, restore_err
+                )
                 if not restored_ok:
                     err_msg = f"Implementation failover aborted: cannot safely restore baseline ({restore_err})."
-                    return fail_implementation(err_msg, FAILURE_CLASS_PROVIDER_UNAVAILABLE)
+                    return fail_implementation(
+                        err_msg,
+                        FAILURE_CLASS_PROVIDER_UNAVAILABLE,
+                        termination_reason=TERMINATION_ROLLBACK_FAILED,
+                    )
 
                 progress.emit_failover(
                     current_impl_resource_id,
@@ -1021,7 +1183,6 @@ class GovernedTaskOrchestrator:
                     },
                 )
 
-                attempted_impl_resource_ids.add(current_impl_resource_id)
                 current_impl_resource_id = next_resource_id
 
             if impl_res is None or not impl_res.success:
@@ -1045,6 +1206,11 @@ class GovernedTaskOrchestrator:
                     provider_execution=impl_res,
                     failure_class=FAILURE_CLASS_PROVIDER_EXHAUSTED,
                     implementation_attempts=implementation_attempts,
+                    failover_summary=self._build_failover_summary(
+                        implementation_attempts,
+                        TERMINATION_ATTEMPTS_EXHAUSTED,
+                        last_selection_decision,
+                    ),
                 )
 
             initial_delta = current_delta
@@ -1388,6 +1554,11 @@ class GovernedTaskOrchestrator:
             remediation_count=remediation_count,
             provider_execution=impl_res,
             implementation_attempts=implementation_attempts,
+            failover_summary=self._build_failover_summary(
+                implementation_attempts,
+                TERMINATION_IMPLEMENTATION_SUCCEEDED,
+                last_selection_decision,
+            ),
         )
 
         if boundary_res.requires_human_approval:
@@ -1509,6 +1680,7 @@ class GovernedTaskOrchestrator:
         provider_execution: Optional[AgentExecutionResult] = None,
         failure_class: Optional[str] = None,
         implementation_attempts: Optional[List[Dict[str, Any]]] = None,
+        failover_summary: Optional[Dict[str, Any]] = None,
     ) -> OrchestrationResult:
         return OrchestrationResult(
             task_id=task_spec.task_id,
@@ -1539,6 +1711,7 @@ class GovernedTaskOrchestrator:
                 if self.config.provider_pool is not None else {}
             ),
             implementation_attempts=implementation_attempts or [],
+            failover_summary=failover_summary,
         )
 
     def _fail_task(

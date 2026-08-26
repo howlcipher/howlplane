@@ -16,6 +16,8 @@ Deterministic tests for failure-handling defects exposed by real dogfood runs:
 11. Failed implementation terminalizes stage checkpoint (status: failed, timestamp set).
 12. Stale 'in_progress' state does not remain after controlled failure.
 13. Pre-existing target-repo dirt and .task_runs/ evidence are not counted as implementation changes.
+14. MISSING_EXECUTABLE rests on structural launch evidence, never on transcript text
+    emitted by a provider that demonstrably started (HOWLFRAM-SLOPFIX-03).
 """
 
 from io import StringIO
@@ -27,7 +29,13 @@ import pytest
 from src.control_plane.agent_execution import (
     AgentBackend,
     AgentExecutionResult,
+    LAUNCH_OUTCOME_KEY,
+    LAUNCH_OUTCOME_LAUNCHED,
+    LAUNCH_OUTCOME_NOT_INSTALLED,
+    LAUNCH_OUTCOME_SPAWN_FAILED,
     SubprocessAgentBackend,
+    TIMEOUT_SOURCE_HARNESS,
+    TIMEOUT_SOURCE_KEY,
 )
 from src.control_plane.authority_envelope import create_envelope
 from src.control_plane.authority_profile import get_profile
@@ -182,6 +190,174 @@ def test_unrelated_exit_code_1_remains_engineering_failure():
 
     event = pool.detect_exhaustion("agy", res, task_id="HOWLFRAM-18B2F1")
     assert event is None
+
+
+# ---------------------------------------------------------------------------
+# Launch-evidence classification (HOWLFRAM-SLOPFIX-03)
+#
+# In the live SLOPFIX-03 run, Codex ran for 600s, edited the repository, and was
+# killed by the harness timeout -- yet it was classified MISSING_EXECUTABLE
+# because its own 471KB session transcript contained the line
+# "/usr/bin/bash: line 1: file: command not found" from a command Codex itself
+# ran. That marked an installed provider permanently unavailable.
+# ---------------------------------------------------------------------------
+
+# Verbatim from the SLOPFIX-03 Codex transcript. "malformed"/"invalid yaml" are
+# present too, and rank above the transport check, so text alone cannot resolve
+# this correctly -- only structural evidence can.
+SLOPFIX03_CODEX_TRANSCRIPT = (
+    "exec /usr/bin/bash -lc \"command -v jscpd || true\" in /repo\n"
+    " succeeded in 0ms:\n"
+    "/usr/bin/bash: line 1: file: command not found\n"
+    "/usr/bin/node\n"
+    "ensureRecord(isDir, `tombstones dir not found: ${dir}`);\n"
+    "note: malformed entry skipped; invalid yaml in fixture\n"
+    "\nTimeout after 600s."
+)
+
+
+def _execution_result(
+    *,
+    agent_id: str = "codex",
+    exit_code: int = -1,
+    stderr: str = "",
+    timed_out: bool = False,
+    error_message: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> AgentExecutionResult:
+    """Builds a failed provider execution with explicit structural markers."""
+    return AgentExecutionResult(
+        agent_id=agent_id,
+        role="implementation",
+        command=f"{agent_id} exec '...'",
+        exit_code=exit_code,
+        stdout="",
+        stderr=stderr,
+        duration_seconds=600.039,
+        success=False,
+        timed_out=timed_out,
+        error_message=error_message,
+        metadata=metadata or {},
+    )
+
+
+def test_executable_absent_before_launch_is_missing_executable():
+    """A provider that was never spawned is genuinely MISSING_EXECUTABLE."""
+    pool = ProviderPoolManager()
+    res = _execution_result(
+        exit_code=127,
+        stderr="Agent binary 'codex' is not installed or available on PATH.",
+        error_message="Agent 'codex' unavailable",
+        metadata={LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_NOT_INSTALLED},
+    )
+
+    assert pool.classify_failure("codex", res) == ProviderFailureClass.MISSING_EXECUTABLE
+
+
+def test_spawn_failure_is_missing_executable():
+    """An OS-refused spawn (ENOENT) is the other genuine missing-executable case."""
+    pool = ProviderPoolManager()
+    res = _execution_result(
+        exit_code=127,
+        stderr="[Errno 2] No such file or directory: 'codex'",
+        error_message="[Errno 2] No such file or directory: 'codex'",
+        metadata={LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_SPAWN_FAILED},
+    )
+
+    assert pool.classify_failure("codex", res) == ProviderFailureClass.MISSING_EXECUTABLE
+
+
+def test_launched_provider_inner_command_not_found_is_not_missing_executable():
+    """The SLOPFIX-03 regression: a running provider's transcript never demotes it."""
+    pool = ProviderPoolManager()
+    res = _execution_result(
+        stderr=SLOPFIX03_CODEX_TRANSCRIPT,
+        timed_out=True,
+        error_message="Timeout after 600s",
+        metadata={
+            LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_LAUNCHED,
+            TIMEOUT_SOURCE_KEY: TIMEOUT_SOURCE_HARNESS,
+        },
+    )
+
+    failure_class = pool.classify_failure("codex", res)
+    assert failure_class != ProviderFailureClass.MISSING_EXECUTABLE
+    assert failure_class == ProviderFailureClass.TRANSPORT_UNAVAILABLE
+    # The provider must stay recoverable, not be permanently written off.
+    pool.record_result("codex", res)
+    assert pool.get_status("codex") == ProviderAvailabilityStatus.UNREACHABLE
+
+
+def test_launched_provider_engineering_failure_is_not_missing_executable():
+    """A launched provider failing on code, whose log mentions absent files."""
+    pool = ProviderPoolManager()
+    res = _execution_result(
+        exit_code=1,
+        stderr="wc: documentation/CONTROL_PLANE.md: No such file or directory\n"
+               "AssertionError: expected 290, got 291\n",
+        error_message="Process exited with code 1",
+        metadata={LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_LAUNCHED},
+    )
+
+    assert pool.classify_failure("codex", res) == ProviderFailureClass.ENGINEERING_FAILURE
+
+
+def test_legacy_result_without_markers_keeps_substring_fallback():
+    """Backends that stamp no markers retain the previous text-based behavior."""
+    pool = ProviderPoolManager()
+    res = _execution_result(
+        exit_code=1,
+        stderr="codex: command not found\n",
+        error_message="Process exited with code 1",
+    )
+
+    assert pool.classify_failure("codex", res) == ProviderFailureClass.MISSING_EXECUTABLE
+
+
+def test_legacy_timeout_outranks_inner_command_not_found():
+    """Without markers, the more specific timeout verdict still wins the tie."""
+    pool = ProviderPoolManager()
+    res = _execution_result(
+        exit_code=1,
+        stderr="/usr/bin/bash: line 1: file: command not found\nTimeout after 600s\n",
+        timed_out=True,
+        error_message="Timeout after 600s",
+    )
+
+    assert pool.classify_failure("codex", res) == ProviderFailureClass.TRANSPORT_UNAVAILABLE
+
+
+def test_legacy_exit_127_remains_missing_executable():
+    """Exit 127 is the shell's own structural verdict, so it survives a timeout."""
+    pool = ProviderPoolManager()
+    res = _execution_result(
+        exit_code=127,
+        stderr="codex: command not found\nrequest timed out\n",
+        timed_out=True,
+        error_message="Process exited with code 127",
+    )
+
+    assert pool.classify_failure("codex", res) == ProviderFailureClass.MISSING_EXECUTABLE
+
+
+def test_subprocess_backend_stamps_launch_outcome_when_binary_absent():
+    """The structural marker comes from the backend, not from the classifier."""
+    backend = SubprocessAgentBackend("codex", "definitely-not-a-real-binary-xyz")
+    task = TaskSpec(
+        task_id="LAUNCH-01",
+        repository="test_repo",
+        objective="never runs",
+        acceptance_criteria=["n/a"],
+        task_class="bug_fix",
+        risk_level="low",
+    )
+
+    res = backend.execute(task=task, cwd=Path.cwd(), role="implementation")
+
+    assert res.metadata[LAUNCH_OUTCOME_KEY] == LAUNCH_OUTCOME_NOT_INSTALLED
+    assert ProviderPoolManager().classify_failure("codex", res) == (
+        ProviderFailureClass.MISSING_EXECUTABLE
+    )
 
 
 def _run_task_with_backend(

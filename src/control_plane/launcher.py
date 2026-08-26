@@ -302,6 +302,45 @@ def create_task_plan(
     return spec, decision
 
 
+def _print_failover_accounting(res: OrchestrationResult) -> None:
+    """Explains multi-attempt implementation so exhaustion is never a mystery."""
+    attempts = res.implementation_attempts or []
+    summary = res.failover_summary or {}
+    if len(attempts) <= 1 and res.final_state != "failed":
+        print("")
+        return
+    print("")
+    print("Implementation attempts:")
+    for attempt in attempts:
+        label = attempt.get("resource_id") or "unknown"
+        outcome = (
+            "SUCCESS" if attempt.get("success")
+            else (attempt.get("failure_class") or "FAILED")
+        )
+        print(f"  {attempt.get('attempt')}. {label:<14} {outcome}")
+    if not attempts:
+        print("  (none recorded)")
+    if summary:
+        print("")
+        print("Failover:")
+        print(
+            "  Attempts used:                "
+            f"{summary.get('attempts_used')}/{summary.get('attempts_allowed')}"
+        )
+        remaining = summary.get("remaining_eligible") or []
+        print(
+            "  Remaining eligible resources: "
+            f"{', '.join(remaining) if remaining else 'none'}"
+        )
+        print(f"  Termination reason:           {summary.get('termination_reason')}")
+        excluded = summary.get("excluded") or {}
+        if excluded:
+            print("  Excluded resources:")
+            for resource_id, reason in sorted(excluded.items()):
+                print(f"    {resource_id:<14} {reason}")
+    print("")
+
+
 def _print_orchestration_summary(
     res: OrchestrationResult,
     ctx: ProjectContext,
@@ -360,7 +399,7 @@ def _print_orchestration_summary(
         print(f"  Files Changed:   {fc}")
         print(f"  Insertions:       {ins}")
         print(f"  Deletions:       {dels}")
-    print("")
+    _print_failover_accounting(res)
     print("Review:")
     if res.review_cycles:
         last_cycle = res.review_cycles[-1]
