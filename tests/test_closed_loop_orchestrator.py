@@ -15,38 +15,25 @@ from src.control_plane.agent_execution import FakeAgentBackend
 from src.control_plane.launcher import cmd_work, cmd_status, build_parser
 from src.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
 from src.control_plane.task_spec import TaskSpec
+from tests._git_test_helpers import git_in_repo, init_git_repo
 
 
 def _init_test_git_repo(path: Path) -> Path:
     """Helper to initialize a real git repository with pyproject and sample code."""
-    path.mkdir(parents=True, exist_ok=True)
-    for cmd in [
-        ["git", "init", "-b", "main"],
-        ["git", "config", "user.email", "ci@howlplane.local"],
-        ["git", "config", "user.name", "HowlPlane CI"],
-    ]:
-        subprocess.run(cmd, cwd=str(path), check=True, capture_output=True)
-
-    (path / "AGENTS.md").write_text("# Test Project Engineering Context\n", encoding="utf-8")
-    (path / "pyproject.toml").write_text(
-        '[project]\nname = "auth_service"\nversion = "0.1.0"\n',
-        encoding="utf-8",
+    return init_git_repo(
+        path,
+        files={
+            "AGENTS.md": "# Test Project Engineering Context\n",
+            "pyproject.toml": '[project]\nname = "auth_service"\nversion = "0.1.0"\n',
+            "src/__init__.py": "",
+            "src/auth.py": "def authenticate(username, token):\n    return False\n",
+            "tests/__init__.py": "",
+            "tests/test_auth.py": (
+                "from src.auth import authenticate\n\n\ndef test_stub():\n"
+                "    assert authenticate('user', 'tok') is False\n"
+            ),
+        },
     )
-    (path / "src").mkdir()
-    (path / "src" / "__init__.py").write_text("", encoding="utf-8")
-    (path / "src" / "auth.py").write_text(
-        "def authenticate(username, token):\n    return False\n",
-        encoding="utf-8",
-    )
-    (path / "tests").mkdir()
-    (path / "tests" / "__init__.py").write_text("", encoding="utf-8")
-    (path / "tests" / "test_auth.py").write_text(
-        "from src.auth import authenticate\n\n\ndef test_stub():\n    assert authenticate('user', 'tok') is False\n",
-        encoding="utf-8",
-    )
-    subprocess.run(["git", "add", "."], cwd=str(path), check=True)
-    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=str(path), check=True)
-    return path
 
 
 # ============================================================================
@@ -369,8 +356,8 @@ def test_allowed_paths_enforcement_reverts_out_of_scope_edits(tmp_path):
     journal = repo / "docs" / "journal.md"
     journal.parent.mkdir(parents=True, exist_ok=True)
     journal.write_text("# initial\n", encoding="utf-8")
-    subprocess.run(["git", "add", "docs/journal.md"], cwd=str(repo), check=True)
-    subprocess.run(["git", "commit", "-m", "Add journal"], cwd=str(repo), check=True)
+    git_in_repo(repo, ["add", "docs/journal.md"])
+    git_in_repo(repo, ["commit", "-m", "Add journal"])
 
     spec = TaskSpec(
         task_id="SCOPE-001",

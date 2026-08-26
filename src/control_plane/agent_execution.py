@@ -17,6 +17,12 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from src.control_plane.locking import LocalInferenceLock, LockError
+from src.control_plane.provider_execution_profile import (
+    MUTATION_TOOLS,
+    ProviderExecutionProfile,
+    build_execution_profile,
+    is_mutating_role,
+)
 from src.control_plane.resource_models import (
     AuthenticationStatus,
     BackendReadiness,
@@ -45,6 +51,47 @@ LAUNCH_OUTCOME_LAUNCHED = "launched"
 TIMEOUT_SOURCE_KEY = "timeout_source"
 TIMEOUT_SOURCE_HARNESS = "harness"
 TIMEOUT_SOURCE_TRANSCRIPT = "transcript"
+
+# Whether the provider was denied a tool the task required. A provider that
+# exits 0 after reporting "I need approval before I can edit" has not
+# implemented anything, and must not be recorded as a successful
+# implementation. Like the launch and timeout markers above, this is stamped by
+# the backend that owns the invocation rather than inferred downstream.
+TOOL_PERMISSION_KEY = "tool_permission_outcome"
+TOOL_PERMISSION_DENIED = "denied"
+
+# Fallback phrases for a provider that reports an approval block in prose
+# without populating a structured denial record. Deliberately narrow: this can
+# only ever demote a claimed success, never manufacture one.
+_PERMISSION_BLOCK_MARKERS = (
+    "requires approval",
+    "require approval",
+    "requires permission",
+    "needs approval",
+    "permission denied by user",
+    "not permitted to use",
+    "approve bash execution",
+)
+
+
+def _parse_claude_result_envelope(stdout: str) -> Optional[Dict[str, Any]]:
+    """Returns the `--output-format json` result object, or None if absent."""
+    text = (stdout or "").strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(parsed, dict) and parsed.get("type") == "result":
+        return parsed
+    return None
+
+
+def _reports_permission_block(text: Optional[str]) -> bool:
+    """Returns True when transcript text states a tool was blocked on approval."""
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in _PERMISSION_BLOCK_MARKERS)
 
 # Local Ollama defaults (milestone #58). Intentionally conservative: a single
 # 7B-instruct model, a bounded 8K context window, and one inference at a time
@@ -267,6 +314,7 @@ class SubprocessAgentBackend(AgentBackend):
     def probe_readiness(self) -> BackendReadiness:
         """Reports executable presence without contacting the hosted provider."""
         installed = self.is_available()
+        native_support = self.agent_id in {"codex", "agy", "devin_cli"}
         return BackendReadiness(
             status=(
                 ReadinessStatus.READY
@@ -278,6 +326,12 @@ class SubprocessAgentBackend(AgentBackend):
             authentication=AuthenticationStatus.UNKNOWN,
             reason=None if installed else "MISSING_EXECUTABLE",
             evidence=f"executable:{self.binary_name}",
+            unattended_mutation_capable=installed if native_support else (False if installed and self.agent_id == "gemini_cli" else None),
+            capability_reason="native_role_support" if native_support and installed else (
+                "headless non-interactive mutation unsupported" if self.agent_id == "gemini_cli" and installed else (
+                    "MISSING_EXECUTABLE" if not installed else None
+                )
+            ),
         )
 
     def build_command(self, task: TaskSpec, cwd: Path, role: str, prompt: str) -> List[str]:
@@ -422,8 +476,131 @@ class SubprocessAgentBackend(AgentBackend):
 
 # Built-in specialized CLI agent backend instances
 class ClaudeCodeBackend(SubprocessAgentBackend):
-    def __init__(self):
-        super().__init__("claude_code", "claude", lambda t, c, r, p: ["claude", "-p", p])
+    """Headless Claude Code with bounded, per-invocation tool permissions.
+
+    The invocation used to be a bare `claude -p <prompt>`. In the
+    HOWLFRAM-SLOPFIX-04 canary that run diagnosed the defect correctly, reported
+    that every Bash attempt "requires approval", produced no repository delta,
+    and exited 0 -- which was recorded as a successful implementation.
+
+    Permissions are passed as command-line flags for one invocation only. No
+    global Claude Code configuration is written, so interactive sessions are
+    unaffected. `--dangerously-skip-permissions` and
+    `--permission-mode bypassPermissions` are never emitted.
+    """
+
+    def __init__(self, operator_settings: Optional[Any] = None):
+        super().__init__("claude_code", "claude")
+        self.operator_settings = operator_settings
+
+    def build_execution_profile(
+        self,
+        task: Optional[TaskSpec] = None,
+        cwd: Optional[Union[str, Path]] = None,
+        role: str = "implementation",
+    ) -> ProviderExecutionProfile:
+        """Derives this invocation's permissions from the target project."""
+        project_context = None
+        verification_plan = None
+        if cwd is not None:
+            try:
+                from src.control_plane.project_adapter import ProjectAdapter
+
+                project_context = ProjectAdapter.discover(Path(cwd))
+                verification_plan = ProjectAdapter.create_verification_plan(
+                    project_context, getattr(task, "task_id", "unknown") if task else "unknown"
+                )
+            except Exception:
+                # Permission derivation must never block execution; without a
+                # discovered project the profile degrades to tools plus read-only
+                # git, which is bounded rather than broadened.
+                pass
+        return build_execution_profile(
+            role=role,
+            task=task,
+            project_context=project_context,
+            verification_plan=verification_plan,
+            operator_settings=self.operator_settings,
+        )
+
+    def probe_readiness(self) -> BackendReadiness:
+        readiness = super().probe_readiness()
+        if not readiness.installed:
+            readiness.unattended_mutation_capable = False
+            readiness.capability_reason = "MISSING_EXECUTABLE"
+            return readiness
+        profile = self.build_execution_profile(None, None, "implementation")
+        readiness.unattended_mutation_capable = profile.mutation_capable
+        readiness.capability_reason = (
+            profile.permission_mode
+            if profile.mutation_capable
+            else "Mutation tools disallowed by configuration"
+        )
+        return readiness
+
+    def build_command(self, task: TaskSpec, cwd: Path, role: str, prompt: str) -> List[str]:
+        profile = self.build_execution_profile(task, cwd, role)
+        cmd = ["claude", "-p", prompt, "--output-format", "json"]
+        allowed = profile.allowed_tools()
+        if allowed:
+            cmd += ["--allowedTools", *allowed]
+        if profile.disallowed_tools:
+            cmd += ["--disallowedTools", *profile.disallowed_tools]
+        if profile.permission_mode:
+            cmd += ["--permission-mode", profile.permission_mode]
+        return cmd
+
+    def execute(self, task: TaskSpec, cwd, role: str = "implementation", **kwargs):
+        """Runs Claude Code and interprets its structured result envelope.
+
+        `--output-format json` makes stdout a result object rather than prose.
+        The human-readable `result` is restored as stdout so downstream evidence
+        and classification see what the agent actually said, and any reported
+        `permission_denials` are recorded structurally.
+        """
+        result = super().execute(task=task, cwd=cwd, role=role, **kwargs)
+        envelope = _parse_claude_result_envelope(result.stdout)
+        if envelope is None:
+            if _reports_permission_block(result.stdout):
+                result.metadata[TOOL_PERMISSION_KEY] = TOOL_PERMISSION_DENIED
+                result.metadata["denied_tools"] = ["unreported"]
+                if result.success:
+                    result.success = False
+                    result.error_message = (
+                        "Required tool permissions were unavailable: unreported"
+                    )
+            return result
+
+        text = envelope.get("result")
+        if isinstance(text, str) and text:
+            result.stdout = text
+        denials = envelope.get("permission_denials") or []
+        result.metadata["claude_session_id"] = envelope.get("session_id")
+        result.metadata["claude_subtype"] = envelope.get("subtype")
+
+        denied_tools = sorted(
+            {
+                str(entry.get("tool_name") or entry.get("tool") or "unknown")
+                for entry in denials
+                if isinstance(entry, dict)
+            }
+        )
+        if not denied_tools and _reports_permission_block(text):
+            # The CLI did not populate `permission_denials`, but the agent
+            # explicitly said it was blocked on approval. Reported honestly as
+            # a permission failure rather than a silent empty success.
+            denied_tools = ["unreported"]
+
+        if denied_tools:
+            result.metadata[TOOL_PERMISSION_KEY] = TOOL_PERMISSION_DENIED
+            result.metadata["denied_tools"] = denied_tools
+            if result.success:
+                result.success = False
+                result.error_message = (
+                    "Required tool permissions were unavailable: "
+                    + ", ".join(denied_tools)
+                )
+        return result
 
 
 class CodexBackend(SubprocessAgentBackend):

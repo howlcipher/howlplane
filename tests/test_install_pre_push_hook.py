@@ -13,6 +13,8 @@ import pathlib
 
 import pytest
 
+from src.control_plane.git_env import GIT_REPOSITORY_SELECTION_ENV_VARS
+
 # Repository root is two directories up from this test file
 repo_root = pathlib.Path(__file__).resolve().parents[1]
 
@@ -73,3 +75,32 @@ def test_install_pre_push_hook_creates_literal_filename(tmp_path: pathlib.Path):
     assert '"pre-push"' in source_text, "Literal hook name missing in source"
     # Ensure the obfuscation pattern is gone
     assert "chr(" not in source_text, "Obfuscated chr() chain still present"
+
+
+def test_generated_hook_drops_inherited_git_repository_selection(tmp_path: pathlib.Path):
+    """The generated hook must scrub the variables Git exports to hooks.
+
+    Regression guard: the installer previously emitted a hook with no `unset`,
+    so re-running it silently reverted a hand-patched local hook. The suite is
+    independently safe (git_env sanitizes every call), but the hook must not
+    reintroduce a contaminated environment for anything else it invokes.
+    """
+    (tmp_path / ".git" / "hooks").mkdir(parents=True, exist_ok=True)
+    script_path = _copy_script_to_tmp(tmp_path)
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"Script failed: {result.stderr}"
+
+    hook_content = (tmp_path / ".git" / "hooks" / "pre-push").read_text(encoding="utf-8")
+    unset_lines = [ln for ln in hook_content.splitlines() if ln.startswith("unset ")]
+    assert unset_lines, "Generated hook does not unset any Git variables"
+    scrubbed = " ".join(unset_lines)
+    for name in GIT_REPOSITORY_SELECTION_ENV_VARS:
+        assert name in scrubbed, f"Generated hook does not unset {name}"
+    # The unset must precede the suite it protects.
+    assert hook_content.index("unset ") < hook_content.index("make test")

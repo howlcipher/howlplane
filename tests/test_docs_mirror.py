@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+from src.control_plane.git_env import run_git_in_repo
 
 
 def test_site_nav_has_no_broken_docs_html_link():
@@ -53,12 +54,7 @@ def test_only_hand_authored_frontend_tracked_under_docs():
     committed-mirror drift removed by improvements item 27.
     """
     repo_root = Path(__file__).resolve().parents[1]
-    result = subprocess.run(
-        ["git", "ls-files", "docs"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-    )
+    result = run_git_in_repo(repo_root, ["ls-files", "docs"])
     assert result.returncode == 0
     tracked_paths = set(result.stdout.strip().splitlines())
     hand_authored_frontend = {

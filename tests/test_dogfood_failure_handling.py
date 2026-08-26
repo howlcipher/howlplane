@@ -74,6 +74,7 @@ from tests._dogfood_test_helpers import (
     build_full_merge_flow,
     init_minimal_python_repo,
 )
+from src.control_plane.git_env import run_git_in_repo
 
 
 class FakeFailingBackend(AgentBackend):
@@ -502,7 +503,7 @@ def test_partial_changes_not_presented_as_reviewed_or_verified(tmp_path):
             assert s.exit_code is None
 
     # Verify no git commit was made on the repo
-    log_proc = subprocess.run(["git", "log", "--oneline"], cwd=str(repo), capture_output=True, text=True, check=True)
+    log_proc = run_git_in_repo(repo, ["log", "--oneline"], check=True)
     assert "Initial commit" in log_proc.stdout
     assert "TEST-UNREVIEWED-01" not in log_proc.stdout
 

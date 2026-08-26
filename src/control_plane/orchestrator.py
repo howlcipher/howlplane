@@ -17,7 +17,14 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
-from src.control_plane.agent_execution import AgentBackend, AgentBackendRegistry, AgentExecutionResult, AgentUnavailableError
+from src.control_plane.agent_execution import (
+    AgentBackend,
+    AgentBackendRegistry,
+    AgentExecutionResult,
+    AgentUnavailableError,
+    TOOL_PERMISSION_DENIED,
+    TOOL_PERMISSION_KEY,
+)
 from src.control_plane.atomic_io import (
     atomic_write_json,
     atomic_write_text,
@@ -461,6 +468,7 @@ class GovernedTaskOrchestrator:
             ProviderFailureClass.PROVIDER_UNAVAILABLE,
             ProviderFailureClass.TRANSPORT_UNAVAILABLE,
             ProviderFailureClass.MISSING_EXECUTABLE,
+            ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED,
         }
 
     def _map_failure_class_to_orchestrator_class(
@@ -478,6 +486,7 @@ class GovernedTaskOrchestrator:
             "PROVIDER_UNAVAILABLE",
             "TRANSPORT_UNAVAILABLE",
             "MISSING_EXECUTABLE",
+            "EXECUTION_PERMISSION_REQUIRED",
         }:
             return FAILURE_CLASS_PROVIDER_UNAVAILABLE
         return FAILURE_CLASS_ENGINEERING
@@ -491,18 +500,46 @@ class GovernedTaskOrchestrator:
         """Re-evaluates reviewer independence after implementation failover."""
         if self.config.provider_pool is None:
             return
+        initial_route = {
+            "selected_agent_id": routing.selected_agent_id,
+            "selected_agent_name": getattr(routing, "selected_agent_name", routing.selected_agent_id),
+            "reviewer_resource_mapping": dict(routing.metadata.get("reviewer_resource_mapping", {})),
+            "reviewer_resource_identities": dict(routing.metadata.get("reviewer_resource_identities", {})),
+            "review_diversity_achieved": routing.metadata.get("review_diversity_achieved"),
+        }
         mapping, diversity = self.config.provider_pool.select_reviewers(
             final_impl_resource_id,
             routing.recommended_reviewers,
             task=task_spec,
         )
-        routing.metadata["reviewer_resource_mapping"] = mapping
-        routing.metadata["reviewer_resource_identities"] = {
+        new_identities = {
             role: self.config.provider_pool.registry.get_resource(resource_id).resource_identity().to_dict()
             for role, resource_id in mapping.items()
             if self.config.provider_pool.registry.get_resource(resource_id) is not None
         }
+        routing.metadata["reviewer_resource_mapping"] = mapping
+        routing.metadata["reviewer_resource_identities"] = new_identities
         routing.metadata["review_diversity_achieved"] = diversity
+        routing.metadata["initial_route"] = initial_route
+        routing.metadata["final_implementation_resource"] = final_impl_resource_id
+        routing.metadata["final_route"] = {
+            "selected_agent_id": final_impl_resource_id,
+            "reviewer_resource_mapping": mapping,
+            "reviewer_resource_identities": new_identities,
+            "review_diversity_achieved": diversity,
+        }
+        routing.metadata["route_status"] = "SUPERSEDED_BY_FAILOVER"
+        routing.metadata["reassignment_reason"] = (
+            f"Implementer failed over from {routing.selected_agent_id} to {final_impl_resource_id}; "
+            f"reviewers recomputed to maintain reviewer independence"
+        )
+        run_dir = self.target_repo / ".task_runs" / task_spec.task_id
+        if run_dir.exists():
+            atomic_write_json(run_dir / "route.json", asdict(routing))
+            effective_data = asdict(routing)
+            effective_data["selected_agent_id"] = final_impl_resource_id
+            atomic_write_json(run_dir / "effective_route.json", effective_data)
+
         self._record_event(
             task_id=task_spec.task_id,
             agent_id="control_plane",
@@ -595,7 +632,8 @@ class GovernedTaskOrchestrator:
 
         router = TaskRouter(resource_pool=self.config.provider_pool)
         routing = router.route(task_spec)
-        (run_dir / "route.json").write_text(json.dumps(asdict(routing), indent=2), encoding="utf-8")
+        atomic_write_json(run_dir / "route.json", asdict(routing))
+        atomic_write_json(run_dir / "initial_route.json", asdict(routing))
 
         verif_plan = ProjectAdapter.create_verification_plan(ctx, task_id=task_spec.task_id)
         (run_dir / "verification_plan.json").write_text(verif_plan.to_json(), encoding="utf-8")
@@ -1055,6 +1093,24 @@ class GovernedTaskOrchestrator:
                     task_spec, baseline, current_impl_resource_id, stage="implementation"
                 )
 
+                denial_outcome = (
+                    (impl_res.metadata or {}).get(TOOL_PERMISSION_KEY)
+                    if impl_res is not None else None
+                )
+                if (
+                    impl_res is not None
+                    and impl_res.success
+                    and denial_outcome == TOOL_PERMISSION_DENIED
+                    and current_delta.is_empty
+                ):
+                    impl_res.success = False
+                    if not impl_res.error_message:
+                        impl_res.error_message = (
+                            "Required tool permissions were unavailable and zero delta produced"
+                        )
+                    if self.config.provider_pool is not None:
+                        normalized_failure = ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
+
                 attempt_record = self._record_implementation_attempt(
                     run_dir=run_dir,
                     attempts_dir=attempts_dir,
@@ -1372,6 +1428,14 @@ class GovernedTaskOrchestrator:
                     err_msg=err_msg,
                     provider_execution=impl_res,
                     failure_class=FAILURE_CLASS_AUTHORITY_BLOCKED,
+                    hf_status=hf_audit_status,
+                    hf_match=hf_audit_match,
+                    implementation_attempts=implementation_attempts,
+                    failover_summary=self._build_failover_summary(
+                        implementation_attempts,
+                        TERMINATION_IMPLEMENTATION_SUCCEEDED,
+                        last_selection_decision,
+                    ),
                 )
 
             remediation_count += 1

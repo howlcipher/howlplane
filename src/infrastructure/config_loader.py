@@ -112,12 +112,23 @@ class IndexingSettings(BaseModel):
     batch_size: int = 100
 
 
+class ProviderExecutionProfileSettings(BaseModel):
+    """Operator overrides for one provider invocation's tool permissions."""
+
+    extra_allowed_bash: List[str] = Field(default_factory=list)
+    disallowed_tools: List[str] = Field(default_factory=list)
+    permission_mode: Optional[Literal["acceptEdits", "plan", "manual", "dontAsk"]] = None
+
+    model_config = {"extra": "forbid"}
+
+
 class ProviderResourceSettings(BaseModel):
     """Operator permission and optional identity constraints for one resource."""
 
     enabled: bool = True
     interface_id: Optional[str] = None
     model_id: Optional[str] = None
+    execution_profile: Optional[ProviderExecutionProfileSettings] = None
 
     model_config = {"extra": "forbid"}
 

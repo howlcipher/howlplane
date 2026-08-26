@@ -17,6 +17,8 @@ from src.control_plane.agent_execution import (
     LAUNCH_OUTCOME_SPAWN_FAILED,
     TIMEOUT_SOURCE_HARNESS,
     TIMEOUT_SOURCE_KEY,
+    TOOL_PERMISSION_DENIED,
+    TOOL_PERMISSION_KEY,
 )
 from src.control_plane.agent_registry import AgentProfile, AgentRegistry
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
@@ -168,6 +170,8 @@ class ProviderStatus(DataClassSerializationMixin):
     reset_at: Optional[str] = None
     last_success_at: Optional[str] = None
     last_failure_at: Optional[str] = None
+    unattended_mutation_capable: Optional[bool] = None
+    capability_reason: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ProviderStatus":
@@ -444,6 +448,8 @@ class ProviderPoolManager:
         state.authentication = AuthenticationStatus(readiness.authentication)
         state.unavailable_reason = readiness.reason
         state.evidence = readiness.evidence
+        state.unattended_mutation_capable = readiness.unattended_mutation_capable
+        state.capability_reason = readiness.capability_reason
         state.last_checked = now
         state.observed_at = now
         failure_states = {
@@ -528,6 +534,8 @@ class ProviderPoolManager:
                 "economic_class": profile.economic_class,
                 "readiness": state.readiness.value,
                 "authentication": state.authentication.value,
+                "unattended_mutation_capable": state.unattended_mutation_capable,
+                "capability_reason": state.capability_reason,
                 "capacity": state.status.value,
                 "reason": state.unavailable_reason,
                 "observed_at": state.observed_at,
@@ -596,6 +604,8 @@ class ProviderPoolManager:
         # very phrases these markers look for, so where the harness observed the
         # process directly, that observation wins (SLOPFIX-03).
         metadata = result.metadata or {}
+        if metadata.get(TOOL_PERMISSION_KEY) == TOOL_PERMISSION_DENIED:
+            return ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
         launch_outcome = metadata.get(LAUNCH_OUTCOME_KEY)
         if launch_outcome in (LAUNCH_OUTCOME_NOT_INSTALLED, LAUNCH_OUTCOME_SPAWN_FAILED):
             return ProviderFailureClass.MISSING_EXECUTABLE
@@ -614,6 +624,11 @@ class ProviderPoolManager:
             )))
         ):
             return ProviderFailureClass.MISSING_EXECUTABLE
+        if any(marker in combined for marker in (
+            "requires approval", "require approval", "permission denied",
+            "requires permission", "needs approval", "approve bash execution",
+        )):
+            return ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
         if any(marker in combined for marker in (
             "authentication required", "not authenticated", "login required",
             "unauthorized", "invalid api key",

@@ -35,16 +35,13 @@ from src.control_plane.human_boundary import (
 )
 from src.control_plane.launcher import cmd_approve, cmd_reject, cmd_resume, cmd_status, build_parser
 from src.control_plane.task_spec import TaskSpec
+from src.control_plane.git_env import run_git_in_repo
+from tests._git_test_helpers import git_in_repo, init_git_repo
 
 
 def _init_git_repo(repo_path: Path) -> None:
     """Initializes a clean git repository."""
-    subprocess.run(["git", "init"], cwd=repo_path, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "TestUser"], cwd=repo_path, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_path, check=True, capture_output=True)
-    (repo_path / "README.md").write_text("# Test Repo\n", encoding="utf-8")
-    subprocess.run(["git", "add", "README.md"], cwd=repo_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "initial commit"], cwd=repo_path, check=True, capture_output=True)
+    init_git_repo(repo_path, files={"README.md": "# Test Repo\n"})
 
 
 def _create_awaiting_human_task_run(
@@ -71,7 +68,7 @@ def _create_awaiting_human_task_run(
     if diff_content is None:
         (repo_path / "app.py").write_text("print('hello')\n", encoding="utf-8")
         fp = compute_repository_fingerprint(repo_path, run_dir)
-        res_diff = subprocess.run(["git", "-C", str(repo_path), "diff", "HEAD"], capture_output=True, text=True)
+        res_diff = run_git_in_repo(repo_path, ["diff", "HEAD"])
         diff_text = res_diff.stdout
         for f_name in fp.files_modified:
             f_path = repo_path / f_name
@@ -259,8 +256,8 @@ def test_scenario_8_repository_drift_invalidates_approval(tmp_path: Path):
 
     # Introduce repository drift by committing new code
     (tmp_path / "extra_file.py").write_text("print('drift')\n", encoding="utf-8")
-    subprocess.run(["git", "add", "extra_file.py"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "drift commit"], cwd=tmp_path, check=True, capture_output=True)
+    git_in_repo(tmp_path, ["add", "extra_file.py"])
+    git_in_repo(tmp_path, ["commit", "-m", "drift commit"])
 
     # Attempting to resume with drifted repo must raise StaleApprovalError and record event
     with pytest.raises(StaleApprovalError, match="STALE"):
