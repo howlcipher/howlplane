@@ -489,8 +489,19 @@ def test_status_reports_active_progress_and_stale_when_process_dead(
 # -----------------------------------------------------------------------------
 
 
-def test_cli_progress_modes_and_stream_isolation(tmp_path, capsys):
+def test_cli_progress_modes_and_stream_isolation(tmp_path, monkeypatch, capsys):
     """Verify --progress and -q flags work without corrupting stdout."""
+    from src.control_plane import launcher as launcher_module
+    from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+
+    # Keep resource selection independent of provider CLIs installed on the host.
+    pool = ProviderPoolManager(probe_on_start=False)
+    monkeypatch.setattr(
+        launcher_module.ProviderPoolManager,
+        "from_config",
+        classmethod(lambda cls, **kwargs: pool),
+    )
+
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_test_git_repo(repo)

@@ -197,7 +197,7 @@ def _run_task_with_backend(
         task_class="bug_fix",
         risk_level="medium",
     )
-    pool = ProviderPoolManager()
+    pool = ProviderPoolManager(probe_on_start=False)
     orch = GovernedTaskOrchestrator(
         target_repo=repo,
         config=OrchestrationConfig(
