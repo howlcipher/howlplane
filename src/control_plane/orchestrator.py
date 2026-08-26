@@ -39,6 +39,12 @@ from src.control_plane.recovery import CrashRecoveryEngine
 from src.control_plane.review_runner import ReviewRunner, ReviewCycleResult, SingleReviewResult
 from src.control_plane.reviewers import get_reviewer_role, build_skill_context
 from src.control_plane.router import TaskRouter, RoutingDecision
+from src.control_plane.progress import (
+    DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+    TaskPhase,
+    TaskProgressState,
+    TaskProgressTracker,
+)
 from src.control_plane.proposed_action import ProposedAction, infer_proposed_actions
 from src.control_plane.task_spec import TaskSpec
 from src.control_plane.verification import VerificationPlan, VerificationStep
@@ -92,6 +98,10 @@ class OrchestrationConfig:
     # custom_backend/custom_reviewer_fn, which keeps deterministic tests on the
     # prior single-attempt path.
     provider_pool: Optional[Any] = None
+    heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS
+    progress_stream: Optional[Any] = None
+    progress_mode: str = "auto"
+    progress_tracker: Optional[Any] = None
 
 
 @dataclass
@@ -382,6 +392,30 @@ class GovernedTaskOrchestrator:
         mutual-exclusion locks and durable checkpoint guarantees.
         """
         start_time = time.time()
+        run_dir = self.target_repo / ".task_runs" / task_spec.task_id
+
+        # Setup Progress Tracker
+        progress = self.config.progress_tracker
+        if progress is None:
+            enabled = (self.config.progress_mode != "never")
+            stream = (
+                self.config.progress_stream
+                if self.config.progress_stream is not None
+                else sys.stderr
+            )
+            progress = TaskProgressTracker(
+                task_id=task_spec.task_id,
+                run_dir=run_dir,
+                stream=stream,
+                heartbeat_interval=self.config.heartbeat_interval,
+                enabled=enabled,
+            )
+
+        progress.start(
+            task_id=task_spec.task_id,
+            run_dir=run_dir,
+            initial_phase=TaskPhase.PREPARING.value,
+        )
 
         # Acquire Locks if enabled
         repo_lock = (
@@ -401,23 +435,33 @@ class GovernedTaskOrchestrator:
             task_lock.acquire()
 
         try:
-            result = self._run_governed_loop(task_spec, planned_actions, start_time)
+            result = self._run_governed_loop(
+                task_spec, planned_actions, start_time, progress=progress
+            )
             if self.trajectory_store is not None:
                 traj = ExecutionTrajectoryBuilder.from_orchestration_result(result)
                 self.trajectory_store.save(traj)
                 result.trajectory_id = traj.trajectory_id
             return result
         except Exception as exc:
-            run_dir = self.target_repo / ".task_runs" / task_spec.task_id
+            progress.record_terminal(
+                TaskProgressState.FAILED,
+                TaskPhase.FAILED,
+                error_message=str(exc),
+            )
             if run_dir.is_dir():
                 try:
-                    CheckpointManager.record_interrupted(
-                        run_dir, stage=task_spec.current_state, reason=str(exc)
+                    CheckpointManager.fail_stage(
+                        run_dir,
+                        stage=task_spec.current_state,
+                        reason=str(exc),
+                        result_summary={"error": str(exc), "interrupted": True},
                     )
                 except Exception:
                     pass
             raise
         finally:
+            progress.close()
             if task_lock:
                 task_lock.release()
             if repo_lock:
@@ -428,8 +472,19 @@ class GovernedTaskOrchestrator:
         task_spec: TaskSpec,
         planned_actions: Optional[List[str]] = None,
         start_time: Optional[float] = None,
+        progress: Optional[TaskProgressTracker] = None,
     ) -> OrchestrationResult:
         start_time = start_time or time.time()
+        if progress is None:
+            progress = TaskProgressTracker(
+                task_id=task_spec.task_id,
+                run_dir=None,
+                enabled=False,
+            )
+
+        progress.transition(
+            TaskPhase.ROUTING, details="selecting implementation resource"
+        )
         ctx, routing, verif_plan, run_dir, hf_res = self.prepare_task_plan(task_spec, planned_actions)
         reviews_dir = run_dir / "reviews"
         remediation_base_dir = run_dir / "remediation"
@@ -482,7 +537,10 @@ class GovernedTaskOrchestrator:
         self._bind_decision_packet(pre_boundary, run_dir)
 
         if pre_boundary.requires_human_approval:
-
+            progress.record_terminal(
+                TaskProgressState.AWAITING_AUTHORIZATION,
+                TaskPhase.AWAITING_AUTHORIZATION,
+            )
             CheckpointManager.start_stage(
                 run_dir,
                 task_spec.task_id,
@@ -526,6 +584,11 @@ class GovernedTaskOrchestrator:
                 "status": "BLOCKED",
                 "reason": FAILURE_CLASS_NO_ELIGIBLE_RESOURCE,
             }
+            progress.record_terminal(
+                TaskProgressState.FAILED,
+                TaskPhase.FAILED,
+                error_message=blocked.get("reason"),
+            )
             task_spec.transition_to("blocked", blocked["reason"])
             task_spec.save_to_file(str(run_dir / "task.yaml"))
             return self._make_result(
@@ -568,8 +631,10 @@ class GovernedTaskOrchestrator:
                 err_msg,
                 start_time,
                 exit_code=1,
+                progress_tracker=progress,
                 agent_id=routing.selected_agent_id,
                 routing=routing,
+                verif_plan=verif_plan,
                 hf_status=hf_audit_status,
                 hf_match=hf_audit_match,
             )
@@ -619,14 +684,21 @@ class GovernedTaskOrchestrator:
                 spec=task_spec,
             )
 
+            impl_agent_id = getattr(impl_backend, "agent_id", None) or routing.selected_agent_id
             impl_prompt = self._build_implementation_prompt(task_spec, ctx)
-            impl_res = impl_backend.execute(
-                task=task_spec,
-                cwd=self.target_repo,
+            with progress.operation(
+                phase=TaskPhase.IMPLEMENTING,
+                resource_id=impl_agent_id,
                 role="implementation",
-                prompt_override=impl_prompt,
-                timeout_seconds=self.config.timeout_seconds,
-            )
+                details="started",
+            ):
+                impl_res = impl_backend.execute(
+                    task=task_spec,
+                    cwd=self.target_repo,
+                    role="implementation",
+                    prompt_override=impl_prompt,
+                    timeout_seconds=self.config.timeout_seconds,
+                )
 
             (impl_dir / "result.json").write_text(impl_res.to_json(), encoding="utf-8")
 
@@ -638,20 +710,31 @@ class GovernedTaskOrchestrator:
                     task_id=task_spec.task_id,
                 )
 
+            current_delta = self._capture_scoped_delta(
+                task_spec, baseline, routing.selected_agent_id, stage="implementation"
+            )
+
+            patch_text = current_delta.diff_content
+            (impl_dir / "diff.patch").write_text(patch_text, encoding="utf-8")
+            (run_dir / "diff.patch").write_text(patch_text, encoding="utf-8")
+
             if not impl_res.success:
                 err_msg = (
                     impl_res.stderr.strip()
                     if impl_res.stderr and impl_res.stderr.strip()
                     else (impl_res.error_message or f"Implementation failed with exit code {impl_res.exit_code}")
                 )
-                self._record_event(
-                    task_id=task_spec.task_id,
-                    agent_id=routing.selected_agent_id,
-                    action="implementation_completed",
-                    result="failure",
-                    spec=task_spec,
-                    metadata={"exit_code": impl_res.exit_code, "error": err_msg},
-                )
+                if not current_delta.is_empty:
+                    (impl_dir / "partial_work.patch").write_text(patch_text, encoding="utf-8")
+                    self._record_event(
+                        task_id=task_spec.task_id,
+                        agent_id=routing.selected_agent_id,
+                        action="implementation_failed_with_partial_work",
+                        result="failure",
+                        spec=task_spec,
+                        metadata=current_delta.to_event_metadata() | {"partial_work": True},
+                    )
+
                 return self._fail_task(
                     task_spec,
                     run_dir,
@@ -659,7 +742,11 @@ class GovernedTaskOrchestrator:
                     start_time,
                     exit_code=impl_res.exit_code if impl_res.exit_code != 0 else 1,
                     agent_id="control_plane",
+                    progress_tracker=progress,
                     routing=routing,
+                    initial_delta=current_delta,
+                    current_delta=current_delta,
+                    verif_plan=verif_plan,
                     hf_status=hf_audit_status,
                     hf_match=hf_audit_match,
                     # Propagate the provider's own execution evidence verbatim
@@ -681,12 +768,6 @@ class GovernedTaskOrchestrator:
                     ),
                 )
 
-            current_delta = self._capture_scoped_delta(
-                task_spec, baseline, routing.selected_agent_id, stage="implementation"
-            )
-            (impl_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
-            (run_dir / "diff.patch").write_text(current_delta.diff_content, encoding="utf-8")
-
             self._record_event(
                 task_id=task_spec.task_id,
                 agent_id=routing.selected_agent_id,
@@ -700,13 +781,7 @@ class GovernedTaskOrchestrator:
                 agent_id="control_plane",
                 action="repository_delta_captured",
                 spec=task_spec,
-                metadata={
-                    "files_added": current_delta.files_added,
-                    "files_modified": current_delta.files_modified,
-                    "files_deleted": current_delta.files_deleted,
-                    "insertions": current_delta.insertions,
-                    "deletions": current_delta.deletions,
-                },
+                metadata=current_delta.to_event_metadata(),
             )
             initial_delta = current_delta
             CheckpointManager.complete_stage(run_dir, "implementing", output_artifacts=[str(run_dir / "diff.patch")])
@@ -761,6 +836,7 @@ class GovernedTaskOrchestrator:
                 custom_reviewer_fn=self.config.custom_reviewer_fn,
                 run_dir=run_dir,
                 provider_pool=self.config.provider_pool,
+                progress_tracker=progress,
             )
             review_cycles.append(cycle_res)
             latest_reconciliation = cycle_res.reconciliation
@@ -814,6 +890,11 @@ class GovernedTaskOrchestrator:
                 err_msg = (
                     f"Remediation limit reached ({self.config.max_remediation_cycles} cycles) with "
                     f"{findings_summary['blocker']} blockers and {findings_summary['high']} high findings remaining."
+                )
+                progress.record_terminal(
+                    TaskProgressState.AWAITING_AUTHORIZATION,
+                    TaskPhase.AWAITING_AUTHORIZATION,
+                    error_message=err_msg,
                 )
                 task_spec.transition_to("awaiting_human", f"Max remediation cycles exceeded: {err_msg}")
                 task_spec.save_to_file(str(run_dir / "task.yaml"))
@@ -878,18 +959,26 @@ class GovernedTaskOrchestrator:
             rem_cycle_dir = remediation_base_dir / f"cycle-{remediation_count:02d}"
             rem_cycle_dir.mkdir(parents=True, exist_ok=True)
 
-            if self.config.custom_remediation_fn:
-                self.config.custom_remediation_fn(task_spec, self.target_repo, cycle_res.all_findings)
-            else:
-                rem_prompt = self._build_remediation_prompt(task_spec, current_delta.diff_content, cycle_res.all_findings)
-                rem_res = impl_backend.execute(
-                    task=task_spec,
-                    cwd=self.target_repo,
-                    role="remediation",
-                    prompt_override=rem_prompt,
-                    timeout_seconds=self.config.timeout_seconds,
-                )
-                (rem_cycle_dir / "result.json").write_text(rem_res.to_json(), encoding="utf-8")
+            rem_agent_id = getattr(impl_backend, "agent_id", None) or routing.selected_agent_id
+            with progress.operation(
+                phase=TaskPhase.REMEDIATING,
+                resource_id=rem_agent_id,
+                role="remediation",
+                cycle=remediation_count,
+                details=f"cycle {remediation_count}",
+            ):
+                if self.config.custom_remediation_fn:
+                    self.config.custom_remediation_fn(task_spec, self.target_repo, cycle_res.all_findings)
+                else:
+                    rem_prompt = self._build_remediation_prompt(task_spec, current_delta.diff_content, cycle_res.all_findings)
+                    rem_res = impl_backend.execute(
+                        task=task_spec,
+                        cwd=self.target_repo,
+                        role="remediation",
+                        prompt_override=rem_prompt,
+                        timeout_seconds=self.config.timeout_seconds,
+                    )
+                    (rem_cycle_dir / "result.json").write_text(rem_res.to_json(), encoding="utf-8")
 
             current_delta = self._capture_scoped_delta(
                 task_spec, baseline, routing.selected_agent_id, stage="remediation"
@@ -954,6 +1043,7 @@ class GovernedTaskOrchestrator:
         verif_status = verif_plan.execute_all(
             cwd=str(self.target_repo),
             stop_on_failure=self.config.stop_on_verification_failure,
+            progress_tracker=progress,
         )
         (run_dir / "verification_result.json").write_text(verif_plan.to_json(), encoding="utf-8")
 
@@ -982,6 +1072,7 @@ class GovernedTaskOrchestrator:
                 err_msg,
                 start_time,
                 exit_code=1,
+                progress_tracker=progress,
                 routing=routing,
                 initial_delta=initial_delta,
                 current_delta=current_delta,
@@ -1027,6 +1118,10 @@ class GovernedTaskOrchestrator:
         )
 
         if boundary_res.requires_human_approval:
+            progress.record_terminal(
+                TaskProgressState.AWAITING_AUTHORIZATION,
+                TaskPhase.AWAITING_AUTHORIZATION,
+            )
             CheckpointManager.start_stage(
                 run_dir,
                 task_spec.task_id,
@@ -1090,6 +1185,10 @@ class GovernedTaskOrchestrator:
             output_artifacts=[str(run_dir / "summary.md")],
         )
 
+        progress.record_terminal(
+            TaskProgressState.COMPLETE,
+            TaskPhase.COMPLETE,
+        )
         return self._make_result(task_spec, "complete", 0, **stage_kwargs)
 
     def _record_human_boundary_events(
@@ -1175,10 +1274,39 @@ class GovernedTaskOrchestrator:
         start_time: float,
         exit_code: int = 1,
         agent_id: str = "control_plane",
+        progress_tracker: Optional[Any] = None,
         **kwargs,
     ) -> OrchestrationResult:
+        if progress_tracker is not None:
+            progress_tracker.record_terminal(
+                TaskProgressState.FAILED,
+                TaskPhase.FAILED,
+                error_message=err_msg,
+            )
         task_spec.transition_to("failed", err_msg)
         task_spec.save_to_file(str(run_dir / "task.yaml"))
+
+        # Terminalize current stage checkpoint so it does not remain permanently in_progress
+        try:
+            delta = kwargs.get("current_delta") or kwargs.get("initial_delta")
+            summary: Dict[str, Any] = {
+                "error": err_msg,
+                "exit_code": exit_code,
+            }
+            if kwargs.get("failure_class"):
+                summary["failure_class"] = kwargs.get("failure_class")
+            if delta is not None:
+                summary.update(delta.to_event_metadata())
+                summary["partial_work"] = not delta.is_empty
+            CheckpointManager.fail_stage(
+                run_dir,
+                stage=kwargs.get("stage") or task_spec.current_state,
+                reason=err_msg,
+                result_summary=summary,
+            )
+        except Exception:
+            pass
+
         self._record_event(
             task_id=task_spec.task_id,
             agent_id=agent_id,
@@ -1308,9 +1436,18 @@ class GovernedTaskOrchestrator:
             "## Deterministic Verification",
             f"- **Overall Status:** `{verif_plan.overall_status.upper()}`",
         ])
+        executed_steps = [
+            s for s in verif_plan.steps
+            if s.exit_code is not None or s.status in ("verified", "failed")
+        ]
+        if not executed_steps and verif_plan.steps:
+            lines.append(f"- **Discovered:** {len(verif_plan.steps)} steps (not executed — implementation failed before verification)")
         for step in verif_plan.steps:
-            mark = "✓" if step.status == "verified" else "✗"
-            lines.append(f"- [{mark}] **{step.name}** (`{step.category}`): {step.status} (exit {step.exit_code})")
+            if step.exit_code is not None or step.status in ("verified", "failed"):
+                mark = "✓" if step.status == "verified" else "✗"
+                lines.append(f"- [{mark}] **{step.name}** (`{step.category}`): {step.status} (exit {step.exit_code})")
+            else:
+                lines.append(f"- [ ] **{step.name}** (`{step.category}`): {step.status}")
 
         lines.extend([
             "",

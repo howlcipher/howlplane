@@ -47,6 +47,16 @@ class RepositoryDelta(DataClassSerializationMixin):
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     schema: str = GIT_DELTA_SCHEMA_VERSION
 
+    def to_event_metadata(self) -> Dict[str, Any]:
+        return {
+            "files_added": self.files_added,
+            "files_modified": self.files_modified,
+            "files_deleted": self.files_deleted,
+            "insertions": self.insertions,
+            "deletions": self.deletions,
+            "files_changed": len(self.files_modified) + len(self.files_added),
+        }
+
 
 def _run_git_cmd(repo_root: Union[str, Path], args: List[str]) -> subprocess.CompletedProcess:
     """Executes a git command deterministically without shell=True."""
@@ -58,6 +68,14 @@ def _run_git_cmd(repo_root: Union[str, Path], args: List[str]) -> subprocess.Com
     )
 
 
+def is_internal_control_plane_path(path: str) -> bool:
+    """Returns True if the path is internal control plane metadata (e.g. .task_runs, .git)."""
+    norm = path.strip().replace("\\", "/")
+    if norm.endswith("/"):
+        norm = norm[:-1]
+    return norm in (".task_runs", ".git", ".howlchangeops") or norm.startswith((".task_runs/", ".git/", ".howlchangeops/"))
+
+
 def _parse_porcelain_lines(status_text: str) -> Tuple[Set[str], Set[str], Set[str], Set[str]]:
     """Extracts (untracked, modified, deleted, added) file sets from git status --porcelain."""
     untracked, modified, deleted, added = set(), set(), set(), set()
@@ -66,6 +84,8 @@ def _parse_porcelain_lines(status_text: str) -> Tuple[Set[str], Set[str], Set[st
             continue
         code, path_part = line[:2], line[3:].strip()
         f_path = path_part.split(" -> ")[1].strip() if " -> " in path_part else path_part
+        if is_internal_control_plane_path(f_path):
+            continue
         if code.startswith("??"):
             untracked.add(f_path)
         elif "D" in code:
