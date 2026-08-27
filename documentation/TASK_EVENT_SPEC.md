@@ -284,6 +284,77 @@ be silently treated as a provider outage; a normal task failure staying
 classified as a normal task failure is the entire point of having a
 taxonomy rather than a single generic "failed" bucket.
 
+### 4a. Orchestrator failure classes (`ProviderFailureClass`)
+
+The enum above is the wire vocabulary for `run_result.failure_class`. The
+orchestrator's own bounded-failover loop uses a separate, upper-case
+taxonomy defined in `src/control_plane/resource_models.py`. The distinction
+that matters most there is between a provider that could not be reached and
+a provider this control plane stopped:
+
+| Value | Meaning |
+| --- | --- |
+| `TRANSPORT_UNAVAILABLE` | The provider itself reported that it could not reach its service. Derived from the provider's own transcript. Marks the resource `UNREACHABLE` and starts the cooldown. |
+| `EXECUTION_BUDGET_EXCEEDED` | *This control plane* killed the provider at its per-attempt wall-clock budget. Nothing was observed about reachability, so the resource is **not** marked unreachable and gets no cooldown; it is simply not reused within this task. |
+| `EXECUTION_PERMISSION_REQUIRED` | The provider launched and reasoned but was denied a tool the task needed, producing no work. |
+| `MISSING_EXECUTABLE` | The provider never launched. |
+| `ENGINEERING_FAILURE` | The provider ran and failed at the task. Not an availability failure, and not failover-eligible. |
+
+A locally enforced deadline is not evidence of a provider outage. Recording
+one as `TRANSPORT_UNAVAILABLE` both misreports the cause and penalizes a
+healthy resource across later tasks, which is what HOWLFRAM-SLOPFIX-05
+demonstrated on two of its three attempts.
+
+### 4b. Governing a budget-stopped candidate
+
+A provider stopped at the execution budget never reports completion, but it
+may already have written a real repository delta. Process outcome and
+artifact quality are different questions, and only the second one matters.
+
+When an `EXECUTION_BUDGET_EXCEEDED` attempt leaves a non-empty
+task-attributable delta and no further failover is possible, the delta is
+captured as a **candidate** and entered into the normal pipeline: independent
+review, reconciliation, remediation, deterministic verification, authority.
+Nothing is bypassed and nothing is auto-accepted.
+
+Salvage is checked only at the end of the failover chain. While attempt
+budget remains, a fresh provider may still produce a complete,
+provider-attested result, which is strictly better than governing a fragment.
+
+The candidate is represented truthfully and never as a success:
+
+| Artifact | Contents |
+| --- | --- |
+| `implementation/result.json` | unchanged — `success: false` |
+| `implementation/attempts/<NN>/candidate.json` | `provider_completion_claim: false`, `origin: timed_out_implementation_attempt`, `requires_governance: true` |
+| `implementation/attempts/<NN>/candidate.patch` | the captured delta, replayable with `git apply` |
+| `OrchestrationResult.implementation_completion_claim` | `false` |
+
+Outcomes:
+
+- **Review and verification pass** — the task may complete under normal authority.
+- **Verification rejects it** — the task does not complete and the repository is restored to its pre-task baseline.
+- **No independent reviewer available** — the task parks at `awaiting_human` rather than completing on a self-review by the resource that produced the candidate.
+- **Zero delta** — there is no candidate; the attempt is an ordinary failure.
+
+### 4c. Terminal state and routing evidence
+
+Two invariants follow from the same run:
+
+**Terminal rollback.** Every terminal implementation failure restores the
+repository to its pre-task baseline and records the outcome in the attempt
+record. Attempt evidence is written before the restore, so patches survive
+it. Pre-existing user modifications and untracked files are preserved
+byte-for-byte. Tasks parked at `awaiting_human` are the deliberate exception:
+a person is being asked to look at exactly what is on disk.
+
+**Routing evidence.** `initial_route.json` is immutable.
+`effective_route.json` is rewritten at every real handoff — not only when a
+failover eventually succeeds — and distinguishes
+`last_attempted_implementation_resource` from
+`accepted_implementation_resource`, which stays `null` until a candidate is
+accepted. Reviewer mappings are labelled `PROVISIONAL` until then.
+
 ---
 
 ## 5. Provider interface
