@@ -81,6 +81,23 @@ FAILURE_CLASS_VERIFICATION = "VERIFICATION_FAILURE"
 FAILURE_CLASS_PROVIDER_EXHAUSTED = "PROVIDER_EXHAUSTED"
 FAILURE_CLASS_PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
 FAILURE_CLASS_NO_ELIGIBLE_RESOURCE = "NO_ELIGIBLE_AI_RESOURCE"
+# This control plane stopped the provider at its own wall-clock budget. Kept
+# distinct from PROVIDER_UNAVAILABLE so an operator reading the summary is never
+# told a reachable provider was unreachable (HOWLFRAM-SLOPFIX-05).
+FAILURE_CLASS_EXECUTION_BUDGET_EXCEEDED = "EXECUTION_BUDGET_EXCEEDED"
+
+# A candidate that exists only because a provider was stopped at our budget.
+# Recorded so no artifact can imply the provider reported success.
+CANDIDATE_ORIGIN_TIMED_OUT = "timed_out_implementation_attempt"
+TIMEOUT_CANDIDATE_SCHEMA_VERSION = "howlplane.timeout_candidate/v1"
+PROVIDER_SCRATCH_SCHEMA_VERSION = "howlplane.provider_scratch/v1"
+TERMINATION_TIMEOUT_CANDIDATE_GOVERNED = "timeout_candidate_governed"
+
+# How durable routing evidence describes itself. SUPERSEDED_BY_FAILOVER means
+# implementation moved and is still in flight; IMPLEMENTATION_FAILED means the
+# named resource was the last one attempted and nothing was accepted.
+ROUTE_STATUS_SUPERSEDED = "SUPERSEDED_BY_FAILOVER"
+ROUTE_STATUS_IMPLEMENTATION_FAILED = "IMPLEMENTATION_FAILED"
 
 # Why bounded implementation failover stopped. Recorded verbatim in the run's
 # failover summary so an operator never has to infer it from a message string.
@@ -169,6 +186,12 @@ class OrchestrationResult:
     implementation_attempts: List[Dict[str, Any]] = field(default_factory=list)
     # Why bounded failover stopped, and what was still eligible when it did.
     failover_summary: Optional[Dict[str, Any]] = None
+    # Whether the implementing provider actually reported completion. False for
+    # a candidate salvaged from a budget-stopped attempt, which reaches the same
+    # review and verification gates without ever being called a success
+    # (HOWLFRAM-SLOPFIX-05).
+    implementation_completion_claim: bool = True
+    candidate_origin: Optional[str] = None
     schema: str = ORCHESTRATOR_SCHEMA_VERSION
 
     @property
@@ -419,6 +442,164 @@ class GovernedTaskOrchestrator:
         attempt_record["rollback"] = {"restored": restored, "error": error}
         self._persist_attempt_record(attempt_record, attempts_dir)
 
+    def _park_awaiting_human(
+        self,
+        task_spec: TaskSpec,
+        run_dir: Path,
+        err_msg: str,
+        decision_pkt: "HumanDecisionPacket",
+        progress: Any,
+    ) -> None:
+        """Hands a task to human authority, leaving the working tree in place.
+
+        Every parking path performs the same five steps, and the working tree is
+        deliberately never rolled back here: a human is being asked to look at
+        exactly what is on disk.
+        """
+        progress.record_terminal(
+            TaskProgressState.AWAITING_AUTHORIZATION,
+            TaskPhase.AWAITING_AUTHORIZATION,
+            error_message=err_msg,
+        )
+        task_spec.transition_to("awaiting_human", err_msg)
+        task_spec.save_to_file(str(run_dir / "task.yaml"))
+        (run_dir / "decision_packet.md").write_text(
+            decision_pkt.render_markdown(), encoding="utf-8"
+        )
+        self._record_human_boundary_events(task_spec, run_dir, reason=err_msg)
+
+    @staticmethod
+    def _attempt_workspace_hint(task: TaskSpec) -> str:
+        """The provider-writable scratch path, as named to the provider."""
+        return (
+            f".task_runs/{task.task_id}/implementation/attempts/"
+            "<NN-resource>/workspace/"
+        )
+
+    def _sweep_provider_scratch(
+        self,
+        run_dir: Path,
+        attempt_dir: Path,
+        resource_id: str,
+        attempt_num: int,
+        known_before: Set[str],
+    ) -> List[str]:
+        """Moves files a provider left at the evidence root into its workspace.
+
+        Providers were never told where scratch belongs, so one wrote
+        wip-refactor.patch straight into the run's evidence root, blurring which
+        files the control plane owns (HOWLFRAM-SLOPFIX-05). Anything that
+        appeared at the root during this attempt is relocated under the
+        attempt's workspace/ with a provenance note. Nothing is deleted -- the
+        artifacts may well be useful, they just are not evidence.
+        """
+        workspace = attempt_dir / "workspace"
+        swept: List[str] = []
+        for entry in sorted(run_dir.iterdir()):
+            if not entry.is_file() or entry.name in known_before:
+                continue
+            workspace.mkdir(parents=True, exist_ok=True)
+            destination = workspace / entry.name
+            try:
+                entry.replace(destination)
+            except OSError:
+                continue
+            swept.append(entry.name)
+        if swept:
+            atomic_write_json(
+                workspace / "_provenance.json",
+                {
+                    "origin": "provider_scratch",
+                    "created_by": resource_id,
+                    "attempt": attempt_num,
+                    "relocated_from": f".task_runs/{run_dir.name}/",
+                    "files": swept,
+                    "note": (
+                        "Written by the provider inside the control plane's "
+                        "evidence namespace and relocated here. Not control "
+                        "plane evidence."
+                    ),
+                    "swept_at": datetime.now(timezone.utc).isoformat(),
+                    "schema": PROVIDER_SCRATCH_SCHEMA_VERSION,
+                },
+            )
+        return swept
+
+    @staticmethod
+    def _is_salvageable_timeout_candidate(
+        failure_class: Optional[Any],
+        delta: Optional[RepositoryDelta],
+    ) -> bool:
+        """Reports whether a budget-stopped attempt left work worth governing.
+
+        A provider we stopped at our own deadline never claimed completion, but
+        that says nothing about what it had already written. When such an
+        attempt leaves a non-empty task-attributable delta, the artifact is a
+        candidate -- neither trustworthy nor disposable -- and belongs in review
+        and verification rather than the bin (HOWLFRAM-SLOPFIX-05).
+        """
+        if failure_class != ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED:
+            return False
+        return delta is not None and not delta.is_empty
+
+    def _capture_timeout_candidate(
+        self,
+        run_dir: Path,
+        attempts_dir: Path,
+        attempt_record: Dict[str, Any],
+        task_spec: TaskSpec,
+        resource_id: str,
+        delta: RepositoryDelta,
+    ) -> Dict[str, Any]:
+        """Preserves a budget-stopped candidate and marks it as needing governance.
+
+        Written before any rollback can run, and deliberately separate from the
+        provider's own result: `implementation/result.json` keeps success=false,
+        so nothing here fabricates a completion the provider never claimed.
+        """
+        candidate = {
+            "candidate_captured": True,
+            "provider_completion_claim": False,
+            "origin": CANDIDATE_ORIGIN_TIMED_OUT,
+            "requires_governance": True,
+            "failure_class": ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED.value,
+            "resource_id": resource_id,
+            "attempt": attempt_record["attempt"],
+            "files_added": list(delta.files_added),
+            "files_modified": list(delta.files_modified),
+            "files_deleted": list(delta.files_deleted),
+            "insertions": delta.insertions,
+            "deletions": delta.deletions,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "schema": TIMEOUT_CANDIDATE_SCHEMA_VERSION,
+        }
+        attempt_dir = attempts_dir / f"{attempt_record['attempt']:02d}-{resource_id}"
+        attempt_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(attempt_dir / "candidate.json", candidate)
+        (attempt_dir / "candidate.patch").write_text(delta.diff_content, encoding="utf-8")
+
+        attempt_record["candidate"] = candidate
+        self._persist_attempt_record(attempt_record, attempts_dir)
+
+        # Publish it as the run's current diff so the existing review and
+        # verification stages act on it exactly as they would a normal one.
+        self._write_delta_patch(delta, run_dir / "implementation", run_dir)
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id=resource_id,
+            action="timeout_candidate_captured",
+            spec=task_spec,
+            metadata={
+                "attempt": attempt_record["attempt"],
+                "origin": CANDIDATE_ORIGIN_TIMED_OUT,
+                "provider_completion_claim": False,
+                "files_changed": len(delta.files_modified) + len(delta.files_added),
+                "insertions": delta.insertions,
+                "deletions": delta.deletions,
+            },
+        )
+        return candidate
+
     def _build_failover_summary(
         self,
         implementation_attempts: List[Dict[str, Any]],
@@ -467,6 +648,7 @@ class GovernedTaskOrchestrator:
             ProviderFailureClass.AUTHENTICATION_REQUIRED,
             ProviderFailureClass.PROVIDER_UNAVAILABLE,
             ProviderFailureClass.TRANSPORT_UNAVAILABLE,
+            ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED,
             ProviderFailureClass.MISSING_EXECUTABLE,
             ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED,
         }
@@ -481,6 +663,8 @@ class GovernedTaskOrchestrator:
         value = getattr(failure_class, "value", str(failure_class))
         if value in {"QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"}:
             return FAILURE_CLASS_PROVIDER_EXHAUSTED
+        if value == "EXECUTION_BUDGET_EXCEEDED":
+            return FAILURE_CLASS_EXECUTION_BUDGET_EXCEEDED
         if value in {
             "AUTHENTICATION_REQUIRED",
             "PROVIDER_UNAVAILABLE",
@@ -491,63 +675,107 @@ class GovernedTaskOrchestrator:
             return FAILURE_CLASS_PROVIDER_UNAVAILABLE
         return FAILURE_CLASS_ENGINEERING
 
-    def _recompute_reviewers(
+    def _persist_effective_route(
         self,
         routing: Any,
         task_spec: TaskSpec,
-        final_impl_resource_id: str,
+        attempt_resource_id: str,
+        route_status: str,
+        accepted: bool,
     ) -> None:
-        """Re-evaluates reviewer independence after implementation failover."""
+        """Makes routing evidence on disk match who is actually implementing.
+
+        This used to run only after a *successful* failover, so a run that
+        failed over and then failed left route.json still naming the originally
+        routed provider, with no effective_route.json at all -- durable evidence
+        contradicting the run (HOWLFRAM-SLOPFIX-05). Routing becomes durable at
+        every real handoff instead, and distinguishes the resource currently
+        attempting implementation from one whose work was actually accepted.
+
+        initial_route.json is never touched here; it stays the immutable record
+        of what was routed first.
+        """
         if self.config.provider_pool is None:
             return
-        initial_route = {
-            "selected_agent_id": routing.selected_agent_id,
-            "selected_agent_name": getattr(routing, "selected_agent_name", routing.selected_agent_id),
-            "reviewer_resource_mapping": dict(routing.metadata.get("reviewer_resource_mapping", {})),
-            "reviewer_resource_identities": dict(routing.metadata.get("reviewer_resource_identities", {})),
-            "review_diversity_achieved": routing.metadata.get("review_diversity_achieved"),
-        }
+        if "initial_route" not in routing.metadata:
+            routing.metadata["initial_route"] = {
+                "selected_agent_id": routing.selected_agent_id,
+                "selected_agent_name": getattr(
+                    routing, "selected_agent_name", routing.selected_agent_id
+                ),
+                "reviewer_resource_mapping": dict(
+                    routing.metadata.get("reviewer_resource_mapping", {})
+                ),
+                "reviewer_resource_identities": dict(
+                    routing.metadata.get("reviewer_resource_identities", {})
+                ),
+                "review_diversity_achieved": routing.metadata.get(
+                    "review_diversity_achieved"
+                ),
+            }
+
+        # Reviewers are recomputed against whoever is implementing now, so no
+        # mapping can imply a provider reviews its own work. Until a candidate
+        # is actually accepted the mapping is labelled provisional, because the
+        # implementer may change again on the next hop.
         mapping, diversity = self.config.provider_pool.select_reviewers(
-            final_impl_resource_id,
+            attempt_resource_id,
             routing.recommended_reviewers,
             task=task_spec,
         )
-        new_identities = {
-            role: self.config.provider_pool.registry.get_resource(resource_id).resource_identity().to_dict()
+        registry = self.config.provider_pool.registry
+        identities = {
+            role: registry.get_resource(resource_id).resource_identity().to_dict()
             for role, resource_id in mapping.items()
-            if self.config.provider_pool.registry.get_resource(resource_id) is not None
+            if registry.get_resource(resource_id) is not None
         }
         routing.metadata["reviewer_resource_mapping"] = mapping
-        routing.metadata["reviewer_resource_identities"] = new_identities
+        routing.metadata["reviewer_resource_identities"] = identities
         routing.metadata["review_diversity_achieved"] = diversity
-        routing.metadata["initial_route"] = initial_route
-        routing.metadata["final_implementation_resource"] = final_impl_resource_id
+        routing.metadata["reviewer_mapping_status"] = (
+            "CONFIRMED" if accepted else "PROVISIONAL"
+        )
+        routing.metadata["route_status"] = route_status
+        routing.metadata["current_attempt_resource"] = attempt_resource_id
+        routing.metadata["last_attempted_implementation_resource"] = attempt_resource_id
+        routing.metadata["accepted_implementation_resource"] = (
+            attempt_resource_id if accepted else None
+        )
+        routing.metadata["final_implementation_resource"] = (
+            attempt_resource_id if accepted else None
+        )
         routing.metadata["final_route"] = {
-            "selected_agent_id": final_impl_resource_id,
+            "selected_agent_id": attempt_resource_id,
+            "accepted": accepted,
             "reviewer_resource_mapping": mapping,
-            "reviewer_resource_identities": new_identities,
+            "reviewer_resource_identities": identities,
             "review_diversity_achieved": diversity,
         }
-        routing.metadata["route_status"] = "SUPERSEDED_BY_FAILOVER"
         routing.metadata["reassignment_reason"] = (
-            f"Implementer failed over from {routing.selected_agent_id} to {final_impl_resource_id}; "
-            f"reviewers recomputed to maintain reviewer independence"
+            f"Implementation moved from {routing.selected_agent_id} to "
+            f"{attempt_resource_id}; reviewers recomputed to keep review "
+            f"independent of the implementer"
         )
+
         run_dir = self.target_repo / ".task_runs" / task_spec.task_id
         if run_dir.exists():
             atomic_write_json(run_dir / "route.json", asdict(routing))
-            effective_data = asdict(routing)
-            effective_data["selected_agent_id"] = final_impl_resource_id
-            atomic_write_json(run_dir / "effective_route.json", effective_data)
+            effective = asdict(routing)
+            effective["selected_agent_id"] = attempt_resource_id
+            atomic_write_json(run_dir / "effective_route.json", effective)
 
         self._record_event(
             task_id=task_spec.task_id,
             agent_id="control_plane",
-            action="reviewers_recomputed_after_failover",
+            action="effective_route_updated",
             spec=task_spec,
             metadata={
-                "final_implementation_resource": final_impl_resource_id,
                 "initial_implementation_resource": routing.selected_agent_id,
+                "attempt_resource": attempt_resource_id,
+                "accepted_implementation_resource": (
+                    attempt_resource_id if accepted else None
+                ),
+                "route_status": route_status,
                 "reviewer_mapping": mapping,
                 "diversity_achieved": diversity,
             },
@@ -953,6 +1181,8 @@ class GovernedTaskOrchestrator:
         # Declared out here because a resumed run can skip the attempt loop
         # entirely and still needs to report failover accounting.
         last_selection_decision: Optional[Any] = None
+        # Set only when a budget-stopped attempt left a delta worth governing.
+        timeout_candidate: Optional[Dict[str, Any]] = None
 
         if has_existing_delta and rec_delta:
             current_delta = rec_delta
@@ -986,13 +1216,48 @@ class GovernedTaskOrchestrator:
                 failure_class: str,
                 exit_code: int = 1,
                 termination_reason: str = TERMINATION_NON_FAILOVER_FAILURE,
+                rollback: bool = True,
             ) -> OrchestrationResult:
                 """Terminal-fails the run from inside the implementation attempt loop.
 
                 Reads the attempt-scoped locals (delta, provider execution, attempt
                 records) at call time, so every terminal path reports the state as of
                 the attempt that failed.
+
+                Rollback used to sit at the end of the failover branch, where it
+                only ever ran to prepare a clean tree for a *next* attempt. A
+                terminal attempt therefore left its edits behind and its record
+                carried no rollback key at all, contaminating the next run's
+                starting state (HOWLFRAM-SLOPFIX-05). Undoing it here instead
+                makes every terminal implementation failure restore the
+                pre-task baseline, and say so. Evidence is already written by
+                this point, so the patch survives the restore.
                 """
+                # Unconditional, exactly like the inter-attempt rollback: a
+                # task-attributable delta can be empty while the provider has
+                # still clobbered a file the operator had already modified,
+                # which capture_delta deliberately excludes. Only the baseline
+                # restore knows how to put those back.
+                if current_impl_resource_id != routing.selected_agent_id:
+                    self._persist_effective_route(
+                        routing,
+                        task_spec,
+                        current_impl_resource_id,
+                        ROUTE_STATUS_IMPLEMENTATION_FAILED,
+                        accepted=False,
+                    )
+                if rollback:
+                    restored_ok, restore_err = restore_repository_to_baseline(
+                        self.target_repo, baseline, current_delta
+                    )
+                    self._attach_rollback_result(
+                        attempt_record, attempts_dir, restored_ok, restore_err
+                    )
+                    if not restored_ok:
+                        err_msg = (
+                            f"{err_msg} Repository could not be restored to baseline "
+                            f"({restore_err}); task-attributable changes remain."
+                        )
                 return self._fail_task(
                     task_spec,
                     run_dir,
@@ -1016,6 +1281,24 @@ class GovernedTaskOrchestrator:
                         last_selection_decision,
                     ),
                 )
+
+            def govern_candidate() -> Dict[str, Any]:
+                """Preserves the current attempt's delta as a governed candidate.
+
+                Reads the attempt-scoped locals at call time, the same way
+                fail_implementation does, so both terminal exits salvage
+                identically.
+                """
+                captured = self._capture_timeout_candidate(
+                    run_dir=run_dir,
+                    attempts_dir=attempts_dir,
+                    attempt_record=attempt_record,
+                    task_spec=task_spec,
+                    resource_id=current_impl_resource_id,
+                    delta=current_delta,
+                )
+                self._record_delta_captured(task_spec, current_delta)
+                return captured
 
             for attempt_num in range(1, self.config.max_provider_failover_attempts + 1):
                 impl_res = None
@@ -1059,6 +1342,12 @@ class GovernedTaskOrchestrator:
                         metadata={"attempt": attempt_num},
                     )
 
+                    attempt_dir = attempts_dir / f"{attempt_num:02d}-{current_impl_resource_id}"
+                    (attempt_dir / "workspace").mkdir(parents=True, exist_ok=True)
+                    evidence_root_before = {
+                        entry.name for entry in run_dir.iterdir() if entry.is_file()
+                    }
+
                     impl_agent_id = getattr(impl_backend, "agent_id", None) or current_impl_resource_id
                     with progress.operation(
                         phase=TaskPhase.IMPLEMENTING,
@@ -1073,6 +1362,27 @@ class GovernedTaskOrchestrator:
                             role="implementation",
                             prompt_override=impl_prompt,
                             timeout_seconds=self.config.timeout_seconds,
+                        )
+
+                # Relocate provider scratch before any evidence for this
+                # attempt is written, so control-plane artifacts can never be
+                # mistaken for files the provider left behind.
+                if impl_backend.is_available():
+                    swept = self._sweep_provider_scratch(
+                        run_dir=run_dir,
+                        attempt_dir=attempts_dir
+                        / f"{attempt_num:02d}-{current_impl_resource_id}",
+                        resource_id=current_impl_resource_id,
+                        attempt_num=attempt_num,
+                        known_before=evidence_root_before,
+                    )
+                    if swept:
+                        self._record_event(
+                            task_id=task_spec.task_id,
+                            agent_id=current_impl_resource_id,
+                            action="provider_scratch_relocated",
+                            spec=task_spec,
+                            metadata={"attempt": attempt_num, "files": swept},
                         )
 
                 # Snapshot capacity before record_result mutates it, so the
@@ -1168,7 +1478,22 @@ class GovernedTaskOrchestrator:
                         termination_reason=TERMINATION_NON_FAILOVER_FAILURE,
                     )
 
-                if attempt_num >= self.config.max_provider_failover_attempts:
+                # No further provider can be tried, but this attempt may still
+                # have left something worth governing. Salvage is checked only
+                # here, at the end of the chain: while failover budget remains a
+                # fresh provider may yet produce a complete, provider-attested
+                # result, and that is strictly better than governing a fragment.
+                salvageable = self._is_salvageable_timeout_candidate(
+                    normalized_failure, current_delta
+                )
+                exhausted = attempt_num >= self.config.max_provider_failover_attempts
+
+                if exhausted and salvageable:
+                    timeout_candidate = govern_candidate()
+                    final_impl_resource_id = current_impl_resource_id
+                    break
+
+                if exhausted:
                     err_msg = (
                         f"Implementation failed on {current_impl_resource_id} ({failure_class_value}); "
                         f"max failover attempts ({self.config.max_provider_failover_attempts}) reached."
@@ -1199,6 +1524,11 @@ class GovernedTaskOrchestrator:
                     or next_resource_id == current_impl_resource_id
                     or next_resource_id in attempted_impl_resource_ids
                 ):
+                    if salvageable:
+                        timeout_candidate = govern_candidate()
+                        final_impl_resource_id = current_impl_resource_id
+                        break
+
                     err_msg = f"Implementation failed on {current_impl_resource_id} ({failure_class_value}) and no eligible failover resource remains."
                     return fail_implementation(
                         err_msg,
@@ -1219,6 +1549,7 @@ class GovernedTaskOrchestrator:
                         err_msg,
                         FAILURE_CLASS_PROVIDER_UNAVAILABLE,
                         termination_reason=TERMINATION_ROLLBACK_FAILED,
+                        rollback=False,
                     )
 
                 progress.emit_failover(
@@ -1240,8 +1571,15 @@ class GovernedTaskOrchestrator:
                 )
 
                 current_impl_resource_id = next_resource_id
+                self._persist_effective_route(
+                    routing,
+                    task_spec,
+                    current_impl_resource_id,
+                    ROUTE_STATUS_SUPERSEDED,
+                    accepted=False,
+                )
 
-            if impl_res is None or not impl_res.success:
+            if timeout_candidate is None and (impl_res is None or not impl_res.success):
                 err_msg = (
                     f"Implementation exhausted all {self.config.max_provider_failover_attempts} "
                     "attempted provider(s) without success."
@@ -1284,7 +1622,75 @@ class GovernedTaskOrchestrator:
                 and final_impl_resource_id != routing.selected_agent_id
                 and self.config.provider_pool is not None
             ):
-                self._recompute_reviewers(routing, task_spec, final_impl_resource_id)
+                self._persist_effective_route(
+                    routing,
+                    task_spec,
+                    final_impl_resource_id,
+                    ROUTE_STATUS_SUPERSEDED,
+                    accepted=True,
+                )
+
+            # A salvaged candidate carries no completion claim from its
+            # producer, so independent review is the only thing standing behind
+            # it. When no independent reviewer is available the pool falls back
+            # to the implementer reviewing its own work, which for this kind of
+            # candidate is no review at all. Park it for a human rather than
+            # completing on a self-review (HOWLFRAM-SLOPFIX-05).
+            if timeout_candidate is not None and not routing.metadata.get(
+                "review_diversity_achieved", True
+            ):
+                err_msg = (
+                    "Timed-out implementation candidate cannot be independently "
+                    f"reviewed: no reviewer is available other than "
+                    f"{final_impl_resource_id}, which produced it."
+                )
+                decision_pkt = HumanDecisionPacket(
+                    task_id=task_spec.task_id,
+                    objective=task_spec.objective,
+                    change_summary=(
+                        f"Candidate ({current_delta.insertions} ins, "
+                        f"{current_delta.deletions} del) was left by "
+                        f"{final_impl_resource_id} after this control plane "
+                        "stopped it at its execution budget. The provider never "
+                        "reported completion."
+                    ),
+                    boundary_triggers=["reviewer_independence_unavailable"],
+                    evidence=[
+                        f"origin={CANDIDATE_ORIGIN_TIMED_OUT}",
+                        "provider_completion_claim=false",
+                    ],
+                    risks=[
+                        "No independent reviewer is available, so the candidate "
+                        "has nothing standing behind it.",
+                    ],
+                    review_findings_summary={
+                        "blocker": 0, "high": 0, "medium": 0, "low": 0,
+                    },
+                    verification_status="unverified",
+                    recommended_action=(
+                        "Inspect implementation/attempts/*/candidate.patch and "
+                        "either authorize it explicitly or discard it."
+                    ),
+                )
+                self._park_awaiting_human(
+                    task_spec, run_dir, err_msg, decision_pkt, progress
+                )
+                return self._make_result(
+                    task_spec=task_spec,
+                    final_state="awaiting_human",
+                    exit_code=2,
+                    start_time=start_time,
+                    run_dir=run_dir,
+                    routing=routing,
+                    initial_delta=initial_delta,
+                    current_delta=current_delta,
+                    verif_plan=verif_plan,
+                    hf_status=hf_audit_status,
+                    hf_match=hf_audit_match,
+                    provider_execution=impl_res,
+                    implementation_attempts=implementation_attempts,
+                    timeout_candidate=timeout_candidate,
+                )
 
             if self.config.failure_injection_hook:
                 self.config.failure_injection_hook("post_implementation", run_dir, task_spec)
@@ -1391,14 +1797,6 @@ class GovernedTaskOrchestrator:
                     f"Remediation limit reached ({self.config.max_remediation_cycles} cycles) with "
                     f"{findings_summary['blocker']} blockers and {findings_summary['high']} high findings remaining."
                 )
-                progress.record_terminal(
-                    TaskProgressState.AWAITING_AUTHORIZATION,
-                    TaskPhase.AWAITING_AUTHORIZATION,
-                    error_message=err_msg,
-                )
-                task_spec.transition_to("awaiting_human", f"Max remediation cycles exceeded: {err_msg}")
-                task_spec.save_to_file(str(run_dir / "task.yaml"))
-
                 decision_pkt = HumanDecisionPacket(
                     task_id=task_spec.task_id,
                     objective=task_spec.objective,
@@ -1410,8 +1808,13 @@ class GovernedTaskOrchestrator:
                     verification_status="unverified",
                     recommended_action="Review finding report in reconciliation_report.md and authorize override or manual remediation.",
                 )
-                (run_dir / "decision_packet.md").write_text(decision_pkt.render_markdown(), encoding="utf-8")
-                self._record_human_boundary_events(task_spec, run_dir, reason=err_msg)
+                self._park_awaiting_human(
+                    task_spec,
+                    run_dir,
+                    f"Max remediation cycles exceeded: {err_msg}",
+                    decision_pkt,
+                    progress,
+                )
                 return self._make_result(
                     task_spec=task_spec,
                     final_state="awaiting_human",
@@ -1568,6 +1971,33 @@ class GovernedTaskOrchestrator:
         if verif_status != "passed":
             failed_steps = [s.name for s in verif_plan.steps if s.status == "failed" and s.required]
             err_msg = f"Deterministic verification failed on required steps: {', '.join(failed_steps)}"
+            # A salvaged candidate only ever existed on sufferance. Governance
+            # has now rejected it, so the repository goes back to its pre-task
+            # baseline rather than keeping a patch nothing stands behind. A
+            # provider-attested implementation still keeps its diff in place for
+            # inspection, as before.
+            if timeout_candidate is not None and not current_delta.is_empty:
+                restored_ok, restore_err = restore_repository_to_baseline(
+                    self.target_repo, baseline, current_delta
+                )
+                self._record_event(
+                    task_id=task_spec.task_id,
+                    agent_id="control_plane",
+                    action="timeout_candidate_rejected",
+                    spec=task_spec,
+                    metadata={
+                        "stage": "verifying",
+                        "origin": CANDIDATE_ORIGIN_TIMED_OUT,
+                        "rollback_restored": restored_ok,
+                        "rollback_error": restore_err,
+                        "failed_steps": failed_steps,
+                    },
+                )
+                if not restored_ok:
+                    err_msg = (
+                        f"{err_msg}. Repository could not be restored to baseline "
+                        f"({restore_err}); candidate changes remain."
+                    )
             return self._fail_task(
                 task_spec,
                 run_dir,
@@ -1586,6 +2016,7 @@ class GovernedTaskOrchestrator:
                 remediation_count=remediation_count,
                 provider_execution=impl_res,
                 failure_class=FAILURE_CLASS_VERIFICATION,
+                timeout_candidate=timeout_candidate,
             )
 
         # --------------------------------------------------------------------
@@ -1620,9 +2051,12 @@ class GovernedTaskOrchestrator:
             implementation_attempts=implementation_attempts,
             failover_summary=self._build_failover_summary(
                 implementation_attempts,
-                TERMINATION_IMPLEMENTATION_SUCCEEDED,
+                TERMINATION_IMPLEMENTATION_SUCCEEDED
+                if timeout_candidate is None
+                else TERMINATION_TIMEOUT_CANDIDATE_GOVERNED,
                 last_selection_decision,
             ),
+            timeout_candidate=timeout_candidate,
         )
 
         if boundary_res.requires_human_approval:
@@ -1745,8 +2179,13 @@ class GovernedTaskOrchestrator:
         failure_class: Optional[str] = None,
         implementation_attempts: Optional[List[Dict[str, Any]]] = None,
         failover_summary: Optional[Dict[str, Any]] = None,
+        timeout_candidate: Optional[Dict[str, Any]] = None,
     ) -> OrchestrationResult:
         return OrchestrationResult(
+            implementation_completion_claim=timeout_candidate is None,
+            candidate_origin=(
+                timeout_candidate.get("origin") if timeout_candidate else None
+            ),
             task_id=task_spec.task_id,
             task_spec=task_spec,
             final_state=final_state,
@@ -1860,6 +2299,15 @@ class GovernedTaskOrchestrator:
             lines.append("## Required Skills")
             for s in task.required_skills:
                 lines.append(f"- {s}")
+        lines.append("")
+        lines.append("## Workspace")
+        lines.append(
+            f"- Scratch files belong in `{self._attempt_workspace_hint(task)}`."
+        )
+        lines.append(
+            f"- Everything else under `.task_runs/{task.task_id}/` is "
+            "control-plane evidence. Do not create or edit files there."
+        )
         if "howlframe-app-development" in (task.required_skills or []):
             lines.append("")
             lines.append("## HowlFrame Application Guidance")

@@ -103,3 +103,54 @@ def test_capture_delta_file_deletion(tmp_path):
     delta = capture_delta(repo, baseline)
     assert "existing.py" in delta.files_deleted
     assert delta.is_empty is False
+
+
+def test_captured_delta_patch_is_replayable_by_git_apply(tmp_path):
+    """HOWLFRAM-SLOPFIX-05: preserved evidence has to survive `git apply`.
+
+    Every attempt patch in the evidence store was written straight from
+    diff_content, which was assembled from stripped hunks and so ended without
+    a trailing newline. git rejected all of them as corrupt at the final line,
+    which meant a preserved candidate could never be replayed, reviewed, or
+    verified -- only read.
+    """
+    repo = _init_git_repo(tmp_path / "repo_replay")
+    baseline = capture_baseline(repo)
+
+    (repo / "existing.py").write_text("def old_fn():\n    return 2\n", encoding="utf-8")
+    (repo / "added.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    delta = capture_delta(repo, baseline)
+    assert not delta.is_empty
+    assert delta.diff_content.endswith("\n")
+    assert not delta.diff_content.endswith("\n\n")
+
+    patch = tmp_path / "candidate.patch"
+    patch.write_text(delta.diff_content, encoding="utf-8")
+
+    # The patch describes exactly the working tree we are standing in, so it
+    # must reverse-apply cleanly against it...
+    assert subprocess.run(
+        ["git", "apply", "--check", "--reverse", str(patch)],
+        cwd=repo, capture_output=True, text=True,
+    ).returncode == 0
+
+    # ...and forward-apply cleanly once the tree is back at baseline, which is
+    # what governing a captured candidate actually requires.
+    subprocess.run(["git", "apply", "--reverse", str(patch)], cwd=repo, check=True)
+    applied = subprocess.run(
+        ["git", "apply", str(patch)],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert applied.returncode == 0, applied.stderr
+    assert (repo / "existing.py").read_text(encoding="utf-8") == "def old_fn():\n    return 2\n"
+    assert (repo / "added.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+
+
+def test_empty_delta_stays_empty_not_a_bare_newline(tmp_path):
+    """Normalizing the patch must not turn 'no changes' into a one-byte file."""
+    repo = _init_git_repo(tmp_path / "repo_empty")
+    delta = capture_delta(repo, capture_baseline(repo))
+
+    assert delta.is_empty
+    assert delta.diff_content == ""

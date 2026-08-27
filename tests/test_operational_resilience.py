@@ -7,6 +7,7 @@ Operational Resilience: Crash Recovery, Durable Resume, Repository Locking,
 Cancellation, and Exactly-Once Consequential Execution Semantics.
 """
 
+import argparse
 from datetime import datetime, timezone
 import json
 import os
@@ -25,6 +26,7 @@ from src.control_plane.atomic_io import (
     CorruptArtifactError,
 )
 from src.control_plane.checkpoints import CheckpointManager, StageCheckpoint
+from src.control_plane.cli import cmd_unlock
 from src.control_plane.evidence_ledger import EvidenceLedger
 from src.control_plane.executor import (
     AuthorityExecutor,
@@ -42,13 +44,17 @@ from src.control_plane.human_boundary import (
     compute_repository_fingerprint,
 )
 from src.control_plane.locking import (
+    LockError,
+    LockOwnerState,
     RepoLock,
     RepositoryLockedError,
     TaskLock,
     TaskLockedError,
+    classify_lock_owner,
     get_repo_lock_path,
     get_task_lock_path,
     is_process_alive,
+    reclaim_lock,
 )
 from src.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
 from src.control_plane.process_manager import ProcessRecord, ProcessTracker
@@ -646,3 +652,175 @@ def test_drift_after_human_approval_fails_closed(tmp_path):
 
     with pytest.raises(StaleApprovalError):
         HumanLifecycleManager.resume(tmp_path, spec.task_id)
+
+
+# ============================================================================
+# HOWLFRAM-SLOPFIX-05: a lock whose owner cannot be verified had no recovery
+# path at all, and was described as active without ever being checked.
+# ============================================================================
+def _write_task_lock(repo, task_id, **overrides):
+    """Writes a task lock file with a chosen owner, for lock-state tests."""
+    payload = {
+        "task_id": task_id,
+        "pid": 999999,
+        "hostname": os.uname().nodename,
+        "lock_type": "task_run",
+        "operation": "orchestrate",
+        "command": "ai resume",
+        "started_at": "2026-08-24T14:05:51.747504+00:00",
+        "process_create_time": 0.0,
+        "schema": "howlplane.lock/v1",
+    }
+    payload.update(overrides)
+    lock_path = get_task_lock_path(repo, task_id)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(lock_path, payload)
+    return lock_path
+
+
+def test_lock_owner_states_are_distinguished(tmp_path):
+    """Live, provably-gone, and unverifiable owners are three different things.
+    Collapsing the last two into 'alive' is what made a cross-host lock
+    permanently unrecoverable while claiming its owner was running."""
+    host = os.uname().nodename
+
+    live, _ = classify_lock_owner(os.getpid(), host, 0.0)
+    assert live is LockOwnerState.ACTIVE
+
+    dead, reason = classify_lock_owner(999999, host, 0.0)
+    assert dead is LockOwnerState.STALE
+    assert "ESRCH" in reason
+
+    # Same provably-dead PID, but recorded on another host: liveness simply
+    # cannot be established from here, so it is neither active nor stale.
+    foreign, reason = classify_lock_owner(999999, "some-other-box", 0.0)
+    assert foreign is LockOwnerState.AMBIGUOUS
+    assert "some-other-box" in reason
+
+
+def test_resume_refuses_takeover_of_live_lock(tmp_path):
+    """Fail closed on a genuinely running owner, and never reclaim it."""
+    _init_git_repo(tmp_path)
+    owner = subprocess.Popen(["sleep", "30"])
+    try:
+        lock_path = _write_task_lock(
+            tmp_path, "TASK-LIVE", pid=owner.pid, hostname=os.uname().nodename
+        )
+
+        with pytest.raises(TaskLockedError) as err:
+            TaskLock(tmp_path, "TASK-LIVE", operation="resume").acquire()
+        assert "active process" in str(err.value)
+        assert lock_path.exists(), "a live owner's lock must never be removed"
+
+        with pytest.raises(LockError) as err:
+            reclaim_lock(lock_path)
+        assert "Refusing to reclaim" in str(err.value)
+        assert lock_path.exists()
+    finally:
+        owner.kill()
+        owner.wait()
+
+
+def test_ambiguous_lock_fails_closed_but_is_recoverable(tmp_path):
+    """The unrecoverable case. Acquire must still fail closed -- we will not
+    steal what we cannot prove is dead -- but it must say so truthfully and
+    point at a real recovery path, which `ai unlock` then provides."""
+    _init_git_repo(tmp_path)
+    lock_path = _write_task_lock(tmp_path, "TASK-AMBIG", hostname="some-other-box")
+
+    with pytest.raises(TaskLockedError) as err:
+        TaskLock(tmp_path, "TASK-AMBIG", operation="resume").acquire()
+    message = str(err.value)
+    assert "INDETERMINATE" in message
+    # It must not assert liveness it never established.
+    assert "held by active process" not in message
+    assert "ai unlock TASK-AMBIG" in message
+    assert lock_path.exists()
+
+    record = reclaim_lock(lock_path)
+    assert record.owner_state == LockOwnerState.AMBIGUOUS.value
+    assert record.owner_hostname == "some-other-box"
+    assert record.task_id == "TASK-AMBIG"
+    assert not lock_path.exists()
+
+    # And the documented path now works.
+    reclaimed = TaskLock(tmp_path, "TASK-AMBIG", operation="resume")
+    assert reclaimed.acquire() is True
+    reclaimed.release()
+
+
+def test_unlock_command_records_reclamation_in_evidence(tmp_path):
+    """A takeover is a privileged act, so it leaves an audit trail."""
+    _init_git_repo(tmp_path)
+    _write_task_lock(tmp_path, "TASK-AUDIT", hostname="some-other-box")
+    ledger_file = tmp_path / "evidence_ledger.jsonl"
+
+    args = argparse.Namespace(
+        repo_dir=str(tmp_path),
+        task_id="TASK-AUDIT",
+        ledger_file=str(ledger_file),
+        json=False,
+    )
+    assert cmd_unlock(args) == 0
+
+    entries = EvidenceLedger(str(ledger_file)).list_all_entries()
+    reclaims = [e for e in entries if e.action == "stale_lock_reclaimed"]
+    assert len(reclaims) == 1
+    assert reclaims[0].task_id == "TASK-AUDIT"
+    assert reclaims[0].result == LockOwnerState.AMBIGUOUS.value
+    assert reclaims[0].agent_id == "human_operator"
+
+
+def test_unlock_refuses_a_live_lock(tmp_path):
+    """The command is a recovery tool, not an override."""
+    _init_git_repo(tmp_path)
+    owner = subprocess.Popen(["sleep", "30"])
+    lock_path = _write_task_lock(tmp_path, "TASK-BUSY", pid=owner.pid)
+
+    args = argparse.Namespace(
+        repo_dir=str(tmp_path), task_id="TASK-BUSY", ledger_file=None, json=False,
+    )
+    try:
+        assert cmd_unlock(args) == 1
+        assert lock_path.exists()
+    finally:
+        owner.kill()
+        owner.wait()
+
+
+def test_recovery_does_not_recommend_resume_behind_a_held_lock(tmp_path):
+    """`ai resume` was recommended for a run whose lock it could never take.
+    The recommendation must reflect what the lock actually allows."""
+    _init_git_repo(tmp_path)
+    repo = tmp_path
+    run_dir = Path(repo) / ".task_runs" / "TASK-RECO"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    TaskSpec(
+        task_id="TASK-RECO",
+        repository="repo",
+        objective="interrupted work",
+        current_state="implementing",
+    ).save_to_file(str(run_dir / "task.yaml"))
+
+    _write_task_lock(repo, "TASK-RECO", hostname="some-other-box")
+    diag = CrashRecoveryEngine.inspect_task(repo, "TASK-RECO")
+    assert diag["task_locked"] is True
+    assert diag["task_lock_state"] == LockOwnerState.AMBIGUOUS.value
+    assert "ai unlock TASK-RECO" in diag["recommendation"]
+    assert diag["classification"] == RetryClassification.HUMAN_DECISION_REQUIRED
+
+    owner = subprocess.Popen(["sleep", "30"])
+    try:
+        _write_task_lock(repo, "TASK-RECO", pid=owner.pid)
+        diag = CrashRecoveryEngine.inspect_task(repo, "TASK-RECO")
+        assert diag["task_lock_state"] == LockOwnerState.ACTIVE.value
+        assert "ai resume" not in diag["recommendation"]
+    finally:
+        owner.kill()
+        owner.wait()
+
+    # A provably dead owner is reclaimed automatically, so resume is correct.
+    _write_task_lock(repo, "TASK-RECO", pid=999999)
+    diag = CrashRecoveryEngine.inspect_task(repo, "TASK-RECO")
+    assert diag["task_locked"] is False
+    assert "ai resume TASK-RECO" in diag["recommendation"]

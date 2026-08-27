@@ -19,7 +19,15 @@ from src.control_plane.atomic_io import atomic_write_json, atomic_write_yaml, sa
 from src.control_plane.checkpoints import CheckpointManager, StageCheckpoint, compute_stage_repo_fingerprint
 from src.control_plane.executor import AuthorityExecutor, ExecutionReceipt, ExecutionResult, ExecutorRegistry
 from src.control_plane.git_baseline import GitBaseline, RepositoryDelta, capture_baseline, capture_delta
-from src.control_plane.locking import RepoLock, TaskLock, is_process_alive, get_repo_lock_path, get_task_lock_path
+from src.control_plane.locking import (
+    LockOwnerState,
+    RepoLock,
+    TaskLock,
+    classify_lock_owner,
+    get_repo_lock_path,
+    get_task_lock_path,
+    is_process_alive,
+)
 from src.control_plane.process_manager import ProcessTracker, ProcessRecord
 from src.control_plane.proposed_action import ProposedAction, infer_proposed_actions
 from src.control_plane.reconciliation import ReviewFinding, ReconciliationResult, ReviewReconciler
@@ -122,14 +130,24 @@ class CrashRecoveryEngine:
             except Exception:
                 pass
 
+        task_lock_state: Optional[str] = None
+        task_lock_reason: Optional[str] = None
         if task_lock_path.exists():
             try:
                 t_data = safe_load_json(task_lock_path)
-                alive, _ = is_process_alive(
-                    t_data.get("pid", 0), t_data.get("hostname", "")
+                state, reason = classify_lock_owner(
+                    t_data.get("pid", 0),
+                    t_data.get("hostname", ""),
+                    t_data.get("process_create_time", 0.0),
                 )
-                if alive:
+                task_lock_state = state.value
+                task_lock_reason = reason
+                # A provably dead owner is reclaimed automatically on the next
+                # acquire, so it does not block anything and is not reported as
+                # a held lock.
+                if state is not LockOwnerState.STALE:
                     task_locked = True
+                    lock_owner_pid = lock_owner_pid or t_data.get("pid")
             except Exception:
                 pass
 
@@ -200,6 +218,21 @@ class CrashRecoveryEngine:
             recommendation = (
                 f"HowlChangeOps action already executed natively. Run 'ai resume {task_id}' to reconcile receipt."
             )
+        elif task_locked and task_lock_state == LockOwnerState.ACTIVE.value:
+            # Recommending resume while a live owner holds the lock sends the
+            # operator at a door that is bolted (HOWLFRAM-SLOPFIX-05).
+            classification = RetryClassification.HUMAN_DECISION_REQUIRED
+            recommendation = (
+                f"Task lock is held by active process PID {lock_owner_pid}. "
+                f"Wait for it to finish, or run 'ai cancel {task_id}'."
+            )
+        elif task_locked and task_lock_state == LockOwnerState.AMBIGUOUS.value:
+            classification = RetryClassification.HUMAN_DECISION_REQUIRED
+            recommendation = (
+                f"Task lock ownership is indeterminate ({task_lock_reason}). "
+                f"If that run is definitely gone, run 'ai unlock {task_id}' "
+                f"first, then 'ai resume {task_id}'."
+            )
         else:
             classification = classify_stage_retry(last_stage)
             recommendation = f"Run 'ai resume {task_id}' to recover from {last_stage}."
@@ -215,6 +248,8 @@ class CrashRecoveryEngine:
             "process_info": active_process.to_dict() if active_process else None,
             "repo_locked": repo_locked,
             "task_locked": task_locked,
+            "task_lock_state": task_lock_state,
+            "task_lock_reason": task_lock_reason,
             "lock_owner_pid": lock_owner_pid,
             "completed_reviewers": completed_reviewers,
             "incomplete_reviewers": incomplete_reviewers,

@@ -32,6 +32,7 @@ from src.control_plane.cli import (
     cmd_reject as cp_cmd_reject,
     cmd_resume as cp_cmd_resume,
     cmd_cancel as cp_cmd_cancel,
+    cmd_unlock as cp_cmd_unlock,
     cmd_create as cp_cmd_create,
     cmd_run_product as cp_cmd_run_product,
     cmd_dogfood as cp_cmd_dogfood,
@@ -924,6 +925,15 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     return cp_cmd_cancel(args)
 
 
+def cmd_unlock(args: argparse.Namespace) -> int:
+    """Reclaims a stale or unverifiable task-run lock by explicit human action."""
+    target_repo = find_git_repo_root(args.repo)
+    cp_root = find_control_plane_root(args.control_plane_dir)
+    args.repo_dir = str(target_repo)
+    args.ledger_file = str(cp_root / "logs" / "control_plane" / "evidence_ledger.jsonl")
+    return cp_cmd_unlock(args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument(
@@ -1023,6 +1033,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_can.add_argument("--reason", help="Optional reason for cancellation")
     p_can.add_argument("--json", action="store_true", help="Output JSON result")
 
+    p_unlock = subparsers.add_parser(
+        "unlock",
+        parents=[common_parser],
+        help="Reclaim a task-run lock whose owner is gone or unverifiable",
+    )
+    p_unlock.add_argument("task_id", help="Task ID whose lock should be reclaimed")
+    p_unlock.add_argument("--json", action="store_true", help="Output JSON result")
+
     p_ver = subparsers.add_parser("verify", parents=[common_parser], help="Execute deterministic verification plan")
     p_ver.add_argument("--task-id", help="Task ID")
 
@@ -1054,6 +1072,7 @@ def main(args: Optional[List[str]] = None) -> int:
         "reject": cmd_reject,
         "resume": cmd_resume,
         "cancel": cmd_cancel,
+        "unlock": cmd_unlock,
         "verify": cmd_verify,
         "howlframe-audit": cmd_howlframe_audit,
         "create": cp_cmd_create,

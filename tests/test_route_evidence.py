@@ -48,7 +48,9 @@ def test_recompute_reviewers_persists_effective_and_initial_route(tmp_path):
     initial_agent = routing.selected_agent_id
     final_impl = "codex" if initial_agent != "codex" else "agy"
 
-    orch._recompute_reviewers(routing, task, final_impl)
+    orch._persist_effective_route(
+        routing, task, final_impl, "SUPERSEDED_BY_FAILOVER", accepted=True
+    )
 
     assert effective_route_file.exists()
 
@@ -59,6 +61,8 @@ def test_recompute_reviewers_persists_effective_and_initial_route(tmp_path):
     assert route_data["metadata"]["route_status"] == "SUPERSEDED_BY_FAILOVER"
     assert route_data["metadata"]["initial_route"]["selected_agent_id"] == initial_agent
     assert route_data["metadata"]["final_route"]["selected_agent_id"] == final_impl
+    assert route_data["metadata"]["accepted_implementation_resource"] == final_impl
+    assert route_data["metadata"]["reviewer_mapping_status"] == "CONFIRMED"
 
     assert eff_data["selected_agent_id"] == final_impl
     if eff_data["metadata"].get("review_diversity_achieved"):
@@ -67,6 +71,45 @@ def test_recompute_reviewers_persists_effective_and_initial_route(tmp_path):
         assert eff_data["metadata"].get("review_diversity_achieved") is False
 
     assert init_data["selected_agent_id"] == initial_agent
+
+
+def test_unaccepted_route_never_claims_an_accepted_implementer(tmp_path):
+    """A resource that is only *attempting* implementation has not been
+    accepted, and the reviewer mapping chosen for it is provisional until it
+    is. Recording it as final would repeat the failure it is meant to fix, in
+    the opposite direction (HOWLFRAM-SLOPFIX-05)."""
+    repo = init_git_repo(tmp_path / "route_repo_hop", files={"README.md": "hello"})
+    pool = ProviderPoolManager(operating_mode="connected")
+    orch = GovernedTaskOrchestrator(
+        target_repo=repo, config=OrchestrationConfig(provider_pool=pool)
+    )
+    task = TaskSpec(
+        task_id="TASK-ROUTE-02",
+        repository="route_repo_hop",
+        objective="Refactor duplication",
+        task_class="bug_fix",
+    )
+    _, routing, _, run_dir, _ = orch.prepare_task_plan(task)
+    initial_agent = routing.selected_agent_id
+    attempted = "codex" if initial_agent != "codex" else "agy"
+
+    orch._persist_effective_route(
+        routing, task, attempted, "IMPLEMENTATION_FAILED", accepted=False
+    )
+
+    eff = json.loads((run_dir / "effective_route.json").read_text(encoding="utf-8"))
+    init = json.loads((run_dir / "initial_route.json").read_text(encoding="utf-8"))
+
+    # The last resource actually attempted is named, and named as attempted.
+    assert eff["selected_agent_id"] == attempted
+    assert eff["metadata"]["route_status"] == "IMPLEMENTATION_FAILED"
+    assert eff["metadata"]["last_attempted_implementation_resource"] == attempted
+    assert eff["metadata"]["accepted_implementation_resource"] is None
+    assert eff["metadata"]["final_implementation_resource"] is None
+    assert eff["metadata"]["reviewer_mapping_status"] == "PROVISIONAL"
+    # And the initially routed provider is not left looking like the implementer.
+    assert eff["metadata"]["initial_route"]["selected_agent_id"] == initial_agent
+    assert init["selected_agent_id"] == initial_agent
 
 
 def _render_summary(result: OrchestrationResult, capsys) -> str:

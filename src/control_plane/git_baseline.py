@@ -205,6 +205,13 @@ def capture_delta(repo_dir: Union[str, Path], baseline: GitBaseline) -> Reposito
     full_diff = "\n\n".join(diffs) if diffs else ""
     ins = sum(1 for l in full_diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
     dels = sum(1 for l in full_diff.splitlines() if l.startswith("-") and not l.startswith("---"))
+    # Each hunk was stripped before joining, so the assembled patch ends without
+    # a newline and `git apply` rejects the whole file as corrupt at its last
+    # line. Preserved evidence has to be replayable -- a candidate that cannot
+    # be applied cannot be reviewed or verified (HOWLFRAM-SLOPFIX-05). Counts
+    # are taken above so this stays purely a serialization fix.
+    if full_diff:
+        full_diff += "\n"
 
     return RepositoryDelta(
         files_added=task_added,

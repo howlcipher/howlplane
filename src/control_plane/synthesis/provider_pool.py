@@ -609,8 +609,14 @@ class ProviderPoolManager:
         launch_outcome = metadata.get(LAUNCH_OUTCOME_KEY)
         if launch_outcome in (LAUNCH_OUTCOME_NOT_INSTALLED, LAUNCH_OUTCOME_SPAWN_FAILED):
             return ProviderFailureClass.MISSING_EXECUTABLE
+        # A harness-sourced timeout is this process killing the provider at our
+        # own budget. Nothing was observed about reachability, so it is an
+        # execution budget result, not a transport failure. Transcript-sourced
+        # timeouts still fall through to the transport branch below, where a
+        # provider genuinely reporting that it could not reach its service is
+        # classified as before (HOWLFRAM-SLOPFIX-05).
         if metadata.get(TIMEOUT_SOURCE_KEY) == TIMEOUT_SOURCE_HARNESS:
-            return ProviderFailureClass.TRANSPORT_UNAVAILABLE
+            return ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED
         # A provider that demonstrably started cannot be a missing executable,
         # whatever its session log says about commands that were not found.
         # Backends that stamp no markers keep the older text-based behavior, with
@@ -704,6 +710,12 @@ class ProviderPoolManager:
             return ProviderFailureClass.UNKNOWN
 
         failure_class = self.classify_failure(resource_id, result)
+        # EXECUTION_BUDGET_EXCEEDED is deliberately absent from this map. We
+        # stopped the provider at our own deadline, so nothing was learned about
+        # its availability and marking it UNREACHABLE (plus a global cooldown)
+        # would penalize a healthy resource across later tasks. Not reusing it
+        # inside this task is already guaranteed by the ALREADY_ATTEMPTED
+        # failover exclusion (HOWLFRAM-SLOPFIX-05).
         availability_map = {
             ProviderFailureClass.QUOTA_EXHAUSTED: ProviderAvailabilityStatus.QUOTA_EXHAUSTED,
             ProviderFailureClass.SESSION_LIMIT: ProviderAvailabilityStatus.SESSION_EXHAUSTED,

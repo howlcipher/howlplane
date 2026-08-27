@@ -69,6 +69,14 @@ class ProviderFailureClass(str, Enum):
     # (never launched), AUTHENTICATION_REQUIRED (launched but not signed in),
     # and TRANSPORT_UNAVAILABLE (launched but could not reach the provider).
     EXECUTION_PERMISSION_REQUIRED = "EXECUTION_PERMISSION_REQUIRED"
+    # This control plane enforced its own per-attempt wall-clock budget and
+    # killed the provider. That is a fact about our deadline, not about the
+    # provider: the transport was never observed to fail, so this must not be
+    # reported as TRANSPORT_UNAVAILABLE and must not mark the resource
+    # unreachable. A provider stopped this way may still have left a usable
+    # repository delta, which is governed as a candidate rather than trusted
+    # (HOWLFRAM-SLOPFIX-05).
+    EXECUTION_BUDGET_EXCEEDED = "EXECUTION_BUDGET_EXCEEDED"
     UNKNOWN = "UNKNOWN"
 
 
