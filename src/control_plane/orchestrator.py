@@ -81,6 +81,10 @@ FAILURE_CLASS_VERIFICATION = "VERIFICATION_FAILURE"
 FAILURE_CLASS_PROVIDER_EXHAUSTED = "PROVIDER_EXHAUSTED"
 FAILURE_CLASS_PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
 FAILURE_CLASS_NO_ELIGIBLE_RESOURCE = "NO_ELIGIBLE_AI_RESOURCE"
+# This control plane stopped the provider at its own wall-clock budget. Kept
+# distinct from PROVIDER_UNAVAILABLE so an operator reading the summary is never
+# told a reachable provider was unreachable (HOWLFRAM-SLOPFIX-05).
+FAILURE_CLASS_EXECUTION_BUDGET_EXCEEDED = "EXECUTION_BUDGET_EXCEEDED"
 
 # Why bounded implementation failover stopped. Recorded verbatim in the run's
 # failover summary so an operator never has to infer it from a message string.
@@ -467,6 +471,7 @@ class GovernedTaskOrchestrator:
             ProviderFailureClass.AUTHENTICATION_REQUIRED,
             ProviderFailureClass.PROVIDER_UNAVAILABLE,
             ProviderFailureClass.TRANSPORT_UNAVAILABLE,
+            ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED,
             ProviderFailureClass.MISSING_EXECUTABLE,
             ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED,
         }
@@ -481,6 +486,8 @@ class GovernedTaskOrchestrator:
         value = getattr(failure_class, "value", str(failure_class))
         if value in {"QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"}:
             return FAILURE_CLASS_PROVIDER_EXHAUSTED
+        if value == "EXECUTION_BUDGET_EXCEEDED":
+            return FAILURE_CLASS_EXECUTION_BUDGET_EXCEEDED
         if value in {
             "AUTHENTICATION_REQUIRED",
             "PROVIDER_UNAVAILABLE",

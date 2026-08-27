@@ -1158,10 +1158,13 @@ def test_slopfix03_canary_walks_three_providers(tmp_path: Path):
 
     _assert_completed_on_third_hop(res)
     transport = ProviderFailureClass.TRANSPORT_UNAVAILABLE.value
+    budget = ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED.value
     missing = ProviderFailureClass.MISSING_EXECUTABLE.value
 
     # 1. A launched provider's inner tooling never demotes it to a missing binary.
-    assert res.implementation_attempts[0]["failure_class"] == transport
+    #    resource_a was killed by our own harness, so it reads as a budget
+    #    result; resource_b's own transcript reported a transport timeout.
+    assert res.implementation_attempts[0]["failure_class"] == budget
     assert res.implementation_attempts[0]["failure_class"] != missing
     assert res.implementation_attempts[1]["failure_class"] == transport
 

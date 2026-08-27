@@ -35,6 +35,7 @@ from src.control_plane.agent_execution import (
     LAUNCH_OUTCOME_SPAWN_FAILED,
     SubprocessAgentBackend,
     TIMEOUT_SOURCE_HARNESS,
+    TIMEOUT_SOURCE_TRANSCRIPT,
     TIMEOUT_SOURCE_KEY,
 )
 from src.control_plane.authority_envelope import create_envelope
@@ -283,10 +284,15 @@ def test_launched_provider_inner_command_not_found_is_not_missing_executable():
 
     failure_class = pool.classify_failure("codex", res)
     assert failure_class != ProviderFailureClass.MISSING_EXECUTABLE
-    assert failure_class == ProviderFailureClass.TRANSPORT_UNAVAILABLE
-    # The provider must stay recoverable, not be permanently written off.
+    # We killed this provider at our own budget, so the result describes our
+    # deadline, not its reachability (HOWLFRAM-SLOPFIX-05).
+    assert failure_class == ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED
+    assert failure_class != ProviderFailureClass.TRANSPORT_UNAVAILABLE
+    # The provider must stay recoverable, not be permanently written off. Since
+    # nothing was observed about availability, it is not written off at all.
     pool.record_result("codex", res)
-    assert pool.get_status("codex") == ProviderAvailabilityStatus.UNREACHABLE
+    assert pool.get_status("codex") != ProviderAvailabilityStatus.UNREACHABLE
+    assert pool.get_resource_status("codex").retry_after is None
 
 
 def test_launched_provider_engineering_failure_is_not_missing_executable():
@@ -730,3 +736,58 @@ def test_bounded_failover_terminates_when_all_eligible_resources_fail(tmp_path):
     assert rec["failure_reason"].startswith("NO_ELIGIBLE_PROVIDER_REMAINING")
     assert pool.get_status("agy") == ProviderAvailabilityStatus.UNREACHABLE
     assert pool.get_status("devin_cli") == ProviderAvailabilityStatus.QUOTA_EXHAUSTED
+
+
+def test_local_budget_kill_is_not_transport_unavailable():
+    """HOWLFRAM-SLOPFIX-05: our own deadline is not a provider outage.
+
+    Both attempts below carry the same 600s timeout wording. Only the harness
+    marker tells us who stopped the process, and that is what must decide the
+    class -- otherwise a reachable provider is reported unreachable and put on a
+    global cooldown for a deadline it never saw.
+    """
+    pool = ProviderPoolManager()
+
+    harness_killed = _execution_result(
+        agent_id="claude_code",
+        stderr="\nTimeout after 600s.",
+        timed_out=True,
+        error_message="Timeout after 600s",
+        metadata={
+            LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_LAUNCHED,
+            TIMEOUT_SOURCE_KEY: TIMEOUT_SOURCE_HARNESS,
+        },
+    )
+    provider_reported = _execution_result(
+        agent_id="agy",
+        exit_code=1,
+        stderr="Error: timeout waiting for response\n",
+        timed_out=True,
+        error_message="Error: timeout waiting for response",
+        metadata={
+            LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_LAUNCHED,
+            TIMEOUT_SOURCE_KEY: TIMEOUT_SOURCE_TRANSCRIPT,
+        },
+    )
+
+    assert (
+        pool.classify_failure("claude_code", harness_killed)
+        == ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED
+    )
+    assert (
+        pool.classify_failure("agy", provider_reported)
+        == ProviderFailureClass.TRANSPORT_UNAVAILABLE
+    )
+
+    # The budget kill leaves availability state untouched: no UNREACHABLE, no
+    # cooldown, and nothing for a later task to recover from.
+    pool.record_result("claude_code", harness_killed)
+    assert pool.get_status("claude_code") != ProviderAvailabilityStatus.UNREACHABLE
+    assert pool.get_resource_status("claude_code").retry_after is None
+    assert pool.detect_exhaustion("claude_code", harness_killed) is None
+
+    # A genuine transport timeout still marks the resource unreachable and
+    # schedules the existing cooldown recovery.
+    pool.record_result("agy", provider_reported)
+    assert pool.get_status("agy") == ProviderAvailabilityStatus.UNREACHABLE
+    assert pool.get_resource_status("agy").retry_after is not None
