@@ -1428,3 +1428,76 @@ def test_terminal_rollback_preserves_pre_existing_user_work(tmp_path: Path):
     # byte-for-byte, even though the task overwrote the same file.
     assert _read_file(repo, "src/feature.py") == tracked_edit
     assert untracked.read_text(encoding="utf-8") == "scratch notes\n"
+
+
+def test_route_evidence_tracks_every_handoff_to_terminal_failure(tmp_path: Path):
+    """A -> B -> C -> terminal failure. Routing evidence used to become durable
+    only after a *successful* failover, so a run like this left route.json still
+    naming A with no effective_route.json at all -- on-disk evidence flatly
+    contradicting the run. The chain must now be readable without the ledger."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_failover_task(
+        repo,
+        _FakeBackendResolver({
+            resource: {"success": False, "stderr": _TIMEOUT_STDERR}
+            for resource in ("resource_a", "resource_b", "resource_c")
+        }),
+        max_attempts=3,
+        registry=_make_registry_three_providers(),
+    )
+
+    assert res.final_state == "failed"
+    run_dir = Path(res.run_dir)
+    initial = json.loads((run_dir / "initial_route.json").read_text(encoding="utf-8"))
+    effective = json.loads((run_dir / "effective_route.json").read_text(encoding="utf-8"))
+
+    # The initial route is immutable and still names who was routed first.
+    assert initial["selected_agent_id"] == "resource_a"
+
+    # The effective route names the last resource actually attempted...
+    meta = effective["metadata"]
+    assert effective["selected_agent_id"] == "resource_c"
+    assert meta["last_attempted_implementation_resource"] == "resource_c"
+    assert meta["route_status"] == "IMPLEMENTATION_FAILED"
+    assert meta["initial_route"]["selected_agent_id"] == "resource_a"
+
+    # ...and does not claim anything was accepted, because nothing was.
+    assert meta["accepted_implementation_resource"] is None
+    assert meta["final_implementation_resource"] is None
+    assert meta["reviewer_mapping_status"] == "PROVISIONAL"
+
+    # No artifact may still imply resource_a was the active implementer.
+    assert json.loads(
+        (run_dir / "route.json").read_text(encoding="utf-8")
+    )["metadata"]["current_attempt_resource"] == "resource_c"
+
+
+def test_route_evidence_is_persisted_at_each_intermediate_handoff(tmp_path: Path):
+    """Routing becomes durable when implementation ownership moves, not only
+    once the provider it moved to succeeds."""
+    repo = _init_test_repo(tmp_path / "repo")
+    observed: List[str] = []
+
+    def _record_route(_task, cwd: Path, _prompt) -> None:
+        route = Path(cwd) / ".task_runs" / "TEST-FAILOVER-01" / "effective_route.json"
+        observed.append(
+            json.loads(route.read_text(encoding="utf-8"))["selected_agent_id"]
+            if route.is_file() else "<absent>"
+        )
+
+    _run_failover_task(
+        repo,
+        _resolver_from_plan({
+            "resource_a": {"success": False, "stderr": _TIMEOUT_STDERR,
+                           "side_effect": _record_route},
+            "resource_b": {"success": False, "stderr": _TIMEOUT_STDERR,
+                           "side_effect": _record_route},
+            "resource_c": {"success": True, "side_effect": _record_route},
+        }, {}),
+        max_attempts=3,
+        registry=_make_registry_three_providers(),
+    )
+
+    # A runs before any handoff, so no effective route exists yet; B and C each
+    # see themselves recorded as the current implementer before they start.
+    assert observed == ["<absent>", "resource_b", "resource_c"]

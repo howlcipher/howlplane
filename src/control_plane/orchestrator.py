@@ -92,6 +92,12 @@ CANDIDATE_ORIGIN_TIMED_OUT = "timed_out_implementation_attempt"
 TIMEOUT_CANDIDATE_SCHEMA_VERSION = "howlplane.timeout_candidate/v1"
 TERMINATION_TIMEOUT_CANDIDATE_GOVERNED = "timeout_candidate_governed"
 
+# How durable routing evidence describes itself. SUPERSEDED_BY_FAILOVER means
+# implementation moved and is still in flight; IMPLEMENTATION_FAILED means the
+# named resource was the last one attempted and nothing was accepted.
+ROUTE_STATUS_SUPERSEDED = "SUPERSEDED_BY_FAILOVER"
+ROUTE_STATUS_IMPLEMENTATION_FAILED = "IMPLEMENTATION_FAILED"
+
 # Why bounded implementation failover stopped. Recorded verbatim in the run's
 # failover summary so an operator never has to infer it from a message string.
 TERMINATION_MAX_ATTEMPTS_REACHED = "max_attempts_reached"
@@ -611,63 +617,107 @@ class GovernedTaskOrchestrator:
             return FAILURE_CLASS_PROVIDER_UNAVAILABLE
         return FAILURE_CLASS_ENGINEERING
 
-    def _recompute_reviewers(
+    def _persist_effective_route(
         self,
         routing: Any,
         task_spec: TaskSpec,
-        final_impl_resource_id: str,
+        attempt_resource_id: str,
+        route_status: str,
+        accepted: bool,
     ) -> None:
-        """Re-evaluates reviewer independence after implementation failover."""
+        """Makes routing evidence on disk match who is actually implementing.
+
+        This used to run only after a *successful* failover, so a run that
+        failed over and then failed left route.json still naming the originally
+        routed provider, with no effective_route.json at all -- durable evidence
+        contradicting the run (HOWLFRAM-SLOPFIX-05). Routing becomes durable at
+        every real handoff instead, and distinguishes the resource currently
+        attempting implementation from one whose work was actually accepted.
+
+        initial_route.json is never touched here; it stays the immutable record
+        of what was routed first.
+        """
         if self.config.provider_pool is None:
             return
-        initial_route = {
-            "selected_agent_id": routing.selected_agent_id,
-            "selected_agent_name": getattr(routing, "selected_agent_name", routing.selected_agent_id),
-            "reviewer_resource_mapping": dict(routing.metadata.get("reviewer_resource_mapping", {})),
-            "reviewer_resource_identities": dict(routing.metadata.get("reviewer_resource_identities", {})),
-            "review_diversity_achieved": routing.metadata.get("review_diversity_achieved"),
-        }
+        if "initial_route" not in routing.metadata:
+            routing.metadata["initial_route"] = {
+                "selected_agent_id": routing.selected_agent_id,
+                "selected_agent_name": getattr(
+                    routing, "selected_agent_name", routing.selected_agent_id
+                ),
+                "reviewer_resource_mapping": dict(
+                    routing.metadata.get("reviewer_resource_mapping", {})
+                ),
+                "reviewer_resource_identities": dict(
+                    routing.metadata.get("reviewer_resource_identities", {})
+                ),
+                "review_diversity_achieved": routing.metadata.get(
+                    "review_diversity_achieved"
+                ),
+            }
+
+        # Reviewers are recomputed against whoever is implementing now, so no
+        # mapping can imply a provider reviews its own work. Until a candidate
+        # is actually accepted the mapping is labelled provisional, because the
+        # implementer may change again on the next hop.
         mapping, diversity = self.config.provider_pool.select_reviewers(
-            final_impl_resource_id,
+            attempt_resource_id,
             routing.recommended_reviewers,
             task=task_spec,
         )
-        new_identities = {
-            role: self.config.provider_pool.registry.get_resource(resource_id).resource_identity().to_dict()
+        registry = self.config.provider_pool.registry
+        identities = {
+            role: registry.get_resource(resource_id).resource_identity().to_dict()
             for role, resource_id in mapping.items()
-            if self.config.provider_pool.registry.get_resource(resource_id) is not None
+            if registry.get_resource(resource_id) is not None
         }
         routing.metadata["reviewer_resource_mapping"] = mapping
-        routing.metadata["reviewer_resource_identities"] = new_identities
+        routing.metadata["reviewer_resource_identities"] = identities
         routing.metadata["review_diversity_achieved"] = diversity
-        routing.metadata["initial_route"] = initial_route
-        routing.metadata["final_implementation_resource"] = final_impl_resource_id
+        routing.metadata["reviewer_mapping_status"] = (
+            "CONFIRMED" if accepted else "PROVISIONAL"
+        )
+        routing.metadata["route_status"] = route_status
+        routing.metadata["current_attempt_resource"] = attempt_resource_id
+        routing.metadata["last_attempted_implementation_resource"] = attempt_resource_id
+        routing.metadata["accepted_implementation_resource"] = (
+            attempt_resource_id if accepted else None
+        )
+        routing.metadata["final_implementation_resource"] = (
+            attempt_resource_id if accepted else None
+        )
         routing.metadata["final_route"] = {
-            "selected_agent_id": final_impl_resource_id,
+            "selected_agent_id": attempt_resource_id,
+            "accepted": accepted,
             "reviewer_resource_mapping": mapping,
-            "reviewer_resource_identities": new_identities,
+            "reviewer_resource_identities": identities,
             "review_diversity_achieved": diversity,
         }
-        routing.metadata["route_status"] = "SUPERSEDED_BY_FAILOVER"
         routing.metadata["reassignment_reason"] = (
-            f"Implementer failed over from {routing.selected_agent_id} to {final_impl_resource_id}; "
-            f"reviewers recomputed to maintain reviewer independence"
+            f"Implementation moved from {routing.selected_agent_id} to "
+            f"{attempt_resource_id}; reviewers recomputed to keep review "
+            f"independent of the implementer"
         )
+
         run_dir = self.target_repo / ".task_runs" / task_spec.task_id
         if run_dir.exists():
             atomic_write_json(run_dir / "route.json", asdict(routing))
-            effective_data = asdict(routing)
-            effective_data["selected_agent_id"] = final_impl_resource_id
-            atomic_write_json(run_dir / "effective_route.json", effective_data)
+            effective = asdict(routing)
+            effective["selected_agent_id"] = attempt_resource_id
+            atomic_write_json(run_dir / "effective_route.json", effective)
 
         self._record_event(
             task_id=task_spec.task_id,
             agent_id="control_plane",
-            action="reviewers_recomputed_after_failover",
+            action="effective_route_updated",
             spec=task_spec,
             metadata={
-                "final_implementation_resource": final_impl_resource_id,
                 "initial_implementation_resource": routing.selected_agent_id,
+                "attempt_resource": attempt_resource_id,
+                "accepted_implementation_resource": (
+                    attempt_resource_id if accepted else None
+                ),
+                "route_status": route_status,
                 "reviewer_mapping": mapping,
                 "diversity_achieved": diversity,
             },
@@ -1130,6 +1180,14 @@ class GovernedTaskOrchestrator:
                 # still clobbered a file the operator had already modified,
                 # which capture_delta deliberately excludes. Only the baseline
                 # restore knows how to put those back.
+                if current_impl_resource_id != routing.selected_agent_id:
+                    self._persist_effective_route(
+                        routing,
+                        task_spec,
+                        current_impl_resource_id,
+                        ROUTE_STATUS_IMPLEMENTATION_FAILED,
+                        accepted=False,
+                    )
                 if rollback:
                     restored_ok, restore_err = restore_repository_to_baseline(
                         self.target_repo, baseline, current_delta
@@ -1428,6 +1486,13 @@ class GovernedTaskOrchestrator:
                 )
 
                 current_impl_resource_id = next_resource_id
+                self._persist_effective_route(
+                    routing,
+                    task_spec,
+                    current_impl_resource_id,
+                    ROUTE_STATUS_SUPERSEDED,
+                    accepted=False,
+                )
 
             if timeout_candidate is None and (impl_res is None or not impl_res.success):
                 err_msg = (
@@ -1472,7 +1537,13 @@ class GovernedTaskOrchestrator:
                 and final_impl_resource_id != routing.selected_agent_id
                 and self.config.provider_pool is not None
             ):
-                self._recompute_reviewers(routing, task_spec, final_impl_resource_id)
+                self._persist_effective_route(
+                    routing,
+                    task_spec,
+                    final_impl_resource_id,
+                    ROUTE_STATUS_SUPERSEDED,
+                    accepted=True,
+                )
 
             # A salvaged candidate carries no completion claim from its
             # producer, so independent review is the only thing standing behind
