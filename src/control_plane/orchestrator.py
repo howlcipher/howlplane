@@ -90,6 +90,7 @@ FAILURE_CLASS_EXECUTION_BUDGET_EXCEEDED = "EXECUTION_BUDGET_EXCEEDED"
 # Recorded so no artifact can imply the provider reported success.
 CANDIDATE_ORIGIN_TIMED_OUT = "timed_out_implementation_attempt"
 TIMEOUT_CANDIDATE_SCHEMA_VERSION = "howlplane.timeout_candidate/v1"
+PROVIDER_SCRATCH_SCHEMA_VERSION = "howlplane.provider_scratch/v1"
 TERMINATION_TIMEOUT_CANDIDATE_GOVERNED = "timeout_candidate_governed"
 
 # How durable routing evidence describes itself. SUPERSEDED_BY_FAILOVER means
@@ -466,6 +467,63 @@ class GovernedTaskOrchestrator:
             decision_pkt.render_markdown(), encoding="utf-8"
         )
         self._record_human_boundary_events(task_spec, run_dir, reason=err_msg)
+
+    @staticmethod
+    def _attempt_workspace_hint(task: TaskSpec) -> str:
+        """The provider-writable scratch path, as named to the provider."""
+        return (
+            f".task_runs/{task.task_id}/implementation/attempts/"
+            "<NN-resource>/workspace/"
+        )
+
+    def _sweep_provider_scratch(
+        self,
+        run_dir: Path,
+        attempt_dir: Path,
+        resource_id: str,
+        attempt_num: int,
+        known_before: Set[str],
+    ) -> List[str]:
+        """Moves files a provider left at the evidence root into its workspace.
+
+        Providers were never told where scratch belongs, so one wrote
+        wip-refactor.patch straight into the run's evidence root, blurring which
+        files the control plane owns (HOWLFRAM-SLOPFIX-05). Anything that
+        appeared at the root during this attempt is relocated under the
+        attempt's workspace/ with a provenance note. Nothing is deleted -- the
+        artifacts may well be useful, they just are not evidence.
+        """
+        workspace = attempt_dir / "workspace"
+        swept: List[str] = []
+        for entry in sorted(run_dir.iterdir()):
+            if not entry.is_file() or entry.name in known_before:
+                continue
+            workspace.mkdir(parents=True, exist_ok=True)
+            destination = workspace / entry.name
+            try:
+                entry.replace(destination)
+            except OSError:
+                continue
+            swept.append(entry.name)
+        if swept:
+            atomic_write_json(
+                workspace / "_provenance.json",
+                {
+                    "origin": "provider_scratch",
+                    "created_by": resource_id,
+                    "attempt": attempt_num,
+                    "relocated_from": f".task_runs/{run_dir.name}/",
+                    "files": swept,
+                    "note": (
+                        "Written by the provider inside the control plane's "
+                        "evidence namespace and relocated here. Not control "
+                        "plane evidence."
+                    ),
+                    "swept_at": datetime.now(timezone.utc).isoformat(),
+                    "schema": PROVIDER_SCRATCH_SCHEMA_VERSION,
+                },
+            )
+        return swept
 
     @staticmethod
     def _is_salvageable_timeout_candidate(
@@ -1284,6 +1342,12 @@ class GovernedTaskOrchestrator:
                         metadata={"attempt": attempt_num},
                     )
 
+                    attempt_dir = attempts_dir / f"{attempt_num:02d}-{current_impl_resource_id}"
+                    (attempt_dir / "workspace").mkdir(parents=True, exist_ok=True)
+                    evidence_root_before = {
+                        entry.name for entry in run_dir.iterdir() if entry.is_file()
+                    }
+
                     impl_agent_id = getattr(impl_backend, "agent_id", None) or current_impl_resource_id
                     with progress.operation(
                         phase=TaskPhase.IMPLEMENTING,
@@ -1298,6 +1362,27 @@ class GovernedTaskOrchestrator:
                             role="implementation",
                             prompt_override=impl_prompt,
                             timeout_seconds=self.config.timeout_seconds,
+                        )
+
+                # Relocate provider scratch before any evidence for this
+                # attempt is written, so control-plane artifacts can never be
+                # mistaken for files the provider left behind.
+                if impl_backend.is_available():
+                    swept = self._sweep_provider_scratch(
+                        run_dir=run_dir,
+                        attempt_dir=attempts_dir
+                        / f"{attempt_num:02d}-{current_impl_resource_id}",
+                        resource_id=current_impl_resource_id,
+                        attempt_num=attempt_num,
+                        known_before=evidence_root_before,
+                    )
+                    if swept:
+                        self._record_event(
+                            task_id=task_spec.task_id,
+                            agent_id=current_impl_resource_id,
+                            action="provider_scratch_relocated",
+                            spec=task_spec,
+                            metadata={"attempt": attempt_num, "files": swept},
                         )
 
                 # Snapshot capacity before record_result mutates it, so the
@@ -2214,6 +2299,15 @@ class GovernedTaskOrchestrator:
             lines.append("## Required Skills")
             for s in task.required_skills:
                 lines.append(f"- {s}")
+        lines.append("")
+        lines.append("## Workspace")
+        lines.append(
+            f"- Scratch files belong in `{self._attempt_workspace_hint(task)}`."
+        )
+        lines.append(
+            f"- Everything else under `.task_runs/{task.task_id}/` is "
+            "control-plane evidence. Do not create or edit files there."
+        )
         if "howlframe-app-development" in (task.required_skills or []):
             lines.append("")
             lines.append("## HowlFrame Application Guidance")

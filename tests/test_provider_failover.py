@@ -1501,3 +1501,61 @@ def test_route_evidence_is_persisted_at_each_intermediate_handoff(tmp_path: Path
     # A runs before any handoff, so no effective route exists yet; B and C each
     # see themselves recorded as the current implementer before they start.
     assert observed == ["<absent>", "resource_b", "resource_c"]
+
+
+def test_provider_scratch_is_relocated_out_of_the_evidence_root(tmp_path: Path):
+    """A provider once wrote wip-refactor.patch straight into the run's evidence
+    root, blurring which files the control plane owns. Scratch is now named in
+    the prompt and anything left at the root is relocated with its provenance,
+    never deleted (HOWLFRAM-SLOPFIX-05)."""
+    repo = _init_test_repo(tmp_path / "repo")
+
+    def _write_scratch_into_evidence_root(task, cwd: Path, _prompt) -> None:
+        run_dir = Path(cwd) / ".task_runs" / task.task_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "wip-refactor.patch").write_text("scratch\n", encoding="utf-8")
+        _edit_feature_to_true(task, cwd, _prompt)
+
+    res = _run_failover_task(
+        repo,
+        _FakeBackendResolver({
+            "resource_a": {
+                "success": True, "side_effect": _write_scratch_into_evidence_root,
+            },
+        }),
+        max_attempts=3,
+    )
+
+    assert res.final_state == "complete"
+    run_dir = Path(res.run_dir)
+    workspace = run_dir / "implementation" / "attempts" / "01-resource_a" / "workspace"
+
+    # The stray file left the evidence root...
+    assert not (run_dir / "wip-refactor.patch").exists()
+    # ...and is retained under the attempt's workspace, attributed.
+    relocated = workspace / "wip-refactor.patch"
+    assert relocated.is_file()
+    assert relocated.read_text(encoding="utf-8") == "scratch\n"
+
+    provenance = json.loads((workspace / "_provenance.json").read_text(encoding="utf-8"))
+    assert provenance["origin"] == "provider_scratch"
+    assert provenance["created_by"] == "resource_a"
+    assert provenance["files"] == ["wip-refactor.patch"]
+
+    # Control-plane evidence at the root is untouched by the sweep.
+    assert (run_dir / "route.json").is_file()
+    assert (run_dir / "task.yaml").is_file()
+
+
+def test_implementation_prompt_names_the_provider_scratch_path(tmp_path: Path):
+    """Providers can only respect a boundary they are told about."""
+    repo = _init_test_repo(tmp_path / "repo")
+    resolver = _FakeBackendResolver({
+        "resource_a": {"success": True, "side_effect": _edit_feature_to_true},
+    })
+    _run_failover_task(repo, resolver, max_attempts=3)
+
+    prompt = resolver.calls["resource_a"][0]["prompt"]
+    assert "## Workspace" in prompt
+    assert "<NN-resource>/workspace/" in prompt
+    assert "control-plane evidence" in prompt
