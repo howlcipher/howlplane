@@ -1190,3 +1190,241 @@ def test_slopfix03_canary_walks_three_providers(tmp_path: Path):
     assert res.verification_plan.overall_status == "passed"
     assert res.failover_summary["termination_reason"] == "implementation_succeeded"
     assert res.failover_summary["attempts_used"] == 3
+
+
+# ---------------------------------------------------------------------------
+# HOWLFRAM-SLOPFIX-05: a provider stopped at our own budget may still have left
+# a real candidate. It is governed, never trusted, and never discarded unread.
+# ---------------------------------------------------------------------------
+_BUDGET_KILL: Dict[str, Any] = {
+    "success": False,
+    "stderr": "\nTimeout after 600s.",
+    "timed_out": True,
+    "metadata": {
+        LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_LAUNCHED,
+        TIMEOUT_SOURCE_KEY: TIMEOUT_SOURCE_HARNESS,
+    },
+}
+
+
+def _refactor_preserving_behavior(_task, cwd: Path, _prompt) -> None:
+    """A real, behavior-preserving edit -- the shape of the SLOPFIX-05 patch."""
+    (cwd / "src" / "feature.py").write_text(
+        '"""Feature entry point."""\n\n\ndef run():\n'
+        '    """Returns the feature flag."""\n    return True\n',
+        encoding="utf-8",
+    )
+
+
+def _slopfix05_resolver(c_side_effect, **overrides) -> _FakeBackendResolver:
+    """The SLOPFIX-05 chain: A availability-fails, B fails, C is budget-killed."""
+    return _resolver_from_plan({
+        "resource_a": {
+            "success": False,
+            "stderr": _TIMEOUT_STDERR,
+            "side_effect": _edit_feature_to_false,
+        },
+        "resource_b": dict(_BUDGET_KILL),
+        "resource_c": {**_BUDGET_KILL, "side_effect": c_side_effect},
+    }, overrides)
+
+
+def _run_slopfix05(repo: Path, c_side_effect, **overrides) -> OrchestrationResult:
+    return _run_failover_task(
+        repo,
+        _slopfix05_resolver(c_side_effect, **overrides),
+        max_attempts=3,
+        registry=_make_registry_three_providers(),
+    )
+
+
+def test_productive_timeout_candidate_is_governed_not_discarded(tmp_path: Path):
+    """The exact SLOPFIX-05 shape: the last provider is killed at our 600s budget
+    after writing a correct patch. That patch used to be thrown away because the
+    process exited non-zero. It must instead be captured and put through the
+    same review and verification gates as any other candidate."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_slopfix05(repo, _refactor_preserving_behavior)
+
+    # 1. Local budget expiry is not reported as a provider outage.
+    attempts = res.implementation_attempts
+    assert [a["resource_id"] for a in attempts] == [
+        "resource_a", "resource_b", "resource_c",
+    ]
+    assert attempts[2]["failure_class"] == (
+        ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED.value
+    )
+    assert attempts[2]["failure_class"] != (
+        ProviderFailureClass.TRANSPORT_UNAVAILABLE.value
+    )
+
+    # 2. The candidate is captured, and captured honestly -- the provider never
+    #    claimed completion and no artifact pretends otherwise.
+    candidate = attempts[2]["candidate"]
+    assert candidate["candidate_captured"] is True
+    assert candidate["provider_completion_claim"] is False
+    assert candidate["origin"] == "timed_out_implementation_attempt"
+    assert candidate["requires_governance"] is True
+    assert attempts[2]["success"] is False
+    assert res.implementation_completion_claim is False
+    assert res.candidate_origin == "timed_out_implementation_attempt"
+
+    # 3. It reached the real gates, and only then completed.
+    assert res.review_cycles, "candidate must be independently reviewed"
+    assert res.verification_plan.overall_status == "passed"
+    assert res.final_state == "complete"
+
+    # 4. Reviewers stay independent of the resource that produced it.
+    mapping = res.routing_decision.metadata["reviewer_resource_mapping"]
+    assert mapping and "resource_c" not in mapping.values()
+
+    # 5. The preserved candidate patch is replayable, not just readable.
+    attempt_dir = Path(res.run_dir) / "implementation" / "attempts" / "03-resource_c"
+    patch = attempt_dir / "candidate.patch"
+    assert patch.is_file()
+    assert subprocess.run(
+        ["git", "apply", "--check", "--reverse", str(patch)],
+        cwd=repo, capture_output=True, text=True,
+    ).returncode == 0
+
+
+def test_broken_timeout_candidate_is_rejected_and_rolled_back(tmp_path: Path):
+    """Artifact correctness outranks provider status only through governance.
+    A budget-killed provider that left a *broken* patch must not complete, and
+    the rejected candidate must not be left sitting in the working tree."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_slopfix05(repo, _edit_feature_to_false)
+
+    assert res.implementation_completion_claim is False
+    assert res.final_state != "complete"
+    assert res.verification_plan.overall_status != "passed"
+
+    # The candidate was captured as evidence...
+    attempt_dir = Path(res.run_dir) / "implementation" / "attempts" / "03-resource_c"
+    assert (attempt_dir / "candidate.json").is_file()
+    assert (attempt_dir / "candidate.patch").is_file()
+
+    # ...but nothing stands behind it, so the repository is back at baseline.
+    assert _read_file(repo, "src/feature.py") == "def run():\n    return True\n"
+
+
+def test_zero_delta_timeout_leaves_no_candidate(tmp_path: Path):
+    """A budget kill that produced nothing is still just a failure."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_slopfix05(repo, None)
+
+    assert res.final_state == "failed"
+    assert res.implementation_completion_claim is True
+    assert res.candidate_origin is None
+    attempts = res.implementation_attempts
+    assert "candidate" not in attempts[2]
+    assert attempts[2]["delta"]["is_empty"] is True
+    # Evidence for the failed attempts is still preserved.
+    attempts_dir = Path(res.run_dir) / "implementation" / "attempts"
+    assert (attempts_dir / "01-resource_a" / "partial_work.patch").is_file()
+
+
+def test_candidate_without_independent_reviewer_parks_for_human(tmp_path: Path):
+    """A salvaged candidate has no completion claim behind it, so independent
+    review is all that stands between it and the repository. When every other
+    resource is unreachable the pool falls back to the implementer reviewing its
+    own work -- which for this candidate is no review at all. It must park for a
+    human instead of completing, and the candidate must survive for them to see."""
+    repo = _init_test_repo(tmp_path / "repo")
+    # A and B are genuine transport failures, so both are marked UNREACHABLE and
+    # only resource_c -- the producer -- remains selectable as a reviewer.
+    res = _run_failover_task(
+        repo,
+        _resolver_from_plan({
+            "resource_a": {"success": False, "stderr": _TIMEOUT_STDERR},
+            "resource_b": {"success": False, "stderr": _TIMEOUT_STDERR},
+            "resource_c": {
+                **_BUDGET_KILL,
+                "side_effect": _refactor_preserving_behavior,
+            },
+        }, {}),
+        max_attempts=3,
+        registry=_make_registry_three_providers(),
+    )
+
+    assert res.final_state == "awaiting_human"
+    assert res.implementation_completion_claim is False
+    assert res.routing_decision.metadata["review_diversity_achieved"] is False
+    assert (Path(res.run_dir) / "decision_packet.md").is_file()
+    # The candidate is explicitly awaiting human disposition, so it stays in
+    # place rather than being rolled back underneath the reviewer.
+    assert "Returns the feature flag" in _read_file(repo, "src/feature.py")
+
+
+# ---------------------------------------------------------------------------
+# HOWLFRAM-SLOPFIX-05: a terminal failed attempt must not leave its edits behind
+# ---------------------------------------------------------------------------
+def test_terminal_failed_attempt_is_rolled_back(tmp_path: Path):
+    """Rollback used to run only to prepare a clean tree for the *next* attempt,
+    so the last attempt's edits were left in the working tree and its record
+    carried no rollback key. That contaminated the next run's starting state."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_failover_task(
+        repo,
+        _FakeBackendResolver({
+            "resource_a": {
+                "success": False, "stderr": _TIMEOUT_STDERR,
+                "side_effect": _edit_feature_to_false,
+            },
+            "resource_b": {
+                "success": False, "stderr": _TIMEOUT_STDERR,
+                "side_effect": _edit_feature_to_false,
+            },
+            "resource_c": {
+                "success": False, "stderr": _TIMEOUT_STDERR,
+                "side_effect": _edit_feature_to_false,
+            },
+        }),
+        max_attempts=3,
+    )
+
+    assert res.final_state == "failed"
+    assert res.failure_class == FAILURE_CLASS_PROVIDER_EXHAUSTED
+
+    # Every attempt, including the terminal one, reports its rollback outcome.
+    attempts = res.implementation_attempts
+    assert len(attempts) == 3
+    for attempt in attempts:
+        assert attempt["rollback"] == {"restored": True, "error": None}
+
+    # The repository is back at its pre-task baseline...
+    assert _read_file(repo, "src/feature.py") == "def run():\n    return True\n"
+    assert git_in_repo(repo, ["status", "--porcelain", "src"]).strip() == ""
+
+    # ...while every attempt's evidence survives the restore, still replayable.
+    attempts_dir = Path(res.run_dir) / "implementation" / "attempts"
+    for name in ("01-resource_a", "02-resource_b", "03-resource_c"):
+        patch = attempts_dir / name / "partial_work.patch"
+        assert patch.is_file() and patch.read_text(encoding="utf-8").strip()
+
+
+def test_terminal_rollback_preserves_pre_existing_user_work(tmp_path: Path):
+    """Restoring the baseline must never reach past the task's own changes."""
+    repo = _init_test_repo(tmp_path / "repo")
+    tracked_edit = "# operator was here\ndef run():\n    return True\n"
+    (repo / "src" / "feature.py").write_text(tracked_edit, encoding="utf-8")
+    untracked = repo / "operator_notes.md"
+    untracked.write_text("scratch notes\n", encoding="utf-8")
+
+    res = _run_failover_task(
+        repo,
+        _FakeBackendResolver({
+            resource: {
+                "success": False, "stderr": _TIMEOUT_STDERR,
+                "side_effect": _edit_feature_to_false,
+            }
+            for resource in ("resource_a", "resource_b", "resource_c")
+        }),
+        max_attempts=3,
+    )
+
+    assert res.final_state == "failed"
+    # Both the pre-existing tracked modification and the untracked file survive
+    # byte-for-byte, even though the task overwrote the same file.
+    assert _read_file(repo, "src/feature.py") == tracked_edit
+    assert untracked.read_text(encoding="utf-8") == "scratch notes\n"
