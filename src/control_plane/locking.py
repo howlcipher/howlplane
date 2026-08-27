@@ -10,6 +10,7 @@ Provides safe stale lock detection without requiring Redis, daemons, or database
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 import errno
 import os
 from pathlib import Path
@@ -21,6 +22,7 @@ from src.control_plane.atomic_io import safe_load_json
 from src.control_plane.task_spec import DataClassSerializationMixin
 
 LOCK_SCHEMA_VERSION = "howlplane.lock/v1"
+LOCK_RECLAMATION_SCHEMA_VERSION = "howlplane.lock_reclamation/v1"
 
 
 class LockError(RuntimeError):
@@ -66,38 +68,147 @@ def get_process_create_time(pid: int) -> float:
     return time.time()
 
 
-def is_process_alive(
+class LockOwnerState(str, Enum):
+    """What can actually be established about a lock owner from this machine.
+
+    The middle state is the one that matters. Previously anything not provably
+    dead was reported as alive, which let a lock written on another host block
+    the documented recovery path forever while claiming to be "held by active
+    process" -- a statement about a PID whose liveness had never been checked
+    (HOWLFRAM-SLOPFIX-05).
+    """
+
+    ACTIVE = "ACTIVE"        # owner is running: fail closed, never steal
+    STALE = "STALE"          # owner is provably gone: safe to reclaim
+    AMBIGUOUS = "AMBIGUOUS"  # cannot be established here: requires a human
+
+
+def classify_lock_owner(
     pid: int,
     hostname: str,
     expected_create_time: Optional[float] = None,
-) -> Tuple[bool, str]:
-    """
-    Deterministically checks if a process with `pid` is actively running on `hostname`.
-    Returns (is_alive, reason).
-    """
+) -> Tuple[LockOwnerState, str]:
+    """Classifies a lock owner as ACTIVE, STALE, or AMBIGUOUS, with a reason."""
     current_host = socket.gethostname()
     if hostname != current_host:
-        return True, f"Process is on different host '{hostname}' (current: '{current_host}')"
+        return (
+            LockOwnerState.AMBIGUOUS,
+            f"Lock was written on host '{hostname}' (this host is "
+            f"'{current_host}'); liveness of PID {pid} cannot be established "
+            f"from here",
+        )
 
     if pid <= 0:
-        return False, "Invalid PID <= 0"
+        return LockOwnerState.STALE, "Invalid PID <= 0"
 
     try:
         os.kill(pid, 0)
     except OSError as err:
         if err.errno == errno.ESRCH:
-            return False, f"Process PID {pid} is no longer running (ESRCH)"
-        elif err.errno == errno.EPERM:
-            return True, f"Process PID {pid} is running under another user account"
-        else:
-            return True, f"Process check returned unexpected OSError {err}"
+            return (
+                LockOwnerState.STALE,
+                f"Process PID {pid} is no longer running (ESRCH)",
+            )
+        if err.errno == errno.EPERM:
+            return (
+                LockOwnerState.AMBIGUOUS,
+                f"PID {pid} exists but runs under another user account, so it "
+                f"cannot be confirmed as this task's owner",
+            )
+        return (
+            LockOwnerState.AMBIGUOUS,
+            f"Process check returned unexpected OSError {err}",
+        )
 
     if expected_create_time and expected_create_time > 0:
         actual_create_time = get_process_create_time(pid)
         if abs(actual_create_time - expected_create_time) > 10.0:
-            return False, f"PID {pid} was recycled by operating system (mismatched start time)"
+            return (
+                LockOwnerState.STALE,
+                f"PID {pid} was recycled by operating system (mismatched start time)",
+            )
 
-    return True, f"Process PID {pid} is actively running"
+    return LockOwnerState.ACTIVE, f"Process PID {pid} is actively running"
+
+
+def is_process_alive(
+    pid: int,
+    hostname: str,
+    expected_create_time: Optional[float] = None,
+) -> Tuple[bool, str]:
+    """Reports whether a lock owner must be treated as running.
+
+    Kept as the single liveness predicate for callers that only need a boolean,
+    and built on classify_lock_owner so there is one authority. AMBIGUOUS counts
+    as alive here: automatic paths must never assume an unverifiable owner is
+    gone. Reclaiming one is a deliberate human act -- see reclaim_lock.
+    """
+    state, reason = classify_lock_owner(pid, hostname, expected_create_time)
+    return state is not LockOwnerState.STALE, reason
+
+
+@dataclass
+class LockReclamation(DataClassSerializationMixin):
+    """Record of a lock reclaimed by explicit human action."""
+
+    task_id: str
+    lock_path: str
+    owner_state: str
+    reason: str
+    owner_pid: int
+    owner_hostname: str
+    owner_command: str
+    owner_started_at: str
+    reclaimed_by_pid: int
+    reclaimed_by_hostname: str
+    reclaimed_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    schema: str = LOCK_RECLAMATION_SCHEMA_VERSION
+
+
+def reclaim_lock(lock_path: Union[str, Path]) -> LockReclamation:
+    """Reclaims a lock whose owner is gone or unverifiable, for a human caller.
+
+    Fails closed on an ACTIVE owner: a running process is never displaced, no
+    matter who asks. STALE and AMBIGUOUS owners can be reclaimed, because the
+    first is provably gone and the second is precisely the case that had no
+    recovery path at all -- `ai resume` recommended resuming a run whose lock it
+    could never take (HOWLFRAM-SLOPFIX-05). Reclaiming an AMBIGUOUS lock stays a
+    deliberate act by a person, never something an automatic path does.
+    """
+    path = Path(lock_path)
+    if not path.exists():
+        raise LockError(f"No lock file at '{path}'.")
+    try:
+        existing = LockMetadata.from_dict(safe_load_json(path))
+    except Exception as err:
+        raise LockError(f"Lock file at '{path}' is unreadable: {err}") from err
+
+    state, reason = classify_lock_owner(
+        existing.pid, existing.hostname, existing.process_create_time
+    )
+    if state is LockOwnerState.ACTIVE:
+        raise LockError(
+            f"Refusing to reclaim: lock for task '{existing.task_id}' is held by "
+            f"active process PID {existing.pid} ({existing.command}). {reason}. "
+            f"Stop that process first, or use `ai cancel {existing.task_id}`."
+        )
+
+    record = LockReclamation(
+        task_id=existing.task_id,
+        lock_path=str(path),
+        owner_state=state.value,
+        reason=reason,
+        owner_pid=existing.pid,
+        owner_hostname=existing.hostname,
+        owner_command=existing.command,
+        owner_started_at=existing.started_at,
+        reclaimed_by_pid=os.getpid(),
+        reclaimed_by_hostname=socket.gethostname(),
+    )
+    path.unlink()
+    return record
 
 
 def get_repo_lock_path(repo_root: Union[str, Path]) -> Path:
@@ -160,20 +271,31 @@ class _BaseFileLock:
                         f"{self.lock_type.replace('_', ' ').title()} lock already held on task '{existing.task_id}'."
                     )
 
-                alive, reason = is_process_alive(
+                state, reason = classify_lock_owner(
                     existing.pid, existing.hostname, existing.process_create_time
                 )
-                if alive:
+                label = self.lock_type.replace("_", " ").title()
+                if state is LockOwnerState.ACTIVE:
                     raise self.error_cls(
-                        f"{self.lock_type.replace('_', ' ').title()} lock held by active process "
+                        f"{label} lock held by active process "
                         f"PID {existing.pid} ({existing.command}) for task '{existing.task_id}' "
                         f"started at {existing.started_at}. Concurrent operation blocked."
                     )
-                else:
-                    try:
-                        self.lock_path.unlink()
-                    except Exception:
-                        pass
+                if state is LockOwnerState.AMBIGUOUS:
+                    # Never silently steal a lock we cannot prove is dead, and
+                    # never claim its owner is active when we never checked.
+                    raise self.error_cls(
+                        f"{label} lock ownership is INDETERMINATE for task "
+                        f"'{existing.task_id}': PID {existing.pid} ({existing.command}) "
+                        f"on host '{existing.hostname}', started at {existing.started_at}. "
+                        f"{reason}. If that run is definitely gone, reclaim the lock "
+                        f"explicitly with `ai unlock {existing.task_id}`."
+                    )
+                # Provably gone: reclaim automatically, as before.
+                try:
+                    self.lock_path.unlink()
+                except Exception:
+                    pass
             else:
                 try:
                     self.lock_path.unlink()

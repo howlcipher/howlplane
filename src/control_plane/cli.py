@@ -642,6 +642,68 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     return res.exit_code
 
 
+def cmd_unlock(args: argparse.Namespace) -> int:
+    """Reclaims a task-run lock whose owner is gone or cannot be verified.
+
+    The one explicit, audited takeover path. `ai resume` deliberately keeps its
+    fail-closed behavior, so nothing ever steals a lock implicitly; a person
+    asks for this, and the reclamation is recorded (HOWLFRAM-SLOPFIX-05).
+    """
+    from src.control_plane.locking import (
+        LockError,
+        classify_lock_owner,
+        get_task_lock_path,
+        reclaim_lock,
+    )
+    from src.control_plane.atomic_io import safe_load_json
+
+    lock_path = get_task_lock_path(args.repo_dir, args.task_id)
+    if not lock_path.exists():
+        print(f"No task lock held for '{args.task_id}'. Nothing to reclaim.")
+        return 0
+
+    if not getattr(args, "json", False):
+        owner = safe_load_json(lock_path)
+        state, reason = classify_lock_owner(
+            owner.get("pid", -1),
+            owner.get("hostname", ""),
+            owner.get("process_create_time", 0.0),
+        )
+        print(
+            f"Lock owner: pid {owner.get('pid')} @ {owner.get('hostname')} "
+            f"({owner.get('command')}) -- {state.value}"
+        )
+        print(f"  {reason}")
+
+    try:
+        record = reclaim_lock(lock_path)
+    except LockError as err:
+        print(f"ERROR: {err}")
+        return 1
+
+    ledger = EvidenceLedger(args.ledger_file) if getattr(args, "ledger_file", None) else None
+    if ledger is not None:
+        ledger.append_entry(
+            EvidenceEntry(
+                task_id=record.task_id,
+                agent_id="human_operator",
+                action="stale_lock_reclaimed",
+                command=f"ai unlock {args.task_id}",
+                result=record.owner_state,
+                artifact=record.lock_path,
+                metadata=record.to_dict(),
+            )
+        )
+
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(record.to_dict(), indent=2))
+    else:
+        print(f"Reclaimed {record.owner_state} lock for task '{record.task_id}'.")
+        print(f"You can now run: ai resume {record.task_id}")
+    return 0
+
+
 def cmd_create(args: argparse.Namespace) -> int:
     """Creates a runnable software product from natural language intent."""
     import re
