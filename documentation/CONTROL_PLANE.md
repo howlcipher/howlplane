@@ -381,6 +381,28 @@ ai doctor
 ai verify
 ```
 
+### 6.2.1 Recovering a Held Task Lock
+
+A task run holds `.task_runs/<task-id>/.task.lock` while it works. `ai status`
+reports the owner's state, and what you do next depends on which of three
+things can actually be established about it:
+
+| Owner state | What it means | What to do |
+| --- | --- | --- |
+| `ACTIVE` | The owning process is running on this host. | Wait, or `ai cancel <task-id>`. The lock is never taken from a live owner. |
+| `STALE` | The owner is provably gone (`ESRCH`, or its PID was recycled). | Nothing. The next `ai resume` reclaims it automatically. |
+| `AMBIGUOUS` | Liveness cannot be established here — the lock was written on another host, or the PID belongs to another user. | `ai unlock <task-id>`, then `ai resume <task-id>`. |
+
+```bash
+# Reclaim a lock whose owner is gone or cannot be verified:
+ai unlock HOWLFRAM-EXAMPLE-01
+ai resume HOWLFRAM-EXAMPLE-01
+```
+
+`ai unlock` is the only takeover path and is deliberately a human action. It
+refuses an `ACTIVE` lock outright and records every reclamation in the
+evidence ledger as `stale_lock_reclaimed`. `ai resume` never steals a lock.
+
 ### 6.3 Direct Provider Escape Hatches
 Direct vendor commands remain available as ungoverned escape hatches when full multi-agent orchestration is not desired:
 ```bash
