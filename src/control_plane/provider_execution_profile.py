@@ -16,10 +16,15 @@ exited 0 -- which the orchestrator recorded as a successful implementation.
 Two properties are load-bearing:
 
 * Bash is bounded, never blanket. Permitted commands are derived from the
-  project's own discovered verification surface (ProjectContext /
+  project's own discovered command surface (ProjectContext /
   VerificationPlan) plus read-only Git introspection, so a Go repository grants
-  `go test`/`go vet`/`go build` and a Python one grants `pytest`/`flake8`,
-  without a hardcoded language stack and without granting the shell.
+  `go test`/`go vet`/`go build`/`go fmt` and a Python one grants
+  `pytest`/`flake8`, without a hardcoded language stack and without granting
+  the shell. The surface includes the project's formatting commands: formatting
+  is ordinary implementation work, and omitting it blocked a real unattended
+  run on `gofmt -l` (HOWLFRAM-SLOPFIX-07). Formatters are granted to mutating
+  roles only and are never added to the VerificationPlan, so the deterministic
+  gate is unchanged.
 * Denials win. Operator configuration and `TaskSpec.prohibited_actions` are
   subtracted last, after every default, so an explicit prohibition can never be
   overridden by a provider default.
@@ -99,6 +104,7 @@ def _iter_project_commands(project_context: Any) -> Iterable[Sequence[str]]:
         "test_commands",
         "build_commands",
         "lint_commands",
+        "format_commands",
         "hygiene_commands",
     ):
         for command in getattr(project_context, attribute, None) or []:

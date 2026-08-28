@@ -93,6 +93,23 @@ def _reports_permission_block(text: Optional[str]) -> bool:
     lowered = (text or "").lower()
     return any(marker in lowered for marker in _PERMISSION_BLOCK_MARKERS)
 
+
+def _denied_command(entry: Dict[str, Any]) -> Optional[str]:
+    """Extracts the shell command a Bash permission denial actually refused.
+
+    A denial records only `tool_name`, so a refused `gofmt -l .` and a refused
+    `rm -rf /` both reduce to "Bash". In HOWLFRAM-SLOPFIX-07 that left the
+    denied command recoverable only from the agent's prose, which is not
+    evidence a later reader can rely on. The command is part of the denial, so
+    it is recorded with it.
+    """
+    tool_input = entry.get("tool_input")
+    if isinstance(tool_input, dict):
+        command = tool_input.get("command")
+        if isinstance(command, str) and command.strip():
+            return command.strip()
+    return None
+
 # Local Ollama defaults (milestone #58). Intentionally conservative: a single
 # 7B-instruct model, a bounded 8K context window, and one inference at a time
 # on modest consumer hardware. See documentation/LOCAL_MODEL.md.
@@ -585,6 +602,16 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
                 if isinstance(entry, dict)
             }
         )
+        denied_commands = sorted(
+            {
+                command
+                for entry in denials
+                if isinstance(entry, dict)
+                for command in (_denied_command(entry),)
+                if command
+            }
+        )
+
         if not denied_tools and _reports_permission_block(text):
             # The CLI did not populate `permission_denials`, but the agent
             # explicitly said it was blocked on approval. Reported honestly as
@@ -594,11 +621,15 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
         if denied_tools:
             result.metadata[TOOL_PERMISSION_KEY] = TOOL_PERMISSION_DENIED
             result.metadata["denied_tools"] = denied_tools
+            if denied_commands:
+                result.metadata["denied_commands"] = denied_commands
             if result.success:
                 result.success = False
+                # Name the command when one is known: "Bash" alone does not say
+                # whether the bound was wrong or the request was illegitimate.
+                detail = ", ".join(denied_commands or denied_tools)
                 result.error_message = (
-                    "Required tool permissions were unavailable: "
-                    + ", ".join(denied_tools)
+                    "Required tool permissions were unavailable: " + detail
                 )
         return result
 

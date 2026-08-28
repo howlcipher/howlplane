@@ -33,6 +33,7 @@ class ProjectContext(DataClassSerializationMixin):
     test_commands: List[List[str]] = field(default_factory=list)
     build_commands: List[List[str]] = field(default_factory=list)
     lint_commands: List[List[str]] = field(default_factory=list)
+    format_commands: List[List[str]] = field(default_factory=list)
     hygiene_commands: List[List[str]] = field(default_factory=list)
     hygiene_status: str = "not_configured"
     capabilities: List[str] = field(default_factory=list)
@@ -110,6 +111,7 @@ class ProjectAdapter:
         test_commands: List[List[str]] = []
         build_commands: List[List[str]] = []
         lint_commands: List[List[str]] = []
+        format_commands: List[List[str]] = []
         hygiene_commands: List[List[str]] = []
         hygiene_status = "not_configured"
         capabilities: List[str] = []
@@ -118,7 +120,7 @@ class ProjectAdapter:
         has_agents_md = (root / "AGENTS.md").exists()
 
         def _extract_manifest_cmds(cmds: Dict[str, Any]) -> None:
-            for k in ("test", "build", "lint"):
+            for k in ("test", "build", "lint", "format", "fmt"):
                 if k in cmds:
                     val = cmds[k]
                     cmd_list = val if isinstance(val, list) else [val]
@@ -128,6 +130,8 @@ class ProjectAdapter:
                         build_commands.append(cmd_list)
                     elif k == "lint":
                         lint_commands.append(cmd_list)
+                    else:
+                        format_commands.append(cmd_list)
             for hk in ("hygiene", "repository_hygiene"):
                 if hk in cmds:
                     hval = cmds[hk]
@@ -292,6 +296,48 @@ class ProjectAdapter:
                     rel_p = str(sh_t.relative_to(root))
                     test_commands.append(["bash", rel_p])
 
+        # 6. Formatting commands.
+        #
+        # Deliberately discovered outside the block above, which only runs when
+        # a test/build/lint command is still missing: a project that specifies
+        # all three would otherwise never be offered a formatter at all.
+        #
+        # Formatting is part of ordinary implementation work rather than a
+        # deterministic gate, so these commands are kept separate from the
+        # verification surface. They are what an implementer may legitimately
+        # run; they are not added to the VerificationPlan and do not change what
+        # a change is verified against (HOWLFRAM-SLOPFIX-07, where a Claude
+        # implementation attempt was blocked on `gofmt -l` and `go fmt` because
+        # no formatting command was discoverable for any language).
+        if not format_commands:
+            makefile = root / "Makefile"
+            if makefile.exists():
+                text = makefile.read_text(encoding="utf-8", errors="ignore")
+                for target in ("fmt", "format"):
+                    if f"{target}:" in text:
+                        format_commands.append(["make", target])
+                        break
+
+        if not format_commands:
+            if (root / "go.mod").exists():
+                # Both forms: `go fmt` rewrites, `gofmt -l` reports. A mutating
+                # role already holds Edit/Write, so the rewriting form grants no
+                # new kind of authority, and a provider denied one of the two
+                # reports itself blocked exactly as SLOPFIX-07 did.
+                format_commands.append(["go", "fmt", "./..."])
+                format_commands.append(["gofmt", "-l", "."])
+            elif (root / "pyproject.toml").exists():
+                pyproject = (root / "pyproject.toml").read_text(
+                    encoding="utf-8", errors="ignore"
+                )
+                # Only grant a formatter the project actually configures.
+                if "ruff" in pyproject:
+                    format_commands.append(["ruff", "format", "."])
+                elif "black" in pyproject:
+                    format_commands.append(["black", "."])
+            elif (root / "Cargo.toml").exists():
+                format_commands.append(["cargo", "fmt"])
+
         return ProjectContext(
             project_root=str(root),
             name=name,
@@ -300,6 +346,7 @@ class ProjectAdapter:
             test_commands=test_commands,
             build_commands=build_commands,
             lint_commands=lint_commands,
+            format_commands=format_commands,
             hygiene_commands=hygiene_commands,
             hygiene_status=hygiene_status,
             capabilities=capabilities,
