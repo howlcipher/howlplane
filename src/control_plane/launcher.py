@@ -850,6 +850,12 @@ def cmd_status(args: argparse.Namespace) -> int:
                     c_revs = rec_diag.get("completed_reviewers", [])
                     if c_revs:
                         print(f"    Completed Reviews: {', '.join(c_revs)}")
+                    # This is the branch an interrupted run actually lands in,
+                    # so it has to say why a review is not complete rather than
+                    # simply omitting it from the completed list.
+                    for role, disposition in (rec_diag.get("reviewer_dispositions") or {}).items():
+                        if disposition not in ("completed_clean", "completed_with_findings"):
+                            print(f"      - {role}: {disposition.upper()}")
                     if not is_proc_alive:
                         rec_action = rec_diag.get('recommendation') or f"ai resume {t_spec.task_id}"
                         print(f"    Recommendation:    {rec_action}")
