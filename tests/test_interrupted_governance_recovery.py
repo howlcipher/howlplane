@@ -923,3 +923,177 @@ def test_a_second_process_cannot_take_an_actively_held_task(tmp_path):
         assert "BLOCKED" in out.stdout, out.stdout + out.stderr
     finally:
         holder.release()
+
+
+# ---------------------------------------------------------------------------
+# HOWLFRAM-SLOPFIX-07R: retained salvage state must survive an interruption
+#
+# The fallback is discoverable only through durable attempt evidence, so an
+# interruption anywhere in the retention lifecycle must leave it findable,
+# unapplied twice, and still honestly marked as not-yet-promoted.
+# ---------------------------------------------------------------------------
+def _die_at(target_stage: str):
+    """Interrupts the run at one named lifecycle point."""
+    def _hook(stage, _run_dir, _spec):
+        if stage == target_stage:
+            raise RuntimeError(f"interrupted at {target_stage}")
+    return _hook
+
+
+def _crash_during_salvage(tmp_path, crash_stage):
+    """Interrupts the salvage chain at one stage; returns repo and evidence dirs."""
+    from tests.test_provider_failover import _init_test_repo, _run_salvage_chain
+
+    repo = _init_test_repo(tmp_path / "repo")
+    with pytest.raises(RuntimeError):
+        _run_salvage_chain(repo, failure_injection_hook=_die_at(crash_stage))
+    run_dir = repo / ".task_runs" / "TEST-FAILOVER-01"
+    return repo, run_dir, run_dir / "implementation" / "attempts"
+
+
+@pytest.mark.parametrize(
+    "crash_stage", ["after_salvage_retention", "during_salvage_promotion"],
+)
+def test_retained_fallback_survives_an_interruption(tmp_path, crash_stage):
+    """Crashing after retention, and again mid-promotion, must not lose the
+    fallback, promote it twice, or let its record claim a promotion that never
+    finished."""
+    import hashlib
+
+    from src.control_plane.orchestrator import GovernedTaskOrchestrator
+
+    _, run_dir, attempts_dir = _crash_during_salvage(tmp_path, crash_stage)
+
+    # The fallback is still discoverable, and still honestly un-promoted.
+    record = GovernedTaskOrchestrator._select_retained_salvage(attempts_dir)
+    assert record is not None, "the retained fallback must survive the crash"
+    retained = record["retained_salvage"]
+    assert retained["resource_id"] == "resource_a"
+    assert retained["eligibility"] == "ELIGIBLE"
+    assert retained["promotion_status"] == "RETAINED"
+    assert retained["provider_completion_claim"] is False
+    assert "promoted_at" not in retained
+
+    # Its identity is intact, so a later promotion can still prove it belongs
+    # to this baseline rather than applying it blind.
+    patch_file = run_dir / retained["patch_path"]
+    assert patch_file.is_file()
+    assert hashlib.sha256(
+        patch_file.read_text(encoding="utf-8").encode("utf-8")
+    ).hexdigest() == retained["patch_sha256"]
+
+    # An unfinished promotion never becomes a candidate.
+    assert not (attempts_dir / "01-resource_a" / "candidate.json").exists()
+
+
+def _resume_run(repo: Path, registry):
+    """Resumes an interrupted run the way `ai resume` does."""
+    task_id = "TEST-FAILOVER-01"
+    return HumanLifecycleManager.resume(
+        target_repo=repo,
+        task_id=task_id,
+        orchestrator=_fake_orchestrator(repo, task_id, registry),
+        ledger=EvidenceLedger(str(repo / ".task_runs" / task_id / "ledger.jsonl")),
+    )
+
+
+def _route_metadata(run_dir: Path) -> dict:
+    from src.control_plane.atomic_io import safe_load_json
+
+    return safe_load_json(run_dir / "effective_route.json")["metadata"]
+
+
+def test_resume_after_an_interrupted_promotion_governs_the_fallback(tmp_path):
+    """The promotion crash window leaves the artifact applied with nothing
+    describing it. Resume must rebuild the candidate the uninterrupted path
+    would have written -- not silently adopt the diff as attested work."""
+    from tests.test_provider_failover import _make_registry_with_spare_reviewer
+
+    repo, run_dir, attempts_dir = _crash_during_salvage(
+        tmp_path, "during_salvage_promotion"
+    )
+    res = _resume_run(repo, _make_registry_with_spare_reviewer())
+
+    # The producer never claimed completion, and resuming does not invent one.
+    assert res.implementation_completion_claim is False
+    assert res.candidate_origin == "timed_out_implementation_attempt"
+
+    record = json.loads(
+        (attempts_dir / "01-resource_a" / "attempt_record.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert record["retained_salvage"]["promotion_status"] == "PROMOTED"
+    assert (attempts_dir / "01-resource_a" / "candidate.json").is_file()
+
+    # The producer is credited as the candidate; the chain still ended on C.
+    meta = _route_metadata(run_dir)
+    assert meta["candidate_resource"] == "resource_a"
+    assert meta["last_attempted_implementation_resource"] == "resource_c"
+
+    # Governing an artifact that already exists is not a fourth attempt.
+    assert sorted(d.name for d in attempts_dir.iterdir()) == [
+        "01-resource_a", "02-resource_b", "03-resource_c",
+    ]
+
+
+def test_resume_does_not_credit_a_producer_for_another_resources_work(tmp_path):
+    """A retained fallback whose work was rolled back must never be stamped onto
+    a later provider's successful diff. Doing so would launder discarded work
+    into an accepted implementation and hide a self-review as independent."""
+    from tests.test_provider_failover import (
+        _budget_kill,
+        _edit_feature_to_false,
+        _init_test_repo,
+        _make_registry_with_spare_reviewer,
+        _refactor_preserving_behavior,
+        _run_salvage_chain,
+    )
+
+    repo = _init_test_repo(tmp_path / "repo")
+    # A and B leave deliberately different work, so crediting the wrong one is
+    # observable rather than a coincidence of identical diffs.
+    with pytest.raises(RuntimeError):
+        _run_salvage_chain(
+            repo,
+            a=_budget_kill(_edit_feature_to_false),
+            b={"success": True, "side_effect": _refactor_preserving_behavior},
+            failure_injection_hook=_die_at("reviewing"),
+        )
+    res = _resume_run(repo, _make_registry_with_spare_reviewer())
+
+    meta = _route_metadata(repo / ".task_runs" / "TEST-FAILOVER-01")
+    assert meta["accepted_implementation_resource"] == "resource_b"
+    assert meta["candidate_resource"] is None
+    assert res.candidate_origin is None
+    assert res.implementation_completion_claim is True
+
+    # B's work is what landed; A's rolled-back fragment is history.
+    feature = (repo / "src" / "feature.py").read_text(encoding="utf-8")
+    assert "Returns the feature flag" in feature
+    assert "return False" not in feature
+
+
+def test_resume_refuses_a_delta_that_is_not_the_retained_artifact(tmp_path):
+    """The identity gate, directly. A retained record plus an unrelated delta in
+    the tree must not resolve to the retained producer."""
+    from src.control_plane.atomic_io import safe_load_json
+    from src.control_plane.git_baseline import GitBaseline, capture_delta
+    from tests.test_provider_failover import (
+        _make_registry_with_spare_reviewer,
+        _make_task,
+    )
+
+    repo, run_dir, _ = _crash_during_salvage(tmp_path, "after_salvage_retention")
+    # Work that is emphatically not the retained artifact.
+    (repo / "src" / "feature.py").write_text(
+        "def run():\n    return 'someone else'\n", encoding="utf-8"
+    )
+    baseline = GitBaseline.from_dict(safe_load_json(run_dir / "baseline.json"))
+    orchestrator = _fake_orchestrator(
+        repo, "TEST-FAILOVER-01", _make_registry_with_spare_reviewer()
+    )
+
+    assert orchestrator._recover_promoted_salvage(
+        run_dir, capture_delta(repo, baseline), _make_task()
+    ) is None
