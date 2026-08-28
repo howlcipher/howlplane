@@ -1,0 +1,11 @@
+{
+  "task_id": "HOWLFRAM-SLOPFIX-06",
+  "pid": 3480843,
+  "hostname": "epyon",
+  "lock_type": "repository_mutation",
+  "operation": "repository_mutation",
+  "command": "ai work HOWLFRAM-SLOPFIX-06 --execute",
+  "started_at": "2026-08-27T21:58:51.321084+00:00",
+  "process_create_time": 1787867931.3050613,
+  "schema": "howlplane.lock/v1"
+}

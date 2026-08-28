@@ -350,10 +350,43 @@ a person is being asked to look at exactly what is on disk.
 
 **Routing evidence.** `initial_route.json` is immutable.
 `effective_route.json` is rewritten at every real handoff — not only when a
-failover eventually succeeds — and distinguishes
-`last_attempted_implementation_resource` from
-`accepted_implementation_resource`, which stays `null` until a candidate is
-accepted. Reviewer mappings are labelled `PROVISIONAL` until then.
+failover eventually succeeds — and distinguishes each stage of the lifecycle:
+
+| Field | Meaning |
+| :--- | :--- |
+| `initial_implementation_resource` | Who was routed first. |
+| `current_attempt_resource` | Who is attempting right now. |
+| `last_attempted_implementation_resource` | Who attempted most recently. |
+| `candidate_resource` | Who produced work now under governance. |
+| `accepted_implementation_resource` | Who produced work governance accepted. |
+
+`accepted_implementation_resource`, `final_implementation_resource` and
+`final_route.accepted` stay `null`/`false` until the single acceptance
+boundary: **Stage 8, Governed Completion**, reached only after review,
+reconciliation, deterministic verification and the human authority gate have
+all passed. Implementation finishing is not acceptance.
+
+Reviewer mappings are labelled `PROVISIONAL` while routing may still change,
+`CANDIDATE_REVIEW` while a captured candidate is under review, and `CONFIRMED`
+only at acceptance. SLOPFIX-06's evidence claimed an accepted implementer and
+`CONFIRMED` mappings while the task was still `reviewing / in_progress`.
+
+**Terminal attempt evidence.** Attempts that hand off record `rollback` and
+`next_selection`. The attempt that exhausts the failover budget records them
+too, explicitly — `rollback.status = PARKED_FOR_GOVERNANCE`,
+`next_selection = null` with `next_selection_reason = MAX_ATTEMPTS_REACHED`,
+the remaining otherwise-eligible resources, and
+`transition = CANDIDATE_GOVERNANCE` — so "no provider remained" is never
+encoded as a missing field.
+
+**Provider scratch.** Provider scratch lives in
+`.task_runs/<task>/provider_scratch/<NN-resource>/`, structurally separate
+from `implementation/attempts/`, which is control-plane-owned. Providers run
+in the repository without a filesystem sandbox, so the boundary is enforced
+after execution: artifacts left at the evidence root, and directories invented
+under `attempts/` that imitate a canonical attempt, are relocated into owned
+scratch with a `_provenance.json` record. Nothing is deleted, and the empty
+imitation shell is removed so the canonical attempt count stays truthful.
 
 ---
 
