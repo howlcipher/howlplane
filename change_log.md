@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 
+**HOWLFRAM-SLOPFIX-07R Retained Salvageable Failover Candidates**: the
+external canary failed and stays failed; its verdict remains
+`HOWLPLANE_EXTERNAL_CANARY_FAILED`. It demonstrated one control-plane defect.
+AGY transport handling was correct, Codex produced a non-empty
+`EXECUTION_BUDGET_EXCEEDED` artifact, inter-attempt rollback correctly cleaned
+the repository, Claude then hit `SESSION_LIMIT` with no delta, and max attempts
+were exhausted -- at which point Codex's already-eligible artifact was
+forgotten and no candidate entered governance. Salvage was evaluated only for
+whichever attempt happened to be last, so a mid-chain productive timeout was
+rolled back and then dropped.
+
+Live implementation state and retained salvageable artifacts are now distinct.
+A productive timeout that hands off to a further provider is recorded as a
+retained fallback on its own attempt record, with patch identity, the baseline
+it was captured against, and a replayability proof taken against the restored
+baseline; the working tree is still rolled back, so the next provider starts
+clean and is never shown the artifact. If no later attempt produces a usable
+result, the most recent eligible retained artifact -- a deterministic rule, with
+no scoring, ranking or model judgment -- is restored through the existing
+baseline mechanism and promoted into the existing candidate-governance
+pipeline. Every step fails closed: an artifact that cannot be proven to belong
+to the baseline is left as evidence rather than applied, and nothing is ever
+partially applied.
+
+Retention is not acceptance. `provider_completion_claim` stays false, no
+`candidate.json` exists while fresh failover remains, `candidate_resource`
+stays null until promotion, and only Stage 8 may set
+`accepted_implementation_resource`. Promotion credits the producing resource as
+the candidate while `last_attempted_implementation_resource` still names the
+resource the failover chain actually ended on, so history is not rewritten.
+Reviewers are recomputed against the producer, and a producer that would be its
+own only reviewer parks for a human. The bounded budget is untouched: promoting
+a retained artifact governs work that already exists and never creates a fourth
+implementation attempt, re-invokes a provider, or resets attempted-resource
+exclusions. Exactly one retained artifact is promoted per task, so candidate
+governance cannot become a second failover loop.
+
+No new schema version and no new evidence record were introduced; retention
+reuses `attempt_record.json`, whose write is now atomic because the fallback is
+discoverable only through it. The regression matrix covers retention yielding
+to a later success, the exact SLOPFIX-07R chain, most-recent-eligible
+selection, `EXECUTION_PERMISSION_REQUIRED` gaining no timeout-candidate
+semantics, empty budget kills, non-replayable artifacts failing closed,
+pre-task user work surviving byte-for-byte, self-review prevention, a rejected
+fallback not reaching for an older one, non-failover-eligible terminal exits,
+and interruption both after retention and mid-promotion. SlopsLint remains
+within both committed ceilings at `python_src` 13/13 and `python_tests` 29/29.
+
 **Milestone #61 Configurable AI Resource Pool Start**: verified that Milestone
 #60D PR #48 is merged into `origin/main`, recorded the post-#60D starting SHA,
 and opened a durable architecture and recovery journal on the dedicated feature

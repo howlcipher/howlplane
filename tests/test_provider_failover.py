@@ -9,6 +9,7 @@ evidence preservation, progress messaging, and final identity/reviewer behavior.
 """
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from io import StringIO
 from pathlib import Path
@@ -25,6 +26,8 @@ from src.control_plane.agent_execution import (
     LAUNCH_OUTCOME_LAUNCHED,
     TIMEOUT_SOURCE_HARNESS,
     TIMEOUT_SOURCE_KEY,
+    TOOL_PERMISSION_DENIED,
+    TOOL_PERMISSION_KEY,
 )
 from src.control_plane.agent_registry import AgentProfile, AgentRegistry
 from src.control_plane.git_baseline import (
@@ -1570,3 +1573,364 @@ def test_implementation_prompt_names_the_provider_scratch_path(tmp_path: Path):
     # The canonical evidence namespace is never offered as a scratch location.
     assert "attempts/<NN-resource>/workspace/" not in prompt
     assert "control-plane evidence" in prompt
+
+
+# ---------------------------------------------------------------------------
+# HOWLFRAM-SLOPFIX-07R: a productive timeout in the middle of the failover
+# chain is rolled back out of the working tree, but never forgotten.
+#
+# The canary chain was agy (transport, empty) -> codex (budget kill, non-empty)
+# -> claude (session limit, empty). Codex's eligible artifact was rolled back
+# correctly and then dropped, because salvage was only ever evaluated for
+# whichever attempt happened to be last. Rollback must not mean forgetting.
+# ---------------------------------------------------------------------------
+_SESSION_LIMIT_STDERR = "Error: usage limit reached\n"
+_PERMISSION_DENIED = {
+    "success": False,
+    "stderr": "Error: permission denied\n",
+    "metadata": {TOOL_PERMISSION_KEY: TOOL_PERMISSION_DENIED},
+}
+
+
+def _make_registry_with_spare_reviewer() -> AgentRegistry:
+    """Four distinct providers: three get attempted, one stays free to review.
+
+    Independent review of a promoted fallback is only observable when some
+    resource that never implemented is still selectable as a reviewer.
+    """
+    return AgentRegistry([
+        _profile("resource_a", "Resource A", "provider_x"),
+        _profile("resource_b", "Resource B", "provider_y"),
+        _profile("resource_c", "Resource C", "provider_z"),
+        _profile("resource_d", "Resource D", "provider_w"),
+    ])
+
+
+def _budget_kill(side_effect=None) -> Dict[str, Any]:
+    """A harness-killed attempt, optionally leaving `side_effect`'s work behind."""
+    behavior = dict(_BUDGET_KILL)
+    if side_effect is not None:
+        behavior["side_effect"] = side_effect
+    return behavior
+
+
+def _attempt_record(res: OrchestrationResult, attempt_dir_name: str) -> Dict[str, Any]:
+    """Reads one attempt's durable record from the run evidence."""
+    record = (
+        Path(res.run_dir) / "implementation" / "attempts"
+        / attempt_dir_name / "attempt_record.json"
+    )
+    return json.loads(record.read_text(encoding="utf-8"))
+
+
+def _retained(res: OrchestrationResult, attempt_dir_name: str) -> Dict[str, Any]:
+    """Returns the retained-salvage block recorded on an attempt."""
+    return _attempt_record(res, attempt_dir_name).get("retained_salvage") or {}
+
+
+def _run_salvage_chain(
+    repo: Path,
+    a: Optional[Dict[str, Any]] = None,
+    b: Optional[Dict[str, Any]] = None,
+    c: Optional[Dict[str, Any]] = None,
+    registry: Optional[AgentRegistry] = None,
+    **config_overrides: Any,
+) -> OrchestrationResult:
+    """Runs a bounded three-hop chain, defaulting to barren later attempts.
+
+    Every retention scenario is this same shape with one or two behaviors
+    swapped, so they are expressed as arguments rather than repeated plans.
+    """
+    return _run_failover_task(
+        repo,
+        _resolver_from_plan({
+            "resource_a": a or _budget_kill(_refactor_preserving_behavior),
+            "resource_b": b or {"success": False, "stderr": _TIMEOUT_STDERR},
+            "resource_c": c or {"success": False, "stderr": _SESSION_LIMIT_STDERR},
+        }, {}),
+        max_attempts=3,
+        registry=registry or _make_registry_with_spare_reviewer(),
+        **config_overrides,
+    )
+
+
+def _run_slopfix07r(repo: Path, **config_overrides) -> OrchestrationResult:
+    """The exact SLOPFIX-07R chain: transport, productive timeout, session limit."""
+    return _run_salvage_chain(
+        repo,
+        a={"success": False, "stderr": _TIMEOUT_STDERR},
+        b=_budget_kill(_refactor_preserving_behavior),
+        **config_overrides,
+    )
+
+
+def test_case1_retained_artifact_yields_to_a_later_success(tmp_path: Path):
+    """Retention must never outrank a provider-attested result. A fresh provider
+    producing complete work is strictly better than governing a fragment, so the
+    fragment stays historical evidence and is never promoted."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_failover_task(
+        repo,
+        _resolver_from_plan({
+            "resource_a": _budget_kill(_edit_feature_to_false),
+            "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
+        }, {}),
+        max_attempts=3,
+    )
+
+    assert res.final_state == "complete"
+    assert res.executing_provider == "resource_b"
+
+    # A was retained, and rolled back before B ever ran: both are true at once.
+    retained = _retained(res, "01-resource_a")
+    assert retained["retained"] is True
+    assert retained["eligibility"] == "ELIGIBLE"
+    assert retained["replayable"] is True
+    assert retained["promotion_status"] == "RETAINED", "A must never be promoted"
+    assert retained["provider_completion_claim"] is False
+    assert _attempt_record(res, "01-resource_a")["rollback"]["restored"] is True
+
+    # Retention is not candidacy: no candidate artifact was ever created for A,
+    # and B's accepted work does not contain A's edit.
+    attempt_dir = Path(res.run_dir) / "implementation" / "attempts" / "01-resource_a"
+    assert not (attempt_dir / "candidate.json").exists()
+    assert _read_file(repo, "src/feature.py") == "def run():\n    return True\n"
+
+
+def test_slopfix07r_forgotten_middle_artifact_is_recovered(tmp_path: Path):
+    """The exact canary regression. Codex's eligible artifact survived attempt 3
+    and reached governance, without inventing a fourth implementation attempt."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_slopfix07r(repo)
+
+    # 1. The bounded budget is untouched: still exactly three attempts, and the
+    #    producer was never re-invoked to claim completion.
+    attempts = res.implementation_attempts
+    assert [a["resource_id"] for a in attempts] == [
+        "resource_a", "resource_b", "resource_c",
+    ]
+    assert len(attempts) == 3
+    assert attempts[1]["failure_class"] == (
+        ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED.value
+    )
+    assert attempts[2]["failure_class"] == ProviderFailureClass.SESSION_LIMIT.value
+    assert attempts[2]["delta"]["is_empty"] is True
+
+    # 2. B was retained across C, and C was rolled back. Both attempts report
+    #    an honest rollback rather than going silent about it.
+    retained = _retained(res, "02-resource_b")
+    assert retained["promotion_status"] == "PROMOTED"
+    assert retained["provider_completion_claim"] is False
+    assert _attempt_record(res, "02-resource_b")["rollback"]["restored"] is True
+    assert _attempt_record(res, "03-resource_c")["rollback"]["restored"] is True
+
+    # 3. The candidate is B's, entered governance, and claims nothing.
+    assert res.implementation_completion_claim is False
+    assert res.candidate_origin == "timed_out_implementation_attempt"
+    assert res.review_cycles, "the promoted fallback must be reviewed"
+    candidate_file = (
+        Path(res.run_dir) / "implementation" / "attempts"
+        / "02-resource_b" / "candidate.json"
+    )
+    assert json.loads(candidate_file.read_text(encoding="utf-8"))[
+        "resource_id"
+    ] == "resource_b"
+
+    # 4. B's work is what actually landed in the tree.
+    assert "Returns the feature flag" in _read_file(repo, "src/feature.py")
+
+
+def test_slopfix07r_routing_credits_producer_without_rewriting_history(
+    tmp_path: Path,
+):
+    """Promotion names B as the candidate, but C is still the resource the
+    failover chain actually ended on. Only acceptance may name an accepted
+    implementer, and a fallback under review is not an accepted implementer."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_slopfix07r(repo)
+
+    meta = json.loads(
+        (Path(res.run_dir) / "effective_route.json").read_text(encoding="utf-8")
+    )["metadata"]
+    assert meta["candidate_resource"] == "resource_b"
+    assert meta["last_attempted_implementation_resource"] == "resource_c"
+    assert meta["current_attempt_resource"] == "resource_c"
+    assert meta["reviewer_mapping_status"] in ("CANDIDATE_REVIEW", "CONFIRMED")
+
+    # Reviewer independence is recomputed against the producer, not the last
+    # resource that ran, so the producer cannot review its own artifact.
+    assert "resource_b" not in meta["reviewer_resource_mapping"].values()
+
+
+def test_case3_most_recent_eligible_retained_artifact_wins(tmp_path: Path):
+    """The selection rule is deterministic and backward-looking: the most recent
+    eligible artifact is promoted and older ones stay evidence only. No scoring,
+    no ranking, no model judgment."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_salvage_chain(
+        repo,
+        a=_budget_kill(_edit_feature_to_false),
+        b=_budget_kill(_refactor_preserving_behavior),
+    )
+
+    assert _retained(res, "01-resource_a")["promotion_status"] == "RETAINED"
+    assert _retained(res, "02-resource_b")["promotion_status"] == "PROMOTED"
+    # Only one retained artifact is ever governed, so candidate governance can
+    # never become a second, unbounded failover loop.
+    assert res.candidate_origin == "timed_out_implementation_attempt"
+    assert "Returns the feature flag" in _read_file(repo, "src/feature.py")
+
+
+def test_case4_permission_denied_artifact_gains_no_timeout_semantics(
+    tmp_path: Path,
+):
+    """A diff is not a candidate. Only a budget kill -- a provider this control
+    plane stopped at its own deadline -- yields a salvageable artifact, so a
+    permission-denied attempt gains nothing merely by having touched files."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_salvage_chain(
+        repo,
+        b={**_PERMISSION_DENIED, "side_effect": _edit_feature_to_false},
+    )
+
+    assert _retained(res, "02-resource_b") == {}, (
+        "EXECUTION_PERMISSION_REQUIRED must not be retained as salvage"
+    )
+    # A therefore remains the eligible fallback.
+    assert _retained(res, "01-resource_a")["promotion_status"] == "PROMOTED"
+
+
+def test_case5_empty_budget_kill_leaves_no_fallback(tmp_path: Path):
+    """A budget kill that produced nothing is still just a failure. Nothing is
+    retained, and the terminal failure path is exactly what it was before."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_salvage_chain(repo, a=_budget_kill())
+
+    assert res.final_state == "failed"
+    assert res.failure_class == FAILURE_CLASS_PROVIDER_EXHAUSTED
+    assert res.candidate_origin is None
+    assert _retained(res, "01-resource_a") == {}
+    assert _read_file(repo, "src/feature.py") == "def run():\n    return True\n"
+
+
+def _corrupt_retained_patch(keep_digest_valid: bool):
+    """Makes a retained artifact unusable between retention and promotion."""
+    def _hook(stage: str, run_dir: Path, _spec) -> None:
+        if stage != "after_salvage_retention":
+            return
+        record_file = (
+            run_dir / "implementation" / "attempts"
+            / "01-resource_a" / "attempt_record.json"
+        )
+        record = json.loads(record_file.read_text(encoding="utf-8"))
+        retained = record["retained_salvage"]
+        patch_file = run_dir / retained["patch_path"]
+        # A well-formed diff against content that is not in the baseline: it
+        # passes every identity check and still cannot be replayed.
+        unapplicable = (
+            "diff --git a/src/feature.py b/src/feature.py\n"
+            "--- a/src/feature.py\n"
+            "+++ b/src/feature.py\n"
+            "@@ -1,1 +1,1 @@\n"
+            "-this line is not in the baseline\n"
+            "+replacement\n"
+        )
+        patch_file.write_text(unapplicable, encoding="utf-8")
+        if keep_digest_valid:
+            retained["patch_sha256"] = hashlib.sha256(
+                unapplicable.encode("utf-8")
+            ).hexdigest()
+        record_file.write_text(json.dumps(record, indent=2), encoding="utf-8")
+    return _hook
+
+
+@pytest.mark.parametrize("keep_digest_valid", [False, True])
+def test_case6_unusable_retained_artifact_fails_closed(
+    tmp_path: Path, keep_digest_valid: bool,
+):
+    """A fallback that cannot be proven to belong to this baseline is left as
+    evidence rather than applied. Whether it fails the digest check or the
+    applicability check, nothing is partially applied and nothing is accepted."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_salvage_chain(
+        repo, failure_injection_hook=_corrupt_retained_patch(keep_digest_valid),
+    )
+
+    assert res.final_state == "failed"
+    assert res.candidate_origin is None
+    assert res.failure_class == FAILURE_CLASS_PROVIDER_EXHAUSTED
+    # The repository is untouched: no partial application survived.
+    assert _read_file(repo, "src/feature.py") == "def run():\n    return True\n"
+    assert not (
+        Path(res.run_dir) / "implementation" / "attempts"
+        / "01-resource_a" / "candidate.json"
+    ).exists()
+
+
+def test_case7_pre_task_user_work_survives_fallback_promotion(tmp_path: Path):
+    """Restoring a fallback runs through the sanctioned baseline mechanism, which
+    puts pre-existing user work back before anything is applied on top of it."""
+    repo = _init_test_repo(tmp_path / "repo")
+    tracked = repo / "src" / "other.py"
+    tracked.write_text("value = 'user edit'\n", encoding="utf-8")
+    untracked = repo / "scratch_notes.txt"
+    untracked.write_text("do not lose me\n", encoding="utf-8")
+
+    res = _run_salvage_chain(repo)
+
+    assert _retained(res, "01-resource_a")["promotion_status"] == "PROMOTED"
+    # Byte-for-byte, both kinds of pre-existing work survive.
+    assert tracked.read_text(encoding="utf-8") == "value = 'user edit'\n"
+    assert untracked.read_text(encoding="utf-8") == "do not lose me\n"
+    assert res.candidate_origin == "timed_out_implementation_attempt"
+
+
+def test_case8_promoted_producer_cannot_review_its_own_artifact(tmp_path: Path):
+    """A promoted fallback carries no completion claim, so independent review is
+    the only thing standing behind it. When the producer is the only reviewer
+    left, the run parks for a human rather than completing on a self-review."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_salvage_chain(
+        repo,
+        c={"success": False, "stderr": _TIMEOUT_STDERR},
+        registry=_make_registry_three_providers(),
+    )
+
+    assert _retained(res, "01-resource_a")["promotion_status"] == "PROMOTED"
+    assert res.final_state == "awaiting_human"
+    assert res.implementation_completion_claim is False
+    assert res.routing_decision.metadata["review_diversity_achieved"] is False
+    assert (Path(res.run_dir) / "decision_packet.md").is_file()
+
+
+def test_case9_rejected_fallback_does_not_promote_an_older_one(tmp_path: Path):
+    """Governance rejecting a promoted fallback is the end of it. An older
+    retained artifact must not be reached for, or candidate governance would
+    become a second unbounded failover loop."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_salvage_chain(repo, b=_budget_kill(_edit_feature_to_false))
+
+    # B is the most recent eligible artifact and it is broken, so it is the one
+    # governed -- and rejected. A is never reached for.
+    assert _retained(res, "02-resource_b")["promotion_status"] == "PROMOTED"
+    assert _retained(res, "01-resource_a")["promotion_status"] == "RETAINED"
+    assert res.final_state != "complete"
+    assert res.verification_plan.overall_status != "passed"
+    # Nothing stands behind the rejected candidate, so the tree is at baseline.
+    assert _read_file(repo, "src/feature.py") == "def run():\n    return True\n"
+
+
+def test_case11_non_failover_eligible_terminal_recovers_the_fallback(
+    tmp_path: Path,
+):
+    """A provider erroring outright is still a termination without a successful
+    implementation, so an earlier eligible artifact is still recovered."""
+    repo = _init_test_repo(tmp_path / "repo")
+    res = _run_salvage_chain(
+        repo, b={"success": False, "stderr": "fatal: internal error\n"},
+    )
+
+    assert res.implementation_attempts[1]["failure_class"] == "ENGINEERING_FAILURE"
+    assert _retained(res, "01-resource_a")["promotion_status"] == "PROMOTED"
+    assert res.candidate_origin == "timed_out_implementation_attempt"
+    assert res.implementation_completion_claim is False

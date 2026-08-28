@@ -13,7 +13,7 @@ Human Authority Boundary Gate -> Complete Evidence Ledger.
 from contextlib import ExitStack
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-import json, os, shutil, sys, time
+import hashlib, json, os, shutil, sys, time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
@@ -114,6 +114,21 @@ ROUTE_STATUS_ACCEPTED = "ACCEPTED"
 ROLLBACK_PARKED_FOR_GOVERNANCE = "PARKED_FOR_GOVERNANCE"
 NEXT_SELECTION_MAX_ATTEMPTS = "MAX_ATTEMPTS_REACHED"
 TRANSITION_CANDIDATE_GOVERNANCE = "CANDIDATE_GOVERNANCE"
+
+# Retention vocabulary. A retained salvage artifact is a productive timeout's
+# work that was rolled back out of the working tree so the next provider could
+# start clean, and kept as a bounded terminal fallback. Retention is not
+# acceptance, and a retained artifact is deliberately not yet the run's
+# candidate (HOWLFRAM-SLOPFIX-07R).
+SALVAGE_ELIGIBLE = "ELIGIBLE"
+SALVAGE_NOT_REPLAYABLE = "NOT_REPLAYABLE"
+SALVAGE_RETAINED = "RETAINED"
+SALVAGE_PROMOTED = "PROMOTED"
+
+# Interruption points that only exist so the retention lifecycle can be crash
+# tested; inert unless a failure_injection_hook is configured.
+FAULT_AFTER_SALVAGE_RETENTION = "after_salvage_retention"
+FAULT_DURING_SALVAGE_PROMOTION = "during_salvage_promotion"
 IMPLEMENTATION_ATTEMPT_SCHEMA_VERSION = "howlplane.implementation_attempt/v1"
 
 # Everything the control plane itself writes into a task run directory. The
@@ -390,6 +405,21 @@ class GovernedTaskOrchestrator:
         if not delta.is_empty:
             (attempt_dir / "partial_work.patch").write_text(delta.diff_content, encoding="utf-8")
 
+        # A retained salvage artifact from an earlier, interrupted run lives on
+        # this attempt's record. Re-recording the same slot on resume must not
+        # erase the fallback; its patch is kept under its own name and its
+        # identity is digest-checked before any promotion, so carrying it
+        # forward can only ever be verified, never trusted blindly.
+        carried_salvage: Optional[Dict[str, Any]] = None
+        existing_record = attempt_dir / "attempt_record.json"
+        if existing_record.is_file():
+            try:
+                carried_salvage = (
+                    safe_load_json(existing_record) or {}
+                ).get("retained_salvage")
+            except Exception:
+                carried_salvage = None
+
         capacity_after: Dict[str, str] = {}
         if self.config.provider_pool is not None:
             # record_result already mutated state; capture after.
@@ -410,6 +440,8 @@ class GovernedTaskOrchestrator:
             "schema": IMPLEMENTATION_ATTEMPT_SCHEMA_VERSION,
             "evidence_dir": str(attempt_dir.relative_to(run_dir)),
         }
+        if carried_salvage:
+            record["retained_salvage"] = carried_salvage
         self._persist_attempt_record(record, attempts_dir)
         return record
 
@@ -442,15 +474,19 @@ class GovernedTaskOrchestrator:
 
         Attempt evidence is additive and is filled in across the attempt's
         lifetime -- the result first, then the failover selection, then the
-        rollback outcome -- so every amendment goes through here rather than
-        opening its own write path.
+        rollback outcome, and now the retained-salvage block -- so every
+        amendment goes through here rather than opening its own write path.
+
+        The write is atomic because a retained salvage artifact is discoverable
+        only through this file: a torn write during an interruption would lose
+        the fallback that HOWLFRAM-SLOPFIX-07R proved must survive.
         """
         record_path = (
             attempts_dir
             / f"{attempt_record['attempt']:02d}-{attempt_record['resource_id']}"
             / "attempt_record.json"
         )
-        record_path.write_text(json.dumps(attempt_record, indent=2), encoding="utf-8")
+        atomic_write_json(record_path, attempt_record)
 
     def _attach_next_selection(
         self,
@@ -746,6 +782,32 @@ class GovernedTaskOrchestrator:
             return False
         return delta is not None and not delta.is_empty
 
+    @staticmethod
+    def _timed_out_artifact_provenance(
+        resource_id: str,
+        attempt: int,
+        delta: RepositoryDelta,
+    ) -> Dict[str, Any]:
+        """The provenance every budget-stopped artifact carries.
+
+        A retained fallback and a governed candidate are the same artifact at
+        two different points in its life, so they describe their origin
+        identically -- including the completion claim their producer never made.
+        """
+        return {
+            "provider_completion_claim": False,
+            "origin": CANDIDATE_ORIGIN_TIMED_OUT,
+            "failure_class": ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED.value,
+            "resource_id": resource_id,
+            "attempt": attempt,
+            "files_added": list(delta.files_added),
+            "files_modified": list(delta.files_modified),
+            "files_deleted": list(delta.files_deleted),
+            "insertions": delta.insertions,
+            "deletions": delta.deletions,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+        }
+
     def _capture_timeout_candidate(
         self,
         run_dir: Path,
@@ -763,18 +825,10 @@ class GovernedTaskOrchestrator:
         """
         candidate = {
             "candidate_captured": True,
-            "provider_completion_claim": False,
-            "origin": CANDIDATE_ORIGIN_TIMED_OUT,
             "requires_governance": True,
-            "failure_class": ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED.value,
-            "resource_id": resource_id,
-            "attempt": attempt_record["attempt"],
-            "files_added": list(delta.files_added),
-            "files_modified": list(delta.files_modified),
-            "files_deleted": list(delta.files_deleted),
-            "insertions": delta.insertions,
-            "deletions": delta.deletions,
-            "captured_at": datetime.now(timezone.utc).isoformat(),
+            **self._timed_out_artifact_provenance(
+                resource_id, attempt_record["attempt"], delta
+            ),
             "schema": TIMEOUT_CANDIDATE_SCHEMA_VERSION,
         }
         attempt_dir = attempts_dir / f"{attempt_record['attempt']:02d}-{resource_id}"
@@ -803,6 +857,301 @@ class GovernedTaskOrchestrator:
             },
         )
         return candidate
+
+    def _retain_salvage_artifact(
+        self,
+        attempts_dir: Path,
+        attempt_record: Dict[str, Any],
+        task_spec: TaskSpec,
+        resource_id: str,
+        delta: RepositoryDelta,
+        baseline: GitBaseline,
+    ) -> Dict[str, Any]:
+        """Keeps a productive timeout's work as a bounded terminal fallback.
+
+        Rollback must not mean forgetting. HOWLFRAM-SLOPFIX-07R rolled Codex's
+        eligible EXECUTION_BUDGET_EXCEEDED artifact out of the tree so Claude
+        could attempt from a clean baseline -- which was correct -- and then
+        terminal-failed without ever reconsidering it, because salvage was only
+        ever evaluated for whichever attempt happened to be last.
+
+        The record lives on the attempt record beside the already-written
+        partial_work.patch, and deliberately not in a `candidate.json`: while
+        fresh failover remains this is not the run's candidate and
+        `candidate_resource` must stay null. Live implementation state and
+        retained salvageable artifacts are different things.
+        """
+        retained = {
+            "retained": True,
+            "eligibility": SALVAGE_ELIGIBLE,
+            "promotion_status": SALVAGE_RETAINED,
+            **self._timed_out_artifact_provenance(
+                resource_id, attempt_record["attempt"], delta
+            ),
+            "patch_path": f"{attempt_record['evidence_dir']}/retained_salvage.patch",
+            "patch_sha256": hashlib.sha256(
+                delta.diff_content.encode("utf-8")
+            ).hexdigest(),
+            # Patch identity: what this artifact was captured against, so a
+            # later promotion can prove it is being replayed onto the same
+            # repository state rather than whatever happens to be present.
+            "baseline_head": baseline.initial_commit_sha,
+            "baseline_status_digest": hashlib.sha256(
+                baseline.status_porcelain.encode("utf-8")
+            ).hexdigest(),
+            # Answered against the restored baseline, which is the only tree
+            # whose answer means anything. Unknown until rollback has run.
+            "replayable": None,
+        }
+        # Written under a name no attempt-recording path ever produces:
+        # partial_work.patch belongs to whichever attempt last occupied this
+        # slot, but the fallback must outlive a resumed re-attempt.
+        attempt_dir = attempts_dir / f"{attempt_record['attempt']:02d}-{resource_id}"
+        attempt_dir.mkdir(parents=True, exist_ok=True)
+        (attempt_dir / "retained_salvage.patch").write_text(
+            delta.diff_content, encoding="utf-8"
+        )
+        attempt_record["retained_salvage"] = retained
+        self._persist_attempt_record(attempt_record, attempts_dir)
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id=resource_id,
+            action="retained_salvage_captured",
+            spec=task_spec,
+            metadata={
+                "attempt": attempt_record["attempt"],
+                "origin": CANDIDATE_ORIGIN_TIMED_OUT,
+                "provider_completion_claim": False,
+                "insertions": delta.insertions,
+                "deletions": delta.deletions,
+                "baseline_head": baseline.initial_commit_sha,
+            },
+        )
+        return retained
+
+    def _confirm_salvage_replayable(
+        self,
+        run_dir: Path,
+        attempts_dir: Path,
+        attempt_record: Dict[str, Any],
+        task_spec: TaskSpec,
+    ) -> bool:
+        """Proves the retained patch still applies to the restored baseline.
+
+        Deliberately run after rollback rather than before it: the clean
+        baseline is the tree a promotion would replay onto. `git apply --check`
+        never writes, so this cannot disturb the state the next provider is
+        about to be handed. An artifact that fails here stays as evidence but
+        can never be selected, so it can never be partially applied.
+        """
+        retained = attempt_record.get("retained_salvage")
+        if not retained:
+            return False
+        patch_file = run_dir / retained["patch_path"]
+        replayable = False
+        if patch_file.is_file():
+            replayable = run_git(
+                self.target_repo, ["apply", "--check", str(patch_file)], 60
+            ).returncode == 0
+        retained["replayable"] = replayable
+        if not replayable:
+            retained["eligibility"] = SALVAGE_NOT_REPLAYABLE
+        self._persist_attempt_record(attempt_record, attempts_dir)
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id=retained["resource_id"],
+            action="retained_salvage_replay_checked",
+            spec=task_spec,
+            metadata={
+                "attempt": retained["attempt"],
+                "replayable": replayable,
+                "eligibility": retained["eligibility"],
+            },
+        )
+        return replayable
+
+    @staticmethod
+    def _select_retained_salvage(attempts_dir: Path) -> Optional[Dict[str, Any]]:
+        """Picks the fallback deterministically: most recent eligible wins.
+
+        No scoring, no ranking, no size heuristic, no model judgment. This
+        preserves the existing semantics -- a productive *final* timeout is
+        already the candidate -- and merely extends the search backward to the
+        nearest prior equivalent when the later attempts produced nothing.
+
+        Reading it from disk rather than from memory is what makes the fallback
+        survive an interruption for free.
+        """
+        if not attempts_dir.is_dir():
+            return None
+        for attempt_dir in sorted(attempts_dir.iterdir(), reverse=True):
+            record_file = attempt_dir / "attempt_record.json"
+            if not record_file.is_file():
+                continue
+            try:
+                record = safe_load_json(record_file) or {}
+            except Exception:
+                continue
+            retained = record.get("retained_salvage") or {}
+            if (
+                retained.get("retained")
+                and retained.get("eligibility") == SALVAGE_ELIGIBLE
+                and retained.get("promotion_status") == SALVAGE_RETAINED
+            ):
+                return record
+        return None
+
+    def _abandon_salvage_promotion(
+        self,
+        task_spec: TaskSpec,
+        retained: Dict[str, Any],
+        reason: str,
+    ) -> None:
+        """Records a fallback that was found but could not be safely restored."""
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id="control_plane",
+            action="retained_salvage_promotion_failed",
+            spec=task_spec,
+            metadata={
+                "attempt": retained.get("attempt"),
+                "resource_id": retained.get("resource_id"),
+                "reason": reason,
+            },
+        )
+
+    def _promote_retained_salvage(
+        self,
+        run_dir: Path,
+        attempts_dir: Path,
+        task_spec: TaskSpec,
+        baseline: GitBaseline,
+        current_delta: RepositoryDelta,
+        attempt_record: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Tuple[Dict[str, Any], str, RepositoryDelta]]:
+        """Recovers the retained fallback once no attempt produced a result.
+
+        This is governance of an artifact that already exists, not a new
+        implementation attempt: no provider is re-invoked, no attempt record is
+        added, and the bounded failover budget is untouched. Promoting Codex's
+        retained artifact after attempt 3 failed does not create attempt 4.
+
+        Every step fails closed. A fallback that cannot be proven to belong to
+        this baseline is left as evidence rather than applied, and nothing is
+        ever partially applied.
+        """
+        record = self._select_retained_salvage(attempts_dir)
+        if record is None:
+            return None
+        retained = record["retained_salvage"]
+        producer = retained["resource_id"]
+
+        # The last attempt's state goes back through the sanctioned restore
+        # path first, so pre-existing user work is put back before anything is
+        # applied on top of it.
+        restored_ok, restore_err = restore_repository_to_baseline(
+            self.target_repo, baseline, current_delta
+        )
+        # The attempt that just failed still owes an honest rollback record.
+        # Its work was undone here rather than in the failover branch, and
+        # evidence that goes silent about it is what SLOPFIX-06 fixed.
+        if attempt_record is not None:
+            self._attach_rollback_result(
+                attempt_record, attempts_dir, restored_ok, restore_err
+            )
+        if not restored_ok:
+            self._abandon_salvage_promotion(
+                task_spec, retained, f"baseline restore failed: {restore_err}"
+            )
+            return None
+
+        head_proc = run_git(self.target_repo, ["rev-parse", "HEAD"], 30)
+        head = head_proc.stdout.strip() if head_proc.returncode == 0 else ""
+        if head != retained.get("baseline_head"):
+            self._abandon_salvage_promotion(
+                task_spec,
+                retained,
+                f"baseline HEAD mismatch: expected {retained.get('baseline_head')}, "
+                f"got {head or 'unknown'}",
+            )
+            return None
+
+        patch_file = run_dir / retained["patch_path"]
+        if not patch_file.is_file():
+            self._abandon_salvage_promotion(
+                task_spec, retained, f"retained patch missing at {retained['patch_path']}"
+            )
+            return None
+        patch_text = patch_file.read_text(encoding="utf-8")
+        if hashlib.sha256(patch_text.encode("utf-8")).hexdigest() != retained.get(
+            "patch_sha256"
+        ):
+            self._abandon_salvage_promotion(
+                task_spec, retained, "retained patch digest does not match its record"
+            )
+            return None
+
+        # Never `git apply` blind. Prove it applies, then apply it.
+        if run_git(
+            self.target_repo, ["apply", "--check", str(patch_file)], 60
+        ).returncode != 0:
+            self._abandon_salvage_promotion(
+                task_spec, retained, "retained patch no longer applies to the baseline"
+            )
+            return None
+        applied = run_git(self.target_repo, ["apply", str(patch_file)], 60)
+        if applied.returncode != 0:
+            restore_repository_to_baseline(self.target_repo, baseline)
+            self._abandon_salvage_promotion(
+                task_spec,
+                retained,
+                f"retained patch failed to apply: {(applied.stderr or '').strip()}",
+            )
+            return None
+
+        self._fault(FAULT_DURING_SALVAGE_PROMOTION, run_dir, task_spec)
+
+        promoted_delta = self._capture_scoped_delta(
+            task_spec, baseline, producer, stage="salvage_promotion"
+        )
+        if promoted_delta.is_empty:
+            restore_repository_to_baseline(self.target_repo, baseline)
+            self._abandon_salvage_promotion(
+                task_spec, retained, "restored artifact produced no task-attributable delta"
+            )
+            return None
+
+        # From here the artifact is an ordinary governed candidate: the same
+        # capture the existing terminal-timeout path uses, with the same
+        # provider_completion_claim=false, entering the same review,
+        # verification and authority stages.
+        candidate = self._capture_timeout_candidate(
+            run_dir=run_dir,
+            attempts_dir=attempts_dir,
+            attempt_record=record,
+            task_spec=task_spec,
+            resource_id=producer,
+            delta=promoted_delta,
+        )
+        retained["promotion_status"] = SALVAGE_PROMOTED
+        retained["promoted_at"] = datetime.now(timezone.utc).isoformat()
+        record["transition"] = TRANSITION_CANDIDATE_GOVERNANCE
+        self._persist_attempt_record(record, attempts_dir)
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id=producer,
+            action="retained_salvage_promoted",
+            spec=task_spec,
+            metadata={
+                "attempt": retained["attempt"],
+                "resource_id": producer,
+                "provider_completion_claim": False,
+                "insertions": promoted_delta.insertions,
+                "deletions": promoted_delta.deletions,
+                "baseline_head": retained["baseline_head"],
+            },
+        )
+        return candidate, producer, promoted_delta
 
     def _build_failover_summary(
         self,
@@ -887,6 +1236,7 @@ class GovernedTaskOrchestrator:
         route_status: str,
         accepted: bool,
         candidate_resource: Optional[str] = None,
+        last_attempted_resource_id: Optional[str] = None,
     ) -> None:
         """Makes routing evidence on disk match who is actually implementing.
 
@@ -943,8 +1293,16 @@ class GovernedTaskOrchestrator:
             else ("CANDIDATE_REVIEW" if candidate_resource else "PROVISIONAL")
         )
         routing.metadata["route_status"] = route_status
-        routing.metadata["current_attempt_resource"] = attempt_resource_id
-        routing.metadata["last_attempted_implementation_resource"] = attempt_resource_id
+        # Promoting a retained fallback credits the resource that produced the
+        # artifact, but the last resource that actually *ran* is still the one
+        # the failover chain ended on. Conflating them would rewrite history as
+        # though the producer had been the final implementation attempt.
+        routing.metadata["current_attempt_resource"] = (
+            last_attempted_resource_id or attempt_resource_id
+        )
+        routing.metadata["last_attempted_implementation_resource"] = (
+            last_attempted_resource_id or attempt_resource_id
+        )
         routing.metadata["initial_implementation_resource"] = (
             routing.metadata.get("initial_route", {}).get("selected_agent_id")
             or routing.selected_agent_id
@@ -1424,6 +1782,9 @@ class GovernedTaskOrchestrator:
         last_selection_decision: Optional[Any] = None
         # Set only when a budget-stopped attempt left a delta worth governing.
         timeout_candidate: Optional[Dict[str, Any]] = None
+        # Set only when a retained fallback is promoted: the producer becomes
+        # the candidate, but the failover chain still ended on this resource.
+        salvage_last_attempted_id: Optional[str] = None
 
         if has_existing_delta and rec_delta:
             current_delta = rec_delta
@@ -1435,7 +1796,18 @@ class GovernedTaskOrchestrator:
             final_impl_resource_id = self._recover_implementation_resource(
                 run_dir, routing
             )
+            # A parked candidate is the strongest form of recovered work. If
+            # there is none, an earlier attempt may still have left a retained
+            # fallback, which stays governable across the interruption.
             timeout_candidate = self._load_parked_candidate(run_dir)
+            if timeout_candidate is None:
+                retained_record = self._select_retained_salvage(
+                    run_dir / "implementation" / "attempts"
+                )
+                if retained_record is not None:
+                    final_impl_resource_id = (
+                        retained_record["retained_salvage"]["resource_id"]
+                    )
             self._record_event(
                 task_id=task_spec.task_id,
                 agent_id="control_plane",
@@ -1551,6 +1923,29 @@ class GovernedTaskOrchestrator:
                 )
                 self._record_delta_captured(task_spec, current_delta)
                 return captured
+
+            def promote_retained_fallback() -> Optional[str]:
+                """Recovers a retained fallback at a terminal exit.
+
+                Reads the attempt-scoped locals at call time, exactly like
+                fail_implementation and govern_candidate, so all three terminal
+                exits salvage identically instead of repeating the sequence.
+                Returns the producing resource, or None to fail as before.
+                """
+                nonlocal timeout_candidate, current_delta
+                promoted = self._promote_retained_salvage(
+                    run_dir=run_dir,
+                    attempts_dir=attempts_dir,
+                    task_spec=task_spec,
+                    baseline=baseline,
+                    current_delta=current_delta,
+                    attempt_record=attempt_record,
+                )
+                if promoted is None:
+                    return None
+                timeout_candidate, producer, current_delta = promoted
+                self._record_delta_captured(task_spec, current_delta)
+                return producer
 
             for attempt_num in range(1, self.config.max_provider_failover_attempts + 1):
                 impl_res = None
@@ -1726,6 +2121,15 @@ class GovernedTaskOrchestrator:
                 attempted_impl_resource_ids.add(current_impl_resource_id)
 
                 if not self._is_failover_eligible_failure(normalized_failure):
+                    # EXECUTION_BUDGET_EXCEEDED is failover-eligible, so this
+                    # attempt is never itself salvageable -- but an earlier one
+                    # may be, and a provider erroring outright is still a
+                    # termination without a successful implementation.
+                    fallback_producer = promote_retained_fallback()
+                    if fallback_producer is not None:
+                        salvage_last_attempted_id = current_impl_resource_id
+                        final_impl_resource_id = fallback_producer
+                        break
                     return fail_implementation(
                         err_msg,
                         self._map_failure_class_to_orchestrator_class(normalized_failure),
@@ -1733,11 +2137,15 @@ class GovernedTaskOrchestrator:
                         termination_reason=TERMINATION_NON_FAILOVER_FAILURE,
                     )
 
-                # No further provider can be tried, but this attempt may still
-                # have left something worth governing. Salvage is checked only
-                # here, at the end of the chain: while failover budget remains a
-                # fresh provider may yet produce a complete, provider-attested
-                # result, and that is strictly better than governing a fragment.
+                # While failover budget remains, a fresh provider may yet
+                # produce a complete, provider-attested result, and that is
+                # strictly better than governing a fragment -- so the current
+                # attempt's work is still rolled back before the next one runs.
+                # It is not discarded, though: SLOPFIX-07R rolled back Codex's
+                # eligible artifact and then forgot it existed, because salvage
+                # was only ever evaluated for whichever attempt happened to be
+                # last. Retention keeps it recoverable without ever letting it
+                # contaminate a later attempt.
                 salvageable = self._is_salvageable_timeout_candidate(
                     normalized_failure, current_delta
                 )
@@ -1760,6 +2168,13 @@ class GovernedTaskOrchestrator:
                     break
 
                 if exhausted:
+                    # This is the SLOPFIX-07R path: the last attempt produced
+                    # nothing, but an earlier productive timeout may have.
+                    fallback_producer = promote_retained_fallback()
+                    if fallback_producer is not None:
+                        salvage_last_attempted_id = current_impl_resource_id
+                        final_impl_resource_id = fallback_producer
+                        break
                     err_msg = (
                         f"Implementation failed on {current_impl_resource_id} ({failure_class_value}); "
                         f"max failover attempts ({self.config.max_provider_failover_attempts}) reached."
@@ -1795,11 +2210,31 @@ class GovernedTaskOrchestrator:
                         final_impl_resource_id = current_impl_resource_id
                         break
 
+                    fallback_producer = promote_retained_fallback()
+                    if fallback_producer is not None:
+                        salvage_last_attempted_id = current_impl_resource_id
+                        final_impl_resource_id = fallback_producer
+                        break
+
                     err_msg = f"Implementation failed on {current_impl_resource_id} ({failure_class_value}) and no eligible failover resource remains."
                     return fail_implementation(
                         err_msg,
                         FAILURE_CLASS_PROVIDER_EXHAUSTED,
                         termination_reason=TERMINATION_NO_ELIGIBLE_RESOURCE,
+                    )
+
+                # Preserve before destroying. Retention is recorded first so
+                # an interruption between here and the rollback can only ever
+                # leave a fallback that is known about, never one that was
+                # silently dropped.
+                if salvageable:
+                    self._retain_salvage_artifact(
+                        attempts_dir=attempts_dir,
+                        attempt_record=attempt_record,
+                        task_spec=task_spec,
+                        resource_id=current_impl_resource_id,
+                        delta=current_delta,
+                        baseline=baseline,
                     )
 
                 # Restore repository to baseline before the next attempt.
@@ -1817,6 +2252,17 @@ class GovernedTaskOrchestrator:
                         termination_reason=TERMINATION_ROLLBACK_FAILED,
                         rollback=False,
                     )
+
+                # "Salvage preserved" and "rollback restored" are both true
+                # here, and the evidence says both. The patch lives in the
+                # attempt's evidence; the working tree is clean for the next
+                # attempt. Replayability is proven against that clean tree,
+                # because that is what a promotion would replay onto.
+                if salvageable:
+                    self._confirm_salvage_replayable(
+                        run_dir, attempts_dir, attempt_record, task_spec
+                    )
+                    self._fault(FAULT_AFTER_SALVAGE_RETENTION, run_dir, task_spec)
 
                 progress.emit_failover(
                     current_impl_resource_id,
@@ -1885,8 +2331,14 @@ class GovernedTaskOrchestrator:
             # are truthful (#59.2 Phase 9).
             if (
                 final_impl_resource_id is not None
-                and final_impl_resource_id != routing.selected_agent_id
                 and self.config.provider_pool is not None
+                and (
+                    final_impl_resource_id != routing.selected_agent_id
+                    # A promoted producer can coincide with the originally
+                    # routed resource, and reviewers must still be recomputed
+                    # against it before it can be reviewed.
+                    or salvage_last_attempted_id is not None
+                )
             ):
                 # Implementation being finished is not the same as the work
                 # being accepted: review, reconciliation, verification and the
@@ -1900,6 +2352,7 @@ class GovernedTaskOrchestrator:
                     ROUTE_STATUS_SUPERSEDED,
                     accepted=False,
                     candidate_resource=final_impl_resource_id,
+                    last_attempted_resource_id=salvage_last_attempted_id,
                 )
 
             # A salvaged candidate carries no completion claim from its
@@ -2394,6 +2847,10 @@ class GovernedTaskOrchestrator:
                 candidate_resource=(
                     final_impl_resource_id if timeout_candidate else None
                 ),
+                # Acceptance names an accepted implementer; it does not
+                # retroactively make a promoted fallback the last resource that
+                # was actually attempted.
+                last_attempted_resource_id=salvage_last_attempted_id,
             )
 
         # Generate summary markdown

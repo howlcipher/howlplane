@@ -923,3 +923,92 @@ def test_a_second_process_cannot_take_an_actively_held_task(tmp_path):
         assert "BLOCKED" in out.stdout, out.stdout + out.stderr
     finally:
         holder.release()
+
+
+# ---------------------------------------------------------------------------
+# HOWLFRAM-SLOPFIX-07R: retained salvage state must survive an interruption
+#
+# The fallback is discoverable only through durable attempt evidence, so an
+# interruption anywhere in the retention lifecycle must leave it findable,
+# unapplied twice, and still honestly marked as not-yet-promoted.
+# ---------------------------------------------------------------------------
+def _die_at(target_stage: str):
+    """Interrupts the run at one named lifecycle point."""
+    def _hook(stage, _run_dir, _spec):
+        if stage == target_stage:
+            raise RuntimeError(f"interrupted at {target_stage}")
+    return _hook
+
+
+def _crash_during_salvage(tmp_path, crash_stage):
+    """Interrupts the salvage chain at one stage; returns repo and evidence dirs."""
+    from tests.test_provider_failover import _init_test_repo, _run_salvage_chain
+
+    repo = _init_test_repo(tmp_path / "repo")
+    with pytest.raises(RuntimeError):
+        _run_salvage_chain(repo, failure_injection_hook=_die_at(crash_stage))
+    run_dir = repo / ".task_runs" / "TEST-FAILOVER-01"
+    return repo, run_dir, run_dir / "implementation" / "attempts"
+
+
+@pytest.mark.parametrize(
+    "crash_stage", ["after_salvage_retention", "during_salvage_promotion"],
+)
+def test_retained_fallback_survives_an_interruption(tmp_path, crash_stage):
+    """Crashing after retention, and again mid-promotion, must not lose the
+    fallback, promote it twice, or let its record claim a promotion that never
+    finished."""
+    import hashlib
+
+    from src.control_plane.orchestrator import GovernedTaskOrchestrator
+
+    _, run_dir, attempts_dir = _crash_during_salvage(tmp_path, crash_stage)
+
+    # The fallback is still discoverable, and still honestly un-promoted.
+    record = GovernedTaskOrchestrator._select_retained_salvage(attempts_dir)
+    assert record is not None, "the retained fallback must survive the crash"
+    retained = record["retained_salvage"]
+    assert retained["resource_id"] == "resource_a"
+    assert retained["eligibility"] == "ELIGIBLE"
+    assert retained["promotion_status"] == "RETAINED"
+    assert retained["provider_completion_claim"] is False
+    assert "promoted_at" not in retained
+
+    # Its identity is intact, so a later promotion can still prove it belongs
+    # to this baseline rather than applying it blind.
+    patch_file = run_dir / retained["patch_path"]
+    assert patch_file.is_file()
+    assert hashlib.sha256(
+        patch_file.read_text(encoding="utf-8").encode("utf-8")
+    ).hexdigest() == retained["patch_sha256"]
+
+    # An unfinished promotion never becomes a candidate.
+    assert not (attempts_dir / "01-resource_a" / "candidate.json").exists()
+
+
+def test_resume_after_an_interrupted_promotion_recovers_the_producer(tmp_path):
+    """A run interrupted mid-promotion left the patch in the tree but no
+    candidate record. Resume must credit the resource that produced it rather
+    than losing the fallback or crediting whoever was attempted last."""
+    from src.control_plane.orchestrator import GovernedTaskOrchestrator
+
+    repo, run_dir, attempts_dir = _crash_during_salvage(
+        tmp_path, "during_salvage_promotion"
+    )
+
+    # The interrupted promotion left the artifact applied to the working tree...
+    assert "Returns the feature flag" in (
+        repo / "src" / "feature.py"
+    ).read_text(encoding="utf-8")
+    # ...but no parked candidate, which is exactly the state the resume
+    # fallback exists to interpret.
+    assert GovernedTaskOrchestrator._load_parked_candidate(run_dir) is None
+    assert GovernedTaskOrchestrator._select_retained_salvage(
+        attempts_dir
+    )["retained_salvage"]["resource_id"] == "resource_a"
+
+    # Exactly the attempts that ran, and no more: recovering an artifact that
+    # already exists is governance, not a fresh implementation attempt.
+    assert sorted(d.name for d in attempts_dir.iterdir()) == [
+        "01-resource_a", "02-resource_b", "03-resource_c",
+    ]
