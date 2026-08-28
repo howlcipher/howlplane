@@ -10,7 +10,7 @@ and deterministic mock/fake backends for testing and CI.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-import hashlib, json, os, shlex, shutil, subprocess, time
+import hashlib, json, os, re, shlex, shutil, subprocess, time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -94,6 +94,32 @@ def _reports_permission_block(text: Optional[str]) -> bool:
     return any(marker in lowered for marker in _PERMISSION_BLOCK_MARKERS)
 
 
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)\b(bearer)\s+\S+"),
+    re.compile(r"(?i)(--?(?:password|token|api[-_]?key|secret|auth)[= ])\S+"),
+    re.compile(r"(?i)\b([A-Za-z0-9_]*(?:token|secret|passwd|password|api[-_]?key)[A-Za-z0-9_]*=)\S+"),
+    re.compile(r"\b(sk-|ghp_|gho_|github_pat_)[A-Za-z0-9_\-]{8,}"),
+)
+
+# A denied command is evidence, and evidence is written to the ledger and shown
+# to operators. A refused command can carry a credential in its arguments, so
+# it is redacted and bounded before it is persisted anywhere.
+_MAX_RECORDED_COMMAND_CHARS = 200
+
+
+def _redact_command(command: str) -> str:
+    """Removes credential-shaped arguments from a command before recording it."""
+    redacted = command
+    for pattern in _SECRET_PATTERNS:
+        redacted = pattern.sub(
+            lambda m: f"{m.group(1)}<redacted>" if m.lastindex else "<redacted>",
+            redacted,
+        )
+    if len(redacted) > _MAX_RECORDED_COMMAND_CHARS:
+        redacted = redacted[:_MAX_RECORDED_COMMAND_CHARS] + "...(truncated)"
+    return redacted
+
+
 def _denied_command(entry: Dict[str, Any]) -> Optional[str]:
     """Extracts the shell command a Bash permission denial actually refused.
 
@@ -107,7 +133,7 @@ def _denied_command(entry: Dict[str, Any]) -> Optional[str]:
     if isinstance(tool_input, dict):
         command = tool_input.get("command")
         if isinstance(command, str) and command.strip():
-            return command.strip()
+            return _redact_command(command.strip())
     return None
 
 # Local Ollama defaults (milestone #58). Intentionally conservative: a single

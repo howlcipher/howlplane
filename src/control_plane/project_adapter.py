@@ -318,7 +318,13 @@ class ProjectAdapter:
                         format_commands.append(["make", target])
                         break
 
-        if not format_commands:
+        # Language defaults are added even when a Makefile target was found.
+        # A wrapper target is what the project prefers, not the only formatter
+        # an implementer will reach for: an agent told to format Go code runs
+        # `gofmt`, and granting only `make format` leaves it blocked exactly as
+        # in HOWLFRAM-SLOPFIX-07. Both are legitimate and neither widens the
+        # bound beyond formatting.
+        if not any(cmd[:1] != ["make"] for cmd in format_commands):
             if (root / "go.mod").exists():
                 # Both forms: `go fmt` rewrites, `gofmt -l` reports. A mutating
                 # role already holds Edit/Write, so the rewriting form grants no

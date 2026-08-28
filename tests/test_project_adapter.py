@@ -223,13 +223,19 @@ def test_format_discovery_survives_fully_specified_command_set(tmp_path: Path):
     assert ctx.format_commands, "formatter must be discovered outside the heuristics gate"
 
 
-def test_makefile_format_target_wins_over_language_default(tmp_path: Path):
+def test_makefile_target_is_added_alongside_the_language_default(tmp_path: Path):
+    """A wrapper target must not suppress the language-native formatter.
+
+    An agent told to format Go code reaches for `gofmt`. Granting only
+    `make fmt` leaves that blocked, which is the original failure again.
+    """
     (tmp_path / "go.mod").write_text("module example.com/x\n\ngo 1.22\n", encoding="utf-8")
     (tmp_path / "Makefile").write_text("fmt:\n\tgo fmt ./...\n", encoding="utf-8")
 
     ctx = ProjectAdapter.discover(tmp_path)
 
-    assert ctx.format_commands == [["make", "fmt"]]
+    assert ["make", "fmt"] in ctx.format_commands
+    assert ["gofmt", "-l", "."] in ctx.format_commands
 
 
 def test_python_formatter_only_granted_when_configured(tmp_path: Path):

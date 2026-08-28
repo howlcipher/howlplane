@@ -670,7 +670,9 @@ def cmd_howlframe_audit(args: argparse.Namespace) -> int:
 # one of these, so a cancelled run kept rendering as "STALE / PREPARING" from
 # stale heartbeat metadata while its own recommendation correctly said it was
 # cancelled. Terminal lifecycle state outranks process-progress presentation.
-TERMINAL_TASK_STATES = frozenset({"complete", "cancelled", "failed", "rejected"})
+# `rejected` is deliberately absent: it is a human decision value, and
+# HumanLifecycleManager.reject transitions the task to `failed`.
+TERMINAL_TASK_STATES = frozenset({"complete", "cancelled", "failed"})
 
 
 def cmd_status(args: argparse.Namespace) -> int:
