@@ -42,9 +42,20 @@ implementation attempt, re-invokes a provider, or resets attempted-resource
 exclusions. Exactly one retained artifact is promoted per task, so candidate
 governance cannot become a second failover loop.
 
-No new schema version and no new evidence record were introduced; retention
-reuses `attempt_record.json`, whose write is now atomic because the fallback is
-discoverable only through it. The regression matrix covers retention yielding
+No new schema version and no new JSON evidence record were introduced;
+retention reuses `attempt_record.json`, whose write is now atomic because the
+fallback is discoverable only through it. The retained patch is kept beside the
+attempt's existing patches as `retained_salvage.patch`, under a name no
+attempt-recording path produces, so a resumed run that reoccupies the same
+attempt slot cannot overwrite the fallback's bytes.
+
+An interrupted promotion is completed on resume only when the delta in the
+working tree is proven to be the retained artifact byte for byte; without that
+proof the producer is not credited, so a rolled-back fragment can never be
+laundered into an accepted implementation or hide a self-review as
+independent. A fallback that cannot be safely restored is marked unusable
+rather than retried by every later resume, and retained artifacts are retired
+outright once any attempt genuinely succeeds. The regression matrix covers retention yielding
 to a later success, the exact SLOPFIX-07R chain, most-recent-eligible
 selection, `EXECUTION_PERMISSION_REQUIRED` gaining no timeout-candidate
 semantics, empty budget kills, non-replayable artifacts failing closed,

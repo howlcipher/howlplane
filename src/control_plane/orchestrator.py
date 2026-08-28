@@ -124,6 +124,14 @@ SALVAGE_ELIGIBLE = "ELIGIBLE"
 SALVAGE_NOT_REPLAYABLE = "NOT_REPLAYABLE"
 SALVAGE_RETAINED = "RETAINED"
 SALVAGE_PROMOTED = "PROMOTED"
+# A later attempt succeeded on its own, so the fallback is history, not an
+# option. Recorded so nothing can later re-select an artifact that was
+# superseded by provider-attested work.
+SALVAGE_SUPERSEDED = "SUPERSEDED"
+# Found, but proven not safely restorable. Recorded so a resumed run does not
+# reach for the same unusable artifact forever.
+SALVAGE_UNUSABLE = "UNUSABLE"
+NEXT_SELECTION_SALVAGE_PROMOTED = "RETAINED_SALVAGE_PROMOTED"
 
 # Interruption points that only exist so the retention lifecycle can be crash
 # tested; inert unless a failure_injection_hook is configured.
@@ -971,6 +979,27 @@ class GovernedTaskOrchestrator:
         return replayable
 
     @staticmethod
+    def _iter_attempt_records(attempts_dir: Path):
+        """Yields (record, retained_salvage) per attempt, in attempt order.
+
+        Attempt evidence is the durable source of truth for retention, so both
+        selection and supersession read it from disk rather than from memory --
+        which is what makes a retained fallback survive an interruption for
+        free.
+        """
+        if not attempts_dir.is_dir():
+            return
+        for attempt_dir in sorted(attempts_dir.iterdir()):
+            record_file = attempt_dir / "attempt_record.json"
+            if not record_file.is_file():
+                continue
+            try:
+                record = safe_load_json(record_file) or {}
+            except Exception:
+                continue
+            yield record, record.get("retained_salvage") or {}
+
+    @staticmethod
     def _select_retained_salvage(attempts_dir: Path) -> Optional[Dict[str, Any]]:
         """Picks the fallback deterministically: most recent eligible wins.
 
@@ -979,35 +1008,119 @@ class GovernedTaskOrchestrator:
         already the candidate -- and merely extends the search backward to the
         nearest prior equivalent when the later attempts produced nothing.
 
-        Reading it from disk rather than from memory is what makes the fallback
-        survive an interruption for free.
+        Records are walked in attempt order and the last match is kept, so the
+        rule holds however many attempts a run is configured to allow.
         """
-        if not attempts_dir.is_dir():
-            return None
-        for attempt_dir in sorted(attempts_dir.iterdir(), reverse=True):
-            record_file = attempt_dir / "attempt_record.json"
-            if not record_file.is_file():
-                continue
-            try:
-                record = safe_load_json(record_file) or {}
-            except Exception:
-                continue
-            retained = record.get("retained_salvage") or {}
+        chosen: Optional[Dict[str, Any]] = None
+        for record, retained in GovernedTaskOrchestrator._iter_attempt_records(
+            attempts_dir
+        ):
             if (
                 retained.get("retained")
                 and retained.get("eligibility") == SALVAGE_ELIGIBLE
                 and retained.get("promotion_status") == SALVAGE_RETAINED
             ):
-                return record
-        return None
+                chosen = record
+        return chosen
+
+    def _recover_promoted_salvage(
+        self,
+        run_dir: Path,
+        delta: RepositoryDelta,
+        task_spec: TaskSpec,
+    ) -> Optional[Dict[str, Any]]:
+        """Finishes a promotion that was interrupted after the patch landed.
+
+        The crash window between applying a retained patch and capturing the
+        candidate leaves the artifact sitting in the tree with nothing
+        describing it. Recovery has to prove the delta in the tree *is* that
+        artifact, byte for byte, before crediting anyone for it: a resumed run
+        whose delta came from a later provider -- or from a provider that
+        simply succeeded -- must not have a rolled-back fragment's producer
+        stamped onto it. Without that proof this would launder discarded work
+        into an accepted implementation and certify a self-review as
+        independent.
+
+        Proven, it rebuilds exactly the candidate the uninterrupted path would
+        have written, so `provider_completion_claim` stays false and the
+        artifact keeps its timed-out origin.
+        """
+        attempts_dir = run_dir / "implementation" / "attempts"
+        record = self._select_retained_salvage(attempts_dir)
+        if record is None:
+            return None
+        retained = record["retained_salvage"]
+        if hashlib.sha256(
+            delta.diff_content.encode("utf-8")
+        ).hexdigest() != retained.get("patch_sha256"):
+            return None
+
+        candidate = self._capture_timeout_candidate(
+            run_dir=run_dir,
+            attempts_dir=attempts_dir,
+            attempt_record=record,
+            task_spec=task_spec,
+            resource_id=retained["resource_id"],
+            delta=delta,
+        )
+        retained["promotion_status"] = SALVAGE_PROMOTED
+        retained["promoted_at"] = datetime.now(timezone.utc).isoformat()
+        record["transition"] = TRANSITION_CANDIDATE_GOVERNANCE
+        self._persist_attempt_record(record, attempts_dir)
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id=retained["resource_id"],
+            action="retained_salvage_promotion_recovered",
+            spec=task_spec,
+            metadata={
+                "attempt": retained["attempt"],
+                "resource_id": retained["resource_id"],
+                "provider_completion_claim": False,
+            },
+        )
+        return candidate
+
+    def _supersede_retained_salvage(
+        self,
+        attempts_dir: Path,
+        task_spec: TaskSpec,
+    ) -> None:
+        """Retires every retained fallback once an attempt genuinely succeeds.
+
+        Provider-attested work outranks any fragment, so the fallbacks stop
+        being options the moment one lands. Leaving them selectable would let a
+        later resume reach for work that was deliberately superseded.
+        """
+        for record, retained in self._iter_attempt_records(attempts_dir):
+            if retained.get("promotion_status") != SALVAGE_RETAINED:
+                continue
+            retained["promotion_status"] = SALVAGE_SUPERSEDED
+            self._persist_attempt_record(record, attempts_dir)
+            self._record_event(
+                task_id=task_spec.task_id,
+                agent_id=retained.get("resource_id", "control_plane"),
+                action="retained_salvage_superseded",
+                spec=task_spec,
+                metadata={"attempt": retained.get("attempt")},
+            )
 
     def _abandon_salvage_promotion(
         self,
         task_spec: TaskSpec,
-        retained: Dict[str, Any],
+        record: Dict[str, Any],
+        attempts_dir: Path,
         reason: str,
     ) -> None:
-        """Records a fallback that was found but could not be safely restored."""
+        """Retires a fallback that was found but cannot be safely restored.
+
+        Marked unusable rather than merely logged: an artifact left eligible
+        would be re-selected by every subsequent resume, retrying a restore
+        that has already been proven impossible.
+        """
+        retained = record["retained_salvage"]
+        retained["eligibility"] = SALVAGE_UNUSABLE
+        retained["abandoned_reason"] = reason
+        self._persist_attempt_record(record, attempts_dir)
         self._record_event(
             task_id=task_spec.task_id,
             agent_id="control_plane",
@@ -1043,6 +1156,18 @@ class GovernedTaskOrchestrator:
         record = self._select_retained_salvage(attempts_dir)
         if record is None:
             return None
+        # `record` is a snapshot read from disk. When the attempt that just
+        # failed occupies the same evidence slot -- which a resumed run makes
+        # ordinary, since routing is deterministic -- `attempt_record` is the
+        # live view of that same file, and writing the snapshot back would
+        # erase the rollback result recorded below it.
+        if (
+            attempt_record is not None
+            and attempt_record.get("attempt") == record.get("attempt")
+            and attempt_record.get("resource_id") == record.get("resource_id")
+        ):
+            attempt_record["retained_salvage"] = record["retained_salvage"]
+            record = attempt_record
         retained = record["retained_salvage"]
         producer = retained["resource_id"]
 
@@ -1061,7 +1186,7 @@ class GovernedTaskOrchestrator:
             )
         if not restored_ok:
             self._abandon_salvage_promotion(
-                task_spec, retained, f"baseline restore failed: {restore_err}"
+                task_spec, record, attempts_dir, f"baseline restore failed: {restore_err}"
             )
             return None
 
@@ -1070,16 +1195,29 @@ class GovernedTaskOrchestrator:
         if head != retained.get("baseline_head"):
             self._abandon_salvage_promotion(
                 task_spec,
-                retained,
+                record,
+                attempts_dir,
                 f"baseline HEAD mismatch: expected {retained.get('baseline_head')}, "
                 f"got {head or 'unknown'}",
+            )
+            return None
+
+        if hashlib.sha256(
+            baseline.status_porcelain.encode("utf-8")
+        ).hexdigest() != retained.get("baseline_status_digest"):
+            self._abandon_salvage_promotion(
+                task_spec,
+                record,
+                attempts_dir,
+                "baseline state digest does not match the one captured with "
+                "the artifact",
             )
             return None
 
         patch_file = run_dir / retained["patch_path"]
         if not patch_file.is_file():
             self._abandon_salvage_promotion(
-                task_spec, retained, f"retained patch missing at {retained['patch_path']}"
+                task_spec, record, attempts_dir, f"retained patch missing at {retained['patch_path']}"
             )
             return None
         patch_text = patch_file.read_text(encoding="utf-8")
@@ -1087,7 +1225,7 @@ class GovernedTaskOrchestrator:
             "patch_sha256"
         ):
             self._abandon_salvage_promotion(
-                task_spec, retained, "retained patch digest does not match its record"
+                task_spec, record, attempts_dir, "retained patch digest does not match its record"
             )
             return None
 
@@ -1096,7 +1234,7 @@ class GovernedTaskOrchestrator:
             self.target_repo, ["apply", "--check", str(patch_file)], 60
         ).returncode != 0:
             self._abandon_salvage_promotion(
-                task_spec, retained, "retained patch no longer applies to the baseline"
+                task_spec, record, attempts_dir, "retained patch no longer applies to the baseline"
             )
             return None
         applied = run_git(self.target_repo, ["apply", str(patch_file)], 60)
@@ -1104,7 +1242,8 @@ class GovernedTaskOrchestrator:
             restore_repository_to_baseline(self.target_repo, baseline)
             self._abandon_salvage_promotion(
                 task_spec,
-                retained,
+                record,
+                attempts_dir,
                 f"retained patch failed to apply: {(applied.stderr or '').strip()}",
             )
             return None
@@ -1117,7 +1256,7 @@ class GovernedTaskOrchestrator:
         if promoted_delta.is_empty:
             restore_repository_to_baseline(self.target_repo, baseline)
             self._abandon_salvage_promotion(
-                task_spec, retained, "restored artifact produced no task-attributable delta"
+                task_spec, record, attempts_dir, "restored artifact produced no task-attributable delta"
             )
             return None
 
@@ -1137,6 +1276,16 @@ class GovernedTaskOrchestrator:
         retained["promoted_at"] = datetime.now(timezone.utc).isoformat()
         record["transition"] = TRANSITION_CANDIDATE_GOVERNANCE
         self._persist_attempt_record(record, attempts_dir)
+        # The attempt that ended the chain says so on its own record, rather
+        # than leaving "an earlier fallback was governed instead" recoverable
+        # only from the ledger.
+        if attempt_record is not None and attempt_record is not record:
+            attempt_record["next_selection"] = None
+            attempt_record["next_selection_reason"] = (
+                NEXT_SELECTION_SALVAGE_PROMOTED
+            )
+            attempt_record["transition"] = TRANSITION_CANDIDATE_GOVERNANCE
+            self._persist_attempt_record(attempt_record, attempts_dir)
         self._record_event(
             task_id=task_spec.task_id,
             agent_id=producer,
@@ -1797,16 +1946,22 @@ class GovernedTaskOrchestrator:
                 run_dir, routing
             )
             # A parked candidate is the strongest form of recovered work. If
-            # there is none, an earlier attempt may still have left a retained
-            # fallback, which stays governable across the interruption.
+            # there is none, the delta in the tree may be a retained fallback
+            # whose promotion was interrupted -- but only if it actually is
+            # that artifact, which _recover_promoted_salvage proves before
+            # crediting its producer.
             timeout_candidate = self._load_parked_candidate(run_dir)
             if timeout_candidate is None:
-                retained_record = self._select_retained_salvage(
-                    run_dir / "implementation" / "attempts"
+                timeout_candidate = self._recover_promoted_salvage(
+                    run_dir, current_delta, task_spec
                 )
-                if retained_record is not None:
-                    final_impl_resource_id = (
-                        retained_record["retained_salvage"]["resource_id"]
+                if timeout_candidate is not None:
+                    final_impl_resource_id = timeout_candidate["resource_id"]
+                    # The durable route already records which resource the
+                    # failover chain ended on. Crediting the producer as the
+                    # candidate must not overwrite that with the producer.
+                    salvage_last_attempted_id = routing.metadata.get(
+                        "last_attempted_implementation_resource"
                     )
             self._record_event(
                 task_id=task_spec.task_id,
@@ -2099,6 +2254,7 @@ class GovernedTaskOrchestrator:
                         },
                     )
                     self._record_delta_captured(task_spec, current_delta)
+                    self._supersede_retained_salvage(attempts_dir, task_spec)
                     break
 
                 # Failed attempt: determine whether to failover or terminal-fail.
@@ -2326,96 +2482,98 @@ class GovernedTaskOrchestrator:
                 output_artifacts=[str(run_dir / "diff.patch")],
             )
 
-            # If the final implementation resource differs from the initially
-            # routed one, recompute reviewer assignments so independence claims
-            # are truthful (#59.2 Phase 9).
-            if (
-                final_impl_resource_id is not None
-                and self.config.provider_pool is not None
-                and (
-                    final_impl_resource_id != routing.selected_agent_id
-                    # A promoted producer can coincide with the originally
-                    # routed resource, and reviewers must still be recomputed
-                    # against it before it can be reviewed.
-                    or salvage_last_attempted_id is not None
-                )
-            ):
-                # Implementation being finished is not the same as the work
-                # being accepted: review, reconciliation, verification and the
-                # authority gate all still lie ahead. The route records who
-                # produced the candidate and stays provisional until Stage 8
-                # (HOWLFRAM-SLOPFIX-06).
-                self._persist_effective_route(
-                    routing,
-                    task_spec,
-                    final_impl_resource_id,
-                    ROUTE_STATUS_SUPERSEDED,
-                    accepted=False,
-                    candidate_resource=final_impl_resource_id,
-                    last_attempted_resource_id=salvage_last_attempted_id,
-                )
+        # Whether the work came from this run's attempt loop or was recovered on
+        # resume, reviewer independence is settled here. If the final
+        # implementation resource differs from the initially
+        # routed one, recompute reviewer assignments so independence claims
+        # are truthful (#59.2 Phase 9).
+        if (
+            final_impl_resource_id is not None
+            and self.config.provider_pool is not None
+            and (
+                final_impl_resource_id != routing.selected_agent_id
+                # A promoted producer can coincide with the originally
+                # routed resource, and reviewers must still be recomputed
+                # against it before it can be reviewed.
+                or salvage_last_attempted_id is not None
+            )
+        ):
+            # Implementation being finished is not the same as the work
+            # being accepted: review, reconciliation, verification and the
+            # authority gate all still lie ahead. The route records who
+            # produced the candidate and stays provisional until Stage 8
+            # (HOWLFRAM-SLOPFIX-06).
+            self._persist_effective_route(
+                routing,
+                task_spec,
+                final_impl_resource_id,
+                ROUTE_STATUS_SUPERSEDED,
+                accepted=False,
+                candidate_resource=final_impl_resource_id,
+                last_attempted_resource_id=salvage_last_attempted_id,
+            )
 
-            # A salvaged candidate carries no completion claim from its
-            # producer, so independent review is the only thing standing behind
-            # it. When no independent reviewer is available the pool falls back
-            # to the implementer reviewing its own work, which for this kind of
-            # candidate is no review at all. Park it for a human rather than
-            # completing on a self-review (HOWLFRAM-SLOPFIX-05).
-            if timeout_candidate is not None and not routing.metadata.get(
-                "review_diversity_achieved", True
-            ):
-                err_msg = (
-                    "Timed-out implementation candidate cannot be independently "
-                    f"reviewed: no reviewer is available other than "
-                    f"{final_impl_resource_id}, which produced it."
-                )
-                decision_pkt = HumanDecisionPacket(
-                    task_id=task_spec.task_id,
-                    objective=task_spec.objective,
-                    change_summary=(
-                        f"Candidate ({current_delta.insertions} ins, "
-                        f"{current_delta.deletions} del) was left by "
-                        f"{final_impl_resource_id} after this control plane "
-                        "stopped it at its execution budget. The provider never "
-                        "reported completion."
-                    ),
-                    boundary_triggers=["reviewer_independence_unavailable"],
-                    evidence=[
-                        f"origin={CANDIDATE_ORIGIN_TIMED_OUT}",
-                        "provider_completion_claim=false",
-                    ],
-                    risks=[
-                        "No independent reviewer is available, so the candidate "
-                        "has nothing standing behind it.",
-                    ],
-                    review_findings_summary={
-                        "blocker": 0, "high": 0, "medium": 0, "low": 0,
-                    },
-                    verification_status="unverified",
-                    recommended_action=(
-                        "Inspect implementation/attempts/*/candidate.patch and "
-                        "either authorize it explicitly or discard it."
-                    ),
-                )
-                self._park_awaiting_human(
-                    task_spec, run_dir, err_msg, decision_pkt, progress
-                )
-                return self._make_result(
-                    task_spec=task_spec,
-                    final_state="awaiting_human",
-                    exit_code=2,
-                    start_time=start_time,
-                    run_dir=run_dir,
-                    routing=routing,
-                    initial_delta=initial_delta,
-                    current_delta=current_delta,
-                    verif_plan=verif_plan,
-                    hf_status=hf_audit_status,
-                    hf_match=hf_audit_match,
-                    provider_execution=impl_res,
-                    implementation_attempts=implementation_attempts,
-                    timeout_candidate=timeout_candidate,
-                )
+        # A salvaged candidate carries no completion claim from its
+        # producer, so independent review is the only thing standing behind
+        # it. When no independent reviewer is available the pool falls back
+        # to the implementer reviewing its own work, which for this kind of
+        # candidate is no review at all. Park it for a human rather than
+        # completing on a self-review (HOWLFRAM-SLOPFIX-05).
+        if timeout_candidate is not None and not routing.metadata.get(
+            "review_diversity_achieved", True
+        ):
+            err_msg = (
+                "Timed-out implementation candidate cannot be independently "
+                f"reviewed: no reviewer is available other than "
+                f"{final_impl_resource_id}, which produced it."
+            )
+            decision_pkt = HumanDecisionPacket(
+                task_id=task_spec.task_id,
+                objective=task_spec.objective,
+                change_summary=(
+                    f"Candidate ({current_delta.insertions} ins, "
+                    f"{current_delta.deletions} del) was left by "
+                    f"{final_impl_resource_id} after this control plane "
+                    "stopped it at its execution budget. The provider never "
+                    "reported completion."
+                ),
+                boundary_triggers=["reviewer_independence_unavailable"],
+                evidence=[
+                    f"origin={CANDIDATE_ORIGIN_TIMED_OUT}",
+                    "provider_completion_claim=false",
+                ],
+                risks=[
+                    "No independent reviewer is available, so the candidate "
+                    "has nothing standing behind it.",
+                ],
+                review_findings_summary={
+                    "blocker": 0, "high": 0, "medium": 0, "low": 0,
+                },
+                verification_status="unverified",
+                recommended_action=(
+                    "Inspect implementation/attempts/*/candidate.patch and "
+                    "either authorize it explicitly or discard it."
+                ),
+            )
+            self._park_awaiting_human(
+                task_spec, run_dir, err_msg, decision_pkt, progress
+            )
+            return self._make_result(
+                task_spec=task_spec,
+                final_state="awaiting_human",
+                exit_code=2,
+                start_time=start_time,
+                run_dir=run_dir,
+                routing=routing,
+                initial_delta=initial_delta,
+                current_delta=current_delta,
+                verif_plan=verif_plan,
+                hf_status=hf_audit_status,
+                hf_match=hf_audit_match,
+                provider_execution=impl_res,
+                implementation_attempts=implementation_attempts,
+                timeout_candidate=timeout_candidate,
+            )
 
             if self.config.failure_injection_hook:
                 self.config.failure_injection_hook("post_implementation", run_dir, task_spec)

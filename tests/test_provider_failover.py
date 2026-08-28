@@ -38,8 +38,8 @@ from src.control_plane.git_baseline import (
 )
 from src.control_plane.orchestrator import (
     FAILURE_CLASS_ENGINEERING,
-    FAILURE_CLASS_PROVIDER_EXHAUSTED,
     GovernedTaskOrchestrator,
+    FAILURE_CLASS_PROVIDER_EXHAUSTED,
     OrchestrationConfig,
     OrchestrationResult,
 )
@@ -1686,7 +1686,12 @@ def test_case1_retained_artifact_yields_to_a_later_success(tmp_path: Path):
     assert retained["retained"] is True
     assert retained["eligibility"] == "ELIGIBLE"
     assert retained["replayable"] is True
-    assert retained["promotion_status"] == "RETAINED", "A must never be promoted"
+    # Provider-attested work outranks the fragment, so the fallback is retired
+    # rather than left looking like a live option for a later resume.
+    assert retained["promotion_status"] == "SUPERSEDED", "A must never be promoted"
+    assert GovernedTaskOrchestrator._select_retained_salvage(
+        Path(res.run_dir) / "implementation" / "attempts"
+    ) is None
     assert retained["provider_completion_claim"] is False
     assert _attempt_record(res, "01-resource_a")["rollback"]["restored"] is True
 
@@ -1755,7 +1760,10 @@ def test_slopfix07r_routing_credits_producer_without_rewriting_history(
     assert meta["candidate_resource"] == "resource_b"
     assert meta["last_attempted_implementation_resource"] == "resource_c"
     assert meta["current_attempt_resource"] == "resource_c"
-    assert meta["reviewer_mapping_status"] in ("CANDIDATE_REVIEW", "CONFIRMED")
+    # The run completed, so acceptance has been reached -- and only acceptance
+    # may name an accepted implementer.
+    assert meta["reviewer_mapping_status"] == "CONFIRMED"
+    assert meta["accepted_implementation_resource"] == "resource_b"
 
     # Reviewer independence is recomputed against the producer, not the last
     # resource that ran, so the producer cannot review its own artifact.
@@ -1800,24 +1808,37 @@ def test_case4_permission_denied_artifact_gains_no_timeout_semantics(
     assert _retained(res, "01-resource_a")["promotion_status"] == "PROMOTED"
 
 
-def test_case5_empty_budget_kill_leaves_no_fallback(tmp_path: Path):
-    """A budget kill that produced nothing is still just a failure. Nothing is
-    retained, and the terminal failure path is exactly what it was before."""
+@pytest.mark.parametrize(
+    "work, expect_retained",
+    [(None, False), (_refactor_preserving_behavior, True)],
+    ids=["empty_delta", "non_empty_delta"],
+)
+def test_case5_retention_requires_a_non_empty_delta(
+    tmp_path: Path, work, expect_retained: bool,
+):
+    """A budget kill that produced nothing is still just a failure. Only the
+    non-empty case is salvageable, so the two branches are asserted together --
+    the negative alone would hold just as well if retention did not exist."""
     repo = _init_test_repo(tmp_path / "repo")
-    res = _run_salvage_chain(repo, a=_budget_kill())
+    res = _run_salvage_chain(repo, a=_budget_kill(work))
+
+    assert bool(_retained(res, "01-resource_a")) is expect_retained
+    if expect_retained:
+        assert res.candidate_origin == "timed_out_implementation_attempt"
+        return
 
     assert res.final_state == "failed"
     assert res.failure_class == FAILURE_CLASS_PROVIDER_EXHAUSTED
     assert res.candidate_origin is None
-    assert _retained(res, "01-resource_a") == {}
     assert _read_file(repo, "src/feature.py") == "def run():\n    return True\n"
 
 
-def _corrupt_retained_patch(keep_digest_valid: bool):
+def _corrupt_retained_patch(keep_digest_valid: bool, fired: List[str]):
     """Makes a retained artifact unusable between retention and promotion."""
     def _hook(stage: str, run_dir: Path, _spec) -> None:
         if stage != "after_salvage_retention":
             return
+        fired.append(stage)
         record_file = (
             run_dir / "implementation" / "attempts"
             / "01-resource_a" / "attempt_record.json"
@@ -1852,10 +1873,16 @@ def test_case6_unusable_retained_artifact_fails_closed(
     evidence rather than applied. Whether it fails the digest check or the
     applicability check, nothing is partially applied and nothing is accepted."""
     repo = _init_test_repo(tmp_path / "repo")
+    fired: List[str] = []
     res = _run_salvage_chain(
-        repo, failure_injection_hook=_corrupt_retained_patch(keep_digest_valid),
+        repo,
+        failure_injection_hook=_corrupt_retained_patch(keep_digest_valid, fired),
     )
 
+    # Without retention the hook never fires and this test would pass vacuously.
+    assert fired == ["after_salvage_retention"]
+    # The unusable artifact is retired, so a resume cannot retry it forever.
+    assert _retained(res, "01-resource_a")["eligibility"] == "UNUSABLE"
     assert res.final_state == "failed"
     assert res.candidate_origin is None
     assert res.failure_class == FAILURE_CLASS_PROVIDER_EXHAUSTED
@@ -1916,6 +1943,13 @@ def test_case9_rejected_fallback_does_not_promote_an_older_one(tmp_path: Path):
     assert _retained(res, "01-resource_a")["promotion_status"] == "RETAINED"
     assert res.final_state != "complete"
     assert res.verification_plan.overall_status != "passed"
+    # Under review and rejected, so nothing was ever accepted.
+    meta = json.loads(
+        (Path(res.run_dir) / "effective_route.json").read_text(encoding="utf-8")
+    )["metadata"]
+    assert meta["candidate_resource"] == "resource_b"
+    assert meta["accepted_implementation_resource"] is None
+    assert meta["reviewer_mapping_status"] == "CANDIDATE_REVIEW"
     # Nothing stands behind the rejected candidate, so the tree is at baseline.
     assert _read_file(repo, "src/feature.py") == "def run():\n    return True\n"
 
