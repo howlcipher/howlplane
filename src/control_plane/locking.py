@@ -15,8 +15,10 @@ import errno
 import os
 from pathlib import Path
 import socket
+import threading
 import time
 from typing import Any, Dict, Optional, Tuple, Type, Union
+import uuid
 
 from src.control_plane.atomic_io import safe_load_json
 from src.control_plane.task_spec import DataClassSerializationMixin
@@ -230,6 +232,48 @@ def get_task_lock_path(repo_root: Union[str, Path], task_id: str) -> Path:
     return task_dir / ".task.lock"
 
 
+@dataclass
+class LockOwnership:
+    """One lock-holding lifecycle's claim on a canonical lock path.
+
+    A governed run reaches the same lock through more than one component:
+    `HumanLifecycleManager.resume` takes the task lock, then hands control to
+    the orchestrator, which needs that same lock to do the work. Those are two
+    `TaskLock` objects over one lock file in one process, and tracking "do I
+    hold this?" on the instance made the second one fail -- the documented
+    recovery path could never recover anything (HOWLFRAM-SLOPFIX-06).
+
+    Ownership is therefore a token, not a process identity. A component that was
+    handed this token belongs to the lifecycle that already owns the lock and
+    may re-enter it; a component that was not gets the same refusal as any other
+    caller. `os.getpid()` is deliberately *not* the test: two unrelated
+    operations sharing a process must not share authority.
+    """
+
+    lineage_id: str
+    lock_path: str
+    task_id: str
+    operation: str
+    depth: int = 1
+
+
+# Canonical lock path -> the lifecycle currently holding it in this process.
+# Guarded because a lock may be taken from a worker thread.
+_OWNERSHIP_REGISTRY: Dict[Path, LockOwnership] = {}
+_OWNERSHIP_GUARD = threading.RLock()
+
+
+def _registry_key(lock_path: Union[str, Path]) -> Path:
+    """Canonical identity of a lock file, independent of how it was spelled."""
+    return Path(lock_path).resolve()
+
+
+def reset_lock_ownership_registry() -> None:
+    """Drops all in-process ownership records. For test isolation only."""
+    with _OWNERSHIP_GUARD:
+        _OWNERSHIP_REGISTRY.clear()
+
+
 class _BaseFileLock:
     """Base mutual-exclusion file lock with stale process reclamation."""
 
@@ -250,8 +294,49 @@ class _BaseFileLock:
         self.command = command
         self.operation = operation
         self._acquired = False
+        self._ownership: Optional[LockOwnership] = None
+        self._pending_ownership: Optional[LockOwnership] = None
 
-    def acquire(self) -> bool:
+    def join(self, ownership: Optional[LockOwnership]) -> "_BaseFileLock":
+        """Declares which lifecycle this lock belongs to, for `with` use."""
+        self._pending_ownership = ownership
+        return self
+
+    @property
+    def ownership(self) -> Optional[LockOwnership]:
+        """The lifecycle token to hand to components that must re-enter this lock."""
+        return self._ownership
+
+    def acquire(self, ownership: Optional[LockOwnership] = None) -> bool:
+        """Takes the lock, or joins the lifecycle that already holds it.
+
+        Passing the `ownership` token returned by an outer acquisition of the
+        same lock re-enters it and increments its depth; the lock is released
+        for real only when every holder in the lineage has released. Passing
+        nothing, or a token from a different lineage, fails closed exactly as a
+        foreign caller would.
+        """
+        if self._acquired:
+            return True
+
+        key = _registry_key(self.lock_path)
+        label = self.lock_type.replace("_", " ").title()
+
+        with _OWNERSHIP_GUARD:
+            held = _OWNERSHIP_REGISTRY.get(key)
+            if held is not None:
+                if ownership is not None and ownership.lineage_id == held.lineage_id:
+                    held.depth += 1
+                    self._ownership = held
+                    self._acquired = True
+                    return True
+                raise self.error_cls(
+                    f"{label} lock already held on task '{held.task_id}' by this "
+                    f"process for operation '{held.operation}'. A component of "
+                    f"that operation may re-enter it by passing its ownership "
+                    f"token; an unrelated operation may not."
+                )
+
         my_pid = os.getpid()
         my_host = socket.gethostname()
         my_ctime = get_process_create_time(my_pid)
@@ -265,16 +350,16 @@ class _BaseFileLock:
 
             if existing:
                 if existing.pid == my_pid and existing.hostname == my_host:
-                    if self._acquired:
-                        return True
+                    # Our PID, but no lifecycle in this process claims it: the
+                    # file outlived the run that wrote it and the OS handed the
+                    # PID back to us. Never silently adopt it.
                     raise self.error_cls(
-                        f"{self.lock_type.replace('_', ' ').title()} lock already held on task '{existing.task_id}'."
+                        f"{label} lock already held on task '{existing.task_id}'."
                     )
 
                 state, reason = classify_lock_owner(
                     existing.pid, existing.hostname, existing.process_create_time
                 )
-                label = self.lock_type.replace("_", " ").title()
                 if state is LockOwnerState.ACTIVE:
                     raise self.error_cls(
                         f"{label} lock held by active process "
@@ -322,6 +407,15 @@ class _BaseFileLock:
             )
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(content)
+            own = LockOwnership(
+                lineage_id=uuid.uuid4().hex,
+                lock_path=str(self.lock_path),
+                task_id=self.task_id,
+                operation=self.operation,
+            )
+            with _OWNERSHIP_GUARD:
+                _OWNERSHIP_REGISTRY[_registry_key(self.lock_path)] = own
+            self._ownership = own
             self._acquired = True
             return True
         except FileExistsError:
@@ -330,8 +424,25 @@ class _BaseFileLock:
             )
 
     def release(self) -> None:
+        """Releases this holder's claim, unlinking only when the last one goes.
+
+        Every acquisition has a matching release, including a re-entrant one:
+        an inner holder decrements the lineage depth and leaves the file in
+        place for the outer holder that is still working.
+        """
         if not self._acquired:
             return
+
+        own = self._ownership
+        self._ownership = None
+        if own is not None:
+            with _OWNERSHIP_GUARD:
+                own.depth -= 1
+                if own.depth > 0:
+                    self._acquired = False
+                    return
+                _OWNERSHIP_REGISTRY.pop(_registry_key(self.lock_path), None)
+
         my_pid = os.getpid()
         my_host = socket.gethostname()
         if self.lock_path.exists():
@@ -348,7 +459,7 @@ class _BaseFileLock:
         self._acquired = False
 
     def __enter__(self):
-        self.acquire()
+        self.acquire(self._pending_ownership)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

@@ -642,66 +642,185 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     return res.exit_code
 
 
+def _lock_candidates(repo_dir, task_id):
+    """Every lock that could be holding this task back, in reclaim order.
+
+    `ai status` reports the repository lock, so `ai unlock` has to be able to
+    act on it. Reclaiming only `.task.lock` meant the command truthfully said
+    "nothing to reclaim" while `.git/howlplane.lock` kept the task unrecoverable
+    (HOWLFRAM-SLOPFIX-06).
+    """
+    from src.control_plane.locking import get_repo_lock_path, get_task_lock_path
+
+    return [
+        ("task run", get_task_lock_path(repo_dir, task_id)),
+        ("repository", get_repo_lock_path(repo_dir)),
+    ]
+
+
+def _lock_relevance(owner: dict, task_id: str):
+    """Reports whether a lock belongs to this task, and why not when it does not.
+
+    Deliberately narrow: this is a reclaim path, not a general lock remover. A
+    lock written for another task, or for an operation that is not a task's
+    repository mutation, is never this command's business.
+    """
+    if owner.get("task_id") != task_id:
+        return False, (
+            f"held for task '{owner.get('task_id')}', not '{task_id}'"
+        )
+    if owner.get("lock_type") not in ("task_run", "repository_mutation"):
+        return False, (
+            f"lock type '{owner.get('lock_type')}' is not a task-owned lock"
+        )
+    return True, ""
+
+
 def cmd_unlock(args: argparse.Namespace) -> int:
-    """Reclaims a task-run lock whose owner is gone or cannot be verified.
+    """Reclaims the locks holding a task back, when their owners are gone.
 
     The one explicit, audited takeover path. `ai resume` deliberately keeps its
     fail-closed behavior, so nothing ever steals a lock implicitly; a person
     asks for this, and the reclamation is recorded (HOWLFRAM-SLOPFIX-05).
+    Both the task-run lock and the repository lock are inspected, so what this
+    command acts on matches what `ai status` reports (HOWLFRAM-SLOPFIX-06).
     """
     from src.control_plane.locking import (
         LockError,
         classify_lock_owner,
-        get_task_lock_path,
         reclaim_lock,
     )
     from src.control_plane.atomic_io import safe_load_json
 
-    lock_path = get_task_lock_path(args.repo_dir, args.task_id)
-    if not lock_path.exists():
-        print(f"No task lock held for '{args.task_id}'. Nothing to reclaim.")
-        return 0
+    ledger = EvidenceLedger(args.ledger_file) if getattr(args, "ledger_file", None) else None
+    as_json = bool(getattr(args, "json", False))
 
-    if not getattr(args, "json", False):
-        owner = safe_load_json(lock_path)
+    def audit(action, result, artifact=None, metadata=None):
+        if ledger is None:
+            return
+        ledger.append_entry(
+            EvidenceEntry(
+                task_id=args.task_id,
+                agent_id="human_operator",
+                action=action,
+                command=f"ai unlock {args.task_id}",
+                result=result,
+                artifact=artifact,
+                repository=str(args.repo_dir),
+                metadata=metadata or {},
+            )
+        )
+
+    audit("unlock_requested", "REQUESTED")
+
+    inspected = []
+    reclaimed = []
+    refusals = []
+
+    for label, lock_path in _lock_candidates(args.repo_dir, args.task_id):
+        if not lock_path.exists():
+            continue
+        try:
+            owner = safe_load_json(lock_path)
+        except Exception as err:
+            refusals.append(f"{label} lock at '{lock_path}' is unreadable: {err}")
+            continue
+
+        relevant, why_not = _lock_relevance(owner, args.task_id)
         state, reason = classify_lock_owner(
             owner.get("pid", -1),
             owner.get("hostname", ""),
             owner.get("process_create_time", 0.0),
         )
-        print(
-            f"Lock owner: pid {owner.get('pid')} @ {owner.get('hostname')} "
-            f"({owner.get('command')}) -- {state.value}"
+        inspected.append(
+            {
+                "scope": label,
+                "path": str(lock_path),
+                "owner_state": state.value,
+                "reason": reason,
+                "relevant": relevant,
+                "pid": owner.get("pid"),
+                "hostname": owner.get("hostname"),
+                "operation": owner.get("operation"),
+                "task_id": owner.get("task_id"),
+            }
         )
-        print(f"  {reason}")
 
-    try:
-        record = reclaim_lock(lock_path)
-    except LockError as err:
-        print(f"ERROR: {err}")
-        return 1
+        if not as_json:
+            print(f"{label.capitalize()} lock: {lock_path}")
+            print(
+                f"  Owner: pid {owner.get('pid')} @ {owner.get('hostname')} "
+                f"({owner.get('command')}) -- {state.value}"
+            )
+            print(f"  {reason}")
 
-    ledger = EvidenceLedger(args.ledger_file) if getattr(args, "ledger_file", None) else None
-    if ledger is not None:
-        ledger.append_entry(
-            EvidenceEntry(
-                task_id=record.task_id,
-                agent_id="human_operator",
-                action="stale_lock_reclaimed",
-                command=f"ai unlock {args.task_id}",
-                result=record.owner_state,
-                artifact=record.lock_path,
-                metadata=record.to_dict(),
+        if not relevant:
+            msg = f"Refusing to reclaim {label} lock: {why_not}."
+            refusals.append(msg)
+            if not as_json:
+                print(f"  {msg}")
+            audit(
+                "unlock_refused",
+                "NOT_THIS_TASK",
+                artifact=str(lock_path),
+                metadata={"scope": label, "reason": why_not},
+            )
+            continue
+
+        try:
+            record = reclaim_lock(lock_path)
+        except LockError as err:
+            refusals.append(str(err))
+            if not as_json:
+                print(f"  ERROR: {err}")
+            audit(
+                "unlock_refused",
+                state.value,
+                artifact=str(lock_path),
+                metadata={"scope": label, "reason": str(err)},
+            )
+            continue
+
+        payload = record.to_dict()
+        payload["scope"] = label
+        reclaimed.append(payload)
+        # Keeps the established ledger vocabulary rather than introducing a
+        # second name for the same event.
+        audit(
+            "stale_lock_reclaimed",
+            record.owner_state,
+            artifact=record.lock_path,
+            metadata=payload,
+        )
+        if not as_json:
+            print(f"  Reclaimed {record.owner_state} {label} lock.")
+
+    if as_json:
+        import json
+        print(
+            json.dumps(
+                {
+                    "task_id": args.task_id,
+                    "inspected": inspected,
+                    "reclaimed": reclaimed,
+                    "refused": refusals,
+                },
+                indent=2,
             )
         )
 
-    if getattr(args, "json", False):
-        import json
-        print(json.dumps(record.to_dict(), indent=2))
-    else:
-        print(f"Reclaimed {record.owner_state} lock for task '{record.task_id}'.")
-        print(f"You can now run: ai resume {record.task_id}")
-    return 0
+    if not inspected:
+        if not as_json:
+            print(f"No locks held for '{args.task_id}'. Nothing to reclaim.")
+        audit("unlock_requested", "NO_OP")
+        return 0
+
+    if reclaimed:
+        if not as_json:
+            print(f"You can now run: ai resume {args.task_id}")
+        return 0
+
+    return 1 if refusals else 0
 
 
 def cmd_create(args: argparse.Namespace) -> int:

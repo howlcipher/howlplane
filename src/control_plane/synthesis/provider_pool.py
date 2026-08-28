@@ -1102,8 +1102,15 @@ class ProviderPoolManager:
         avoid_provider: Optional[str] = None,
         preferred_agent: Optional[str] = None,
         task: Optional[TaskSpec] = None,
+        role: str = "implementation",
     ) -> List[str]:
-        """Compatibility API returning the new pipeline's ordered candidates."""
+        """Compatibility API returning the new pipeline's ordered candidates.
+
+        `role` is the role the candidates are actually for. It used to be
+        hardcoded to "implementation", so reviewer failover picked its fallback
+        pool using implementation capability requirements rather than the review
+        role's -- the wrong question for the candidate it was choosing.
+        """
         if task is None or self._legacy_mode:
             preference = TASK_SUITABILITY_PREFERENCES.get(
                 task_category,
@@ -1137,7 +1144,7 @@ class ProviderPoolManager:
             return list(dict.fromkeys(result))
         decision = self.select_resource(
             task,
-            role="implementation",
+            role=role,
             explicit_resource_id=preferred_agent,
             avoid_resource_id=avoid_provider,
         )
