@@ -865,15 +865,61 @@ class HumanLifecycleManager:
             InvalidReceiptError,
             UnsupportedActionError,
         )
-        from src.control_plane.locking import TaskLock, RepoLock
+        from src.control_plane.locking import TaskLock
         from src.control_plane.proposed_action import infer_proposed_actions, ProposedAction
 
         run_dir = cls.get_run_dir(target_repo, task_id)
         if not run_dir.is_dir() or not (run_dir / "task.yaml").is_file():
             raise TaskRunNotFoundError(f"Task run '{task_id}' not found in {target_repo}/.task_runs")
 
-        with TaskLock(target_repo, task_id, operation="resume", command=f"ai resume {task_id}"):
+        # Recovery is governed execution, so it leaves evidence like any other
+        # stage. SLOPFIX-06's two failed resumes mutated progress and lock state
+        # and recorded nothing, leaving no durable account of why the documented
+        # recovery path did not work.
+        def audit(action, result=None, **metadata):
+            if not ledger:
+                return
+            try:
+                ledger.append_entry(
+                    EvidenceEntry(
+                        task_id=task_id,
+                        agent_id="control_plane",
+                        action=action,
+                        command=f"ai resume {task_id}",
+                        result=result,
+                        repository=str(target_repo),
+                        metadata=metadata,
+                    )
+                )
+            except Exception:
+                pass
+
+        lock_state = cls._describe_lock_state(target_repo, task_id)
+        audit("resume_requested", "REQUESTED", lock_state=lock_state)
+        audit("resume_lock_state", lock_state.get("blocking_state"), **lock_state)
+
+        task_lock = TaskLock(
+            target_repo, task_id, operation="resume", command=f"ai resume {task_id}"
+        )
+        try:
+            task_lock.acquire()
+        except Exception as err:
+            audit(
+                "resume_failed",
+                "LOCK_UNAVAILABLE",
+                error=str(err),
+                lock_state=lock_state,
+            )
+            raise
+
+        try:
             task_spec = cls.load_task_spec(run_dir)
+            audit(
+                "resume_started",
+                "STARTED",
+                previous_state=task_spec.current_state,
+                lock_state=lock_state,
+            )
 
             if task_spec.current_state == "complete":
                 return OrchestrationResult(
@@ -1130,16 +1176,101 @@ class HumanLifecycleManager:
                         run_dir=str(run_dir),
                     )
 
-            # For tasks interrupted in intermediate states (discovered, planned, implementing, reviewing, verifying, interrupted)
+            # For tasks interrupted in intermediate states (discovered, planned,
+            # implementing, reviewing, verifying, interrupted). The orchestrator
+            # needs the same task lock this method already holds, so it is handed
+            # the ownership token rather than being made to acquire it again --
+            # which is what deadlocked every documented recovery
+            # (HOWLFRAM-SLOPFIX-06).
             if orchestrator:
-                return orchestrator.run(task_spec)
+                outcome = orchestrator.run(
+                    task_spec, lock_ownership=task_lock.ownership
+                )
             else:
                 from src.control_plane.orchestrator import GovernedTaskOrchestrator
                 orch = GovernedTaskOrchestrator(
                     target_repo=target_repo,
                     control_plane_root=control_plane_root,
                 )
-                return orch.run(task_spec)
+                outcome = orch.run(task_spec, lock_ownership=task_lock.ownership)
+            audit(
+                "resume_completed",
+                getattr(outcome, "final_state", None),
+                exit_code=getattr(outcome, "exit_code", None),
+                checkpoint=cls._latest_checkpoint_stage(run_dir),
+            )
+            return outcome
+        except Exception as err:
+            audit(
+                "resume_failed",
+                type(err).__name__,
+                error=str(err),
+                checkpoint=cls._latest_checkpoint_stage(run_dir),
+            )
+            raise
+        finally:
+            task_lock.release()
+
+    @staticmethod
+    def _latest_checkpoint_stage(run_dir: Path) -> Optional[str]:
+        """Names the stage a recovery attempt actually left behind, if any."""
+        try:
+            from src.control_plane.checkpoints import CheckpointManager
+
+            checkpoint = CheckpointManager.load_latest_checkpoint(run_dir)
+            if checkpoint is None:
+                return None
+            return f"{checkpoint.stage}:{checkpoint.status}"
+        except Exception:
+            return None
+
+    @staticmethod
+    def _describe_lock_state(target_repo, task_id: str) -> Dict[str, Any]:
+        """Classifies every lock relevant to a task before recovery touches it.
+
+        Recorded up front so a failed resume explains itself: which lock stood
+        in the way, whose it was, and whether it was reclaimable.
+        """
+        from src.control_plane.atomic_io import safe_load_json
+        from src.control_plane.locking import (
+            classify_lock_owner,
+            get_repo_lock_path,
+            get_task_lock_path,
+        )
+
+        locks: Dict[str, Any] = {}
+        blocking = "NONE"
+        for scope, path in (
+            ("task_run", get_task_lock_path(target_repo, task_id)),
+            ("repository", get_repo_lock_path(target_repo)),
+        ):
+            if not path.exists():
+                locks[scope] = {"held": False}
+                continue
+            try:
+                owner = safe_load_json(path)
+            except Exception as err:
+                locks[scope] = {"held": True, "unreadable": str(err)}
+                blocking = "UNREADABLE"
+                continue
+            state, reason = classify_lock_owner(
+                owner.get("pid", -1),
+                owner.get("hostname", ""),
+                owner.get("process_create_time", 0.0),
+            )
+            locks[scope] = {
+                "held": True,
+                "path": str(path),
+                "owner_state": state.value,
+                "reason": reason,
+                "pid": owner.get("pid"),
+                "hostname": owner.get("hostname"),
+                "task_id": owner.get("task_id"),
+                "operation": owner.get("operation"),
+            }
+            if state.value != "STALE" or blocking == "NONE":
+                blocking = state.value
+        return {"locks": locks, "blocking_state": blocking}
 
     @classmethod
     def cancel(

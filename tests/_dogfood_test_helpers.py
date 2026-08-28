@@ -423,7 +423,7 @@ class FakeOrchestrator:
         self.run_dir = run_dir
         self.modified_files = [modified_files] if isinstance(modified_files, str) else list(modified_files)
 
-    def run(self, task_spec, planned_actions=None) -> OrchestrationResult:
+    def run(self, task_spec, planned_actions=None, lock_ownership=None) -> OrchestrationResult:
         return complete_result(task_spec, self.run_dir, self.modified_files)
 
 
@@ -457,7 +457,7 @@ class ProviderScriptedOrchestrator:
         self.attempted: List[str] = []
         self.on_attempt = on_attempt
 
-    def run(self, task_spec, planned_actions=None) -> OrchestrationResult:
+    def run(self, task_spec, planned_actions=None, lock_ownership=None) -> OrchestrationResult:
         provider = task_spec.preferred_agent or "unknown"
         self.attempted.append(provider)
         if self.on_attempt is not None:

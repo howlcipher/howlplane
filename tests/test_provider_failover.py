@@ -151,8 +151,14 @@ def _run_failover_task(
     registry: Optional[AgentRegistry] = None,
     pool_hook: Optional[Callable[[ProviderPoolManager], None]] = None,
     pool: Optional[ProviderPoolManager] = None,
+    **config_overrides: Any,
 ) -> OrchestrationResult:
-    """Runs the orchestrator with the given fake backend resolver."""
+    """Runs the orchestrator with the given fake backend resolver.
+
+    `config_overrides` are applied to the OrchestrationConfig, so a caller can
+    enable real locking or inject a lifecycle failure without rebuilding the
+    whole fixture.
+    """
     task = task or _make_task()
     registry = registry or _make_registry()
     if pool is None:
@@ -183,6 +189,7 @@ def _run_failover_task(
         progress_mode="human",
         progress_stream=progress_stream,
         trajectory_store_dir=str(repo / ".task_runs" / task.task_id / "trajectories"),
+        **config_overrides,
     )
     orch = GovernedTaskOrchestrator(target_repo=repo, config=config)
     return orch.run(task)
@@ -1507,7 +1514,9 @@ def test_provider_scratch_is_relocated_out_of_the_evidence_root(tmp_path: Path):
     """A provider once wrote wip-refactor.patch straight into the run's evidence
     root, blurring which files the control plane owns. Scratch is now named in
     the prompt and anything left at the root is relocated with its provenance,
-    never deleted (HOWLFRAM-SLOPFIX-05)."""
+    never deleted (HOWLFRAM-SLOPFIX-05). Scratch lives outside
+    implementation/attempts/ so it can never imitate an attempt
+    (HOWLFRAM-SLOPFIX-06)."""
     repo = _init_test_repo(tmp_path / "repo")
 
     def _write_scratch_into_evidence_root(task, cwd: Path, _prompt) -> None:
@@ -1528,11 +1537,11 @@ def test_provider_scratch_is_relocated_out_of_the_evidence_root(tmp_path: Path):
 
     assert res.final_state == "complete"
     run_dir = Path(res.run_dir)
-    workspace = run_dir / "implementation" / "attempts" / "01-resource_a" / "workspace"
+    workspace = run_dir / "provider_scratch" / "01-resource_a"
 
     # The stray file left the evidence root...
     assert not (run_dir / "wip-refactor.patch").exists()
-    # ...and is retained under the attempt's workspace, attributed.
+    # ...and is retained under the attempt's owned scratch, attributed.
     relocated = workspace / "wip-refactor.patch"
     assert relocated.is_file()
     assert relocated.read_text(encoding="utf-8") == "scratch\n"
@@ -1557,5 +1566,7 @@ def test_implementation_prompt_names_the_provider_scratch_path(tmp_path: Path):
 
     prompt = resolver.calls["resource_a"][0]["prompt"]
     assert "## Workspace" in prompt
-    assert "<NN-resource>/workspace/" in prompt
+    assert "provider_scratch/<NN-resource>/" in prompt
+    # The canonical evidence namespace is never offered as a scratch location.
+    assert "attempts/<NN-resource>/workspace/" not in prompt
     assert "control-plane evidence" in prompt

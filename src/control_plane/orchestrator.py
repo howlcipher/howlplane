@@ -10,6 +10,7 @@ Remediation Loop -> Targeted Re-review -> Deterministic Verification ->
 Human Authority Boundary Gate -> Complete Evidence Ledger.
 """
 
+from contextlib import ExitStack
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 import json, os, shutil, sys, time
@@ -44,7 +45,13 @@ from src.control_plane.git_baseline import (
 from src.control_plane.git_integration import run_git
 from src.control_plane.howlframe_runner import HowlFrameAuditRunner, get_dogfood_mode, DEFAULT_INSTRUCTION_BUDGET
 from src.control_plane.human_boundary import HumanBoundaryGate, BoundaryCheckResult, HumanDecisionPacket
-from src.control_plane.locking import RepoLock, TaskLock, RepositoryLockedError, TaskLockedError
+from src.control_plane.locking import (
+    LockOwnership,
+    RepoLock,
+    TaskLock,
+    RepositoryLockedError,
+    TaskLockedError,
+)
 from src.control_plane.process_manager import ProcessTracker
 from src.control_plane.project_adapter import ProjectAdapter, ProjectContext
 from src.control_plane.reconciliation import ReviewFinding, ReconciliationResult, ReviewReconciler
@@ -98,6 +105,45 @@ TERMINATION_TIMEOUT_CANDIDATE_GOVERNED = "timeout_candidate_governed"
 # named resource was the last one attempted and nothing was accepted.
 ROUTE_STATUS_SUPERSEDED = "SUPERSEDED_BY_FAILOVER"
 ROUTE_STATUS_IMPLEMENTATION_FAILED = "IMPLEMENTATION_FAILED"
+# Terminal, and only reachable past the authority gate: the route names an
+# implementer whose work governance actually accepted.
+ROUTE_STATUS_ACCEPTED = "ACCEPTED"
+
+# Terminal-attempt vocabulary, so a final attempt states its disposition
+# explicitly instead of encoding it as missing fields.
+ROLLBACK_PARKED_FOR_GOVERNANCE = "PARKED_FOR_GOVERNANCE"
+NEXT_SELECTION_MAX_ATTEMPTS = "MAX_ATTEMPTS_REACHED"
+TRANSITION_CANDIDATE_GOVERNANCE = "CANDIDATE_GOVERNANCE"
+IMPLEMENTATION_ATTEMPT_SCHEMA_VERSION = "howlplane.implementation_attempt/v1"
+
+# Everything the control plane itself writes into a task run directory. The
+# sweep that relocates provider scratch must never move these, even if one is
+# created after the pre-attempt snapshot was taken.
+CONTROL_PLANE_RUN_ARTIFACTS = frozenset({
+    ".task.lock",
+    "baseline.json",
+    "candidate.json",
+    "checkpoints",
+    "decision_packet.md",
+    "diff.patch",
+    "effective_route.json",
+    "execution_receipt.json",
+    "findings_template.yaml",
+    "howlframe_audit.json",
+    "implementation",
+    "initial_route.json",
+    "progress.json",
+    "project_context.json",
+    "provider_scratch",
+    "remediation",
+    "reviews",
+    "route.json",
+    "stage_checkpoint.json",
+    "summary.md",
+    "task.yaml",
+    "trajectories",
+    "verification_plan.json",
+})
 
 # Why bounded implementation failover stopped. Recorded verbatim in the run's
 # failover summary so an operator never has to infer it from a message string.
@@ -361,6 +407,7 @@ class GovernedTaskOrchestrator:
             "delta": delta.to_dict(),
             "capacity_before": capacity_before,
             "capacity_after": capacity_after,
+            "schema": IMPLEMENTATION_ATTEMPT_SCHEMA_VERSION,
             "evidence_dir": str(attempt_dir.relative_to(run_dir)),
         }
         self._persist_attempt_record(record, attempts_dir)
@@ -470,44 +517,102 @@ class GovernedTaskOrchestrator:
 
     @staticmethod
     def _attempt_workspace_hint(task: TaskSpec) -> str:
-        """The provider-writable scratch path, as named to the provider."""
-        return (
-            f".task_runs/{task.task_id}/implementation/attempts/"
-            "<NN-resource>/workspace/"
-        )
+        """The provider-writable scratch path, as named to the provider.
+
+        Deliberately outside `implementation/attempts/`. Pointing providers
+        inside the canonical attempt namespace invited one to invent
+        `attempts/01-claude/workspace/` -- a directory that looked exactly like
+        a fourth attempt in a three-attempt run (HOWLFRAM-SLOPFIX-06). Scratch
+        and evidence now live in structurally separate trees, so an unexpected
+        path under `attempts/` is unambiguously wrong.
+        """
+        return f".task_runs/{task.task_id}/provider_scratch/<NN-resource>/"
+
+    @staticmethod
+    def _provider_scratch_dir(run_dir: Path, attempt_num: int, resource_id: str) -> Path:
+        """Control-plane-owned scratch location for one attempt's provider."""
+        return run_dir / "provider_scratch" / f"{attempt_num:02d}-{resource_id}"
+
+    def _resolve_backend(self, resource_id: str) -> AgentBackend:
+        """Resolves the execution backend for a resource, however it is wired.
+
+        A resumed run reconciles its implementation from the durable delta and
+        never enters the attempt loop, so the loop-local backend it used to rely
+        on did not exist by the time remediation needed one -- resume died with
+        an UnboundLocalError before it could finish recovering anything.
+        """
+        if self.config.custom_backend is not None:
+            return self.config.custom_backend
+        if self.config.backend_resolver is not None:
+            return self.config.backend_resolver(resource_id)
+        return AgentBackendRegistry.get_backend(resource_id)
 
     def _sweep_provider_scratch(
         self,
         run_dir: Path,
-        attempt_dir: Path,
         resource_id: str,
         attempt_num: int,
         known_before: Set[str],
+        attempts_dir: Optional[Path] = None,
+        attempts_before: Optional[Set[str]] = None,
+        owned_attempt_name: Optional[str] = None,
     ) -> List[str]:
-        """Moves files a provider left at the evidence root into its workspace.
+        """Moves anything a provider left in the evidence namespace into scratch.
 
-        Providers were never told where scratch belongs, so one wrote
-        wip-refactor.patch straight into the run's evidence root, blurring which
-        files the control plane owns (HOWLFRAM-SLOPFIX-05). Anything that
-        appeared at the root during this attempt is relocated under the
-        attempt's workspace/ with a provenance note. Nothing is deleted -- the
-        artifacts may well be useful, they just are not evidence.
+        Providers write where they like -- they run in the repository with no
+        filesystem sandbox -- so the boundary is enforced afterwards rather than
+        assumed. Two escapes are swept: artifacts dropped at the run's evidence
+        root (HOWLFRAM-SLOPFIX-05), and directories invented under
+        `implementation/attempts/` that imitate a canonical attempt
+        (HOWLFRAM-SLOPFIX-06, where `01-claude/` made a three-attempt run look
+        like four). Both are relocated with provenance and nothing is deleted:
+        the artifacts may well be useful, they are simply not evidence.
         """
-        workspace = attempt_dir / "workspace"
+        scratch = self._provider_scratch_dir(run_dir, attempt_num, resource_id)
         swept: List[str] = []
-        for entry in sorted(run_dir.iterdir()):
-            if not entry.is_file() or entry.name in known_before:
-                continue
-            workspace.mkdir(parents=True, exist_ok=True)
-            destination = workspace / entry.name
+
+        def relocate(entry: Path, label: str) -> None:
+            scratch.mkdir(parents=True, exist_ok=True)
+            destination = scratch / entry.name
+            if destination.exists():
+                destination = scratch / f"{entry.name}.{attempt_num:02d}"
             try:
                 entry.replace(destination)
             except OSError:
+                return
+            swept.append(label)
+
+        for entry in sorted(run_dir.iterdir()):
+            if entry.name in known_before:
                 continue
-            swept.append(entry.name)
+            if entry.name in CONTROL_PLANE_RUN_ARTIFACTS:
+                continue
+            relocate(entry, entry.name)
+
+        # A directory under attempts/ that this run did not create is a
+        # provider's guess at its own attempt label, not an attempt.
+        if attempts_dir is not None and attempts_dir.is_dir():
+            known_attempts = attempts_before or set()
+            for entry in sorted(attempts_dir.iterdir()):
+                if not entry.is_dir():
+                    continue
+                if entry.name in known_attempts or entry.name == owned_attempt_name:
+                    continue
+                if (entry / "attempt_record.json").is_file():
+                    # Real control-plane evidence; never touch it.
+                    continue
+                for child in sorted(entry.iterdir()):
+                    relocate(child, f"implementation/attempts/{entry.name}/{child.name}")
+                try:
+                    # Only ever removes the empty shell left behind, so the
+                    # canonical attempt count stops counting a fake one.
+                    entry.rmdir()
+                except OSError:
+                    pass
+
         if swept:
             atomic_write_json(
-                workspace / "_provenance.json",
+                scratch / "_provenance.json",
                 {
                     "origin": "provider_scratch",
                     "created_by": resource_id,
@@ -524,6 +629,105 @@ class GovernedTaskOrchestrator:
                 },
             )
         return swept
+
+    def _attach_terminal_disposition(
+        self,
+        attempt_record: Dict[str, Any],
+        attempts_dir: Path,
+        attempt_num: int,
+        attempted: Set[str],
+        task_spec: TaskSpec,
+    ) -> None:
+        """Records why a salvaged final attempt has no successor.
+
+        Attempts that hand off carry `rollback` and `next_selection`; the one
+        that exhausts the budget carried neither, so "no provider remained" and
+        "nobody wrote the field" looked identical in the evidence. The candidate
+        is deliberately not rolled back -- it is parked for governance -- and
+        that has to be stated, not inferred (HOWLFRAM-SLOPFIX-06).
+        """
+        remaining: List[str] = []
+        pool = self.config.provider_pool
+        if pool is not None:
+            try:
+                for resource_id in pool.select_candidates(
+                    task_category="code_heavy", task=task_spec
+                ):
+                    if resource_id not in attempted:
+                        remaining.append(resource_id)
+            except Exception:
+                remaining = []
+
+        attempt_record["max_attempts"] = self.config.max_provider_failover_attempts
+        attempt_record["rollback"] = {
+            "restored": False,
+            "error": None,
+            "status": ROLLBACK_PARKED_FOR_GOVERNANCE,
+            "reason": (
+                "Candidate preserved for governance instead of being rolled "
+                "back; no further attempt follows it."
+            ),
+        }
+        attempt_record["next_selection"] = None
+        attempt_record["next_selection_reason"] = NEXT_SELECTION_MAX_ATTEMPTS
+        attempt_record["remaining_eligible_resources"] = remaining
+        attempt_record["transition"] = TRANSITION_CANDIDATE_GOVERNANCE
+        self._persist_attempt_record(attempt_record, attempts_dir)
+
+    @staticmethod
+    def _recover_implementation_resource(run_dir: Path, routing: Any) -> Optional[str]:
+        """Restores which resource produced the work being resumed.
+
+        A resumed run re-routes from scratch, so the in-memory decision knows
+        nothing about the failover that already happened. The durable effective
+        route does, and it is the only truthful source for who to credit --
+        and, until governance clears it, who not to let review their own work.
+        """
+        route_file = run_dir / "effective_route.json"
+        if route_file.is_file():
+            try:
+                meta = (safe_load_json(route_file) or {}).get("metadata") or {}
+            except Exception:
+                meta = {}
+            recovered = (
+                meta.get("accepted_implementation_resource")
+                or meta.get("candidate_resource")
+                or meta.get("last_attempted_implementation_resource")
+            )
+            if recovered:
+                # Carry the failover history forward so this run's evidence
+                # continues the story instead of restarting it.
+                for key in (
+                    "initial_route",
+                    "initial_implementation_resource",
+                    "candidate_resource",
+                    "last_attempted_implementation_resource",
+                    "reviewer_resource_mapping",
+                    "reviewer_resource_identities",
+                ):
+                    if key in meta and key not in routing.metadata:
+                        routing.metadata[key] = meta[key]
+                return recovered
+        return routing.metadata.get("last_attempted_implementation_resource")
+
+    @staticmethod
+    def _load_parked_candidate(run_dir: Path) -> Optional[Dict[str, Any]]:
+        """Recovers a parked timeout candidate's record after an interruption.
+
+        The candidate is durable evidence, so a resumed run must know it is
+        governing a salvaged fragment rather than provider-attested work.
+        """
+        attempts_dir = run_dir / "implementation" / "attempts"
+        if not attempts_dir.is_dir():
+            return None
+        for attempt_dir in sorted(attempts_dir.iterdir(), reverse=True):
+            candidate_file = attempt_dir / "candidate.json"
+            if candidate_file.is_file():
+                try:
+                    return safe_load_json(candidate_file)
+                except Exception:
+                    return None
+        return None
 
     @staticmethod
     def _is_salvageable_timeout_candidate(
@@ -682,6 +886,7 @@ class GovernedTaskOrchestrator:
         attempt_resource_id: str,
         route_status: str,
         accepted: bool,
+        candidate_resource: Optional[str] = None,
     ) -> None:
         """Makes routing evidence on disk match who is actually implementing.
 
@@ -733,11 +938,22 @@ class GovernedTaskOrchestrator:
         routing.metadata["reviewer_resource_identities"] = identities
         routing.metadata["review_diversity_achieved"] = diversity
         routing.metadata["reviewer_mapping_status"] = (
-            "CONFIRMED" if accepted else "PROVISIONAL"
+            "CONFIRMED"
+            if accepted
+            else ("CANDIDATE_REVIEW" if candidate_resource else "PROVISIONAL")
         )
         routing.metadata["route_status"] = route_status
         routing.metadata["current_attempt_resource"] = attempt_resource_id
         routing.metadata["last_attempted_implementation_resource"] = attempt_resource_id
+        routing.metadata["initial_implementation_resource"] = (
+            routing.metadata.get("initial_route", {}).get("selected_agent_id")
+            or routing.selected_agent_id
+        )
+        # A candidate is work that exists and is being governed; an accepted
+        # implementation is work that cleared review, verification and
+        # authority. Conflating them let SLOPFIX-06's route evidence claim an
+        # accepted implementer while the task was still under review.
+        routing.metadata["candidate_resource"] = candidate_resource
         routing.metadata["accepted_implementation_resource"] = (
             attempt_resource_id if accepted else None
         )
@@ -772,6 +988,7 @@ class GovernedTaskOrchestrator:
             metadata={
                 "initial_implementation_resource": routing.selected_agent_id,
                 "attempt_resource": attempt_resource_id,
+                "candidate_resource": candidate_resource,
                 "accepted_implementation_resource": (
                     attempt_resource_id if accepted else None
                 ),
@@ -924,14 +1141,29 @@ class GovernedTaskOrchestrator:
                 boundary_res.decision_packet.changeops_decision_id = dec_id
                 boundary_res.decision_packet.executor_id = executor.name
 
+    def _fault(self, stage: str, run_dir: Path, task_spec: TaskSpec) -> None:
+        """Fires the configured failure-injection hook for a lifecycle point.
+
+        Used to prove the acquisition/cleanup boundary holds: a test raises from
+        any of these points and asserts no lock file survives.
+        """
+        if self.config.failure_injection_hook:
+            self.config.failure_injection_hook(stage, run_dir, task_spec)
+
     def run(
         self,
         task_spec: TaskSpec,
         planned_actions: Optional[List[str]] = None,
+        lock_ownership: Optional[LockOwnership] = None,
     ) -> OrchestrationResult:
         """
         Executes the complete governed control-plane loop for the task under
         mutual-exclusion locks and durable checkpoint guarantees.
+
+        `lock_ownership` is the task-lock token of an outer lifecycle that
+        already owns this run -- `ai resume` holds the task lock across the
+        whole recovery, then hands it here. Without it a resumed run would
+        deadlock against itself (HOWLFRAM-SLOPFIX-06).
         """
         start_time = time.time()
         run_dir = self.target_repo / ".task_runs" / task_spec.task_id
@@ -953,61 +1185,65 @@ class GovernedTaskOrchestrator:
                 enabled=enabled,
             )
 
-        progress.start(
-            task_id=task_spec.task_id,
-            run_dir=run_dir,
-            initial_phase=TaskPhase.PREPARING.value,
-        )
+        # Every acquisition below is registered for release the moment it
+        # succeeds. Previously the repo lock was taken before the task lock but
+        # outside the try/finally, so a task-lock failure stranded
+        # `.git/howlplane.lock` and no later run could proceed
+        # (HOWLFRAM-SLOPFIX-06). Progress starts only once the locks are held,
+        # so a resume that cannot acquire never overwrites the durable
+        # progress record of the run it was trying to recover.
+        with ExitStack() as stack:
+            if self.config.acquire_locks:
+                repo_lock = RepoLock(
+                    self.target_repo,
+                    task_spec.task_id,
+                    command=f"ai work {task_spec.task_id} --execute",
+                )
+                repo_lock.acquire()
+                stack.callback(repo_lock.release)
+                self._fault("after_repo_lock", run_dir, task_spec)
 
-        # Acquire Locks if enabled
-        repo_lock = (
-            RepoLock(self.target_repo, task_spec.task_id, command=f"ai work {task_spec.task_id} --execute")
-            if self.config.acquire_locks
-            else None
-        )
-        task_lock = (
-            TaskLock(self.target_repo, task_spec.task_id, operation="orchestrate")
-            if self.config.acquire_locks
-            else None
-        )
+                task_lock = TaskLock(
+                    self.target_repo, task_spec.task_id, operation="orchestrate"
+                )
+                task_lock.acquire(lock_ownership)
+                stack.callback(task_lock.release)
+                self._fault("after_task_lock", run_dir, task_spec)
 
-        if repo_lock:
-            repo_lock.acquire()
-        if task_lock:
-            task_lock.acquire()
-
-        try:
-            result = self._run_governed_loop(
-                task_spec, planned_actions, start_time, progress=progress
+            progress.start(
+                task_id=task_spec.task_id,
+                run_dir=run_dir,
+                initial_phase=TaskPhase.PREPARING.value,
             )
-            if self.trajectory_store is not None:
-                traj = ExecutionTrajectoryBuilder.from_orchestration_result(result)
-                self.trajectory_store.save(traj)
-                result.trajectory_id = traj.trajectory_id
-            return result
-        except Exception as exc:
-            progress.record_terminal(
-                TaskProgressState.FAILED,
-                TaskPhase.FAILED,
-                error_message=str(exc),
-            )
-            if run_dir.is_dir():
-                try:
-                    CheckpointManager.fail_stage(
-                        run_dir,
-                        stage=task_spec.current_state,
-                        reason=str(exc),
-                        result_summary={"error": str(exc), "interrupted": True},
-                    )
-                except Exception:
-                    pass
-            raise
-        finally:
-            progress.close()
-            if task_lock:
-                task_lock.release()
-            if repo_lock:
-                repo_lock.release()
+            stack.callback(progress.close)
+            self._fault("after_progress_start", run_dir, task_spec)
+
+            try:
+                result = self._run_governed_loop(
+                    task_spec, planned_actions, start_time, progress=progress
+                )
+                if self.trajectory_store is not None:
+                    traj = ExecutionTrajectoryBuilder.from_orchestration_result(result)
+                    self.trajectory_store.save(traj)
+                    result.trajectory_id = traj.trajectory_id
+                return result
+            except Exception as exc:
+                progress.record_terminal(
+                    TaskProgressState.FAILED,
+                    TaskPhase.FAILED,
+                    error_message=str(exc),
+                )
+                if run_dir.is_dir():
+                    try:
+                        CheckpointManager.fail_stage(
+                            run_dir,
+                            stage=task_spec.current_state,
+                            reason=str(exc),
+                            result_summary={"error": str(exc), "interrupted": True},
+                        )
+                    except Exception:
+                        pass
+                raise
 
     def _run_governed_loop(
         self,
@@ -1173,6 +1409,11 @@ class GovernedTaskOrchestrator:
         attempts_dir = impl_dir / "attempts"
         attempts_dir.mkdir(parents=True, exist_ok=True)
 
+        # Declared for the whole loop, not just the branch that runs providers:
+        # a recovered implementation skips the attempt loop entirely, and later
+        # stages still need to know who (if anyone) is credited with the work.
+        final_impl_resource_id: Optional[str] = None
+
         # Stays None on the crash-recovery path, where an interrupted
         # implementation's delta is reconciled rather than re-run: there is no
         # provider execution in *this* process to report (#59.1 Phase 1).
@@ -1187,12 +1428,24 @@ class GovernedTaskOrchestrator:
         if has_existing_delta and rec_delta:
             current_delta = rec_delta
             initial_delta = rec_delta
+            # A resumed run reconciles the delta instead of re-running the
+            # provider, so who produced it is reconstructed from the durable
+            # route rather than re-derived. Without this the later stages had
+            # no implementer to credit and acceptance could never be recorded.
+            final_impl_resource_id = self._recover_implementation_resource(
+                run_dir, routing
+            )
+            timeout_candidate = self._load_parked_candidate(run_dir)
             self._record_event(
                 task_id=task_spec.task_id,
                 agent_id="control_plane",
                 action="implementation_recovered",
                 spec=task_spec,
-                metadata={"files_changed": len(current_delta.files_modified) + len(current_delta.files_added)},
+                metadata={
+                    "files_changed": len(current_delta.files_modified) + len(current_delta.files_added),
+                    "recovered_implementation_resource": final_impl_resource_id,
+                    "candidate_recovered": timeout_candidate is not None,
+                },
             )
         else:
             CheckpointManager.start_stage(
@@ -1209,7 +1462,6 @@ class GovernedTaskOrchestrator:
             impl_prompt = self._build_implementation_prompt(task_spec, ctx)
             current_impl_resource_id = routing.selected_agent_id
             attempted_impl_resource_ids: Set[str] = set()
-            final_impl_resource_id: Optional[str] = None
 
             def fail_implementation(
                 err_msg: str,
@@ -1304,12 +1556,7 @@ class GovernedTaskOrchestrator:
                 impl_res = None
                 normalized_failure = None
 
-                if self.config.custom_backend is not None:
-                    impl_backend = self.config.custom_backend
-                elif self.config.backend_resolver is not None:
-                    impl_backend = self.config.backend_resolver(current_impl_resource_id)
-                else:
-                    impl_backend = AgentBackendRegistry.get_backend(current_impl_resource_id)
+                impl_backend = self._resolve_backend(current_impl_resource_id)
 
                 if not impl_backend.is_available():
                     impl_res = AgentExecutionResult(
@@ -1343,10 +1590,15 @@ class GovernedTaskOrchestrator:
                     )
 
                     attempt_dir = attempts_dir / f"{attempt_num:02d}-{current_impl_resource_id}"
-                    (attempt_dir / "workspace").mkdir(parents=True, exist_ok=True)
+                    self._provider_scratch_dir(
+                        run_dir, attempt_num, current_impl_resource_id
+                    ).mkdir(parents=True, exist_ok=True)
                     evidence_root_before = {
-                        entry.name for entry in run_dir.iterdir() if entry.is_file()
+                        entry.name for entry in run_dir.iterdir()
                     }
+                    attempts_before = {
+                        entry.name for entry in attempts_dir.iterdir()
+                    } if attempts_dir.is_dir() else set()
 
                     impl_agent_id = getattr(impl_backend, "agent_id", None) or current_impl_resource_id
                     with progress.operation(
@@ -1370,11 +1622,14 @@ class GovernedTaskOrchestrator:
                 if impl_backend.is_available():
                     swept = self._sweep_provider_scratch(
                         run_dir=run_dir,
-                        attempt_dir=attempts_dir
-                        / f"{attempt_num:02d}-{current_impl_resource_id}",
                         resource_id=current_impl_resource_id,
                         attempt_num=attempt_num,
                         known_before=evidence_root_before,
+                        attempts_dir=attempts_dir,
+                        attempts_before=attempts_before,
+                        owned_attempt_name=(
+                            f"{attempt_num:02d}-{current_impl_resource_id}"
+                        ),
                     )
                     if swept:
                         self._record_event(
@@ -1490,6 +1745,17 @@ class GovernedTaskOrchestrator:
 
                 if exhausted and salvageable:
                     timeout_candidate = govern_candidate()
+                    # State a terminal attempt reaches by exhausting the budget
+                    # is still state: record it rather than letting the absence
+                    # of `rollback`/`next_selection` imply it (SLOPFIX-06's
+                    # attempt 3 was silent about all of it).
+                    self._attach_terminal_disposition(
+                        attempt_record,
+                        attempts_dir=attempts_dir,
+                        attempt_num=attempt_num,
+                        attempted=attempted_impl_resource_ids,
+                        task_spec=task_spec,
+                    )
                     final_impl_resource_id = current_impl_resource_id
                     break
 
@@ -1622,12 +1888,18 @@ class GovernedTaskOrchestrator:
                 and final_impl_resource_id != routing.selected_agent_id
                 and self.config.provider_pool is not None
             ):
+                # Implementation being finished is not the same as the work
+                # being accepted: review, reconciliation, verification and the
+                # authority gate all still lie ahead. The route records who
+                # produced the candidate and stays provisional until Stage 8
+                # (HOWLFRAM-SLOPFIX-06).
                 self._persist_effective_route(
                     routing,
                     task_spec,
                     final_impl_resource_id,
                     ROUTE_STATUS_SUPERSEDED,
-                    accepted=True,
+                    accepted=False,
+                    candidate_resource=final_impl_resource_id,
                 )
 
             # A salvaged candidate carries no completion claim from its
@@ -1743,6 +2015,7 @@ class GovernedTaskOrchestrator:
                 run_dir=run_dir,
                 provider_pool=self.config.provider_pool,
                 progress_tracker=progress,
+                implementer_resource_id=final_impl_resource_id,
             )
             review_cycles.append(cycle_res)
             latest_reconciliation = cycle_res.reconciliation
@@ -1870,7 +2143,11 @@ class GovernedTaskOrchestrator:
             rem_cycle_dir = remediation_base_dir / f"cycle-{remediation_count:02d}"
             rem_cycle_dir.mkdir(parents=True, exist_ok=True)
 
-            rem_agent_id = getattr(impl_backend, "agent_id", None) or routing.selected_agent_id
+            rem_resource_id = (
+                final_impl_resource_id or routing.selected_agent_id
+            )
+            rem_backend = self._resolve_backend(rem_resource_id)
+            rem_agent_id = getattr(rem_backend, "agent_id", None) or rem_resource_id
             with progress.operation(
                 phase=TaskPhase.REMEDIATING,
                 resource_id=rem_agent_id,
@@ -1882,7 +2159,7 @@ class GovernedTaskOrchestrator:
                     self.config.custom_remediation_fn(task_spec, self.target_repo, cycle_res.all_findings)
                 else:
                     rem_prompt = self._build_remediation_prompt(task_spec, current_delta.diff_content, cycle_res.all_findings)
-                    rem_res = impl_backend.execute(
+                    rem_res = rem_backend.execute(
                         task=task_spec,
                         cwd=self.target_repo,
                         role="remediation",
@@ -2097,6 +2374,27 @@ class GovernedTaskOrchestrator:
         )
         task_spec.transition_to("complete", "All reviews, reconciliations, deterministic verifications, and policies passed.")
         task_spec.save_to_file(str(run_dir / "task.yaml"))
+
+        # The one place acceptance becomes true. Everything before this point
+        # survived review, reconciliation, deterministic verification and the
+        # human authority boundary; only now is there an accepted implementer.
+        if final_impl_resource_id is not None:
+            self._persist_effective_route(
+                routing,
+                task_spec,
+                final_impl_resource_id,
+                ROUTE_STATUS_SUPERSEDED
+                if final_impl_resource_id != routing.metadata.get(
+                    "initial_implementation_resource", routing.selected_agent_id
+                )
+                else ROUTE_STATUS_ACCEPTED,
+                accepted=True,
+                # Acceptance does not erase how the work arrived. A candidate
+                # that cleared governance is still a candidate in provenance.
+                candidate_resource=(
+                    final_impl_resource_id if timeout_candidate else None
+                ),
+            )
 
         # Generate summary markdown
         summary_md = self._render_summary_markdown(
