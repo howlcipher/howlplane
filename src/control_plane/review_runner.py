@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
 from src.control_plane.agent_execution import AgentBackend, AgentBackendRegistry, AgentExecutionResult
+from src.control_plane.atomic_io import atomic_write_json, safe_load_json
 from src.control_plane.reconciliation import ReviewFinding, ReconciliationResult, ReviewReconciler, VALID_SEVERITIES
 from src.control_plane.reviewers import get_reviewer_role, ReviewerRole, build_skill_context
 from src.control_plane.task_spec import TaskSpec
@@ -62,6 +63,120 @@ REVIEW_TIMEOUT_SECONDS = 180
 # times out, not the whole pool) without risking a multi-minute stall chaining
 # through every eligible candidate on every review cycle.
 MAX_REVIEWER_FAILOVER_ATTEMPTS = 2
+
+
+REVIEW_RESULT_SCHEMA_VERSION = "howlplane.review_result/v1"
+
+# A reviewer that has not run yet is distinct from one that ran and found
+# nothing. Resume must be able to tell them apart, so "never ran" is a durable
+# state rather than the absence of a file.
+REVIEW_STATUS_NOT_RUN = "not_run"
+
+
+def review_role_dir(cycle_dir: Path, role_id: str) -> Path:
+    """Durable evidence directory for one reviewer role in one cycle."""
+    return cycle_dir / role_id
+
+
+def write_review_result(
+    cycle_dir: Optional[Path],
+    role_id: str,
+    result: "SingleReviewResult",
+    *,
+    implementer: Optional[str] = None,
+    assigned_resource: Optional[str] = None,
+) -> Optional[Path]:
+    """Persists what actually happened when a reviewer ran.
+
+    The markdown and findings files alone cannot answer whether a reviewer
+    succeeded: a zero-byte transcript and an empty findings list are exactly
+    what a clean review and a dead provider both leave behind. SLOPFIX-06
+    resumed such a pair as "clean" and moved on. Everything the live path
+    already computed -- status, process result, normalized failure, output
+    validity -- is written here so resume can read the truth instead of
+    guessing it.
+    """
+    if cycle_dir is None:
+        return None
+
+    agent_res = result.agent_result
+    role_dir = review_role_dir(cycle_dir, role_id)
+    attempts = result.attempts or []
+    effective_resource = assigned_resource
+    if attempts:
+        effective_resource = attempts[-1].get("resource_id") or effective_resource
+    if agent_res is not None:
+        effective_resource = getattr(agent_res, "agent_id", None) or effective_resource
+
+    payload: Dict[str, Any] = {
+        "role": role_id,
+        "reviewer_name": result.reviewer_name,
+        "status": result.status,
+        "attempt_count": max(len(attempts), 1),
+        "resource_id": effective_resource,
+        "assigned_resource_id": assigned_resource,
+        "completed_at": result.timestamp,
+        "duration_seconds": result.duration_seconds,
+        "process": {
+            "exit_code": getattr(agent_res, "exit_code", None),
+            "success": getattr(agent_res, "success", None),
+            "timed_out": getattr(agent_res, "timed_out", None),
+        },
+        "launch_outcome": (getattr(agent_res, "metadata", None) or {}).get(
+            "launch_outcome"
+        ),
+        "raw_failure": result.error_message,
+        "normalized_failure": (getattr(agent_res, "metadata", None) or {}).get(
+            "normalized_failure"
+        ),
+        "output_present": bool((result.raw_output or "").strip()),
+        "output_valid": result.status in ("clean", "findings_detected"),
+        "findings_count": len(result.findings),
+        "disposition": result.status,
+        "failover": {
+            "engaged": len(attempts) > 1,
+            "attempts": attempts,
+        },
+        "independence": {
+            "implementer": implementer,
+            "reviewer": effective_resource,
+            "independent": (
+                None
+                if implementer is None or effective_resource is None
+                else implementer != effective_resource
+            ),
+        },
+        "schema": REVIEW_RESULT_SCHEMA_VERSION,
+    }
+
+    role_dir.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(role_dir / "result.json", payload)
+
+    # Per-attempt evidence, so a failover leaves a record of every provider
+    # tried and not just the one that happened to answer last.
+    for index, attempt in enumerate(attempts, start=1):
+        resource = attempt.get("resource_id") or "unknown"
+        attempt_dir = role_dir / "attempts" / f"{index:02d}-{resource}"
+        attempt_dir.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(attempt_dir / "result.json", dict(attempt))
+
+    return role_dir / "result.json"
+
+
+def read_review_result(cycle_dir: Optional[Path], role_id: str) -> Optional[Dict[str, Any]]:
+    """Loads a reviewer's persisted outcome, or None when there is none."""
+    if cycle_dir is None:
+        return None
+    path = review_role_dir(cycle_dir, role_id) / "result.json"
+    if not path.is_file():
+        return None
+    try:
+        data = safe_load_json(path)
+    except Exception:
+        return None
+    if not isinstance(data, dict) or not data.get("status"):
+        return None
+    return data
 
 
 @dataclass
@@ -294,11 +409,36 @@ def build_reviewer_candidates(
     )
 
     fallback_pool = provider_pool.select_candidates(
-        task_category="code_heavy", avoid_provider=preferred, task=task,
+        task_category="code_heavy",
+        avoid_provider=preferred,
+        task=task,
+        role=role_id,
     )
     if role_id in LOCAL_INELIGIBLE_REVIEWER_ROLES:
         fallback_pool = [c for c in fallback_pool if c not in LOCAL_PROVIDER_IDS]
     return [preferred] + [c for c in fallback_pool if c != preferred]
+
+
+def _current_capacity_block(provider_pool: Optional[Any], candidate: str) -> Optional[str]:
+    """Names the reason a provider cannot serve a review right now, if any.
+
+    Consults the pool's live availability rather than only asking whether the
+    executable exists, so a provider already known to be unreachable or
+    exhausted is skipped before an attempt is spent on it.
+    """
+    if provider_pool is None:
+        return None
+    try:
+        status = provider_pool.get_status(candidate)
+    except Exception:
+        return None
+    blocked = getattr(provider_pool, "_capacity_exclusion", None)
+    if callable(blocked):
+        try:
+            return blocked(status)
+        except Exception:
+            return None
+    return None
 
 
 def invoke_reviewer_with_failover(
@@ -328,13 +468,30 @@ def invoke_reviewer_with_failover(
     """
     attempts_log: List[Dict[str, Any]] = []
     for candidate in candidates[:max_attempts]:
+        # Reviewer assignments are planned when implementation settles, which
+        # can be many minutes before the review actually launches. Honour the
+        # provider's state now rather than the state it had at planning time:
+        # SLOPFIX-06 routed the correctness review to a provider whose
+        # transport had already failed, spent the attempt, and got nothing back.
+        unavailable_reason = _current_capacity_block(provider_pool, candidate)
+        if unavailable_reason:
+            attempts_log.append(
+                {
+                    "provider": candidate,
+                    "resource_id": candidate,
+                    "outcome": "unavailable",
+                    "reason": unavailable_reason,
+                    "checked_at": "launch",
+                }
+            )
+            continue
         try:
             backend = backend_lookup(candidate)
         except Exception:
-            attempts_log.append({"provider": candidate, "outcome": "unavailable"})
+            attempts_log.append({"provider": candidate, "resource_id": candidate, "outcome": "unavailable"})
             continue
         if not backend or not backend.is_available():
-            attempts_log.append({"provider": candidate, "outcome": "unavailable"})
+            attempts_log.append({"provider": candidate, "resource_id": candidate, "outcome": "unavailable"})
             continue
 
         # Tell the backend which candidate this attempt represents, matching
@@ -399,6 +556,108 @@ class ReviewRunner:
     """Orchestrates independent review runs, output parsing, and reconciliation."""
 
     @classmethod
+    def _reconstruct_cached_review(
+        cls,
+        cycle_dir: Optional[Path],
+        role_id: str,
+        role_name: str,
+    ) -> Optional["SingleReviewResult"]:
+        """Rebuilds a reviewer's durable state after an interruption.
+
+        Prefers the persisted `result.json`, which records exactly what the
+        live path concluded. Runs predating that file fall back to judging the
+        transcript itself: an empty one reconstructs as `output_invalid`, never
+        as clean. Returns None when the reviewer genuinely never ran.
+        """
+        if cycle_dir is None:
+            return None
+
+        cached_md = cycle_dir / f"{role_id}.md"
+        cached_yaml = cycle_dir / f"{role_id}_findings.yaml"
+
+        persisted = read_review_result(cycle_dir, role_id)
+        raw_text = ""
+        if cached_md.is_file():
+            try:
+                raw_text = cached_md.read_text(encoding="utf-8")
+            except Exception:
+                raw_text = ""
+
+        if persisted is not None:
+            findings: List[ReviewFinding] = []
+            if persisted.get("status") in ("clean", "findings_detected"):
+                findings = cls._load_cached_findings(cached_yaml)
+            return SingleReviewResult(
+                reviewer_role=role_id,
+                reviewer_name=role_name,
+                status=persisted.get("status", REVIEW_STATUS_NOT_RUN),
+                findings=findings,
+                raw_output=raw_text,
+                error_message=persisted.get("raw_failure"),
+                duration_seconds=persisted.get("duration_seconds", 0.0) or 0.0,
+                attempts=(persisted.get("failover") or {}).get("attempts", []),
+            )
+
+        if not (cached_md.is_file() and cached_yaml.is_file()):
+            return None
+
+        # Legacy evidence, written before reviewer results were persisted. The
+        # findings file cannot settle this on its own -- an empty list is what a
+        # deliberate clean review and a dead provider both leave behind. The
+        # transcript can: a reviewer that emitted nothing at all did not review
+        # anything, whatever its findings file says. That is exactly the pair
+        # SLOPFIX-06 reconstructed as clean (0-byte transcript, `[]` findings).
+        if not raw_text.strip():
+            return SingleReviewResult(
+                reviewer_role=role_id,
+                reviewer_name=role_name,
+                status="output_invalid",
+                findings=[],
+                raw_output="",
+                error_message=(
+                    "Reviewer transcript is empty; no durable result was "
+                    "recorded, so the review cannot be treated as completed."
+                ),
+                duration_seconds=0.0,
+            )
+
+        findings = cls._load_cached_findings(cached_yaml)
+        return SingleReviewResult(
+            reviewer_role=role_id,
+            reviewer_name=role_name,
+            status="findings_detected" if findings else "clean",
+            findings=findings,
+            raw_output=raw_text,
+            error_message=None,
+            duration_seconds=0.0,
+        )
+
+    @staticmethod
+    def _load_cached_findings(cached_yaml: Path) -> List[ReviewFinding]:
+        """Reads a persisted findings file, tolerating both list and mapping forms."""
+        if not cached_yaml.is_file():
+            return []
+        try:
+            raw_data = yaml.safe_load(cached_yaml.read_text(encoding="utf-8")) or []
+        except Exception:
+            return []
+        if isinstance(raw_data, dict):
+            entries = raw_data.get("findings", [])
+        elif isinstance(raw_data, list):
+            entries = raw_data
+        else:
+            entries = []
+        out: List[ReviewFinding] = []
+        for item in entries:
+            try:
+                out.append(
+                    ReviewFinding.from_dict(item) if isinstance(item, dict) else item
+                )
+            except Exception:
+                continue
+        return out
+
+    @classmethod
     def execute_review_cycle(
         cls,
         task: TaskSpec,
@@ -412,6 +671,7 @@ class ReviewRunner:
         run_dir: Optional[Union[str, Path]] = None,
         provider_pool: Optional[Any] = None,
         progress_tracker: Optional[Any] = None,
+        implementer_resource_id: Optional[str] = None,
     ) -> ReviewCycleResult:
         """
         Executes each specified reviewer independently against the actual implementation diff.
@@ -446,41 +706,23 @@ class ReviewRunner:
             role = get_reviewer_role(role_id)
             role_name = role.name if role else role_id
 
-            # Check if this reviewer already completed in a previous interrupted run
-            cached_result: Optional[SingleReviewResult] = None
-            if cycle_dir:
-                cached_md = cycle_dir / f"{role_id}.md"
-                cached_yaml = cycle_dir / f"{role_id}_findings.yaml"
-                if cached_md.is_file() and cached_yaml.is_file():
-                    try:
-                        c_raw = cached_md.read_text(encoding="utf-8")
-                        raw_data = yaml.safe_load(cached_yaml.read_text(encoding="utf-8")) or []
-                        if isinstance(raw_data, dict):
-                            c_findings_data = raw_data.get("findings", [])
-                        elif isinstance(raw_data, list):
-                            c_findings_data = raw_data
-                        else:
-                            c_findings_data = []
-                        c_findings = [
-                            ReviewFinding.from_dict(f) if isinstance(f, dict) else f
-                            for f in c_findings_data
-                        ]
-                        cached_result = SingleReviewResult(
-                            reviewer_role=role_id,
-                            reviewer_name=role_name,
-                            status="findings_detected" if c_findings else "clean",
-                            findings=c_findings,
-                            raw_output=c_raw,
-                            error_message=None,
-                            duration_seconds=0.0,
-                        )
-                    except Exception:
-                        cached_result = None
+            # Reconstruct a reviewer that already ran in an interrupted run.
+            # Status comes from the persisted result, never from the shape of
+            # the findings file: inferring "clean" from an empty list turned a
+            # dead reviewer's zero-byte output into a passing review and
+            # skipped the retry it was owed (HOWLFRAM-SLOPFIX-06).
+            cached_result = cls._reconstruct_cached_review(
+                cycle_dir, role_id, role_name
+            )
 
             if cached_result is not None:
-                reviewer_results[role_id] = cached_result
-                all_findings.extend(cached_result.findings)
-                continue
+                if cached_result.status in ("clean", "findings_detected"):
+                    reviewer_results[role_id] = cached_result
+                    all_findings.extend(cached_result.findings)
+                    continue
+                # Persisted as invalid/failed: it stays invalid, and the role is
+                # re-run under the normal policy below rather than being
+                # silently accepted.
 
             # Render brief with the REAL implementation diff and skill context
             brief = (
@@ -575,18 +817,34 @@ class ReviewRunner:
             reviewer_results[role_id] = single_res
             all_findings.extend(findings)
 
-            # Persist individual reviewer artifact incrementally
+            # Persist individual reviewer artifact incrementally. The legacy
+            # markdown/findings pair stays for backward compatibility; the
+            # result record is what resume actually reads.
             if cycle_dir:
+                from src.control_plane.atomic_io import atomic_write_text, atomic_write_yaml
                 try:
-                    from src.control_plane.atomic_io import atomic_write_text, atomic_write_yaml
                     atomic_write_text(cycle_dir / f"{role_id}.md", raw_output)
                     atomic_write_yaml(
                         cycle_dir / f"{role_id}_findings.yaml",
                         [f.to_dict() for f in findings],
                         sort_keys=False,
                     )
-                except Exception:
-                    pass
+                    write_review_result(
+                        cycle_dir,
+                        role_id,
+                        single_res,
+                        implementer=implementer_resource_id,
+                        assigned_resource=assigned_agent,
+                    )
+                except Exception as persist_err:
+                    # A review whose evidence did not survive is not a review we
+                    # may later reconstruct as clean. Mark it failed loudly
+                    # rather than leaving a half-written pair on disk.
+                    single_res.status = "reviewer_failure"
+                    single_res.error_message = (
+                        f"Reviewer evidence could not be persisted: {persist_err}"
+                    )
+                    has_failure = True
 
         # Run reconciliation across all gathered findings
         reconciliation = ReviewReconciler.reconcile(all_findings) if all_findings else None
