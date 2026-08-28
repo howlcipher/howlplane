@@ -72,6 +72,56 @@ def classify_stage_retry(stage: str, **kwargs) -> RetryClassification:
 class CrashRecoveryEngine:
     """Inspects durable task artifacts and coordinates safe recovery after process death."""
 
+    @staticmethod
+    def _reviewer_disposition(reviews_dir: Path, role: str) -> str:
+        """Classifies what a reviewer's durable evidence actually says.
+
+        Returns one of: completed_clean, completed_with_findings, failed,
+        invalid, running, pending. File presence alone is not a verdict -- a
+        zero-byte transcript beside an empty findings list is what a provider
+        that never answered leaves behind, and it must not read as a passing
+        review (HOWLFRAM-SLOPFIX-06).
+        """
+        result_file = reviews_dir / role / "result.json"
+        if result_file.is_file():
+            try:
+                data = safe_load_json(result_file)
+                status = (data or {}).get("status")
+            except Exception:
+                status = None
+            if status == "clean":
+                return "completed_clean"
+            if status == "findings_detected":
+                return "completed_with_findings"
+            if status == "output_invalid":
+                return "invalid"
+            if status in ("reviewer_failure", "malformed_output"):
+                return "failed"
+            if status:
+                return "pending"
+
+        md_file = reviews_dir / f"{role}.md"
+        yaml_file = reviews_dir / f"{role}_findings.yaml"
+        if not (md_file.is_file() and yaml_file.is_file()):
+            return "running" if md_file.is_file() else "pending"
+
+        try:
+            transcript = md_file.read_text(encoding="utf-8")
+        except Exception:
+            return "invalid"
+        if not transcript.strip():
+            return "invalid"
+
+        try:
+            parsed = yaml.safe_load(yaml_file.read_text(encoding="utf-8"))
+        except Exception:
+            return "failed"
+        if isinstance(parsed, dict):
+            parsed = parsed.get("findings", [])
+        if isinstance(parsed, list) and parsed:
+            return "completed_with_findings"
+        return "completed_clean"
+
     @classmethod
     def inspect_task(
         cls,
@@ -118,13 +168,24 @@ class CrashRecoveryEngine:
         task_locked = False
         lock_owner_pid = None
 
+        repo_lock_state: Optional[str] = None
+        repo_lock_reason: Optional[str] = None
+        repo_lock_task_id: Optional[str] = None
         if repo_lock_path.exists():
             try:
                 l_data = safe_load_json(repo_lock_path)
-                alive, _ = is_process_alive(
-                    l_data.get("pid", 0), l_data.get("hostname", "")
+                # Classified tri-state like the task lock: a recommendation is
+                # only useful if it names a command that can actually work, and
+                # the repository lock blocks recovery just as effectively.
+                state, reason = classify_lock_owner(
+                    l_data.get("pid", 0),
+                    l_data.get("hostname", ""),
+                    l_data.get("process_create_time", 0.0),
                 )
-                if alive:
+                repo_lock_state = state.value
+                repo_lock_reason = reason
+                repo_lock_task_id = l_data.get("task_id")
+                if state is not LockOwnerState.STALE:
                     repo_locked = True
                     lock_owner_pid = l_data.get("pid")
             except Exception:
@@ -165,11 +226,16 @@ class CrashRecoveryEngine:
                 pass
 
         reviews_dir = run_dir / "reviews"
+        reviewer_dispositions: Dict[str, str] = {}
         if reviews_dir.is_dir() and recommended_reviewers:
             for role in recommended_reviewers:
-                md_file = reviews_dir / f"{role}.md"
-                yaml_file = reviews_dir / f"{role}_findings.yaml"
-                if md_file.is_file() and yaml_file.is_file():
+                disposition = cls._reviewer_disposition(reviews_dir, role)
+                reviewer_dispositions[role] = disposition
+                # Only a review that actually produced a usable verdict counts
+                # as completed. Reporting a dead reviewer's empty transcript as
+                # "Completed Reviews" is how SLOPFIX-06 looked further along
+                # than it was.
+                if disposition in ("completed_clean", "completed_with_findings"):
                     completed_reviewers.append(role)
                 else:
                     incomplete_reviewers.append(role)
@@ -233,6 +299,21 @@ class CrashRecoveryEngine:
                 f"If that run is definitely gone, run 'ai unlock {task_id}' "
                 f"first, then 'ai resume {task_id}'."
             )
+        elif repo_locked and repo_lock_state == LockOwnerState.ACTIVE.value:
+            classification = RetryClassification.HUMAN_DECISION_REQUIRED
+            recommendation = (
+                f"Repository lock is held by active process PID "
+                f"{lock_owner_pid} for task '{repo_lock_task_id}'. Wait for it "
+                f"to finish before resuming."
+            )
+        elif repo_locked and repo_lock_state == LockOwnerState.AMBIGUOUS.value:
+            classification = RetryClassification.HUMAN_DECISION_REQUIRED
+            recommendation = (
+                f"Repository lock ownership is indeterminate "
+                f"({repo_lock_reason}). If that run is definitely gone, run "
+                f"'ai unlock {repo_lock_task_id or task_id}' first, then "
+                f"'ai resume {task_id}'."
+            )
         else:
             classification = classify_stage_retry(last_stage)
             recommendation = f"Run 'ai resume {task_id}' to recover from {last_stage}."
@@ -251,7 +332,9 @@ class CrashRecoveryEngine:
             "task_lock_state": task_lock_state,
             "task_lock_reason": task_lock_reason,
             "lock_owner_pid": lock_owner_pid,
+            "repo_lock_state": repo_lock_state,
             "completed_reviewers": completed_reviewers,
+            "reviewer_dispositions": reviewer_dispositions,
             "incomplete_reviewers": incomplete_reviewers,
             "has_local_receipt": has_local_receipt,
             "native_receipt_found": native_receipt_found,

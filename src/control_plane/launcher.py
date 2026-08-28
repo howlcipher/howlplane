@@ -865,6 +865,11 @@ def cmd_status(args: argparse.Namespace) -> int:
                         print(f"  Completed Reviews:  {', '.join(rec_diag.get('completed_reviewers'))}")
                     if rec_diag.get("incomplete_reviewers"):
                         print(f"  Pending Reviews:    {', '.join(rec_diag.get('incomplete_reviewers'))}")
+                    # Name why a review is not complete, so an invalid or failed
+                    # reviewer is visibly distinct from one that never ran.
+                    for role, disposition in (rec_diag.get("reviewer_dispositions") or {}).items():
+                        if disposition not in ("completed_clean", "completed_with_findings"):
+                            print(f"    - {role}: {disposition.upper()}")
                     print(f"  Recommendation:     {rec_diag.get('recommendation')}")
                     print("-" * 40)
                 else:
