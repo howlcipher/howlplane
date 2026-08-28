@@ -98,7 +98,9 @@ def test_bash_permissions_are_bounded():
     assert command_to_bash_specifier(["go", "test", "./..."]) == "Bash(go test:*)"
     assert command_to_bash_specifier(["pytest", "-q"]) == "Bash(pytest:*)"
     assert command_to_bash_specifier(["make", "test"]) == "Bash(make test)"
-    assert command_to_bash_specifier(["bash", "-c", "echo 1"]) == "Bash(bash -c echo 1)"
+    # Shell-quoted: the rule has to match the command as it is really
+    # submitted. The former unquoted spelling could not match one.
+    assert command_to_bash_specifier(["bash", "-c", "echo 1"]) == "Bash(bash -c 'echo 1')"
     assert command_to_bash_specifier([]) is None
 
 
@@ -556,9 +558,15 @@ def test_argument_level_path_escape_is_not_bounded_by_prefix_rules(tmp_path):
     """Also documented rather than asserted away.
 
     `Bash(go build:*)` admits any path argument, including one climbing out of
-    the repository. Bounding this needs argument validation the permission
-    vocabulary does not have; the working directory and Git authority
-    boundaries are what actually contain it.
+    the repository -- `go build -o ../outside/tool` and `gofmt -w ../sibling.go`
+    are both admitted. Bounding this needs argument validation the permission
+    vocabulary does not have.
+
+    The working directory is NOT a containment boundary and must not be
+    described as one; what limits the blast radius is the deny floor (no
+    destructive binary is grantable at all) plus whatever sandbox the provider
+    itself imposes. Recorded here as a known, named gap rather than a bound
+    this layer actually provides.
     """
     profile = _profile_for(_go_project(tmp_path), "implementation")
 
@@ -699,3 +707,46 @@ def test_ordinary_denied_command_is_recorded_verbatim(tmp_path):
     )
 
     assert res.metadata["denied_commands"] == ["gofmt -l ."]
+
+
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        # A scalar manifest entry is one token; unsplit it rendered as a
+        # bare-binary rule granting every subcommand.
+        (["git status"], "Bash(git status:*)"),
+        (["go test ./..."], "Bash(go test:*)"),
+        (["gofmt -l ."], "Bash(gofmt:*)"),
+    ],
+)
+def test_scalar_manifest_command_grants_no_more_than_its_list_form(command, expected):
+    assert command_to_bash_specifier(command) == expected
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["/bin/rm", "-rf", "/"],          # absolute path
+        ["/usr/bin/git", "push"],         # absolute path + authority-bearing
+        ["env", "rm", "-rf", "/"],        # delegation
+        ["xargs", "-n1", "rm"],           # delegation
+        ["nohup", "curl", "http://x"],    # delegation
+        ["timeout", "5", "curl", "http://x"],
+        ["git push"],                     # scalar spelling
+        ["sudo rm -rf /"],                # scalar spelling
+    ],
+)
+def test_deny_floor_is_not_bypassed_by_path_or_delegation(command):
+    """The floor must compare programs, not spellings."""
+    assert command_to_bash_specifier(command) is None
+
+
+def test_interpreter_grant_is_shell_quoted_so_it_matches_the_real_invocation():
+    """Raw joining emitted a rule the correctly quoted command never matches.
+
+    `bash -c "cd tests && go test ./..."` is a real discovered command for a
+    nested Go test module, so a rule it cannot match blocks legitimate work.
+    """
+    specifier = command_to_bash_specifier(["bash", "-c", "cd tests && go test ./..."])
+
+    assert specifier == "Bash(bash -c 'cd tests && go test ./...')"

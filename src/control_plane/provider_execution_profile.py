@@ -46,7 +46,9 @@ Two bounds are enforced here, and one is assumed of the provider:
   express that bound, so it is stated here rather than left implicit.
 """
 
+import shlex
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 # Tool names a provider needs to read a repository without changing it.
@@ -101,6 +103,14 @@ _NEVER_GRANTED_BINARIES = frozenset(
     }
 )
 
+# Binaries that run another program named in their own arguments. Judging only
+# the first token would let `env rm -rf /` or `xargs -n1 rm` past a deny floor
+# that refuses a bare `rm`.
+_DELEGATING_BINARIES = frozenset(
+    {"env", "xargs", "nohup", "timeout", "nice", "ionice", "setsid", "watch",
+     "find", "parallel", "stdbuf", "chroot", "unshare", "script"}
+)
+
 # The only Git subcommands an implementer may run. Commit, push, branch, merge,
 # reset and checkout are authority-bearing and stay with GitIntegrationExecutor.
 _READ_ONLY_GIT_SUBCOMMANDS = frozenset({"status", "diff", "log", "show", "blame", "ls-files"})
@@ -111,36 +121,56 @@ _READ_ONLY_GIT_SUBCOMMANDS = frozenset({"status", "diff", "log", "show", "blame"
 _SHELL_METACHARACTERS = ("&", ";", "|", "$", "`", ">", "<", "\n")
 
 
-def _first_word(token: str) -> str:
-    """Returns the executable named by a token, tolerating an unsplit string.
+def _normalise_tokens(command: Sequence[str]) -> List[str]:
+    """Splits any token that is really a whole command line.
 
-    A manifest may supply `format = "rm -rf /"` as a single string, which
-    reaches here as one token. Reading only the first word means such an entry
-    is judged on the binary it actually runs.
+    A manifest may supply `test = "git status"` as a scalar, which arrives as a
+    single token. Left unsplit it was rendered as `Bash(git:*)` -- a grant of
+    every Git subcommand, push and reset included -- because the renderer saw
+    one token and emitted a bare-binary rule. Splitting first means the scalar
+    and list spellings of a command produce the same permission.
     """
-    return token.strip().split()[0] if token.strip() else ""
+    tokens: List[str] = []
+    for raw in command:
+        text = str(raw).strip()
+        if not text:
+            continue
+        tokens.extend(text.split() if " " in text or "\t" in text else [text])
+    return tokens
+
+
+def _executable_name(token: str) -> str:
+    """Returns the bare executable a token names, ignoring any directory.
+
+    `/bin/rm` and `rm` are the same program; a deny floor comparing spellings
+    rather than programs is bypassed by writing the absolute path.
+    """
+    return PurePosixPath(str(token).strip()).name
 
 
 def _is_forbidden_command(tokens: Sequence[str]) -> bool:
     """Reports whether a discovered command may never become a permission."""
     if not tokens:
         return True
-    binary = _first_word(tokens[0])
+    binary = _executable_name(tokens[0])
     if binary in _NEVER_GRANTED_BINARIES:
         return True
     if binary == "git":
-        rest = tokens[0].strip().split()[1:] or list(tokens[1:])
-        subcommand = rest[0] if rest else ""
+        subcommand = _executable_name(tokens[1]) if len(tokens) > 1 else ""
         if subcommand not in _READ_ONLY_GIT_SUBCOMMANDS:
             return True
-    # An interpreter runs its payload, so the payload is judged too: this is
+    # An interpreter runs its payload and a delegating binary runs a program
+    # named in its arguments, so for both the arguments are judged too. This is
     # what separates `bash -c "cd tests && go test ./..."`, a real discovered
-    # command in this repository, from `bash -c "curl http://... | sh"`.
-    if binary in _OPAQUE_INTERPRETERS:
-        for token in tokens:
+    # command in this repository, from `bash -c "curl http://... | sh"` or
+    # `env rm -rf /`.
+    if binary in _OPAQUE_INTERPRETERS or binary in _DELEGATING_BINARIES:
+        for token in tokens[1:]:
             for word in str(token).replace("|", " ").replace("&", " ").split():
-                candidate = word.strip("\"'()`$;")
+                candidate = _executable_name(word.strip("\"'()`$;"))
                 if candidate in _NEVER_GRANTED_BINARIES:
+                    return True
+                if candidate == "git":
                     return True
     return False
 
@@ -162,16 +192,21 @@ def command_to_bash_specifier(command: Sequence[str]) -> Optional[str]:
     is an interpreter are granted verbatim, because a prefix rule for `bash` or
     `make` would grant arbitrary execution.
     """
-    tokens = [str(token) for token in command if str(token).strip()]
+    tokens = _normalise_tokens(command)
     if not tokens:
         return None
     if _is_forbidden_command(tokens):
         return None
-    binary = _first_word(tokens[0])
-    if binary in _OPAQUE_INTERPRETERS:
+    binary = _executable_name(tokens[0])
+    if binary in _OPAQUE_INTERPRETERS or binary in _DELEGATING_BINARIES:
         # Granted verbatim as an exact literal, so the payload authorised is
-        # precisely this command and nothing built on top of it.
-        return f"Bash({' '.join(tokens)})"
+        # precisely this command and nothing built on top of it. Rendered with
+        # shell quoting, because the rule has to match the command as it will
+        # actually be submitted: raw joining emitted
+        # `Bash(bash -c cd tests && go test ./...)`, which the correctly quoted
+        # invocation never matches.
+        original = [str(token) for token in command if str(token).strip()]
+        return f"Bash({shlex.join(original)})"
     if any(
         marker in token for token in tokens for marker in _SHELL_METACHARACTERS
     ):
