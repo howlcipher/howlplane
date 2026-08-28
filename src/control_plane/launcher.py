@@ -665,6 +665,16 @@ def cmd_howlframe_audit(args: argparse.Namespace) -> int:
     return cp_cmd_howlframe_audit(args)
 
 
+# Lifecycle states from which a run never continues. `progress.json` is a
+# heartbeat written by a live process and is not cleared when a task reaches
+# one of these, so a cancelled run kept rendering as "STALE / PREPARING" from
+# stale heartbeat metadata while its own recommendation correctly said it was
+# cancelled. Terminal lifecycle state outranks process-progress presentation.
+# `rejected` is deliberately absent: it is a human decision value, and
+# HumanLifecycleManager.reject transitions the task to `failed`.
+TERMINAL_TASK_STATES = frozenset({"complete", "cancelled", "failed"})
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     """Displays project status, active task runs, lock status, and crash recovery diagnostics."""
     target_repo = find_git_repo_root(args.repo)
@@ -824,7 +834,11 @@ def cmd_status(args: argparse.Namespace) -> int:
                             print(f"  Reason:             {dec_record.reason}")
                         print("  Terminal state:     FAILED (Rejected)")
                     print("-" * 40)
-                elif prog_data and prog_data.get("state") == "RUNNING":
+                elif (
+                    prog_data
+                    and prog_data.get("state") == "RUNNING"
+                    and t_spec.current_state not in TERMINAL_TASK_STATES
+                ):
                     p_phase = prog_data.get("phase", t_spec.current_state.upper())
                     p_resource = prog_data.get("resource_id") or t_spec.actual_agent or t_spec.recommended_agent or "N/A"
                     p_elapsed = format_elapsed(prog_data.get("elapsed_seconds", 0))

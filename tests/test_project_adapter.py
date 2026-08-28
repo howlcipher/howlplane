@@ -184,3 +184,92 @@ def test_howlplane_root_discovery_regression():
     assert ctx.lint_commands == [["make", "lint"]]
     assert "integrations/howlframe/project_context_audit.howl" in ctx.metadata["howl_sources"]
     assert "cli_app" in ctx.metadata["apparent_targets"]
+
+
+# --- Formatting command discovery (HOWLFRAM-SLOPFIX-07) -----------------------
+#
+# A Claude implementation attempt was denied `gofmt -l` and `go fmt` because no
+# formatting command was discoverable for any language, so the bounded allow
+# list could never contain one.
+
+
+def test_go_project_discovers_both_formatter_forms(tmp_path: Path):
+    (tmp_path / "go.mod").write_text("module example.com/x\n\ngo 1.22\n", encoding="utf-8")
+
+    ctx = ProjectAdapter.discover(tmp_path)
+
+    assert ["go", "fmt", "./..."] in ctx.format_commands
+    assert ["gofmt", "-l", "."] in ctx.format_commands
+
+
+def test_format_discovery_survives_fully_specified_command_set(tmp_path: Path):
+    """Formatting is discovered even when test/build/lint are all explicit.
+
+    The stack heuristics only run when one of those three is still missing. A
+    formatter discovered inside that block would be silently unavailable to
+    exactly the mature projects most likely to gate on formatting in CI.
+    """
+    (tmp_path / "go.mod").write_text("module example.com/x\n\ngo 1.22\n", encoding="utf-8")
+    (tmp_path / ".ai-project.toml").write_text(
+        '[commands]\ntest = ["go", "test", "./..."]\n'
+        'build = ["go", "build", "./..."]\n'
+        'lint = ["go", "vet", "./..."]\n',
+        encoding="utf-8",
+    )
+
+    ctx = ProjectAdapter.discover(tmp_path)
+
+    assert ctx.test_commands and ctx.build_commands and ctx.lint_commands
+    assert ctx.format_commands, "formatter must be discovered outside the heuristics gate"
+
+
+def test_makefile_target_is_added_alongside_the_language_default(tmp_path: Path):
+    """A wrapper target must not suppress the language-native formatter.
+
+    An agent told to format Go code reaches for `gofmt`. Granting only
+    `make fmt` leaves that blocked, which is the original failure again.
+    """
+    (tmp_path / "go.mod").write_text("module example.com/x\n\ngo 1.22\n", encoding="utf-8")
+    (tmp_path / "Makefile").write_text("fmt:\n\tgo fmt ./...\n", encoding="utf-8")
+
+    ctx = ProjectAdapter.discover(tmp_path)
+
+    assert ["make", "fmt"] in ctx.format_commands
+    assert ["gofmt", "-l", "."] in ctx.format_commands
+
+
+def test_python_formatter_only_granted_when_configured(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.black]\nline-length = 100\n", encoding="utf-8"
+    )
+
+    ctx = ProjectAdapter.discover(tmp_path)
+
+    assert ["black", "."] in ctx.format_commands
+
+
+def test_project_without_known_formatter_gets_none(tmp_path: Path):
+    """No language gets a formatter it has no toolchain for."""
+    (tmp_path / "package.json").write_text('{"name": "x"}\n', encoding="utf-8")
+
+    ctx = ProjectAdapter.discover(tmp_path)
+
+    assert ctx.format_commands == []
+
+
+def test_formatting_never_enters_the_verification_plan(tmp_path: Path):
+    """Formatting is implementation work, not a deterministic gate.
+
+    Adding it to the plan would change what every change is verified against.
+    """
+    (tmp_path / "go.mod").write_text("module example.com/x\n\ngo 1.22\n", encoding="utf-8")
+
+    ctx = ProjectAdapter.discover(tmp_path)
+    plan = ProjectAdapter.create_verification_plan(ctx, "TASK-FMT-01")
+
+    assert ctx.format_commands
+    rendered = [
+        step.command if isinstance(step.command, str) else " ".join(step.command)
+        for step in plan.steps
+    ]
+    assert not any("fmt" in command for command in rendered), rendered

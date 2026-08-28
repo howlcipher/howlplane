@@ -16,19 +16,39 @@ exited 0 -- which the orchestrator recorded as a successful implementation.
 Two properties are load-bearing:
 
 * Bash is bounded, never blanket. Permitted commands are derived from the
-  project's own discovered verification surface (ProjectContext /
+  project's own discovered command surface (ProjectContext /
   VerificationPlan) plus read-only Git introspection, so a Go repository grants
-  `go test`/`go vet`/`go build` and a Python one grants `pytest`/`flake8`,
-  without a hardcoded language stack and without granting the shell.
+  `go test`/`go vet`/`go build`/`go fmt` and a Python one grants
+  `pytest`/`flake8`, without a hardcoded language stack and without granting
+  the shell. The surface includes the project's formatting commands: formatting
+  is ordinary implementation work, and omitting it blocked a real unattended
+  run on `gofmt -l` (HOWLFRAM-SLOPFIX-07). Formatters are granted to mutating
+  roles only and are never added to the VerificationPlan, so the deterministic
+  gate is unchanged.
 * Denials win. Operator configuration and `TaskSpec.prohibited_actions` are
   subtracted last, after every default, so an explicit prohibition can never be
   overridden by a provider default.
 
 `--dangerously-skip-permissions` and `--permission-mode bypassPermissions` are
 never emitted, and operator configuration cannot express them.
+
+Two bounds are enforced here, and one is assumed of the provider:
+
+* Enforced: a discovered command naming a destructive binary, or performing
+  authority-bearing Git mutation, never becomes a permission at all -- the
+  target repository's own manifest and Makefile are inputs, so without this
+  floor the repository under change would decide what the provider may run.
+* Enforced: a command carrying a shell operator is never rendered as a `:*`
+  prefix rule, which could not bound what follows it.
+* Assumed: that the provider splits a requested command on shell operators
+  before matching it against a prefix rule. Claude Code does. A provider that
+  matched literally would admit `go fmt ./... && ...`; the vocabulary cannot
+  express that bound, so it is stated here rather than left implicit.
 """
 
+import shlex
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 # Tool names a provider needs to read a repository without changing it.
@@ -62,6 +82,98 @@ MUTATING_ROLES: Tuple[str, ...] = ("implementation", "remediation")
 # their commands are granted as exact literals instead.
 _OPAQUE_INTERPRETERS = frozenset({"bash", "sh", "zsh", "python", "python3", "make"})
 
+# Binaries never granted from a discovered command, whatever the project says.
+#
+# Discovery reads the target repository's own manifest and Makefile, so without
+# a floor the repository under change decides what the provider may run: a
+# manifest entry of "rm -rf /" became `Bash(rm -rf /:*)`, and `git push` became
+# a grant despite Git mutation being authority-bearing work owned by
+# GitIntegrationExecutor. The allow list must be bounded by the control plane,
+# not by the repository being worked on.
+_NEVER_GRANTED_BINARIES = frozenset(
+    {
+        "rm", "rmdir", "mv", "dd", "mkfs", "shred", "truncate",
+        "sudo", "su", "doas",
+        "chmod", "chown", "chgrp",
+        "curl", "wget", "nc", "netcat", "ssh", "scp", "sftp", "rsync", "telnet",
+        "shutdown", "reboot", "halt", "poweroff", "kill", "killall", "pkill",
+        "eval", "exec", "source",
+        "crontab", "at", "systemctl", "service",
+        "docker", "podman", "kubectl",
+    }
+)
+
+# Binaries that run another program named in their own arguments. Judging only
+# the first token would let `env rm -rf /` or `xargs -n1 rm` past a deny floor
+# that refuses a bare `rm`.
+_DELEGATING_BINARIES = frozenset(
+    {"env", "xargs", "nohup", "timeout", "nice", "ionice", "setsid", "watch",
+     "find", "parallel", "stdbuf", "chroot", "unshare", "script"}
+)
+
+# The only Git subcommands an implementer may run. Commit, push, branch, merge,
+# reset and checkout are authority-bearing and stay with GitIntegrationExecutor.
+_READ_ONLY_GIT_SUBCOMMANDS = frozenset({"status", "diff", "log", "show", "blame", "ls-files"})
+
+# Characters that turn one permitted command into several. A prefix rule ending
+# in `:*` cannot bound what follows it, so a command containing these is never
+# rendered as a prefix rule.
+_SHELL_METACHARACTERS = ("&", ";", "|", "$", "`", ">", "<", "\n")
+
+
+def _normalise_tokens(command: Sequence[str]) -> List[str]:
+    """Splits any token that is really a whole command line.
+
+    A manifest may supply `test = "git status"` as a scalar, which arrives as a
+    single token. Left unsplit it was rendered as `Bash(git:*)` -- a grant of
+    every Git subcommand, push and reset included -- because the renderer saw
+    one token and emitted a bare-binary rule. Splitting first means the scalar
+    and list spellings of a command produce the same permission.
+    """
+    tokens: List[str] = []
+    for raw in command:
+        text = str(raw).strip()
+        if not text:
+            continue
+        tokens.extend(text.split() if " " in text or "\t" in text else [text])
+    return tokens
+
+
+def _executable_name(token: str) -> str:
+    """Returns the bare executable a token names, ignoring any directory.
+
+    `/bin/rm` and `rm` are the same program; a deny floor comparing spellings
+    rather than programs is bypassed by writing the absolute path.
+    """
+    return PurePosixPath(str(token).strip()).name
+
+
+def _is_forbidden_command(tokens: Sequence[str]) -> bool:
+    """Reports whether a discovered command may never become a permission."""
+    if not tokens:
+        return True
+    binary = _executable_name(tokens[0])
+    if binary in _NEVER_GRANTED_BINARIES:
+        return True
+    if binary == "git":
+        subcommand = _executable_name(tokens[1]) if len(tokens) > 1 else ""
+        if subcommand not in _READ_ONLY_GIT_SUBCOMMANDS:
+            return True
+    # An interpreter runs its payload and a delegating binary runs a program
+    # named in its arguments, so for both the arguments are judged too. This is
+    # what separates `bash -c "cd tests && go test ./..."`, a real discovered
+    # command in this repository, from `bash -c "curl http://... | sh"` or
+    # `env rm -rf /`.
+    if binary in _OPAQUE_INTERPRETERS or binary in _DELEGATING_BINARIES:
+        for token in tokens[1:]:
+            for word in str(token).replace("|", " ").replace("&", " ").split():
+                candidate = _executable_name(word.strip("\"'()`$;"))
+                if candidate in _NEVER_GRANTED_BINARIES:
+                    return True
+                if candidate == "git":
+                    return True
+    return False
+
 
 def is_mutating_role(role: Optional[str]) -> bool:
     """Returns True when `role` is permitted to produce a repository delta."""
@@ -80,12 +192,27 @@ def command_to_bash_specifier(command: Sequence[str]) -> Optional[str]:
     is an interpreter are granted verbatim, because a prefix rule for `bash` or
     `make` would grant arbitrary execution.
     """
-    tokens = [str(token) for token in command if str(token).strip()]
+    tokens = _normalise_tokens(command)
     if not tokens:
         return None
-    binary = tokens[0]
-    if binary in _OPAQUE_INTERPRETERS:
-        return f"Bash({' '.join(tokens)})"
+    if _is_forbidden_command(tokens):
+        return None
+    binary = _executable_name(tokens[0])
+    if binary in _OPAQUE_INTERPRETERS or binary in _DELEGATING_BINARIES:
+        # Granted verbatim as an exact literal, so the payload authorised is
+        # precisely this command and nothing built on top of it. Rendered with
+        # shell quoting, because the rule has to match the command as it will
+        # actually be submitted: raw joining emitted
+        # `Bash(bash -c cd tests && go test ./...)`, which the correctly quoted
+        # invocation never matches.
+        original = [str(token) for token in command if str(token).strip()]
+        return f"Bash({shlex.join(original)})"
+    if any(
+        marker in token for token in tokens for marker in _SHELL_METACHARACTERS
+    ):
+        # A `:*` rule cannot bound what follows the prefix, so a command
+        # carrying shell operators is not expressible as one.
+        return None
     if len(tokens) > 1 and not tokens[1].startswith("-"):
         return f"Bash({binary} {tokens[1]}:*)"
     return f"Bash({binary}:*)"
@@ -99,6 +226,7 @@ def _iter_project_commands(project_context: Any) -> Iterable[Sequence[str]]:
         "test_commands",
         "build_commands",
         "lint_commands",
+        "format_commands",
         "hygiene_commands",
     ):
         for command in getattr(project_context, attribute, None) or []:
@@ -197,10 +325,15 @@ def build_execution_profile(
 
     denied_names = {entry.split("(", 1)[0] for entry in denied}
     tools = [tool for tool in tools if tool not in denied and tool not in denied_names]
+    # Only a bare `Bash` denial removes the whole surface. Treating
+    # `Bash(git log:*)` as one would strip every command while leaving Edit and
+    # Write in place -- an implementer able to change files but not to test,
+    # vet or format them, which is the shape that failed HOWLFRAM-SLOPFIX-07.
+    bash_denied_wholesale = "Bash" in denied
     bash = [
         specifier
         for specifier in bash
-        if specifier not in denied and "Bash" not in denied_names
+        if specifier not in denied and not bash_denied_wholesale
     ]
 
     permission_mode = _operator_value(operator_settings, "permission_mode", None)
@@ -213,10 +346,12 @@ def build_execution_profile(
         permission_mode = MUTATION_PERMISSION_MODE
 
     can_mutate = any(tool in tools for tool in MUTATION_TOOLS)
-    if not can_mutate:
+    if not can_mutate and permission_mode == MUTATION_PERMISSION_MODE:
         # Without edit tools there is nothing for an edit-accepting mode to do,
         # and claiming one would misreport the capability actually granted.
-        permission_mode = None if mutating else permission_mode
+        # This applies to review roles too: an operator default of
+        # `acceptEdits` must not follow a reviewer that holds no edit tools.
+        permission_mode = None
 
     return ProviderExecutionProfile(
         role=role,

@@ -10,7 +10,7 @@ and deterministic mock/fake backends for testing and CI.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-import hashlib, json, os, shlex, shutil, subprocess, time
+import hashlib, json, os, re, shlex, shutil, subprocess, time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -92,6 +92,49 @@ def _reports_permission_block(text: Optional[str]) -> bool:
     """Returns True when transcript text states a tool was blocked on approval."""
     lowered = (text or "").lower()
     return any(marker in lowered for marker in _PERMISSION_BLOCK_MARKERS)
+
+
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)\b(bearer)\s+\S+"),
+    re.compile(r"(?i)(--?(?:password|token|api[-_]?key|secret|auth)[= ])\S+"),
+    re.compile(r"(?i)\b([A-Za-z0-9_]*(?:token|secret|passwd|password|api[-_]?key)[A-Za-z0-9_]*=)\S+"),
+    re.compile(r"\b(sk-|ghp_|gho_|github_pat_)[A-Za-z0-9_\-]{8,}"),
+)
+
+# A denied command is evidence, and evidence is written to the ledger and shown
+# to operators. A refused command can carry a credential in its arguments, so
+# it is redacted and bounded before it is persisted anywhere.
+_MAX_RECORDED_COMMAND_CHARS = 200
+
+
+def _redact_command(command: str) -> str:
+    """Removes credential-shaped arguments from a command before recording it."""
+    redacted = command
+    for pattern in _SECRET_PATTERNS:
+        redacted = pattern.sub(
+            lambda m: f"{m.group(1)}<redacted>" if m.lastindex else "<redacted>",
+            redacted,
+        )
+    if len(redacted) > _MAX_RECORDED_COMMAND_CHARS:
+        redacted = redacted[:_MAX_RECORDED_COMMAND_CHARS] + "...(truncated)"
+    return redacted
+
+
+def _denied_command(entry: Dict[str, Any]) -> Optional[str]:
+    """Extracts the shell command a Bash permission denial actually refused.
+
+    A denial records only `tool_name`, so a refused `gofmt -l .` and a refused
+    `rm -rf /` both reduce to "Bash". In HOWLFRAM-SLOPFIX-07 that left the
+    denied command recoverable only from the agent's prose, which is not
+    evidence a later reader can rely on. The command is part of the denial, so
+    it is recorded with it.
+    """
+    tool_input = entry.get("tool_input")
+    if isinstance(tool_input, dict):
+        command = tool_input.get("command")
+        if isinstance(command, str) and command.strip():
+            return _redact_command(command.strip())
+    return None
 
 # Local Ollama defaults (milestone #58). Intentionally conservative: a single
 # 7B-instruct model, a bounded 8K context window, and one inference at a time
@@ -585,6 +628,16 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
                 if isinstance(entry, dict)
             }
         )
+        denied_commands = sorted(
+            {
+                command
+                for entry in denials
+                if isinstance(entry, dict)
+                for command in (_denied_command(entry),)
+                if command
+            }
+        )
+
         if not denied_tools and _reports_permission_block(text):
             # The CLI did not populate `permission_denials`, but the agent
             # explicitly said it was blocked on approval. Reported honestly as
@@ -594,11 +647,15 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
         if denied_tools:
             result.metadata[TOOL_PERMISSION_KEY] = TOOL_PERMISSION_DENIED
             result.metadata["denied_tools"] = denied_tools
+            if denied_commands:
+                result.metadata["denied_commands"] = denied_commands
             if result.success:
                 result.success = False
+                # Name the command when one is known: "Bash" alone does not say
+                # whether the bound was wrong or the request was illegitimate.
+                detail = ", ".join(denied_commands or denied_tools)
                 result.error_message = (
-                    "Required tool permissions were unavailable: "
-                    + ", ".join(denied_tools)
+                    "Required tool permissions were unavailable: " + detail
                 )
         return result
 
