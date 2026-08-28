@@ -308,3 +308,69 @@ def test_ai_status_with_shadow_mode(tmp_path, capsys, monkeypatch):
     captured = capsys.readouterr().out
     assert "HOWLFRAME DOGFOOD STATUS" in captured
     assert "shadow" in captured
+
+
+# --- Terminal state outranks stale progress (HOWLFRAM-SLOPFIX-07 follow-up) ---
+
+
+def _run_dir_with_progress(repo_dir: Path, task_id: str, current_state: str) -> Path:
+    """Builds a run whose progress heartbeat still claims RUNNING.
+
+    This is the real shape a cancelled or failed run leaves behind:
+    `progress.json` is written by a live process and is not rewritten when the
+    lifecycle reaches a terminal state.
+    """
+    run_dir = repo_dir / ".task_runs" / task_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "task.yaml").write_text(
+        f"task_id: {task_id}\n"
+        f"repository: {repo_dir}\n"
+        "objective: bounded change\n"
+        f"current_state: {current_state}\n",
+        encoding="utf-8",
+    )
+    (run_dir / "progress.json").write_text(
+        json.dumps(
+            {
+                "task_id": task_id,
+                "phase": "PREPARING",
+                "state": "RUNNING",
+                "resource_id": "claude_code",
+                "elapsed_seconds": 0,
+                "pid": 999999,
+                "schema": "howlplane.task_progress/v1",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return run_dir
+
+
+@pytest.mark.parametrize("terminal_state", ["cancelled", "failed", "complete"])
+def test_terminal_task_not_reported_as_stale_progress(tmp_path, capsys, terminal_state):
+    """A terminal run must not be headlined from a stale heartbeat.
+
+    HOWLFRAM-SLOPFIX-06 was durably CANCELLED yet still rendered as
+    "STALE (Process not running) / PREPARING", disagreeing with its own
+    recommendation immediately below it.
+    """
+    repo_dir = _make_test_repo(tmp_path / "sample_repo", {"go.mod": "module sample\n"})
+    _run_dir_with_progress(repo_dir, f"TASK-TERM-{terminal_state.upper()}", terminal_state)
+
+    assert launcher_main(["status", "--repo", str(repo_dir)]) == 0
+    captured = capsys.readouterr().out
+
+    assert "STALE (Process not running)" not in captured
+    assert "Phase:          PREPARING" not in captured
+    assert terminal_state.upper() in captured
+
+
+def test_live_run_still_reported_from_progress(tmp_path, capsys):
+    """The progress view is unchanged for a run that has not reached a terminal state."""
+    repo_dir = _make_test_repo(tmp_path / "sample_repo", {"go.mod": "module sample\n"})
+    _run_dir_with_progress(repo_dir, "TASK-LIVE-01", "implementing")
+
+    assert launcher_main(["status", "--repo", str(repo_dir)]) == 0
+    captured = capsys.readouterr().out
+
+    assert "Phase:          PREPARING" in captured
