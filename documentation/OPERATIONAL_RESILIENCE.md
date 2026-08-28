@@ -59,6 +59,55 @@ HowlPlane prevents concurrent agent collisions, race conditions, and corrupted g
 - **Schema:** `howlplane.lock/v1`
 - **Function:** Serializes resume, approval, and remediation operations on a specific task run, preventing duplicate worker invocations.
 
+### 2.3 Lock Ownership Lineage
+
+One governed run reaches the same lock through more than one component: `ai
+resume` takes the task lock, validates the run, and then hands control to the
+orchestrator, which needs that same lock to do the work. Ownership is therefore
+tracked per **lifecycle**, not per object and not per process.
+
+- A successful acquisition creates a `LockOwnership` token (lineage id, lock
+  path, task, operation) and registers it against the canonical lock path.
+- A component handed that token may re-enter the lock; the lineage depth
+  increases and the lock file is released only when every holder has released.
+- A caller with no token, or a token from a different lineage, is refused
+  exactly as a foreign process would be. Sharing a PID is not sharing
+  authority, so `os.getpid()` is deliberately not the test.
+- Another live process is still blocked, stale locks are still reclaimable, and
+  ambiguous ownership still fails closed.
+
+Before this, `ai resume` acquired the task lock and the orchestrator then tried
+to acquire it again as a separate object, so every documented recovery of an
+interrupted run failed with `Task Run lock already held`
+(HOWLFRAM-SLOPFIX-06).
+
+### 2.4 Acquisition and Cleanup
+
+All locks and the progress tracker are acquired inside a single `ExitStack`, so
+a failure at any startup point unwinds every earlier acquisition. The repository
+lock used to be taken before the task lock but outside the guarded block, so a
+task-lock failure stranded `.git/howlplane.lock` and blocked every later run.
+Progress now starts only once the locks are held, so a resume that cannot
+acquire never overwrites the durable progress of the run it was recovering.
+
+### 2.5 Reclaiming Locks (`ai unlock`)
+
+`ai unlock <task>` inspects **both** the task-run lock and the repository lock,
+so what it can act on matches what `ai status` reports. For each it validates
+that the lock belongs to the named task and is a task-owned lock, then:
+
+| Owner state | Behavior |
+| :--- | :--- |
+| `ACTIVE` | Refused. A running process is never displaced. |
+| `STALE` | Explicit, audited reclaim. |
+| `AMBIGUOUS` | Reclaimable only by this deliberate human action. |
+| Another task's lock | Refused. |
+| Nothing relevant held | Truthful no-op. |
+
+Every outcome is recorded to the evidence ledger (`unlock_requested`,
+`unlock_refused`, `stale_lock_reclaimed`). This is a reclaim path, not an
+arbitrary lock remover.
+
 ---
 
 ## 3. Crash Recovery & Durable Lifecycle Resume
@@ -77,11 +126,53 @@ When a process crashes or is interrupted (`SIGINT`, power loss, terminal close),
 | `planning` | None | `RERUN_STAGE` | Re-runs task router and verification plan generation cleanly |
 | `implementing` | Empty / No changes | `RERUN_STAGE` | Re-launches implementation agent cleanly |
 | `implementing` | Code delta present | `RECONCILE_FIRST` | Recovers captured delta against baseline without blind re-execution; advances to review |
-| `reviewing` | Partial reviewer logs | `RECONCILE_FIRST` | Reuses completed reviewer outputs from cache; executes only missing reviewers |
+| `reviewing` | Partial reviewer logs | `RECONCILE_FIRST` | Reuses reviewers whose persisted verdict was clean or findings; re-runs missing, invalid, and failed ones |
 | `remediating` | New changes written | `RECONCILE_FIRST` | Discovers updated diff and routes to re-review cycle |
 | `verifying` | Unchanged workspace | `RERUN_STAGE` | Reruns incomplete verification checks from plan |
 | `verifying` | Drifted workspace | `INVALIDATE_AND_RETRY` | Invalidates prior review & verification; triggers re-review |
 | `awaiting_human` | Decision packet saved | `RECONCILE_FIRST` | Preserved across restarts; requires `ai approve` or `ai reject` |
+
+### 3.3 Reviewer Execution Evidence
+
+A reviewer's markdown transcript and findings file cannot settle whether it
+succeeded: a zero-byte transcript beside an empty findings list is exactly what
+a clean review and a dead provider both leave behind. Each reviewer therefore
+persists what actually happened:
+
+```
+reviews/<role>/result.json                        # effective outcome
+reviews/<role>/attempts/<NN-resource>/result.json  # every provider tried
+reviews/<role>.md                                  # transcript (legacy-compatible)
+reviews/<role>_findings.yaml                       # findings (legacy-compatible)
+```
+
+`result.json` records the role, resource and provider identity, timings,
+process exit code, launch outcome, raw and normalized failure, whether output
+was present and structurally valid, findings count, disposition, failover
+transitions and the independence result.
+
+**Resume reads that verdict; it never re-derives one.** Status is one of
+`clean`, `findings_detected`, `output_invalid`, `malformed_output` or
+`reviewer_failure`, and only the first two count as complete. Runs predating
+`result.json` fall back to the same validator the live path uses, so an empty
+transcript reconstructs as `output_invalid` rather than clean. Inferring
+"clean" from `len(findings) == 0` is what let a dead reviewer's empty output
+pass as a completed review, and skipped the retry it was owed
+(HOWLFRAM-SLOPFIX-06).
+
+`ai status` reports the same durable dispositions -- `completed_clean`,
+`completed_with_findings`, `invalid`, `failed`, `running`, `pending` -- rather
+than treating the presence of two files as a completed review.
+
+### 3.4 Recovery Is Audited
+
+Recovery is governed execution, so it leaves evidence like any other stage.
+`ai resume` records `resume_requested`, `resume_lock_state`, `resume_started`,
+and then `resume_completed` or `resume_failed`, capturing the previous
+lifecycle state, every relevant lock's classification and owner, the outcome,
+the failure reason, and the resulting checkpoint. **A failed resume is itself
+durable evidence** -- SLOPFIX-06's two failed attempts mutated progress and
+lock state and recorded nothing.
 
 ---
 
