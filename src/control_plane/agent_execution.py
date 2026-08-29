@@ -60,6 +60,11 @@ TIMEOUT_SOURCE_TRANSCRIPT = "transcript"
 TOOL_PERMISSION_KEY = "tool_permission_outcome"
 TOOL_PERMISSION_DENIED = "denied"
 
+# Exact provider errors from structured result envelopes are terminal evidence.
+# Keeping this separate from the transcript lets classification distinguish a
+# current provider stop from similar words quoted during ordinary reasoning.
+TERMINAL_PROVIDER_ERROR_KEY = "terminal_provider_error"
+
 # Fallback phrases for a provider that reports an approval block in prose
 # without populating a structured denial record. Deliberately narrow: this can
 # only ever demote a claimed success, never manufacture one.
@@ -620,6 +625,15 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
         denials = envelope.get("permission_denials") or []
         result.metadata["claude_session_id"] = envelope.get("session_id")
         result.metadata["claude_subtype"] = envelope.get("subtype")
+        if isinstance(envelope.get("is_error"), bool):
+            result.metadata["claude_is_error"] = envelope["is_error"]
+        if envelope.get("is_error") is True:
+            result.success = False
+            if isinstance(text, str) and text.strip():
+                result.metadata[TERMINAL_PROVIDER_ERROR_KEY] = text.strip()
+                result.error_message = text.strip()
+            elif not result.error_message:
+                result.error_message = "Claude Code reported a terminal error"
 
         denied_tools = sorted(
             {

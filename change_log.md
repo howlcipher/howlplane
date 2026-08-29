@@ -3,6 +3,19 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Fixed
+
+**HOWLFRAM SLOPFIX 07S Failure Classification Precedence**: provider failures
+now select the dominant structural cause. Exact terminal authentication,
+session, quota, and rate errors outrank incidental tool denials recorded earlier
+in the same invocation, while a current structured permission denial still
+outranks stale capacity warning prose. Launch outcomes, harness enforced local
+budgets, provider transport timeouts, malformed output, and engineering failures
+retain distinct fail closed classifications. Claude structured error envelopes
+now preserve their terminal error and error status as result metadata. The
+deterministic regression matrix covers all eight required precedence cases and
+retains the PR 53 harness timeout behavior.
+
 ### Added
 
 **HOWLFRAM-SLOPFIX-07R Retained Salvageable Failover Candidates**: the
