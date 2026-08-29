@@ -682,7 +682,8 @@ def test_provider_scratch_cannot_manufacture_a_fake_attempt(tmp_path):
     assert len(res.implementation_attempts) == 1
 
     # Nothing was deleted: the contents live in owned scratch, attributed.
-    scratch = run_dir / "provider_scratch" / "01-resource_a"
+    manifest = json.loads((run_dir / "scratch_manifest.json").read_text(encoding="utf-8"))
+    scratch = Path(manifest["attempts"]["01-resource_a"]["scratch_path"])
     relocated = scratch / "probe.sh"
     assert relocated.is_file()
     assert "echo probe" in relocated.read_text(encoding="utf-8")

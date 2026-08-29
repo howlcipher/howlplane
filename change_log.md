@@ -3,6 +3,44 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Fixed
+
+**HOWLFRAM SLOPFIX 07S Failure Classification Precedence**: provider failures
+now select the dominant structural cause. Exact terminal authentication,
+session, quota, and rate errors outrank incidental tool denials recorded earlier
+in the same invocation, while a current structured permission denial still
+outranks stale capacity warning prose. Launch outcomes, harness enforced local
+budgets, provider transport timeouts, malformed output, and engineering failures
+retain distinct fail closed classifications. Claude structured error envelopes
+now preserve their terminal error and error status as result metadata. The
+deterministic regression matrix covers all eight required precedence cases and
+retains the PR 53 harness timeout behavior.
+
+**HOWLFRAM SLOPFIX 07S Checkpoint State Machine Terminalization Truth**:
+`GovernedTaskOrchestrator._fail_task` and `HumanLifecycleManager.handle_rejection`
+now truthfully capture the original active stage identity and terminalize the
+active stage checkpoint as `status: "failed"` before mutating `task_spec.current_state`
+to `"failed"`. `CheckpointManager.fail_stage` normalizes terminal stage arguments so
+terminal stages fail their active in-progress checkpoint rather than generating bogus
+`failed_01.json` checkpoints while leaving active stages `in_progress`. Process
+interruptions and non-terminal exceptions cleanly retain resumable `in_progress`
+checkpoints for deterministic resume.
+
+**HOWLFRAM SLOPFIX 07S External Provider Scratch Isolation & Manifest**:
+provider scratch workspaces are now externalized outside the target repository root
+(under `$HOWLPLANE_SCRATCH_ROOT` or `$XDG_CACHE_HOME/howlplane/scratch/`) to prevent
+contaminating deterministic target repository verification gates (reproducing the
+291 -> 1421 clone count explosion). Durable evidence is recorded in the task run
+evidence tree via `scratch_manifest.json` referencing external paths, provider identity,
+and cleanup status. Ephemeral caches are cleanly pruned at task completion while preserving
+patches and provenance.
+
+**Design Decision Note: SCRATCH_CANDIDATE_MANIFEST_DEFERRED**:
+per operational mandate, speculative candidate promotion of arbitrary unmanifested
+scratch files is explicitly deferred. Provider scratch experimentation remains isolated
+and does not masquerade as a governed candidate without explicit manifest and proof,
+preserving PR #56 guarantees without weakening candidate discipline.
+
 ### Added
 
 **HOWLFRAM-SLOPFIX-07R Retained Salvageable Failover Candidates**: the

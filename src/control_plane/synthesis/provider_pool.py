@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
+import re
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from src.control_plane.agent_execution import (
@@ -17,6 +18,7 @@ from src.control_plane.agent_execution import (
     LAUNCH_OUTCOME_SPAWN_FAILED,
     TIMEOUT_SOURCE_HARNESS,
     TIMEOUT_SOURCE_KEY,
+    TERMINAL_PROVIDER_ERROR_KEY,
     TOOL_PERMISSION_DENIED,
     TOOL_PERMISSION_KEY,
 )
@@ -100,6 +102,114 @@ EXHAUSTION_PATTERNS: Dict[str, List[str]] = {
     ],
     "local_ollama": ["connection refused", "not running", "server unavailable"],
 }
+
+_TERMINAL_HARD_FAILURE_PATTERNS = (
+    (
+        ProviderFailureClass.AUTHENTICATION_REQUIRED,
+        (
+            re.compile(
+                r"(?:error:\s*)?(?:authentication required|not authenticated|"
+                r"login required|unauthorized|invalid api key)[.!]?",
+                re.IGNORECASE,
+            ),
+            re.compile(
+                r"(?:error:\s*)?(?:authentication|api key|credentials?) expired"
+                r"(?:\.\s*(?:please\s+)?(?:log|sign) in again\.?)?",
+                re.IGNORECASE,
+            ),
+        ),
+    ),
+    (
+        ProviderFailureClass.RATE_LIMITED,
+        (
+            re.compile(
+                r"(?:error:\s*)?(?:429 too many requests|rate_limit_exceeded|"
+                r"rate limit(?: exceeded)?|rate limited)[.!]?",
+                re.IGNORECASE,
+            ),
+        ),
+    ),
+    (
+        ProviderFailureClass.QUOTA_EXHAUSTED,
+        (
+            re.compile(
+                r"(?:error:\s*)?(?:quota exhausted|quota exceeded|"
+                r"insufficient_quota|credits exhausted|insufficient funds|"
+                r"resource exhausted)[.!]?",
+                re.IGNORECASE,
+            ),
+        ),
+    ),
+    (
+        ProviderFailureClass.SESSION_LIMIT,
+        (
+            re.compile(
+                r"(?:error:\s*)?you(?:'|’)ve hit your session limit"
+                r"(?:\s*·\s*resets? .+)?[.!]?",
+                re.IGNORECASE,
+            ),
+            re.compile(
+                r"(?:error:\s*)?(?:usage limit reached|session limit(?: reached)?|"
+                r"individual quota reached|quota reached|out of capacity|"
+                r"upgrade your subscription)[.!]?",
+                re.IGNORECASE,
+            ),
+        ),
+    ),
+)
+
+
+def _last_nonempty_line(text: Optional[str]) -> Optional[str]:
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    return lines[-1] if lines else None
+
+
+def _terminal_text_candidates(result: AgentExecutionResult) -> List[str]:
+    """Returns bounded exact terminal texts, strongest source first."""
+    candidates: List[str] = []
+    structured = (result.metadata or {}).get(TERMINAL_PROVIDER_ERROR_KEY)
+    if isinstance(structured, str) and structured.strip():
+        candidates.append(structured.strip())
+    for text in (result.error_message, result.stderr, result.stdout):
+        terminal_line = _last_nonempty_line(text)
+        if terminal_line and terminal_line not in candidates:
+            candidates.append(terminal_line)
+    return candidates
+
+
+def _classify_structured_terminal_hard_failure(
+    result: AgentExecutionResult,
+) -> Optional[ProviderFailureClass]:
+    """Classifies authenticated structured terminal error metadata or non-zero stderr.
+    Never checks unstructured stdout.
+    """
+    structured = (result.metadata or {}).get(TERMINAL_PROVIDER_ERROR_KEY)
+    if isinstance(structured, str) and structured.strip():
+        normalized = " ".join(structured.strip().split())
+        for failure_class, patterns in _TERMINAL_HARD_FAILURE_PATTERNS:
+            if any(pattern.fullmatch(normalized) for pattern in patterns):
+                return failure_class
+    if result.exit_code != 0:
+        for text in (result.error_message, result.stderr):
+            line = _last_nonempty_line(text)
+            if line:
+                normalized = " ".join(line.split())
+                for failure_class, patterns in _TERMINAL_HARD_FAILURE_PATTERNS:
+                    if any(pattern.fullmatch(normalized) for pattern in patterns):
+                        return failure_class
+    return None
+
+
+def _classify_terminal_hard_failure(
+    result: AgentExecutionResult,
+) -> Optional[ProviderFailureClass]:
+    """Classifies only anchored provider stop signals, never transcript prose."""
+    for text in _terminal_text_candidates(result):
+        normalized = " ".join(text.split())
+        for failure_class, patterns in _TERMINAL_HARD_FAILURE_PATTERNS:
+            if any(pattern.fullmatch(normalized) for pattern in patterns):
+                return failure_class
+    return None
 
 
 def is_task_local_eligible(task: Optional[TaskSpec]) -> bool:
@@ -604,8 +714,6 @@ class ProviderPoolManager:
         # very phrases these markers look for, so where the harness observed the
         # process directly, that observation wins (SLOPFIX-03).
         metadata = result.metadata or {}
-        if metadata.get(TOOL_PERMISSION_KEY) == TOOL_PERMISSION_DENIED:
-            return ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
         launch_outcome = metadata.get(LAUNCH_OUTCOME_KEY)
         if launch_outcome in (LAUNCH_OUTCOME_NOT_INSTALLED, LAUNCH_OUTCOME_SPAWN_FAILED):
             return ProviderFailureClass.MISSING_EXECUTABLE
@@ -617,17 +725,34 @@ class ProviderPoolManager:
         # classified as before (HOWLFRAM-SLOPFIX-05).
         if metadata.get(TIMEOUT_SOURCE_KEY) == TIMEOUT_SOURCE_HARNESS:
             return ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED
+        if launch_outcome != LAUNCH_OUTCOME_LAUNCHED and result.exit_code == 127:
+            return ProviderFailureClass.MISSING_EXECUTABLE
+
+        # A provider's exact terminal error is stronger than evidence collected
+        # earlier in its session. In particular, a hard capacity stop must not
+        # be hidden by an earlier denied tool. However, arbitrary trailing prose
+        # in stdout must NEVER override a structured denial: only authenticated
+        # structured metadata or explicit non-zero exit stderr can outrank it.
+        if metadata.get(TOOL_PERMISSION_KEY) == TOOL_PERMISSION_DENIED:
+            structured_terminal = _classify_structured_terminal_hard_failure(result)
+            if structured_terminal is not None:
+                return structured_terminal
+            return ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
+
+        terminal_hard_failure = _classify_terminal_hard_failure(result)
+        if terminal_hard_failure is not None:
+            return terminal_hard_failure
+
         # A provider that demonstrably started cannot be a missing executable,
         # whatever its session log says about commands that were not found.
         # Backends that stamp no markers keep the older text-based behavior, with
         # one correction: a timeout verdict is the more specific signal and so
-        # outranks the substring scan. Exit 127 stays decisive either way, since
-        # the shell reserves it for a command it could not execute.
+        # outranks the substring scan. Exit 127 remains a legacy launch verdict
+        # only when no structural launched marker contradicts it.
         if launch_outcome != LAUNCH_OUTCOME_LAUNCHED and (
-            result.exit_code == 127
-            or (not result.timed_out and any(marker in combined for marker in (
+            not result.timed_out and any(marker in combined for marker in (
                 "command not found", "binary not found", "not installed",
-            )))
+            ))
         ):
             return ProviderFailureClass.MISSING_EXECUTABLE
         if any(marker in combined for marker in (

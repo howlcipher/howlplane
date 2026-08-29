@@ -98,6 +98,7 @@ FAILURE_CLASS_EXECUTION_BUDGET_EXCEEDED = "EXECUTION_BUDGET_EXCEEDED"
 CANDIDATE_ORIGIN_TIMED_OUT = "timed_out_implementation_attempt"
 TIMEOUT_CANDIDATE_SCHEMA_VERSION = "howlplane.timeout_candidate/v1"
 PROVIDER_SCRATCH_SCHEMA_VERSION = "howlplane.provider_scratch/v1"
+SCRATCH_MANIFEST_SCHEMA_VERSION = "howlplane.scratch_manifest/v1"
 TERMINATION_TIMEOUT_CANDIDATE_GOVERNED = "timeout_candidate_governed"
 
 # How durable routing evidence describes itself. SUPERSEDED_BY_FAILOVER means
@@ -161,6 +162,7 @@ CONTROL_PLANE_RUN_ARTIFACTS = frozenset({
     "remediation",
     "reviews",
     "route.json",
+    "scratch_manifest.json",
     "stage_checkpoint.json",
     "summary.md",
     "task.yaml",
@@ -218,6 +220,9 @@ class OrchestrationConfig:
     progress_stream: Optional[Any] = None
     progress_mode: str = "auto"
     progress_tracker: Optional[Any] = None
+    # Root directory for external provider scratch workspaces. When None, defaults
+    # to $HOWLPLANE_SCRATCH_ROOT or $XDG_CACHE_HOME/howlplane/scratch (~/.cache).
+    scratch_root: Optional[Union[str, Path]] = None
 
 
 @dataclass
@@ -559,23 +564,139 @@ class GovernedTaskOrchestrator:
         )
         self._record_human_boundary_events(task_spec, run_dir, reason=err_msg)
 
-    @staticmethod
-    def _attempt_workspace_hint(task: TaskSpec) -> str:
+    def _get_scratch_base_path(self) -> Path:
+        """Determines the root directory for external provider scratch workspaces."""
+        if self.config.scratch_root is not None:
+            base = Path(self.config.scratch_root).resolve()
+        elif os.environ.get("HOWLPLANE_SCRATCH_ROOT"):
+            base = Path(os.environ["HOWLPLANE_SCRATCH_ROOT"]).resolve()
+        else:
+            xdg = os.environ.get("XDG_CACHE_HOME")
+            cache_base = Path(xdg) if xdg else (Path.home() / ".cache")
+            base = (cache_base / "howlplane" / "scratch").resolve()
+
+        # Reject any configured scratch root that resolves inside the target repository
+        if hasattr(self, "target_repo"):
+            repo_res = self.target_repo.resolve()
+            if base == repo_res or base.is_relative_to(repo_res):
+                xdg = os.environ.get("XDG_CACHE_HOME")
+                cache_base = Path(xdg) if xdg else (Path.home() / ".cache")
+                base = (cache_base / "howlplane" / "scratch").resolve()
+        return base
+
+    def _attempt_workspace_hint(self, task: TaskSpec) -> str:
         """The provider-writable scratch path, as named to the provider.
 
-        Deliberately outside `implementation/attempts/`. Pointing providers
-        inside the canonical attempt namespace invited one to invent
-        `attempts/01-claude/workspace/` -- a directory that looked exactly like
-        a fourth attempt in a three-attempt run (HOWLFRAM-SLOPFIX-06). Scratch
-        and evidence now live in structurally separate trees, so an unexpected
-        path under `attempts/` is unambiguously wrong.
+        Deliberately outside `implementation/attempts/` and outside the target
+        repository so scratch source trees or build caches cannot contaminate
+        deterministic repository verification gates (HOWLFRAM-SLOPFIX-07S).
         """
-        return f".task_runs/{task.task_id}/provider_scratch/<NN-resource>/"
+        base = self._get_scratch_base_path()
+        repo_slug = self.target_repo.resolve().name if hasattr(self, "target_repo") else "repo"
+        return f"{base}/{repo_slug}/{task.task_id}/provider_scratch/<NN-resource>/"
 
-    @staticmethod
-    def _provider_scratch_dir(run_dir: Path, attempt_num: int, resource_id: str) -> Path:
+    def _provider_scratch_dir(self, run_dir: Path, attempt_num: int, resource_id: str) -> Path:
         """Control-plane-owned scratch location for one attempt's provider."""
-        return run_dir / "provider_scratch" / f"{attempt_num:02d}-{resource_id}"
+        base = self._get_scratch_base_path()
+        repo_slug = self.target_repo.resolve().name if hasattr(self, "target_repo") else run_dir.parent.parent.name
+        scratch_dir = base / repo_slug / run_dir.name / "provider_scratch" / f"{attempt_num:02d}-{resource_id}"
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+        return scratch_dir
+
+    def _record_scratch_manifest(
+        self,
+        run_dir: Path,
+        task_id: str,
+        attempt_num: int,
+        resource_id: str,
+        scratch_dir: Path,
+        status: str = "active",
+        artifacts: Optional[List[str]] = None,
+    ) -> None:
+        """Records durable scratch location and ownership metadata in evidence."""
+        manifest_path = run_dir / "scratch_manifest.json"
+        manifest: Dict[str, Any] = {}
+        if manifest_path.is_file():
+            try:
+                manifest = safe_load_json(manifest_path) or {}
+            except Exception:
+                manifest = {}
+        if not manifest:
+            manifest = {
+                "task_id": task_id,
+                "repository": str(self.target_repo.resolve()) if hasattr(self, "target_repo") else str(run_dir.parent.parent),
+                "scratch_root": str(self._get_scratch_base_path()),
+                "attempts": {},
+                "schema": SCRATCH_MANIFEST_SCHEMA_VERSION,
+            }
+        attempt_key = f"{attempt_num:02d}-{resource_id}"
+        attempt_entry = manifest.get("attempts", {}).get(attempt_key, {})
+        attempt_entry.update({
+            "attempt": attempt_num,
+            "resource_id": resource_id,
+            "scratch_path": str(scratch_dir.resolve()),
+            "status": status,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+        if "created_at" not in attempt_entry:
+            attempt_entry["created_at"] = datetime.now(timezone.utc).isoformat()
+        if artifacts:
+            existing = set(attempt_entry.get("artifacts", []))
+            existing.update(artifacts)
+            attempt_entry["artifacts"] = sorted(existing)
+        manifest.setdefault("attempts", {})[attempt_key] = attempt_entry
+        atomic_write_json(manifest_path, manifest)
+
+    def _prune_ephemeral_scratch(self, run_dir: Path, task_id: str) -> None:
+        """Prunes large disposable build and tool caches from external scratch.
+
+        Preserves candidate patches, diffs, provider transcripts, failure evidence,
+        and provenance files. Never removes candidate material or durable evidence.
+        Strictly validates containment beneath the authorized scratch base to prevent
+        path traversal or unintended file deletion.
+        """
+        manifest_path = run_dir / "scratch_manifest.json"
+        if not manifest_path.is_file():
+            return
+        try:
+            manifest = safe_load_json(manifest_path)
+            if not manifest or manifest.get("schema") != SCRATCH_MANIFEST_SCHEMA_VERSION:
+                return
+            if not isinstance(manifest.get("attempts"), dict):
+                return
+            scratch_base = self._get_scratch_base_path().resolve()
+            disposable_names = {"go-cache", ".cache"}
+            disposable_suffixes = {".tar", ".iso"}
+            for attempt_key, attempt_info in manifest["attempts"].items():
+                scratch_str = attempt_info.get("scratch_path")
+                if not scratch_str:
+                    continue
+                scratch_p = Path(scratch_str).resolve()
+                # Security: scratch directory must be strictly contained within scratch_base,
+                # cannot be scratch_base itself, and cannot be a symlink.
+                if not scratch_p.is_relative_to(scratch_base) or scratch_p == scratch_base:
+                    continue
+                if scratch_p.is_symlink() or not scratch_p.is_dir():
+                    continue
+                pruned = False
+                for item in scratch_p.iterdir():
+                    if item.is_symlink():
+                        continue
+                    if item.is_dir() and item.name in disposable_names:
+                        shutil.rmtree(item, ignore_errors=True)
+                        pruned = True
+                    elif item.is_file() and item.suffix in disposable_suffixes:
+                        try:
+                            item.unlink()
+                            pruned = True
+                        except OSError:
+                            pass
+                if pruned:
+                    attempt_info["status"] = "cleaned"
+                    attempt_info["pruned_at"] = datetime.now(timezone.utc).isoformat()
+            atomic_write_json(manifest_path, manifest)
+        except Exception:
+            pass
 
     def _resolve_backend(self, resource_id: str) -> AgentBackend:
         """Resolves the execution backend for a resource, however it is wired.
@@ -671,6 +792,15 @@ class GovernedTaskOrchestrator:
                     "swept_at": datetime.now(timezone.utc).isoformat(),
                     "schema": PROVIDER_SCRATCH_SCHEMA_VERSION,
                 },
+            )
+            self._record_scratch_manifest(
+                run_dir,
+                run_dir.name,
+                attempt_num,
+                resource_id,
+                scratch,
+                status="relocated",
+                artifacts=swept,
             )
         return swept
 
@@ -1740,16 +1870,6 @@ class GovernedTaskOrchestrator:
                     TaskPhase.FAILED,
                     error_message=str(exc),
                 )
-                if run_dir.is_dir():
-                    try:
-                        CheckpointManager.fail_stage(
-                            run_dir,
-                            stage=task_spec.current_state,
-                            reason=str(exc),
-                            result_summary={"error": str(exc), "interrupted": True},
-                        )
-                    except Exception:
-                        pass
                 raise
 
     def _run_governed_loop(
@@ -1974,6 +2094,19 @@ class GovernedTaskOrchestrator:
                     "candidate_recovered": timeout_candidate is not None,
                 },
             )
+            if task_spec.current_state == "planned":
+                task_spec.transition_to(
+                    "implementing",
+                    "Recovered existing implementation delta from interrupted run",
+                )
+                task_spec.save_to_file(str(run_dir / "task.yaml"))
+            impl_chk = CheckpointManager._find_latest_checkpoint_for_stage(run_dir, "implementing")
+            if impl_chk and impl_chk.status == "in_progress":
+                CheckpointManager.complete_stage(
+                    run_dir,
+                    "implementing",
+                    result_summary={"recovered": True, "resource_id": final_impl_resource_id},
+                )
         else:
             CheckpointManager.start_stage(
                 run_dir,
@@ -2045,6 +2178,7 @@ class GovernedTaskOrchestrator:
                     exit_code=exit_code,
                     agent_id="control_plane",
                     progress_tracker=progress,
+                    stage="implementing",
                     routing=routing,
                     initial_delta=current_delta,
                     current_delta=current_delta,
@@ -2139,10 +2273,18 @@ class GovernedTaskOrchestrator:
                         metadata={"attempt": attempt_num},
                     )
 
-                    attempt_dir = attempts_dir / f"{attempt_num:02d}-{current_impl_resource_id}"
-                    self._provider_scratch_dir(
+                    attempt_scratch = self._provider_scratch_dir(
                         run_dir, attempt_num, current_impl_resource_id
-                    ).mkdir(parents=True, exist_ok=True)
+                    )
+                    attempt_scratch.mkdir(parents=True, exist_ok=True)
+                    self._record_scratch_manifest(
+                        run_dir,
+                        task_spec.task_id,
+                        attempt_num,
+                        current_impl_resource_id,
+                        attempt_scratch,
+                        status="active",
+                    )
                     evidence_root_before = {
                         entry.name for entry in run_dir.iterdir()
                     }
@@ -2460,6 +2602,7 @@ class GovernedTaskOrchestrator:
                     exit_code=1,
                     agent_id="control_plane",
                     progress_tracker=progress,
+                    stage="implementing",
                     routing=routing,
                     current_delta=current_delta if "current_delta" in locals() else None,
                     verif_plan=verif_plan,
@@ -2849,13 +2992,6 @@ class GovernedTaskOrchestrator:
             result=verif_status,
             verification_summary=verif_summary,
         )
-        CheckpointManager.complete_stage(
-            run_dir,
-            "verifying",
-            output_artifacts=[str(run_dir / "verification_result.json")],
-            result_summary=verif_summary,
-        )
-
         if verif_status != "passed":
             failed_steps = [s.name for s in verif_plan.steps if s.status == "failed" and s.required]
             err_msg = f"Deterministic verification failed on required steps: {', '.join(failed_steps)}"
@@ -2893,6 +3029,7 @@ class GovernedTaskOrchestrator:
                 start_time,
                 exit_code=1,
                 progress_tracker=progress,
+                stage="verifying",
                 routing=routing,
                 initial_delta=initial_delta,
                 current_delta=current_delta,
@@ -2906,6 +3043,13 @@ class GovernedTaskOrchestrator:
                 failure_class=FAILURE_CLASS_VERIFICATION,
                 timeout_candidate=timeout_candidate,
             )
+
+        CheckpointManager.complete_stage(
+            run_dir,
+            "verifying",
+            output_artifacts=[str(run_dir / "verification_result.json")],
+            result_summary=verif_summary,
+        )
 
         # --------------------------------------------------------------------
         # Stage 7: Human Authority Boundary Gate (awaiting_human)
@@ -3044,6 +3188,7 @@ class GovernedTaskOrchestrator:
             TaskProgressState.COMPLETE,
             TaskPhase.COMPLETE,
         )
+        self._prune_ephemeral_scratch(run_dir, task_spec.task_id)
         return self._make_result(task_spec, "complete", 0, **stage_kwargs)
 
     def _record_human_boundary_events(
@@ -3141,14 +3286,14 @@ class GovernedTaskOrchestrator:
         progress_tracker: Optional[Any] = None,
         **kwargs,
     ) -> OrchestrationResult:
-        if progress_tracker is not None:
-            progress_tracker.record_terminal(
-                TaskProgressState.FAILED,
-                TaskPhase.FAILED,
-                error_message=err_msg,
-            )
-        task_spec.transition_to("failed", err_msg)
-        task_spec.save_to_file(str(run_dir / "task.yaml"))
+        # Capture the original active stage identity BEFORE modifying task_spec state
+        active_stage = kwargs.pop("stage", None)
+        if not active_stage or active_stage in ("failed", "cancelled"):
+            active_stage = task_spec.current_state
+        if not active_stage or active_stage in ("failed", "cancelled"):
+            latest_chk = CheckpointManager.load_latest_checkpoint(run_dir)
+            if latest_chk and latest_chk.stage not in ("failed", "cancelled"):
+                active_stage = latest_chk.stage
 
         # Terminalize current stage checkpoint so it does not remain permanently in_progress
         try:
@@ -3164,12 +3309,21 @@ class GovernedTaskOrchestrator:
                 summary["partial_work"] = not delta.is_empty
             CheckpointManager.fail_stage(
                 run_dir,
-                stage=kwargs.get("stage") or task_spec.current_state,
+                stage=active_stage,
                 reason=err_msg,
                 result_summary=summary,
             )
         except Exception:
             pass
+
+        if progress_tracker is not None:
+            progress_tracker.record_terminal(
+                TaskProgressState.FAILED,
+                TaskPhase.FAILED,
+                error_message=err_msg,
+            )
+        task_spec.transition_to("failed", err_msg)
+        task_spec.save_to_file(str(run_dir / "task.yaml"))
 
         self._record_event(
             task_id=task_spec.task_id,
@@ -3178,6 +3332,7 @@ class GovernedTaskOrchestrator:
             result=err_msg,
             spec=task_spec,
         )
+        self._prune_ephemeral_scratch(run_dir, task_spec.task_id)
         return self._make_result(
             task_spec=task_spec,
             final_state="failed",
