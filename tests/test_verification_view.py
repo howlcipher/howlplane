@@ -363,3 +363,39 @@ def test_no_worktree_is_leaked_after_a_governed_run(tmp_path: Path):
     assert res.final_state == "complete"
     listed = run_git_in_repo(repo, ["worktree", "list"]).stdout.strip().splitlines()
     assert len(listed) == 1
+
+
+def test_a_staged_rename_leaves_only_the_destination_in_the_view(tmp_path):
+    """A renamed file must not appear in the view under both names.
+
+    This is the HowlFrame archive rename in miniature: `old_howlframe.go` was
+    renamed to `.go.txt` precisely so a `**/*.go` hygiene scope would stop
+    counting it. A view that kept both paths would have gone on measuring the
+    old file and reported the pre-rename count.
+    """
+    repo = _make_repo(tmp_path)
+    (repo / "archive.go").write_text("package main\n\nfunc Archived() int { return 7 }\n")
+    _commit_all(repo, "add archive")
+
+    baseline = capture_baseline(repo)
+    run_git_in_repo(repo, ["mv", "archive.go", "archive.go.txt"])
+    delta = capture_delta(repo, baseline)
+
+    with _built(repo, baseline, delta, tmp_path) as view:
+        assert (view.path / "archive.go.txt").is_file()
+        assert not (view.path / "archive.go").exists()
+        go_files = sorted(p.relative_to(view.path).as_posix() for p in view.path.rglob("*.go"))
+        assert go_files == ["product.go"]
+
+
+def test_a_staged_rename_of_control_plane_paths_never_enters_the_view(tmp_path):
+    repo = _make_repo(tmp_path)
+    evidence = repo / ".task_runs" / TASK_ID
+    evidence.mkdir(parents=True)
+    (evidence / "a.go").write_text("package main\n")
+    baseline = capture_baseline(repo)
+
+    with _built(repo, baseline, _StubDelta(added=[".task_runs/VIEW-TEST-01/b.go"],
+                                          deleted=[".task_runs/VIEW-TEST-01/a.go"]), tmp_path) as view:
+        assert not (view.path / ".task_runs").exists()
+        assert view.files_materialized == []
