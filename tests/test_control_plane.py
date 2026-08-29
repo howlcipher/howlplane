@@ -613,6 +613,44 @@ def test_human_boundary_gate_triggers():
     assert "infrastructure_apply" in md
 
 
+def test_self_review_forces_the_human_authority_gate():
+    """A change reviewed by its own author is not independently reviewed.
+
+    HOWLFRAM-BUG-50: failover fell through to the implementer for three roles
+    and the run proceeded as though independence held, because nothing gated on
+    the independence flag the evidence already recorded.
+    """
+    task = TaskSpec(
+        task_id="SELFREV-01",
+        repository="repo",
+        objective="Add docstrings",
+        risk_level="low",
+    )
+    res = HumanBoundaryGate.evaluate(
+        task,
+        planned_actions=["edit docs.py", "pytest"],
+        non_independent_roles=["correctness-reviewer"],
+    )
+    assert res.requires_human_approval is True
+    assert "non_independent_review" in res.triggered_boundaries
+    assert "non_independent_review" in res.decision_packet.render_markdown()
+
+
+def test_no_self_review_leaves_a_clean_task_autonomous():
+    task = TaskSpec(
+        task_id="SELFREV-02",
+        repository="repo",
+        objective="Add docstrings",
+        risk_level="low",
+    )
+    res = HumanBoundaryGate.evaluate(
+        task,
+        planned_actions=["edit docs.py", "pytest"],
+        non_independent_roles=[],
+    )
+    assert res.requires_human_approval is False
+
+
 def test_human_boundary_gate_clean():
     task = TaskSpec(
         task_id="SAFE-01",

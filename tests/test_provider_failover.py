@@ -11,6 +11,8 @@ evidence preservation, progress messaging, and final identity/reviewer behavior.
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+
+from src.control_plane.atomic_io import safe_load_json
 from io import StringIO
 from pathlib import Path
 import subprocess
@@ -1972,3 +1974,25 @@ def test_case11_non_failover_eligible_terminal_recovers_the_fallback(
     assert _retained(res, "01-resource_a")["promotion_status"] == "PROMOTED"
     assert res.candidate_origin == "timed_out_implementation_attempt"
     assert res.implementation_completion_claim is False
+
+
+def test_a_findings_free_cycle_still_writes_its_own_reconciliation(tmp_path: Path):
+    """An empty cycle must record that it was empty, not stay silent.
+
+    HOWLFRAM-BUG-50: reconciliation.json was only written when a cycle produced
+    findings, so a clean cycle left whatever the previous cycle had written --
+    and the decision packet pointed the operator at a finding that had already
+    been remediated. A cycle with nothing to reconcile now says so explicitly.
+    """
+    repo = _init_test_repo(tmp_path / "target_repo")
+    resolver = _FakeBackendResolver({
+        "resource_a": {"success": True, "side_effect": _edit_feature_to_true},
+    })
+    res = _run_failover_task(repo, resolver, max_attempts=1)
+    assert res.final_state == "complete"
+
+    run_dir = Path(res.run_dir)
+    recon_file = run_dir / "reconciliation.json"
+    assert recon_file.is_file(), "a findings-free cycle must still persist its reconciliation"
+    assert safe_load_json(recon_file)["summary"]["total_findings"] == 0
+    assert "no reviewer findings" in (run_dir / "reconciliation_report.md").read_text()

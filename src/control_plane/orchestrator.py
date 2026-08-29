@@ -2880,9 +2880,33 @@ class GovernedTaskOrchestrator:
             # Persist findings and reconciliation
             findings_data = {"findings": [f.to_dict() for f in cycle_res.all_findings]}
             (run_dir / "findings.yaml").write_text(yaml.dump(findings_data, sort_keys=False), encoding="utf-8")
+            # Written unconditionally. A cycle with no findings leaves
+            # cycle_res.reconciliation as None, and skipping the write used to
+            # leave the *previous* cycle's report on disk -- so the decision
+            # packet pointed operators at a finding that had already been
+            # remediated (HOWLFRAM-BUG-50). An empty cycle now says it is empty.
             if cycle_res.reconciliation:
                 (run_dir / "reconciliation.json").write_text(json.dumps(cycle_res.reconciliation.to_dict(), indent=2), encoding="utf-8")
                 (run_dir / "reconciliation_report.md").write_text(cycle_res.reconciliation.render_markdown(), encoding="utf-8")
+            else:
+                (run_dir / "reconciliation.json").write_text(
+                    json.dumps(
+                        {
+                            "summary": {"total_findings": 0, "unresolved_blockers": 0, "unresolved_highs": 0},
+                            "findings": [],
+                            "cycle_index": cycle_res.cycle_index,
+                            "status": cycle_res.status,
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                (run_dir / "reconciliation_report.md").write_text(
+                    "# Review Reconciliation Report\n\n"
+                    f"Cycle {cycle_res.cycle_index} produced no reviewer findings to reconcile "
+                    f"(cycle status: `{cycle_res.status}`).\n",
+                    encoding="utf-8",
+                )
 
             findings_summary = {
                 "total": len(cycle_res.all_findings),
@@ -2917,13 +2941,50 @@ class GovernedTaskOrchestrator:
                     f"Remediation limit reached ({self.config.max_remediation_cycles} cycles) with "
                     f"{findings_summary['blocker']} blockers and {findings_summary['high']} high findings remaining."
                 )
+                # Name the cause that actually stopped the loop. Reporting every
+                # escalation as "unresolved findings" told operators a change had
+                # defects when the real problem was that a reviewer never ran, or
+                # that the implementer reviewed its own diff -- three different
+                # situations calling for three different human judgments
+                # (HOWLFRAM-BUG-50).
+                triggers: List[str] = []
+                risks: List[str] = []
+                evidence = [f.title for f in cycle_res.all_findings if f.severity in ("blocker", "high")]
+                if findings_summary["high"] > 0 or findings_summary["blocker"] > 0:
+                    triggers.append("security_policy_exception")
+                    risks.append("Unresolved reviewer findings may indicate defects or security vulnerabilities.")
+                if cycle_res.non_independent_roles:
+                    triggers.append("non_independent_review")
+                    risks.append(
+                        "The implementer reviewed its own change for "
+                        f"{', '.join(cycle_res.non_independent_roles)}; those roles are not independent review."
+                    )
+                    evidence.extend(
+                        f"{role}: reviewed by the implementer ({final_impl_resource_id or 'unknown'})"
+                        for role in cycle_res.non_independent_roles
+                    )
+                if cycle_res.status == "review_failure":
+                    triggers.append("review_incomplete")
+                    risks.append("At least one reviewer never completed, so this change is under-reviewed.")
+                    evidence.extend(
+                        f"{role}: {res.status}"
+                        for role, res in sorted(cycle_res.reviewer_results.items())
+                        if res.status == "reviewer_failure"
+                    )
+                if not triggers:
+                    triggers.append("unresolved_findings")
+                    risks.append("Unresolved reviewer findings may indicate defects or security vulnerabilities.")
+
                 decision_pkt = HumanDecisionPacket(
                     task_id=task_spec.task_id,
                     objective=task_spec.objective,
-                    change_summary=f"Implementation diff ({current_delta.insertions} ins, {current_delta.deletions} del) has unresolved reviewer findings.",
-                    boundary_triggers=["security_policy_exception"] if findings_summary["high"] > 0 else ["unresolved_findings"],
-                    evidence=[f.title for f in cycle_res.all_findings if f.severity in ("blocker", "high")],
-                    risks=["Unresolved reviewer findings may indicate defects or security vulnerabilities."],
+                    change_summary=(
+                        f"Implementation diff ({current_delta.insertions} ins, {current_delta.deletions} del) "
+                        f"reached the remediation limit; triggers: {', '.join(triggers)}."
+                    ),
+                    boundary_triggers=triggers,
+                    evidence=evidence,
+                    risks=risks,
                     review_findings_summary=findings_summary,
                     verification_status="unverified",
                     recommended_action="Review finding report in reconciliation_report.md and authorize override or manual remediation.",
@@ -3160,6 +3221,9 @@ class GovernedTaskOrchestrator:
             change_summary=f"Changed {len(current_delta.files_modified) + len(current_delta.files_added)} files (+{current_delta.insertions}/-{current_delta.deletions})",
             reconciliation=latest_reconciliation,
             verification=verif_plan,
+            non_independent_roles=sorted(
+                {role for cyc in review_cycles for role in cyc.non_independent_roles}
+            ),
         )
 
         stage_kwargs = dict(

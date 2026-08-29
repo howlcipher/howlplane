@@ -90,6 +90,10 @@ HUMAN_BOUNDARY_TRIGGERS = {
     "package_publishing": "Publishing packages or binaries to public registries or releases",
     "job_submission": "Submitting job applications, resumes, or external forms",
     "security_policy_exception": "Overriding or relaxing established security or anti-manipulation rules",
+    "non_independent_review": (
+        "The implementer reviewed its own change for one or more roles, so the change is not independently reviewed"
+    ),
+    "review_incomplete": "At least one reviewer never completed, so the change is under-reviewed",
     "slop_debt_acceptance": (
         "Accepting new repository debt tombstone or repointing existing debt without prior policy authorization"
     ),
@@ -300,6 +304,7 @@ class HumanBoundaryGate:
         reconciliation: Optional[ReconciliationResult] = None,
         verification: Optional[VerificationPlan] = None,
         hygiene_policy: Optional[PolicyEvaluationResult] = None,
+        non_independent_roles: Optional[List[str]] = None,
     ) -> BoundaryCheckResult:
         """
         Determines whether the post-verification task hits a human authority boundary.
@@ -338,6 +343,13 @@ class HumanBoundaryGate:
         if reconciliation and reconciliation.requires_human_judgment:
             if "security_policy_exception" not in triggers:
                 triggers.append("security_policy_exception")
+
+        # A change whose reviewer was its own author has not been independently
+        # reviewed, however clean the verdict reads. On HOWLFRAM-BUG-50 failover
+        # handed the implementer three of its own reviews and the run proceeded
+        # as though independence held, so this now reaches the human either way.
+        if non_independent_roles and "non_independent_review" not in triggers:
+            triggers.append("non_independent_review")
 
         # 5. Critical risk tasks always trigger human authority
         if task.risk_level == "critical" and "production_deployment" not in triggers:

@@ -8,6 +8,7 @@ and targeted re-review role determination.
 from src.control_plane.reconciliation import ReviewFinding
 from src.control_plane.review_runner import (
     ReviewRunner,
+    build_reviewer_candidates,
     parse_and_validate_findings,
 )
 from src.control_plane.task_spec import TaskSpec
@@ -227,3 +228,50 @@ def test_determine_re_review_roles():
     assert "architecture-reviewer" in roles_arch
     assert "regression-reviewer" in roles_arch
     assert "correctness-reviewer" in roles_arch
+
+
+class _StubPool:
+    """Minimal provider pool exposing only the candidate selection hook."""
+
+    def __init__(self, pool):
+        self._pool = pool
+
+    def select_candidates(self, task_category=None, avoid_provider=None, task=None, role=None):
+        return [c for c in self._pool if c != avoid_provider]
+
+
+def _candidates(pool, preferred, implementer):
+    return build_reviewer_candidates(
+        "correctness-reviewer",
+        preferred,
+        _StubPool(pool),
+        TaskSpec(task_id="T-1", repository="repo", objective="obj"),
+        implementer,
+    )
+
+
+def test_implementer_is_ordered_last_among_reviewer_candidates():
+    """Failover must exhaust every independent reviewer before self-review.
+
+    HOWLFRAM-BUG-50: build_reviewer_candidates was never told who implemented
+    the change, so ordinary failover handed the implementer three of its own
+    reviews, including the final correctness verdict on its own diff.
+    """
+    order = _candidates(["agy", "claude_code", "codex"], preferred="agy", implementer="agy")
+    assert order[-1] == "agy"
+    assert set(order) == {"agy", "claude_code", "codex"}
+
+
+def test_implementer_stays_reachable_when_it_is_the_only_candidate():
+    """A degraded pool still yields signal; it is labelled, not withheld."""
+    assert _candidates(["agy"], preferred="agy", implementer="agy") == ["agy"]
+
+
+def test_candidate_order_is_unchanged_when_the_implementer_is_not_a_candidate():
+    order = _candidates(["claude_code", "codex"], preferred="claude_code", implementer="agy")
+    assert order == ["claude_code", "codex"]
+
+
+def test_no_implementer_supplied_preserves_previous_ordering():
+    order = _candidates(["agy", "claude_code"], preferred="agy", implementer=None)
+    assert order[0] == "agy"

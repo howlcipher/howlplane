@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+**Review Independence Is Now Enforced And Labelled, Not Merely Recorded**:
+`build_reviewer_candidates` never learned who implemented a change, so ordinary
+reviewer failover could select the implementer itself. On the first real
+production run (`HOWLFRAM-BUG-50`) agy implemented the diff and then served as
+simplicity-reviewer, test-falsifier and, in the final cycle, correctness-reviewer
+returning `clean` on its own work: 4 of 10 reviews recorded `independent=False`
+and nothing gated on it. The implementer is now ordered last among candidates, so
+it is only reached once every independent reviewer has been tried; a role it does
+serve is recorded on `ReviewCycleResult.non_independent_roles`, forces the human
+authority gate through the new `non_independent_review` trigger, and is labelled
+as a self-review in the operator summary.
+
+**Human Authority Packets Name The Cause That Actually Stopped The Loop**: every
+remediation-limit escalation reported `unresolved_findings`, even when the real
+cause was a reviewer that never completed. The packet for `HOWLFRAM-BUG-50` claimed
+unresolved findings while reporting `0 total (0 blockers, 0 highs)` and
+`Key Evidence: None recorded`. Triggers are now selected from the actual cause and
+may combine: `security_policy_exception` for unresolved blockers or highs,
+`non_independent_review` for self-review, `review_incomplete` for a reviewer that
+never finished, and `unresolved_findings` otherwise, each with matching evidence
+and risk lines.
+
+**A Reviewer That Never Ran No Longer Displays As `PASS`**: the operator summary
+printed `PASS` both for a role missing from the final cycle and for a role whose
+status was `reviewer_failure`, because neither had findings. `HOWLFRAM-BUG-50`
+showed three green reviewer rows while one role had failed on its last provider
+and another had not run at all. Missing roles now render `NOT RUN`, failed roles
+render `FAILED (no verdict)`, and self-reviewed roles are marked.
+
+**Findings-Free Review Cycles Overwrite Their Reconciliation Artifacts**:
+`reconciliation.json` and `reconciliation_report.md` were only rewritten when a
+cycle produced findings, so a clean final cycle left the previous cycle's report
+on disk and the decision packet's recommended action pointed operators at a
+finding that had already been remediated. A cycle with nothing to reconcile now
+persists an explicit empty reconciliation naming its own cycle index and status.
+
+
 **HOWLFRAM SLOPFIX 07S Verification View Isolation**: deterministic verification
 no longer runs in the live target checkout. Gates now execute against a
 disposable git worktree built from the task's baseline commit plus the
