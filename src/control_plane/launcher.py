@@ -417,19 +417,25 @@ def _print_orchestration_summary(
     print("Review:")
     if res.review_cycles:
         last_cycle = res.review_cycles[-1]
+        non_independent = set(getattr(last_cycle, "non_independent_roles", []) or [])
         for role_id in decision.recommended_reviewers:
             role_res = last_cycle.reviewer_results.get(role_id)
-            if role_res:
-                if role_res.findings:
-                    sev_summary = f"{role_res.findings[0].severity.upper()}"
-                    status_text = f"{sev_summary} → REMEDIATED" if res.final_state == "complete" and res.remediation_cycles_count > 0 else f"{sev_summary} ({len(role_res.findings)} findings)"
-                else:
-                    status_text = "PASS"
-                role_label = role_id.replace("-reviewer", "").capitalize()
-                print(f"  {role_label:<17} {status_text}")
+            role_label = role_id.replace("-reviewer", "").capitalize()
+            # A reviewer that never ran, or that failed, is not a reviewer that
+            # passed. Printing PASS for both is how HOWLFRAM-BUG-50 showed three
+            # green rows while one role had failed and another had not run at all.
+            if role_res is None:
+                status_text = "NOT RUN"
+            elif role_res.status == "reviewer_failure":
+                status_text = "FAILED (no verdict)"
+            elif role_res.findings:
+                sev_summary = f"{role_res.findings[0].severity.upper()}"
+                status_text = f"{sev_summary} → REMEDIATED" if res.final_state == "complete" and res.remediation_cycles_count > 0 else f"{sev_summary} ({len(role_res.findings)} findings)"
             else:
-                role_label = role_id.replace("-reviewer", "").capitalize()
-                print(f"  {role_label:<17} PASS")
+                status_text = "PASS"
+            if role_id in non_independent:
+                status_text = f"{status_text} ⚠ SELF-REVIEW (implementer)"
+            print(f"  {role_label:<17} {status_text}")
     else:
         print("  (No review cycles executed)")
     print("")

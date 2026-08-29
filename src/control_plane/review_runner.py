@@ -224,6 +224,9 @@ class ReviewCycleResult:
     reconciliation: Optional[ReconciliationResult] = None
     status: str = "clean"  # "clean", "has_findings", "review_failure"
     requires_remediation: bool = False
+    # Roles this cycle served with the implementer itself, i.e. a self-review.
+    # Recorded so the authority gate can name the real reason it triggered.
+    non_independent_roles: List[str] = field(default_factory=list)
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -234,6 +237,7 @@ class ReviewCycleResult:
             "cycle_index": self.cycle_index,
             "status": self.status,
             "requires_remediation": self.requires_remediation,
+            "non_independent_roles": self.non_independent_roles,
             "reviewer_results": {k: v.to_dict() for k, v in self.reviewer_results.items()},
             "all_findings": [f.to_dict() for f in self.all_findings],
             "reconciliation": self.reconciliation.to_dict() if self.reconciliation else None,
@@ -394,6 +398,7 @@ def build_reviewer_candidates(
     preferred: str,
     provider_pool: Any,
     task: TaskSpec,
+    implementer: Optional[str] = None,
 ) -> List[str]:
     """
     Builds the bounded reviewer candidate list for one role (#59.2 Phase 4):
@@ -402,6 +407,14 @@ def build_reviewer_candidates(
     a local candidate, even as a fallback (#59.2 Phase 10). Shared by both
     review-invocation call sites (this module and engine.py) so the
     candidate-building logic exists in exactly one place.
+
+    The implementer is ordered *last*. It stays reachable, because a degraded
+    provider pool should still yield some signal rather than none, but it is
+    only ever reached once every independent candidate has been tried. On
+    HOWLFRAM-BUG-50 the implementer was not considered at all here, so ordinary
+    failover handed it three of its own reviews -- including the final
+    correctness verdict on its own diff. A review it does serve is recorded as
+    non-independent and forces the human authority gate.
     """
     from src.control_plane.synthesis.provider_pool import (
         LOCAL_INELIGIBLE_REVIEWER_ROLES,
@@ -416,7 +429,12 @@ def build_reviewer_candidates(
     )
     if role_id in LOCAL_INELIGIBLE_REVIEWER_ROLES:
         fallback_pool = [c for c in fallback_pool if c not in LOCAL_PROVIDER_IDS]
-    return [preferred] + [c for c in fallback_pool if c != preferred]
+    ordered = [preferred] + [c for c in fallback_pool if c != preferred]
+    if implementer:
+        independent = [c for c in ordered if c != implementer]
+        if len(independent) != len(ordered):
+            ordered = independent + [implementer]
+    return ordered
 
 
 def _current_capacity_block(provider_pool: Optional[Any], candidate: str) -> Optional[str]:
@@ -689,6 +707,7 @@ class ReviewRunner:
         reviewer_results: Dict[str, SingleReviewResult] = {}
         all_findings: List[ReviewFinding] = []
         has_failure = False
+        non_independent_roles: List[str] = []
 
         skill_context = build_skill_context(task)
 
@@ -757,7 +776,9 @@ class ReviewRunner:
                         err_message = str(exc)
                         has_failure = True
                 elif provider_pool is not None and not backend:
-                    candidates = build_reviewer_candidates(role_id, assigned_agent, provider_pool, task)
+                    candidates = build_reviewer_candidates(
+                        role_id, assigned_agent, provider_pool, task, implementer_resource_id
+                    )
                     winner, agent_res, attempts_log = invoke_reviewer_with_failover(
                         role_id=role_id,
                         candidates=candidates,
@@ -768,6 +789,12 @@ class ReviewRunner:
                         provider_pool=provider_pool,
                     )
                     duration = agent_res.duration_seconds if agent_res else 0.0
+                    if winner and implementer_resource_id and winner == implementer_resource_id:
+                        # Failover exhausted every independent candidate and fell
+                        # through to the implementer. The review still runs, but a
+                        # change reviewed by its own author is not independently
+                        # reviewed, and the gate has to say so.
+                        non_independent_roles.append(role_id)
                     if winner and agent_res:
                         raw_output = agent_res.stdout
                     else:
@@ -872,6 +899,7 @@ class ReviewRunner:
             reconciliation=reconciliation,
             status=overall_status,
             requires_remediation=requires_remediation,
+            non_independent_roles=non_independent_roles,
         )
 
     @classmethod
