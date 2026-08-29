@@ -156,6 +156,13 @@ deterministic `TaskRouter` remains an advisory recommendation layer over an
 already eligible candidate set; it does not grant provider permission, egress,
 spend, capability, or execution authority.
 
+Provider failure classification uses dominant structural evidence. Launch
+outcomes and local harness budgets remain authoritative, while exact terminal
+provider errors distinguish authentication and capacity exhaustion from tool
+permission denials recorded earlier in a session. Ordinary transcript prose
+cannot override a current structured denial merely by quoting a session or
+quota warning.
+
 ---
 
 ## Operating Modes & Egress Governance
