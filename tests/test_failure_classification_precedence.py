@@ -170,3 +170,17 @@ def test_malformed_and_ambiguous_output_fail_closed():
 
     assert _classify(malformed) == ProviderFailureClass.MALFORMED_OUTPUT
     assert _classify(ambiguous) == ProviderFailureClass.ENGINEERING_FAILURE
+
+
+def test_trailing_session_prose_cannot_override_structured_permission_denial():
+    """An adversarial probe whose stdout trailing line quotes session limits
+    must not override a structured tool denial unless authenticated in metadata."""
+    result = _failed_result(
+        stdout=(
+            "I could not execute the command because tool permission was denied.\n"
+            "An earlier attempt gave this message: You've hit your session limit"
+        ),
+        metadata={TOOL_PERMISSION_KEY: TOOL_PERMISSION_DENIED},
+    )
+
+    assert _classify(result) == ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED

@@ -567,13 +567,22 @@ class GovernedTaskOrchestrator:
     def _get_scratch_base_path(self) -> Path:
         """Determines the root directory for external provider scratch workspaces."""
         if self.config.scratch_root is not None:
-            return Path(self.config.scratch_root).resolve()
-        env_root = os.environ.get("HOWLPLANE_SCRATCH_ROOT")
-        if env_root:
-            return Path(env_root).resolve()
-        xdg = os.environ.get("XDG_CACHE_HOME")
-        cache_base = Path(xdg) if xdg else (Path.home() / ".cache")
-        return (cache_base / "howlplane" / "scratch").resolve()
+            base = Path(self.config.scratch_root).resolve()
+        elif os.environ.get("HOWLPLANE_SCRATCH_ROOT"):
+            base = Path(os.environ["HOWLPLANE_SCRATCH_ROOT"]).resolve()
+        else:
+            xdg = os.environ.get("XDG_CACHE_HOME")
+            cache_base = Path(xdg) if xdg else (Path.home() / ".cache")
+            base = (cache_base / "howlplane" / "scratch").resolve()
+
+        # Reject any configured scratch root that resolves inside the target repository
+        if hasattr(self, "target_repo"):
+            repo_res = self.target_repo.resolve()
+            if base == repo_res or base.is_relative_to(repo_res):
+                xdg = os.environ.get("XDG_CACHE_HOME")
+                cache_base = Path(xdg) if xdg else (Path.home() / ".cache")
+                base = (cache_base / "howlplane" / "scratch").resolve()
+        return base
 
     def _attempt_workspace_hint(self, task: TaskSpec) -> str:
         """The provider-writable scratch path, as named to the provider.
@@ -590,7 +599,7 @@ class GovernedTaskOrchestrator:
         """Control-plane-owned scratch location for one attempt's provider."""
         base = self._get_scratch_base_path()
         repo_slug = self.target_repo.resolve().name if hasattr(self, "target_repo") else run_dir.parent.parent.name
-        scratch_dir = base / repo_slug / run_dir.name / f"{attempt_num:02d}-{resource_id}"
+        scratch_dir = base / repo_slug / run_dir.name / "provider_scratch" / f"{attempt_num:02d}-{resource_id}"
         scratch_dir.mkdir(parents=True, exist_ok=True)
         return scratch_dir
 
@@ -643,25 +652,36 @@ class GovernedTaskOrchestrator:
 
         Preserves candidate patches, diffs, provider transcripts, failure evidence,
         and provenance files. Never removes candidate material or durable evidence.
+        Strictly validates containment beneath the authorized scratch base to prevent
+        path traversal or unintended file deletion.
         """
         manifest_path = run_dir / "scratch_manifest.json"
         if not manifest_path.is_file():
             return
         try:
             manifest = safe_load_json(manifest_path)
-            if not manifest or not isinstance(manifest.get("attempts"), dict):
+            if not manifest or manifest.get("schema") != SCRATCH_MANIFEST_SCHEMA_VERSION:
                 return
+            if not isinstance(manifest.get("attempts"), dict):
+                return
+            scratch_base = self._get_scratch_base_path().resolve()
             disposable_names = {"go-cache", ".cache"}
             disposable_suffixes = {".tar", ".iso"}
             for attempt_key, attempt_info in manifest["attempts"].items():
                 scratch_str = attempt_info.get("scratch_path")
                 if not scratch_str:
                     continue
-                scratch_p = Path(scratch_str)
-                if not scratch_p.is_dir():
+                scratch_p = Path(scratch_str).resolve()
+                # Security: scratch directory must be strictly contained within scratch_base,
+                # cannot be scratch_base itself, and cannot be a symlink.
+                if not scratch_p.is_relative_to(scratch_base) or scratch_p == scratch_base:
+                    continue
+                if scratch_p.is_symlink() or not scratch_p.is_dir():
                     continue
                 pruned = False
                 for item in scratch_p.iterdir():
+                    if item.is_symlink():
+                        continue
                     if item.is_dir() and item.name in disposable_names:
                         shutil.rmtree(item, ignore_errors=True)
                         pruned = True
@@ -2074,6 +2094,19 @@ class GovernedTaskOrchestrator:
                     "candidate_recovered": timeout_candidate is not None,
                 },
             )
+            if task_spec.current_state == "planned":
+                task_spec.transition_to(
+                    "implementing",
+                    "Recovered existing implementation delta from interrupted run",
+                )
+                task_spec.save_to_file(str(run_dir / "task.yaml"))
+            impl_chk = CheckpointManager._find_latest_checkpoint_for_stage(run_dir, "implementing")
+            if impl_chk and impl_chk.status == "in_progress":
+                CheckpointManager.complete_stage(
+                    run_dir,
+                    "implementing",
+                    result_summary={"recovered": True, "resource_id": final_impl_resource_id},
+                )
         else:
             CheckpointManager.start_stage(
                 run_dir,

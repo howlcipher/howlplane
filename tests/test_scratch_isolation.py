@@ -85,7 +85,7 @@ def test_provider_scratch_debris_does_not_contaminate_target_repo(tmp_path: Path
     def create_scratch_debris(task, cwd: Path, prompt: str) -> None:
         # Provider discovers scratch directory from prompt
         # and creates source clones, caches, and patches there
-        orch_scratch = scratch_root / repo.name / task.task_id / "01-resource_a"
+        orch_scratch = scratch_root / repo.name / task.task_id / "provider_scratch" / "01-resource_a"
         orch_scratch.mkdir(parents=True, exist_ok=True)
 
         # 1. Nested Go clone tree
@@ -188,3 +188,89 @@ def test_stray_evidence_root_artifacts_are_relocated_externally(tmp_path: Path):
     provenance = safe_load_json(scratch_path / "_provenance.json")
     assert provenance["origin"] == "provider_scratch"
     assert "rogue-test.patch" in provenance["files"]
+
+
+def test_prompt_workspace_hint_matches_created_scratch_directory(tmp_path: Path):
+    """The workspace path advertised in the prompt must match the directory created."""
+    repo = _init_test_repo(tmp_path / "target_repo")
+    scratch_root = tmp_path / "external_scratch"
+    captured_prompt = []
+
+    def inspect_prompt(task, cwd: Path, prompt: str) -> None:
+        captured_prompt.append(prompt)
+        _edit_feature_to_true(task, cwd, prompt)
+
+    resolver = _FakeBackendResolver({
+        "resource_a": {"success": True, "side_effect": inspect_prompt},
+    })
+
+    res = _run_failover_task(
+        repo,
+        resolver,
+        scratch_root=scratch_root,
+        max_attempts=1,
+    )
+    assert res.final_state == "complete"
+    assert len(captured_prompt) == 1
+
+    # Inspect prompt for workspace guidance
+    prompt = captured_prompt[0]
+    expected_hint_part = f"{scratch_root}/{repo.name}/{res.task_id}/provider_scratch/<NN-resource>/"
+    assert expected_hint_part in prompt
+
+    # The actual created path must have provider_scratch/<NN-resource>
+    manifest = safe_load_json(Path(res.run_dir) / "scratch_manifest.json")
+    actual_scratch = manifest["attempts"]["01-resource_a"]["scratch_path"]
+    expected_actual = str(scratch_root / repo.name / res.task_id / "provider_scratch" / "01-resource_a")
+    assert actual_scratch == expected_actual
+
+
+def test_scratch_root_inside_target_repo_is_rejected(tmp_path: Path):
+    """A configured scratch root inside the target repository is rejected."""
+    repo = _init_test_repo(tmp_path / "target_repo")
+    bad_scratch = repo / "in_repo_scratch"
+
+    config = OrchestrationConfig(scratch_root=bad_scratch)
+    orch = GovernedTaskOrchestrator(target_repo=repo, config=config)
+
+    resolved = orch._get_scratch_base_path()
+    assert resolved != bad_scratch.resolve()
+    assert not resolved.is_relative_to(repo.resolve())
+
+
+def test_malicious_manifest_path_traversal_is_ignored_by_pruner(tmp_path: Path):
+    """A manifest attempting path traversal outside the scratch base is ignored by pruner."""
+    repo = _init_test_repo(tmp_path / "target_repo")
+    scratch_root = tmp_path / "external_scratch"
+    scratch_root.mkdir(parents=True)
+
+    victim_dir = tmp_path / "victim_data" / "go-cache"
+    victim_dir.mkdir(parents=True)
+    (victim_dir / "important.txt").write_text("critical data", encoding="utf-8")
+
+    run_dir = repo / ".task_runs" / "ATTACK-01"
+    run_dir.mkdir(parents=True)
+
+    # Manifest points to victim directory outside scratch base
+    malicious_manifest = {
+        "task_id": "ATTACK-01",
+        "schema": SCRATCH_MANIFEST_SCHEMA_VERSION,
+        "scratch_root": str(scratch_root),
+        "attempts": {
+            "01-bad": {
+                "scratch_path": str(victim_dir.parent),
+                "status": "active",
+            }
+        },
+    }
+    (run_dir / "scratch_manifest.json").write_text(json.dumps(malicious_manifest), encoding="utf-8")
+
+    config = OrchestrationConfig(scratch_root=scratch_root)
+    orch = GovernedTaskOrchestrator(target_repo=repo, config=config)
+
+    orch._prune_ephemeral_scratch(run_dir, "ATTACK-01")
+
+    # Victim data must NOT be touched
+    assert (victim_dir / "important.txt").is_file()
+    assert (victim_dir / "important.txt").read_text(encoding="utf-8") == "critical data"
+

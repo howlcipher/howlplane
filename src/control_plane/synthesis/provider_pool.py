@@ -177,6 +177,29 @@ def _terminal_text_candidates(result: AgentExecutionResult) -> List[str]:
     return candidates
 
 
+def _classify_structured_terminal_hard_failure(
+    result: AgentExecutionResult,
+) -> Optional[ProviderFailureClass]:
+    """Classifies authenticated structured terminal error metadata or non-zero stderr.
+    Never checks unstructured stdout.
+    """
+    structured = (result.metadata or {}).get(TERMINAL_PROVIDER_ERROR_KEY)
+    if isinstance(structured, str) and structured.strip():
+        normalized = " ".join(structured.strip().split())
+        for failure_class, patterns in _TERMINAL_HARD_FAILURE_PATTERNS:
+            if any(pattern.fullmatch(normalized) for pattern in patterns):
+                return failure_class
+    if result.exit_code != 0:
+        for text in (result.error_message, result.stderr):
+            line = _last_nonempty_line(text)
+            if line:
+                normalized = " ".join(line.split())
+                for failure_class, patterns in _TERMINAL_HARD_FAILURE_PATTERNS:
+                    if any(pattern.fullmatch(normalized) for pattern in patterns):
+                        return failure_class
+    return None
+
+
 def _classify_terminal_hard_failure(
     result: AgentExecutionResult,
 ) -> Optional[ProviderFailureClass]:
@@ -707,13 +730,18 @@ class ProviderPoolManager:
 
         # A provider's exact terminal error is stronger than evidence collected
         # earlier in its session. In particular, a hard capacity stop must not
-        # be hidden by an earlier denied tool. Anchored matching is essential:
-        # arbitrary transcript prose may quote any of these error messages.
+        # be hidden by an earlier denied tool. However, arbitrary trailing prose
+        # in stdout must NEVER override a structured denial: only authenticated
+        # structured metadata or explicit non-zero exit stderr can outrank it.
+        if metadata.get(TOOL_PERMISSION_KEY) == TOOL_PERMISSION_DENIED:
+            structured_terminal = _classify_structured_terminal_hard_failure(result)
+            if structured_terminal is not None:
+                return structured_terminal
+            return ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
+
         terminal_hard_failure = _classify_terminal_hard_failure(result)
         if terminal_hard_failure is not None:
             return terminal_hard_failure
-        if metadata.get(TOOL_PERMISSION_KEY) == TOOL_PERMISSION_DENIED:
-            return ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
 
         # A provider that demonstrably started cannot be a missing executable,
         # whatever its session log says about commands that were not found.

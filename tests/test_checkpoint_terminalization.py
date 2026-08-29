@@ -26,6 +26,7 @@ from tests.test_provider_failover import (
     _FakeBackendResolver,
     _edit_feature_to_true,
     _init_test_repo,
+    _make_task,
     _run_failover_task,
 )
 
@@ -179,3 +180,47 @@ def test_interrupted_non_terminal_task_retains_resumable_in_progress_state(tmp_p
     assert latest.stage == "reviewing"
     assert latest.status == "in_progress"
     # This proves interrupted is not confused with failed
+
+
+def test_recovered_task_subsequent_failure_leaves_no_in_progress_implementation_checkpoint(tmp_path: Path):
+    """When an interrupted implementation is recovered on resume and subsequent verification fails,
+    implementing_01 must be completed and verifying_01 failed; no checkpoint remains in_progress."""
+    repo = _init_test_repo(tmp_path / "repo")
+
+    # Step 1: Simulate interrupted implementation attempt
+    task = _make_task("RECOVER-FAIL-01")
+    run_dir = repo / ".task_runs" / task.task_id
+    run_dir.mkdir(parents=True)
+
+    from src.control_plane.git_baseline import capture_baseline
+    baseline = capture_baseline(repo)
+    (run_dir / "baseline.json").write_text(baseline.to_json(), encoding="utf-8")
+
+    # Start implementing stage checkpoint
+    chk = CheckpointManager.start_stage(run_dir, task_id=task.task_id, stage="implementing")
+    assert chk.status == "in_progress"
+
+    # Implementation produced a delta
+    (repo / "src" / "feature.py").write_text("def broken_syntax!():\n", encoding="utf-8")
+
+    # Step 2: Resume task, which recovers the delta and proceeds to verification
+    resolver = _FakeBackendResolver({"resource_a": {"success": True}})
+    res = _run_failover_task(repo, resolver, task=task, max_attempts=1)
+    assert res.final_state == "failed"
+
+    # Step 3: Verify all checkpoints
+    all_chks = _load_all_chks(run_dir)
+    in_progress = [c for c in all_chks if c.status == "in_progress"]
+    assert len(in_progress) == 0, f"Stale in_progress checkpoints found: {in_progress}"
+
+    # implementing_01 was completed on recovery
+    c_dir = CheckpointManager.get_checkpoints_dir(run_dir)
+    impl_chk = _load_chk(c_dir / "implementing_01.json")
+    assert impl_chk is not None
+    assert impl_chk.status == "completed"
+
+    # verifying_01 was failed
+    verif_chk = _load_chk(c_dir / "verifying_01.json")
+    assert verif_chk is not None
+    assert verif_chk.status == "failed"
+
