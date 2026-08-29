@@ -182,6 +182,7 @@ def _run_failover_task(
     if pool_hook is not None:
         pool_hook(pool)
 
+    config_overrides.setdefault("scratch_root", str(repo.parent / "scratch"))
     config = OrchestrationConfig(
         provider_pool=pool,
         backend_resolver=resolver,
@@ -1540,11 +1541,14 @@ def test_provider_scratch_is_relocated_out_of_the_evidence_root(tmp_path: Path):
 
     assert res.final_state == "complete"
     run_dir = Path(res.run_dir)
-    workspace = run_dir / "provider_scratch" / "01-resource_a"
+    manifest = json.loads((run_dir / "scratch_manifest.json").read_text(encoding="utf-8"))
+    workspace = Path(manifest["attempts"]["01-resource_a"]["scratch_path"])
 
     # The stray file left the evidence root...
     assert not (run_dir / "wip-refactor.patch").exists()
-    # ...and is retained under the attempt's owned scratch, attributed.
+    # ...and provider scratch is not placed inside run_dir / target repo
+    assert not (run_dir / "provider_scratch").exists()
+    # ...and is retained under the attempt's owned external scratch, attributed.
     relocated = workspace / "wip-refactor.patch"
     assert relocated.is_file()
     assert relocated.read_text(encoding="utf-8") == "scratch\n"

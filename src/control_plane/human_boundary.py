@@ -822,9 +822,22 @@ class HumanLifecycleManager:
         )
         record.save_to_file(run_dir / "human_decision.json")
 
+        rej_reason = f"Human operator rejected authorization: {reason or 'No reason provided'}"
+        try:
+            from src.control_plane.checkpoints import CheckpointManager
+            active_stage = task_spec.current_state if task_spec.current_state not in ("failed", "cancelled") else None
+            CheckpointManager.fail_stage(
+                run_dir,
+                stage=active_stage,
+                reason=rej_reason,
+                result_summary={"error": rej_reason, "decision": "rejected"},
+            )
+        except Exception:
+            pass
+
         task_spec.transition_to(
             "failed",
-            f"Human operator rejected authorization: {reason or 'No reason provided'}",
+            rej_reason,
         )
         task_spec.save_to_file(str(run_dir / "task.yaml"))
 

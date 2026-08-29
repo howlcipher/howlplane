@@ -134,6 +134,64 @@ class CheckpointManager:
         return checkpoint
 
     @classmethod
+    def _find_active_in_progress_checkpoint(
+        cls, run_dir: Union[str, Path]
+    ) -> Optional[StageCheckpoint]:
+        """Finds an active in-progress checkpoint in the run directory."""
+        r_dir = Path(run_dir).resolve()
+        latest = cls.load_latest_checkpoint(r_dir)
+        if (
+            latest
+            and latest.status == "in_progress"
+            and latest.stage not in ("failed", "cancelled")
+        ):
+            return latest
+
+        c_dir = cls.get_checkpoints_dir(r_dir)
+        if not c_dir.is_dir():
+            return None
+
+        candidates: List[StageCheckpoint] = []
+        for p in c_dir.glob("*.json"):
+            try:
+                data = safe_load_json(p)
+                chk = StageCheckpoint.from_dict(data)
+                if (
+                    chk.status == "in_progress"
+                    and chk.stage not in ("failed", "cancelled")
+                ):
+                    candidates.append(chk)
+            except Exception:
+                continue
+
+        if not candidates:
+            return None
+
+        candidates.sort(
+            key=lambda c: (c.stage_started_at or "", c.attempt_number),
+            reverse=True,
+        )
+        return candidates[0]
+
+    @classmethod
+    def _find_latest_checkpoint_for_stage(
+        cls, run_dir: Union[str, Path], stage: str
+    ) -> Optional[StageCheckpoint]:
+        """Finds the most recent checkpoint for a given stage name."""
+        r_dir = Path(run_dir).resolve()
+        c_dir = cls.get_checkpoints_dir(r_dir)
+        if not c_dir.is_dir():
+            return None
+        stage_files = sorted(c_dir.glob(f"{stage}_*.json"))
+        if not stage_files:
+            return None
+        try:
+            data = safe_load_json(stage_files[-1])
+            return StageCheckpoint.from_dict(data)
+        except Exception:
+            return None
+
+    @classmethod
     def _finalize_stage(
         cls,
         run_dir: Union[str, Path],
@@ -145,36 +203,69 @@ class CheckpointManager:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> StageCheckpoint:
         r_dir = Path(run_dir).resolve()
-        latest = cls.load_latest_checkpoint(r_dir)
-        target_stage = stage or (latest.stage if latest else "unknown")
+        c_dir = cls.get_checkpoints_dir(r_dir)
         now_iso = datetime.now(timezone.utc).isoformat()
         dur = 0.0
 
-        if latest and (stage is None or latest.stage == stage):
+        latest = cls.load_latest_checkpoint(r_dir)
+        target_chk: Optional[StageCheckpoint] = None
+        target_stage: Optional[str] = None
+
+        # If stage is a terminal/non-stage state name ("failed", "cancelled") or None,
+        # resolve and finalize the active in-progress checkpoint rather than
+        # creating a bogus new checkpoint file with stage="failed" / stage="cancelled".
+        if stage in (None, "failed", "cancelled"):
+            active_chk = cls._find_active_in_progress_checkpoint(r_dir)
+            if active_chk is not None:
+                target_chk = active_chk
+                target_stage = active_chk.stage
+            elif latest and latest.stage not in ("failed", "cancelled"):
+                target_chk = latest
+                target_stage = latest.stage
+            else:
+                target_stage = (
+                    latest.stage
+                    if latest and latest.stage not in ("failed", "cancelled")
+                    else "unknown"
+                )
+        else:
+            # A specific stage was requested
+            if latest and latest.stage == stage:
+                target_chk = latest
+                target_stage = stage
+            else:
+                stage_chk = cls._find_latest_checkpoint_for_stage(r_dir, stage)
+                if stage_chk is not None:
+                    target_chk = stage_chk
+                    target_stage = stage
+                else:
+                    target_stage = stage
+
+        if target_chk is not None:
             try:
-                start_dt = datetime.fromisoformat(latest.stage_started_at)
+                start_dt = datetime.fromisoformat(target_chk.stage_started_at)
                 dur = round((datetime.now(timezone.utc) - start_dt).total_seconds(), 3)
             except Exception:
                 pass
-            latest.status = target_status
-            latest.stage_completed_at = now_iso
-            latest.duration_seconds = dur
+            target_chk.status = target_status
+            target_chk.stage_completed_at = now_iso
+            target_chk.duration_seconds = dur
             if output_artifacts:
-                latest.output_artifacts.extend(output_artifacts)
+                target_chk.output_artifacts.extend(output_artifacts)
             if result_summary:
-                latest.result_summary = result_summary
+                target_chk.result_summary = result_summary
             elif reason:
-                latest.result_summary = {"error": reason}
+                target_chk.result_summary = {"error": reason}
             if metadata:
-                latest.metadata.update(metadata)
-            checkpoint = latest
+                target_chk.metadata.update(metadata)
+            checkpoint = target_chk
         else:
             meta = dict(metadata or {})
             if reason:
                 meta["interruption_reason"] = reason
             checkpoint = StageCheckpoint(
                 task_id=latest.task_id if latest else "UNKNOWN",
-                stage=target_stage,
+                stage=target_stage or "unknown",
                 status=target_status,
                 stage_started_at=now_iso,
                 stage_completed_at=now_iso,
@@ -183,7 +274,6 @@ class CheckpointManager:
                 metadata=meta,
             )
 
-        c_dir = cls.get_checkpoints_dir(r_dir)
         atomic_write_json(r_dir / "stage_checkpoint.json", checkpoint.to_dict())
         atomic_write_json(c_dir / f"{target_stage}_{checkpoint.attempt_number:02d}.json", checkpoint.to_dict())
         return checkpoint
@@ -214,7 +304,13 @@ class CheckpointManager:
         result_summary: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> StageCheckpoint:
-        """Marks a stage checkpoint as failed with completed timestamp and summary."""
+        """Marks a stage checkpoint as failed with completed timestamp and summary.
+
+        If stage is 'failed', 'cancelled', or None, it finalizes the active in-progress
+        checkpoint rather than creating a bogus checkpoint file with stage='failed'.
+        """
+        if stage in ("failed", "cancelled"):
+            stage = None
         return cls._finalize_stage(
             run_dir,
             "failed",
