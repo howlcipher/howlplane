@@ -9,6 +9,7 @@ import subprocess
 
 from src.control_plane.git_baseline import (
     GitBaseline,
+    _parse_porcelain_lines,
     capture_baseline,
     capture_delta,
 )
@@ -154,3 +155,70 @@ def test_empty_delta_stays_empty_not_a_bare_newline(tmp_path):
 
     assert delta.is_empty
     assert delta.diff_content == ""
+
+
+def test_parse_porcelain_records_both_sides_of_a_staged_rename():
+    """A staged rename must report the destination added AND the source deleted.
+
+    "R  old -> new" carries no D and no A, so it used to fall through to
+    `modified` carrying only the destination. The source file's disappearance
+    was dropped, and anything rebuilding a tree from the delta kept both paths.
+    """
+    untracked, modified, deleted, added = _parse_porcelain_lines(
+        "R  docs/archive/old.go -> docs/archive/old.go.txt\n"
+    )
+    assert added == {"docs/archive/old.go.txt"}
+    assert deleted == {"docs/archive/old.go"}
+    assert modified == set()
+    assert untracked == set()
+
+
+def test_parse_porcelain_rename_with_later_edit_still_deletes_the_source():
+    """"RM" is a staged rename whose destination was edited afterwards."""
+    _, modified, deleted, added = _parse_porcelain_lines("RM old.py -> new.py\n")
+    assert added == {"new.py"}
+    assert deleted == {"old.py"}
+    assert modified == set()
+
+
+def test_parse_porcelain_copy_does_not_delete_its_source():
+    """A copy names a source too, but leaves it in place."""
+    _, _, deleted, added = _parse_porcelain_lines("C  template.py -> derived.py\n")
+    assert added == {"derived.py"}
+    assert deleted == set()
+
+
+def test_parse_porcelain_rename_of_control_plane_paths_is_filtered():
+    """Control plane metadata stays out of the delta on both sides of a rename."""
+    _, _, deleted, added = _parse_porcelain_lines(
+        "R  .task_runs/T/a.go -> .task_runs/T/b.go\n"
+        "R  .task_runs/T/c.go -> product.go\n"
+        "R  product_old.go -> .task_runs/T/d.go\n"
+    )
+    assert added == {"product.go"}
+    assert deleted == {"product_old.go"}
+
+
+def test_capture_delta_reports_a_staged_rename_as_added_plus_deleted(tmp_path):
+    repo = _init_git_repo(tmp_path / "repo_rename")
+    baseline = capture_baseline(repo)
+
+    subprocess.run(["git", "mv", "existing.py", "renamed.py"], cwd=repo, check=True)
+
+    delta = capture_delta(repo, baseline)
+    assert "renamed.py" in delta.files_added
+    assert "existing.py" in delta.files_deleted
+    assert delta.is_empty is False
+
+
+def test_capture_delta_still_handles_an_unstaged_rename(tmp_path):
+    """Unstaged renames arrive as ' D old' + '?? new' and already worked."""
+    repo = _init_git_repo(tmp_path / "repo_rename_unstaged")
+    baseline = capture_baseline(repo)
+
+    (repo / "moved.py").write_text((repo / "existing.py").read_text())
+    (repo / "existing.py").unlink()
+
+    delta = capture_delta(repo, baseline)
+    assert "moved.py" in delta.files_added
+    assert "existing.py" in delta.files_deleted

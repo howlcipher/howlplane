@@ -111,7 +111,30 @@ def _parse_porcelain_lines(status_text: str) -> Tuple[Set[str], Set[str], Set[st
         if not line.strip():
             continue
         code, path_part = line[:2], line[3:].strip()
-        f_path = path_part.split(" -> ")[1].strip() if " -> " in path_part else path_part
+        source_path: Optional[str] = None
+        if " -> " in path_part:
+            source_part, dest_part = path_part.split(" -> ", 1)
+            source_path = source_part.strip()
+            f_path = dest_part.strip()
+        else:
+            f_path = path_part
+
+        # A staged rename ("R  old -> new") carries no D and no A, so it used to
+        # fall through to `modified` carrying only the destination -- the source
+        # file's disappearance was dropped entirely. A verification view built
+        # from that delta then held both the old and the new path, which is the
+        # contamination the view exists to prevent: the archive rename that took
+        # howlframe's go_production from 291 to 84 would have measured 291.
+        # A copy ("C") names a source too, but leaves it in place, so only the
+        # destination is new.
+        index_code = code[0]
+        if index_code in ("R", "C") and source_path:
+            if not is_internal_control_plane_path(f_path):
+                added.add(f_path)
+            if index_code == "R" and not is_internal_control_plane_path(source_path):
+                deleted.add(source_path)
+            continue
+
         if is_internal_control_plane_path(f_path):
             continue
         if code.startswith("??"):
