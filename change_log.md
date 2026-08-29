@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+**HOWLFRAM SLOPFIX 07S Verification View Isolation**: deterministic verification
+no longer runs in the live target checkout. Gates now execute against a
+disposable git worktree built from the task's baseline commit plus the
+task-attributable delta, placed under the external scratch root that provider
+scratch already uses, so untracked control plane evidence cannot change a
+verification result. Externalising new scratch stopped the control plane from
+adding debris, but evidence already written into a target repository kept
+poisoning later runs: with the historical `HOWLFRAM-SLOPFIX-07S` evidence tree
+still on disk, `slopslint check --classify --enforce` reported 1421
+`go_production` clones in the live checkout and 291 -- the true product count --
+in the sanitized view. The delta is materialized by byte-copy so binary
+additions survive and no patch can fail to apply silently; delta paths that
+escape the repository or name control plane metadata are refused. A view that
+cannot be built fails the gate rather than silently falling back to the live
+checkout, and `verification_view.json` records the baseline identity, patch
+digest, materialized paths, and a truthful cleanup status. No target repository
+hygiene policy was weakened and no ceiling was raised.
+
+
 **HOWLFRAM SLOPFIX 07S Failure Classification Precedence**: provider failures
 now select the dominant structural cause. Exact terminal authentication,
 session, quota, and rate errors outrank incidental tool denials recorded earlier

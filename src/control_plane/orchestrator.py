@@ -69,6 +69,12 @@ from src.control_plane.proposed_action import ProposedAction, infer_proposed_act
 from src.control_plane.resource_models import ProviderFailureClass
 from src.control_plane.task_spec import TaskSpec
 from src.control_plane.verification import VerificationPlan, VerificationStep
+from src.control_plane.verification_view import (
+    VERIFICATION_VIEW_SCHEMA_VERSION,
+    VerificationViewError,
+    resolve_external_scratch_root,
+    verification_view,
+)
 from src.control_plane.reasoning.execution_trajectory import (
     ExecutionTrajectoryBuilder,
     TrajectoryStore,
@@ -223,6 +229,10 @@ class OrchestrationConfig:
     # Root directory for external provider scratch workspaces. When None, defaults
     # to $HOWLPLANE_SCRATCH_ROOT or $XDG_CACHE_HOME/howlplane/scratch (~/.cache).
     scratch_root: Optional[Union[str, Path]] = None
+    # Run deterministic gates against a sanitized view (baseline + task delta)
+    # instead of the live checkout, so untracked control plane evidence cannot
+    # change a verification result (HOWLFRAM-SLOPFIX-07S).
+    verification_isolation: bool = True
 
 
 @dataclass
@@ -565,24 +575,107 @@ class GovernedTaskOrchestrator:
         self._record_human_boundary_events(task_spec, run_dir, reason=err_msg)
 
     def _get_scratch_base_path(self) -> Path:
-        """Determines the root directory for external provider scratch workspaces."""
-        if self.config.scratch_root is not None:
-            base = Path(self.config.scratch_root).resolve()
-        elif os.environ.get("HOWLPLANE_SCRATCH_ROOT"):
-            base = Path(os.environ["HOWLPLANE_SCRATCH_ROOT"]).resolve()
-        else:
-            xdg = os.environ.get("XDG_CACHE_HOME")
-            cache_base = Path(xdg) if xdg else (Path.home() / ".cache")
-            base = (cache_base / "howlplane" / "scratch").resolve()
+        """Determines the root directory for external provider scratch workspaces.
 
-        # Reject any configured scratch root that resolves inside the target repository
-        if hasattr(self, "target_repo"):
-            repo_res = self.target_repo.resolve()
-            if base == repo_res or base.is_relative_to(repo_res):
-                xdg = os.environ.get("XDG_CACHE_HOME")
-                cache_base = Path(xdg) if xdg else (Path.home() / ".cache")
-                base = (cache_base / "howlplane" / "scratch").resolve()
-        return base
+        Provider scratch and the sanitized verification view share one root and
+        one containment rule, so a root configured inside the target repository
+        is rejected identically for both.
+        """
+        repo = self.target_repo if hasattr(self, "target_repo") else Path.cwd()
+        return resolve_external_scratch_root(repo, self.config.scratch_root)
+
+    def _execute_verification_plan(
+        self,
+        verif_plan: VerificationPlan,
+        task_spec: TaskSpec,
+        baseline: GitBaseline,
+        delta: RepositoryDelta,
+        run_dir: Path,
+        progress: Optional[Any],
+    ) -> str:
+        """Runs the deterministic gates against a sanitized view of the repository.
+
+        The gates measure the product, so they must see the product and nothing
+        else. Running them in the live checkout let untracked control plane
+        evidence decide the outcome: in HOWLFRAM-SLOPFIX-07S a provider's
+        source clone under `.task_runs/` moved the `go_production` clone count
+        from 291 to 1421 without a line of product code changing.
+
+        A view that cannot be built fails the gate. Falling back to the live
+        checkout would quietly restore that contamination and report the result
+        as if it had been isolated.
+        """
+        if not self.config.verification_isolation:
+            return verif_plan.execute_all(
+                cwd=str(self.target_repo),
+                stop_on_failure=self.config.stop_on_verification_failure,
+                progress_tracker=progress,
+            )
+
+        view_ref: Optional[Any] = None
+        try:
+            with verification_view(
+                target_repo=self.target_repo,
+                baseline=baseline,
+                delta=delta,
+                task_id=task_spec.task_id,
+                scratch_root=self.config.scratch_root,
+            ) as view:
+                view_ref = view
+                self._record_event(
+                    task_id=task_spec.task_id,
+                    agent_id="control_plane",
+                    action="verification_view_created",
+                    spec=task_spec,
+                    metadata={
+                        "baseline_sha": view.baseline_sha,
+                        "files_materialized": len(view.files_materialized),
+                        "files_refused": view.files_refused,
+                    },
+                )
+                status = verif_plan.execute_all(
+                    cwd=str(view.path),
+                    stop_on_failure=self.config.stop_on_verification_failure,
+                    progress_tracker=progress,
+                )
+        except VerificationViewError as exc:
+            reason = f"Sanitized verification view could not be built: {exc}"
+            verif_plan.add_step(
+                step_id="step-verification-view",
+                name="Sanitized verification view",
+                command=["git", "worktree", "add", "--detach"],
+                category="policy_check",
+                required=True,
+                metadata={"baseline_sha": getattr(baseline, "initial_commit_sha", "")},
+            )
+            failed_step = verif_plan.steps[-1]
+            failed_step.status = "failed"
+            failed_step.exit_code = 1
+            failed_step.stderr = reason
+            verif_plan.overall_status = "failed"
+            atomic_write_json(
+                run_dir / "verification_view.json",
+                {
+                    "schema": VERIFICATION_VIEW_SCHEMA_VERSION,
+                    "task_id": task_spec.task_id,
+                    "status": "unavailable",
+                    "error": str(exc),
+                },
+            )
+            self._record_event(
+                task_id=task_spec.task_id,
+                agent_id="control_plane",
+                action="verification_view_failed",
+                spec=task_spec,
+                result="failed",
+                metadata={"error": str(exc)},
+            )
+            return "failed"
+
+        # Written after teardown so the recorded cleanup status is the real one.
+        if view_ref is not None:
+            atomic_write_json(run_dir / "verification_view.json", view_ref.to_dict())
+        return status
 
     def _attempt_workspace_hint(self, task: TaskSpec) -> str:
         """The provider-writable scratch path, as named to the provider.
@@ -2976,10 +3069,13 @@ class GovernedTaskOrchestrator:
             metadata={"steps_count": len(verif_plan.steps)},
         )
 
-        verif_status = verif_plan.execute_all(
-            cwd=str(self.target_repo),
-            stop_on_failure=self.config.stop_on_verification_failure,
-            progress_tracker=progress,
+        verif_status = self._execute_verification_plan(
+            verif_plan=verif_plan,
+            task_spec=task_spec,
+            baseline=baseline,
+            delta=current_delta,
+            run_dir=run_dir,
+            progress=progress,
         )
         (run_dir / "verification_result.json").write_text(verif_plan.to_json(), encoding="utf-8")
 
