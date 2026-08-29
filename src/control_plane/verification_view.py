@@ -289,23 +289,12 @@ def destroy_verification_view(view: VerificationView) -> VerificationView:
 
 
 @contextmanager
-def verification_view(
-    target_repo: Union[str, Path],
-    baseline: Any,
-    delta: Any,
-    task_id: str,
-    scratch_root: Optional[Union[str, Path]] = None,
-    linked_dependency_dirs: Sequence[str] = DEFAULT_LINKED_DEPENDENCY_DIRS,
-) -> Iterator[VerificationView]:
-    """Yields a sanitized verification view and always tears it down."""
-    view = build_verification_view(
-        target_repo=target_repo,
-        baseline=baseline,
-        delta=delta,
-        task_id=task_id,
-        scratch_root=scratch_root,
-        linked_dependency_dirs=linked_dependency_dirs,
-    )
+def verification_view(*args: Any, **kwargs: Any) -> Iterator[VerificationView]:
+    """Yields a sanitized verification view and always tears it down.
+
+    Takes the same arguments as `build_verification_view`.
+    """
+    view = build_verification_view(*args, **kwargs)
     try:
         yield view
     finally:
