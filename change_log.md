@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+**Approval Authorizes The Workflow To Continue, Not The Implementation To Be
+Correct**: a task that escalated to `awaiting_human` before Stage 6 transitioned
+straight to `complete` on a valid approval, because `human_boundary.py` had no
+way to tell a Stage 7 escalation (which happens *after* verification) from an
+earlier one (which never reaches it). HOWLFRAM-BUG-50 therefore reported
+`Final state: COMPLETE (Exit 0)` while `verification_plan.json` still read
+`overall_status: unverified` with all four steps `claimed` and `exit_code: null`,
+and the summary hardcoded the words `(Human Approved & Verified)`.
+HOWLFRAM-BUG-52 is parked in exactly that shape.
+
+Approval now resumes the governed workflow into the deterministic gate rather
+than standing in for it. The trigger is the verification evidence itself --
+a plan whose `overall_status` is still `unverified` has not run, whatever else
+the run recorded -- rather than an inference from a checkpoint stage, which is
+also the fail-closed reading for tasks serialized before this fix. A plan that
+already reports a terminal status keeps it, so post-verification approvals
+retain exactly their previous semantics and a repeated resume cannot turn a
+recorded failure into a fresh pass.
+
+Outcomes follow the evidence. `passed` completes under normal policy. `failed`
+reaches `failed`, the same terminal state the ordinary Stage 6 gate uses, by the
+same evidence. Anything short of a completed run -- partial, errored, never run
+-- reaches `blocked`, because an implementation that was not judged must not be
+recorded as judged. The summary reads the executed plan instead of asserting a
+result.
+
+Stage 6 now *calls* the same gate rather than restating it, so a task verified
+in one pass and a task verified after a pre-verification escalation cannot reach
+different conclusions from identical evidence.
+
+There is deliberately no verification override. Overruling a failed
+deterministic gate is a different act from authorizing a workflow to continue,
+and would need its own explicit authority operation with its own evidence and
+terminal semantics; a regression test fails if `approve` or `resume` ever grows
+an override, force or skip-verification parameter. (issues.md #12)
+
 **One Authoritative Effective-Implementer Identity**: `actual_agent` was doing
 two incompatible jobs -- durable audit metadata answering "who produced this
 work", and a mutable dispatch slot telling a backend which resource the next
