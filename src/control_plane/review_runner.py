@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
-from src.control_plane.agent_execution import AgentBackend, AgentBackendRegistry, AgentExecutionResult
+from src.control_plane.agent_execution import (
+    AgentBackend,
+    AgentBackendRegistry,
+    AgentExecutionResult,
+    LAUNCH_OUTCOME_KEY,
+    TIMEOUT_SOURCE_KEY,
+)
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
 from src.control_plane.reconciliation import ReviewFinding, ReconciliationResult, ReviewReconciler, VALID_SEVERITIES
 from src.control_plane.reviewers import get_reviewer_role, ReviewerRole, build_skill_context
@@ -49,14 +55,32 @@ REVIEW_ATTEMPT_STATUSES = (
 )
 
 # Default bounded timeout for a single reviewer invocation (#59.2 Phase 6).
-# Live campaign DOGFOOD-20260822-205616-5466ce recorded claude_code timing out
-# at 30.104s against the previous 30s ceiling in engine.py -- 180s is 6x that
-# one observed near-miss, well under the 300s SubprocessAgentBackend default
-# and the 600s OrchestrationConfig ceiling used for actual code remediation. A
-# review only reads a diff and emits findings; it should need meaningfully
-# less wall-clock than an implementation/remediation attempt. No per-provider
-# or per-role override: one data point does not justify a config system.
-REVIEW_TIMEOUT_SECONDS = 180
+#
+# Was 180s, derived from a single observed 30.104s near-miss in campaign
+# DOGFOOD-20260822-205616-5466ce on the theory that reading a diff needs less
+# wall-clock than writing code. HOWLFRAM-BUG-50, the first real governed run,
+# produced 20 attempts that say otherwise:
+#
+#   claude_code  0 completions / 4 attempts   180.155 180.157 180.163 180.14
+#   codex        0 completions / 3 attempts   180.052 180.039 180.03
+#   devin_cli    0 completions / 3 attempts   1.718 1.688 1.606  (quota, issues.md #15)
+#   agy          4 completions / 10 attempts  124.159 136.037 169.434 178.316
+#
+# 13 of 20 attempts hit the deadline. Only agy ever completed a review, and its
+# fastest success finished 1.7s under the ceiling: 180s sat at the *median*
+# review duration, so every review was close to a coin flip. That is a
+# governance problem, not a latency one -- when one provider fits the budget,
+# bounded failover converges on it, and on that run it was the implementer,
+# which PR #60 then correctly gated as a self-review.
+#
+# 600s is the value OrchestrationConfig already uses as its remediation
+# ceiling. The 300s parameter on AgentBackend.execute is a default, not a cap,
+# and no enclosing review-cycle or orchestration deadline exists, so this
+# budget reaches the provider. Worst case is 3 roles x
+# MAX_REVIEWER_FAILOVER_ATTEMPTS x (1 + max_remediation_cycles) cycles; that
+# bound is documented rather than optimised, because truthful governed review
+# is worth more than cutting off a reviewer that would have answered.
+REVIEW_TIMEOUT_SECONDS = 600
 
 # Bounded reviewer failover depth (#59.2 Phase 4): preferred assignment + one
 # fallback candidate. Matches the observed real failure mode (one reviewer
@@ -108,6 +132,28 @@ def write_review_result(
     if agent_res is not None:
         effective_resource = getattr(agent_res, "agent_id", None) or effective_resource
 
+    # When every candidate fails, invoke_reviewer_with_failover returns no
+    # AgentExecutionResult, so reading process evidence off `agent_res` wrote
+    # null for all of it -- which is exactly the case where an operator most
+    # needs to know why. Fall back to the last attempt, which now carries the
+    # same structural fields (HOWLFRAM-BUG-50, issues.md #14).
+    last_attempt = attempts[-1] if attempts else {}
+    metadata = getattr(agent_res, "metadata", None) or {}
+
+    def _evidence(field: str, *, from_metadata: bool = False) -> Any:
+        if agent_res is not None:
+            value = metadata.get(field) if from_metadata else getattr(agent_res, field, None)
+            if value is not None:
+                return value
+        return last_attempt.get(field)
+
+    # A role that consumed two full review budgets did not take 0.0 seconds.
+    duration_seconds = result.duration_seconds
+    if not duration_seconds and attempts:
+        duration_seconds = round(
+            sum(a.get("duration_seconds") or 0.0 for a in attempts), 3
+        )
+
     payload: Dict[str, Any] = {
         "role": role_id,
         "reviewer_name": result.reviewer_name,
@@ -116,19 +162,17 @@ def write_review_result(
         "resource_id": effective_resource,
         "assigned_resource_id": assigned_resource,
         "completed_at": result.timestamp,
-        "duration_seconds": result.duration_seconds,
+        "duration_seconds": duration_seconds,
         "process": {
-            "exit_code": getattr(agent_res, "exit_code", None),
+            "exit_code": _evidence("exit_code"),
             "success": getattr(agent_res, "success", None),
-            "timed_out": getattr(agent_res, "timed_out", None),
+            "timed_out": _evidence("timed_out"),
         },
-        "launch_outcome": (getattr(agent_res, "metadata", None) or {}).get(
-            "launch_outcome"
-        ),
+        "launch_outcome": _evidence(LAUNCH_OUTCOME_KEY, from_metadata=True),
+        "timeout_source": _evidence(TIMEOUT_SOURCE_KEY, from_metadata=True),
         "raw_failure": result.error_message,
-        "normalized_failure": (getattr(agent_res, "metadata", None) or {}).get(
-            "normalized_failure"
-        ),
+        "normalized_failure": metadata.get("normalized_failure")
+        or last_attempt.get("failure_class"),
         "output_present": bool((result.raw_output or "").strip()),
         "output_valid": result.status in ("clean", "findings_detected"),
         "findings_count": len(result.findings),
@@ -526,8 +570,10 @@ def invoke_reviewer_with_failover(
         )
         attempt: Dict[str, Any] = {
             "provider": candidate,
+            "resource_id": candidate,
             "duration_seconds": round(agent_res.duration_seconds, 3),
         }
+        attempt.update(_attempt_execution_evidence(agent_res, provider_pool, candidate))
 
         exhaustion = provider_pool.detect_exhaustion(candidate, agent_res) if provider_pool else None
         if exhaustion:
@@ -554,6 +600,38 @@ def invoke_reviewer_with_failover(
         return candidate, agent_res, attempts_log
 
     return None, None, attempts_log
+
+
+def _attempt_execution_evidence(
+    agent_res: Any,
+    provider_pool: Optional[Any],
+    candidate: str,
+) -> Dict[str, Any]:
+    """Structural evidence for one reviewer attempt.
+
+    A reviewer that timed out, one whose executable never spawned, and one that
+    launched and then exited non-zero are three different events. Recording only
+    provider/duration/outcome made them indistinguishable, so on HOWLFRAM-BUG-50
+    a 180s deadline and a 1.6s provider quota failure left byte-identical
+    evidence and the cause had to be reproduced live against the provider.
+
+    Everything here is read off the process result the harness already observed.
+    Nothing is inferred from elapsed time.
+    """
+    metadata = getattr(agent_res, "metadata", None) or {}
+    evidence: Dict[str, Any] = {
+        "exit_code": getattr(agent_res, "exit_code", None),
+        "timed_out": getattr(agent_res, "timed_out", None),
+        "timeout_source": metadata.get(TIMEOUT_SOURCE_KEY),
+        "launch_outcome": metadata.get(LAUNCH_OUTCOME_KEY),
+    }
+    if provider_pool is not None and not getattr(agent_res, "success", False):
+        try:
+            failure_class = provider_pool.classify_failure(candidate, agent_res)
+        except Exception:
+            failure_class = None
+        evidence["failure_class"] = getattr(failure_class, "value", failure_class)
+    return evidence
 
 
 def _make_err_finding(reviewer_role: str, err_msg: str, raw_output: str) -> ReviewFinding:

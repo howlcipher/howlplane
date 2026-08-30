@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+**Reviewer Invocation Budget Raised From 180s To 600s On Production Evidence**:
+independent review was failing far more often than it was completing.
+`HOWLFRAM-BUG-50`, the first real governed run, produced 20 reviewer attempts of
+which **13 hit the 180-second deadline**; `claude_code` completed 0 of 4,
+`codex` 0 of 3, and only `agy` ever returned a verdict, completing 4 of 10 with
+its fastest success finishing 1.7s under the ceiling. The budget sat at the
+median review duration, so bounded failover deterministically converged on the
+single fastest provider -- which on that run was the implementer, correctly
+gated by PR #60 as a self-review. This is a governance failure rather than a
+latency one: reviewer independence cannot hold when only one resource fits the
+budget. 600s is the value `OrchestrationConfig` already uses for remediation;
+the timeout path was traced end to end and the 300s `AgentBackend.execute`
+parameter is a default rather than a cap, with no enclosing review-cycle
+deadline. (issues.md #13)
+
+**Review Failure Evidence Is Now Machine-Readably Truthful**: a 180s harness
+timeout and a 1.6s provider quota failure previously wrote byte-identical
+durable evidence -- `status: reviewer_failure`, `duration_seconds: 0.0`, and
+`null` for `process.exit_code`, `process.timed_out`, `launch_outcome` and
+`normalized_failure` -- because `invoke_reviewer_with_failover` returns no
+`AgentExecutionResult` when every candidate fails, and per-attempt records
+carried only provider, duration and outcome. Diagnosing a real failure required
+reproducing it live against the provider. Each attempt now records `exit_code`,
+`timed_out`, `timeout_source`, `launch_outcome` and the normalized
+`failure_class` from the existing PR #53/#57 taxonomy, and `write_review_result`
+falls back to the last attempt when no `AgentExecutionResult` exists, so
+harness-budget timeouts, launch failures, launched-then-failed processes,
+malformed output and invalid output are all distinguishable without reading
+transcripts or comparing durations. Classification is read from structural
+process evidence, never inferred from elapsed time. The
+`REVIEW_ATTEMPT_STATUSES` contract is unchanged: role-level status remains
+`reviewer_failure`, with the cause carried alongside it. Role-level
+`duration_seconds` also stops reporting `0.0` for a role that consumed two full
+review budgets. (issues.md #14)
+
+
 **Review Independence Is Now Enforced And Labelled, Not Merely Recorded**:
 `build_reviewer_candidates` never learned who implemented a change, so ordinary
 reviewer failover could select the implementer itself. On the first real
