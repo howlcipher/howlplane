@@ -140,7 +140,26 @@ class TaskSpec(DataClassSerializationMixin):
     recommended_reasoning_tier: str = "tier_2"
     preferred_agent: Optional[str] = None
     recommended_agent: Optional[str] = None
+    # Durable audit answer to "who produced the work this task is governing".
+    # Provisional while implementation is still moving between resources, and
+    # pinned to the effective implementer the moment implementation settles.
+    # It is NOT a dispatch slot: nothing may overwrite it to tell a backend
+    # which resource to invoke, which is exactly how a reviewer's provider id
+    # ended up here on HOWLFRAM-BUG-52 (issues.md #16). Use
+    # `dispatch_resource_id` / `dispatch_target` for that.
     actual_agent: Optional[str] = None
+    # The single authoritative effective-implementer identity (issues.md #16).
+    # Written once implementation settles -- on success, on promotion of a
+    # retained candidate, and on recovery after an interruption -- and never
+    # written by any review, remediation or dispatch path. `actual_agent`
+    # mirrors it so durable task metadata, reviewer-independence records and
+    # the final summary cannot disagree about who produced the candidate.
+    effective_implementer_resource_id: Optional[str] = None
+    # Transient: which resource the *next* backend invocation represents.
+    # Reviewer and implementation failover both rewrite this per attempt; it
+    # carries no audit meaning and is deliberately excluded from every
+    # "who implemented this" question.
+    dispatch_resource_id: Optional[str] = None
     is_override: Optional[bool] = None
     override_reason: Optional[str] = None
     allowed_tools: List[str] = field(default_factory=list)
@@ -160,6 +179,17 @@ class TaskSpec(DataClassSerializationMixin):
 
     def __post_init__(self):
         self.validate()
+
+    @property
+    def dispatch_target(self) -> Optional[str]:
+        """Which resource the next backend invocation represents.
+
+        Falls back to `actual_agent` so a caller that never set a dispatch
+        target (implementation paths that construct a fresh TaskSpec per
+        candidate) keeps its existing behaviour. Being a property rather than
+        a field, it is never serialized.
+        """
+        return self.dispatch_resource_id or self.actual_agent
 
     def validate(self) -> None:
         """Validates internal fields against allowed enums and non-empty constraints."""

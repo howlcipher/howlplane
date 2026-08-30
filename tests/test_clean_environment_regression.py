@@ -115,17 +115,17 @@ def test_provider_fallback_chain_clean_environment(tmp_path: Path):
     class MockExhaustingBackend(FakeAgentBackend):
         def execute(self, task, cwd, role="implementation", **kwargs):
             if role == "implementation":
-                events.append(task.actual_agent)
+                events.append(task.dispatch_target)
             if role not in ("implementation", "remediation"):
                 # Independent review roles: this test exercises
                 # implementation-provider fallback, not review content.
-                return clean_review_result(role, task.actual_agent or self.agent_id)
-            err = agent_errors.get(task.actual_agent)
+                return clean_review_result(role, task.dispatch_target or self.agent_id)
+            err = agent_errors.get(task.dispatch_target)
             ok = err is None
             return AgentExecutionResult(
-                agent_id=task.actual_agent or self.agent_id,
+                agent_id=task.dispatch_target or self.agent_id,
                 role=role,
-                command=task.actual_agent or "agent",
+                command=task.dispatch_target or "agent",
                 exit_code=0 if ok else 1,
                 stdout="Success" if ok else "",
                 stderr="" if ok else err,
