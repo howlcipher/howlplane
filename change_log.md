@@ -73,6 +73,22 @@ different resource.
 Full attempt history is untouched: every provider that was asked still has its
 own record under `implementation/attempts/`, and promotion still credits the
 producer without rewriting which attempt actually ran last. (issues.md #16)
+**A Required Check That Never Runs Is A Permanently Blocked PR**: the
+`main-protection` ruleset requires the `SlopsLint Duplication & Ceiling Ratchet`
+context, but `.github/workflows/hygiene.yml` filtered its `pull_request:`
+trigger by path. A pull request touching none of those paths never triggered
+the workflow, so the required context was never reported -- and GitHub treats a
+required check that has not reported as pending, not as skipped. PR #62, a
+single addition to `issues.md`, therefore sat at `mergeStateStatus: BLOCKED`
+with all 5 present checks green and no way to ever go green. The `paths:` list
+is removed from the `pull_request:` trigger, matching `.github/workflows/test.yml`,
+which has always used a bare `pull_request:` trigger. The `push:` filter is kept,
+since pushes to `main` are not gated by required checks. The alternative of a
+companion workflow reporting the same context name on excluded paths was
+rejected: it reports a green gate that did not run, and duplicates a path list
+that drifts. The filter only ever saved wall-clock -- `slopslint check` and
+`slopslint ratchet` scan the whole repository regardless of what a PR touched.
+(issues.md #17)
 
 **Reviewer Invocation Budget Raised From 180s To 600s On Production Evidence**:
 independent review was failing far more often than it was completing.
