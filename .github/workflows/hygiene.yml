@@ -10,14 +10,14 @@ on:
       - 'scripts/**'
       - '.slop/**'
       - '.github/workflows/hygiene.yml'
+  # Deliberately unfiltered, matching test.yml. The `main-protection` ruleset
+  # requires the `SlopsLint Duplication & Ceiling Ratchet` context, and a
+  # required check that never reports is not a skipped check -- it is a
+  # permanently BLOCKED pull request. A path filter here made every
+  # docs/issues-only PR unmergeable (observed on PR #62, which touched only
+  # issues.md and sat at BLOCKED with 5/5 present checks green). The gate
+  # itself is repository-wide, so filtering it only ever saved wall-clock.
   pull_request:
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'scripts/**'
-      - '.slop/**'
-      - '.github/workflows/hygiene.yml'
-      - 'documentation/task_journals/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
