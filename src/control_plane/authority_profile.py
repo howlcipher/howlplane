@@ -143,9 +143,42 @@ OVERNIGHT_SAFE_PROFILE = AuthorityProfile(
     local_only_iteration_limit=DEFAULT_LOCAL_ONLY_ITERATION_LIMIT,
 )
 
+# Canonical profile for the first unattended HowlFrame backlog marathon.
+#
+# Deliberately a third profile rather than a widening of OVERNIGHT_SAFE_PROFILE:
+# that profile was audited and granted for `howlcipher/howlplane`, and adding a
+# second repository to it would silently extend every existing invocation's
+# blast radius. A separate profile makes the HowlFrame grant an explicit opt-in
+# at the command line.
+#
+# `merge_pull_request` is absent from the allow list AND `max_merges` is 0, so
+# an autonomous merge is refused twice over. The first marathon stops at green
+# pull requests and a human authorizes every merge. A marathon that produces
+# several independently reviewed, verified, green PRs is useful; one that
+# merges unreviewed work to look more autonomous is not.
+HOWLFRAME_OVERNIGHT_PROFILE = AuthorityProfile(
+    profile_id="howlframe-overnight",
+    version="1.0",
+    # Shorter than overnight-safe's 12h: this is a first run, and a shorter TTL
+    # means an envelope that outlives its usefulness expires sooner.
+    ttl_hours=10.0,
+    max_merges=0,
+    external_spend_usd_limit=0.0,
+    authorized_repositories=["howlcipher/howlframe"],
+    allowed_action_classes=[
+        action for action in OVERNIGHT_SAFE_ALLOWED_ACTIONS
+        if action != "merge_pull_request"
+    ],
+    denied_action_classes=list(OVERNIGHT_SAFE_DENIED_ACTIONS),
+    local_ram_threshold_gib=9.0,
+    local_keep_alive=0,
+    local_only_iteration_limit=DEFAULT_LOCAL_ONLY_ITERATION_LIMIT,
+)
+
 CANONICAL_PROFILES: Dict[str, AuthorityProfile] = {
     "strict": STRICT_PROFILE,
     "overnight-safe": OVERNIGHT_SAFE_PROFILE,
+    "howlframe-overnight": HOWLFRAME_OVERNIGHT_PROFILE,
 }
 
 

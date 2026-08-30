@@ -557,6 +557,30 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
     p_overnight.add_argument("--ledger-file", help="Ledger file path")
     p_overnight.add_argument("--json", action="store_true", help="Output JSON result")
 
+    # marathon (bounded backlog-driven engineering marathon)
+    p_marathon = subparsers.add_parser(
+        "marathon", help="Work a bounded sequence of a repository's ranked backlog", **kwargs
+    )
+    p_marathon.add_argument(
+        "--authority-profile", required=True,
+        choices=["strict", "overnight-safe", "howlframe-overnight"],
+        help="Delegated campaign authority. Required -- there is no default; an "
+             "operator must explicitly authorize exactly the actions it encodes.",
+    )
+    p_marathon.add_argument("--target-repo", default=".", help="Repository whose backlog is worked")
+    p_marathon.add_argument("--repo-slug", help="owner/repo (auto-detected from origin remote if omitted)")
+    p_marathon.add_argument("--max-tasks", type=int, default=3, help="Maximum backlog items to attempt")
+    p_marathon.add_argument("--max-runtime-hours", type=float, default=8.0, help="Wall-clock ceiling")
+    p_marathon.add_argument("--roi-floor", type=float, default=0.5, help="Minimum backlog score to work")
+    p_marathon.add_argument("--campaign-dir", default=".dogfood_runs", help="Durable campaign state directory")
+    p_marathon.add_argument("--resume", help="Resume an existing campaign by id")
+    p_marathon.add_argument("--ledger-file", help="Ledger file path")
+    p_marathon.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would be worked and stop. Invokes no provider and writes nothing.",
+    )
+    p_marathon.add_argument("--json", action="store_true", help="Output JSON result")
+
     # authority (read-only authority profile inspection, #59 Phase 26)
     p_authority = subparsers.add_parser("authority", help="Inspect delegated authority profiles (read-only)", **kwargs)
     authority_sub = p_authority.add_subparsers(dest="authority_action", required=True)
@@ -569,6 +593,85 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
     p_local.add_argument("local_action", choices=["setup"], help="Action to perform")
     p_local.add_argument("--model", default="qwen2.5-coder:7b-instruct", help="Model to pull/verify")
     p_local.add_argument("--json", action="store_true", help="Output JSON result")
+
+
+def cmd_marathon(args: argparse.Namespace) -> int:
+    """Works a bounded sequence of the target repository's ranked backlog."""
+    import json as _json
+    from src.control_plane.backlog_source import BacklogSource
+    from src.control_plane.synthesis import MarathonDogfoodEngine
+    from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+
+    target_repo = getattr(args, "target_repo", None) or "."
+
+    if getattr(args, "dry_run", False):
+        # Read-only: shows exactly which items are eligible and why the
+        # near-misses are not, without binding an authority envelope or
+        # invoking any provider.
+        selection = BacklogSource(
+            target_repo, roi_floor=getattr(args, "roi_floor", 0.5)
+        ).select()
+        payload = {
+            "target_repo": target_repo,
+            "files_read": selection.files_read,
+            "eligible": [item.to_dict() for item in selection.eligible],
+            "excluded": selection.excluded,
+            "would_work": [
+                item.task_id for item in selection.eligible[: args.max_tasks]
+            ],
+        }
+        if getattr(args, "json", False):
+            print(_json.dumps(payload, indent=2))
+        else:
+            print("=" * 60)
+            print(f"HOWLPLANE — MARATHON DRY RUN: {target_repo}")
+            print("=" * 60)
+            print(f"Backlogs read:      {', '.join(selection.files_read) or 'none'}")
+            print(f"Eligible items:     {len(selection.eligible)}")
+            print(f"Would work (max {args.max_tasks}):")
+            for item in selection.eligible[: args.max_tasks]:
+                print(f"  - {item.task_id}  score={item.score}  {item.title}")
+            if selection.excluded:
+                print("\nPending but NOT eligible:")
+                for excluded in selection.excluded:
+                    print(f"  - #{excluded['item_id']} ({excluded['source_file']}): {excluded['reason']}")
+            print("\nNo provider was invoked and nothing was written.")
+        return 0
+
+    ledger = EvidenceLedger(args.ledger_file) if getattr(args, "ledger_file", None) else None
+    engine = MarathonDogfoodEngine(
+        provider_pool=ProviderPoolManager.from_config(),
+        ledger=ledger,
+        campaign_dir=getattr(args, "campaign_dir", None),
+        target_repo=target_repo,
+        repo_slug=getattr(args, "repo_slug", None),
+    )
+    report = engine.run_backlog_marathon(
+        authority_profile_id=args.authority_profile,
+        max_tasks=args.max_tasks,
+        max_runtime_hours=args.max_runtime_hours,
+        resume_campaign_id=getattr(args, "resume", None),
+        roi_floor=getattr(args, "roi_floor", 0.5),
+    )
+
+    if getattr(args, "json", False):
+        print(_json.dumps(report, indent=2))
+    else:
+        print("=" * 60)
+        print(f"HOWLPLANE — BACKLOG MARATHON: {report['campaign_id']}")
+        print("=" * 60)
+        print(f"Repository:     {report['target_repo']} ({report['repo_slug'] or 'no slug'})")
+        print(f"Authority:      {report['authority_profile']}")
+        print(f"Stop reason:    {report['stop_reason']}")
+        print(f"Attempted:      {', '.join(report['tasks_attempted']) or 'none'}")
+        print(f"Completed:      {', '.join(report['tasks_completed']) or 'none'}")
+        print(f"Failed:         {', '.join(report['tasks_failed']) or 'none'}")
+        print(f"Parked:         {', '.join(report['tasks_parked']) or 'none'}")
+        print(f"Duration:       {report['duration_seconds']}s")
+        print(f"State:          {report['state_dir']}")
+    # A parked task is not a failure: it is the control plane correctly
+    # refusing to exceed its delegated authority, and the operator decides.
+    return 0 if not report["tasks_failed"] else 1
 
 
 def _handle_decision(args: argparse.Namespace, decision: str) -> int:
@@ -1235,6 +1338,7 @@ def main(args: Optional[List[str]] = None) -> int:
         "create": cmd_create,
         "run": cmd_run_product,
         "dogfood": cmd_dogfood,
+        "marathon": cmd_marathon,
         "authority": cmd_authority,
         "local": cmd_local,
     }
