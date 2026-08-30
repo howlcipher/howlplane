@@ -12,6 +12,9 @@ Pending bugs carry the same diminishing-returns score defined in `improvements.m
 
 | # | Bug | Status | Score (V×D÷E) | Claude model | Gemini model | ROI rationale |
 | --- | --- | --- | --- | --- | --- | --- |
+| 13 | [The 180s reviewer budget sits at the median review duration, so independent review usually cannot finish](#13-the-180s-reviewer-budget-sits-at-the-median-review-duration-so-independent-review-usually-cannot-finish) | Pending | 8.0 (8×1÷1) | Sonnet 5 | Gemini 3 Pro | On HOWLFRAM-BUG-50, 13 of 20 reviewer attempts hit the 180s deadline and only one provider ever completed a review. Independent review collapsed onto the implementer because it was the only resource that fit the budget. |
+| 14 | [Review failure evidence cannot distinguish a timeout from a quota failure from a launch failure](#14-review-failure-evidence-cannot-distinguish-a-timeout-from-a-quota-failure-from-a-launch-failure) | Pending | 6.0 (6×1÷1) | Sonnet 5 | Gemini 3 Pro | When every reviewer candidate fails, `agent_result` is None, so `process`, `launch_outcome` and `normalized_failure` all persist as null and a 180s timeout is byte-identical to a 1.6s provider quota failure. |
+| 15 | [`classify_failure` reads Devin's quota exhaustion as an engineering failure, so the pool never marks it exhausted](#15-classify_failure-reads-devins-quota-exhaustion-as-an-engineering-failure-so-the-pool-never-marks-it-exhausted) | Pending | 4.0 (8×1÷2) | Sonnet 5 | Gemini 3 Pro | Devin exits 1 in ~1.5s with a structured `resource_exhausted` quota error; the shared classifier returns ENGINEERING_FAILURE, so `detect_exhaustion` records nothing and Devin keeps being selected as a reviewer and burning a failover attempt every cycle. |
 | 12 | [Approving a pre-verification escalation completes the task without ever running the deterministic verification plan](#12-approving-a-pre-verification-escalation-completes-the-task-without-ever-running-the-deterministic-verification-plan) | Pending | 4.0 (8×1÷2) | Sonnet 5 | Gemini 3 Pro | A task that escalates to `awaiting_human` before Stage 6 transitions straight to `complete` on approval, so it can be recorded complete with `verification_plan.json` still reporting every step `claimed` and `Executed: 0`. Observed live on HOWLFRAM-BUG-50. |
 | 11 | [Consequential execution is not mechanically separated from proposal/implementation, and approval can be mistaken for completion](#11-consequential-execution-is-not-mechanically-separated-from-proposalimplementation-and-approval-can-be-mistaken-for-completion) | Done (2026-08-20) | — | Sonnet 5 | Gemini 3 Pro | Critical authority bypass where consequential actions launch unrestricted implementation agent before human boundary, and approved tasks falsely complete without bounded execution or receipt |
 | 8 | [Blank input authorizes executable tool calls in the human-approval gate](#8-blank-input-authorizes-executable-tool-calls-in-the-human-approval-gate) | Done (2026-08-05) | — | Sonnet 5 | Gemini 3 Pro | Trivial one-line fix; a deny-by-default authorization gate currently authorizes on an empty Enter keypress, the exact opposite of its stated contract |
@@ -26,6 +29,62 @@ Pending bugs carry the same diminishing-returns score defined in `improvements.m
 | 5 | [Orchestrator leaks MCP server subprocesses across instances](#5-orchestrator-leaks-mcp-server-subprocesses-across-instances) | Done (2026-07-20) | — | Sonnet 5 | Gemini 3 Pro | New-theme reliability bug (Decay 1.0); verified live — leaked subprocesses accumulated to 1.9GB+ RSS and visibly throttled a single pre-push test run, risking CI OOM/timeout on tighter runners |
 
 ## Details
+
+### 13. The 180s reviewer budget sits at the median review duration, so independent review usually cannot finish
+* **Symptom:** on `HOWLFRAM-BUG-50`, the first real governed run, independent review effectively did not work. Reviewers hit the deadline, bounded failover burned both candidates, and the implementer became the only provider able to return a verdict — which PR #60 then correctly gated as a self-review, blocking the task.
+* **Production evidence** (`.task_runs/HOWLFRAM-BUG-50`, 10 role-cycles x 2 failover attempts = 20 attempts):
+
+  | provider | completions | attempts | durations |
+  | --- | --- | --- | --- |
+  | `claude_code` | 0 | 4 | 180.155, 180.157, 180.163, 180.14 |
+  | `codex` | 0 | 3 | 180.052, 180.039, 180.03 |
+  | `devin_cli` | 0 | 3 | 1.718, 1.688, 1.606 (quota, see issue #15) |
+  | `agy` | 4 | 10 | completions 124.159, 136.037, 169.434, 178.316; 6 further attempts at ~180s |
+
+  **13 of 20 attempts hit the 180s deadline. Only `agy` ever completed a review, and it failed 60% of the time.**
+* **Root Cause:** `REVIEW_TIMEOUT_SECONDS = 180` (`src/control_plane/review_runner.py`) is set at the *median* observed review duration, not above the tail. The fastest success finished 1.7s under the deadline, so every review is close to a coin flip. The constant's own comment records that 180 was derived from a single observed 30.104s near-miss during DOGFOOD-20260822-205616-5466ce; 20 subsequent data points contradict it.
+* **Why it matters beyond latency:** reviewer independence is a governance guarantee, not a performance property. When only one provider fits the budget, failover deterministically converges on whichever provider is fastest — here, the implementer.
+* **Fix:** raise the reviewer invocation budget to 600s, a value already established in this codebase as the `OrchestrationConfig` remediation ceiling. The timeout path was traced end to end: `review_runner` passes `timeout_seconds` explicitly to `AgentBackend.execute`, whose 300s parameter is a default rather than a cap, and there is no enclosing review-cycle or orchestration deadline, so 600 reaches the provider.
+* **Documented worst case (not optimised away):** 3 reviewer roles x `MAX_REVIEWER_FAILOVER_ATTEMPTS` (2) x (1 initial + `max_remediation_cycles` 3) cycles = 4320s at 180s, 14400s at 600s. The theoretical worst case is not the expected case: re-review is targeted via `determine_re_review_roles`, and a review that completes does not burn its second failover attempt.
+* **Deterministic acceptance:** a fake reviewer backend that returns after longer than 180s completes under the new budget rather than being cut off.
+
+### 14. Review failure evidence cannot distinguish a timeout from a quota failure from a launch failure
+* **Symptom:** two materially different review failures produce byte-identical durable evidence. From the same run, a role whose candidates both timed out at ~180s and a role whose first candidate died in 1.6s on a provider quota error both wrote:
+
+  ```json
+  "status": "reviewer_failure", "duration_seconds": 0.0,
+  "process": {"exit_code": null, "success": null, "timed_out": null},
+  "launch_outcome": null, "normalized_failure": null,
+  "raw_failure": "All candidate reviewers failed or were unavailable"
+  ```
+
+  Diagnosing Devin's failure required reproducing it live against the provider, because the run itself had recorded nothing usable.
+* **Root Cause:** two gaps, not one.
+  1. `write_review_result` already persists `process.exit_code`, `process.timed_out`, `launch_outcome` and `normalized_failure` — but reads them off `result.agent_result`. `invoke_reviewer_with_failover` returns `(None, None, attempts_log)` when *every* candidate fails, so `agent_result` is `None` and each field writes `null`.
+  2. Per-attempt entries in the failover log carry only `provider`, `duration_seconds` and `outcome`. The structural evidence (`timed_out`, `timeout_source`, `exit_code`, `launch_outcome`) exists on the `AgentExecutionResult` in scope at that moment and is discarded.
+* **Also wrong:** the role-level `duration_seconds` reports `0.0` after two attempts consuming ~360s of real time.
+* **Fix:** record the structural evidence and the normalized failure class on each attempt, reusing `ProviderPoolManager.classify_failure` (the PR #53/#57 taxonomy) rather than inventing a parallel one; and have `write_review_result` fall back to the last recorded attempt when `agent_result` is absent. The `REVIEW_ATTEMPT_STATUSES` contract is unchanged: the role-level status stays `reviewer_failure`, with the cause carried alongside it.
+* **Deterministic acceptance:** a harness timeout persists `EXECUTION_BUDGET_EXCEEDED` with `timed_out` true; a spawn failure persists `MISSING_EXECUTABLE`; a launched-then-non-zero-exit persists `ENGINEERING_FAILURE`; all three are distinguishable in both per-attempt and role-level `result.json` without reading transcripts or comparing durations.
+
+### 15. `classify_failure` reads Devin's quota exhaustion as an engineering failure, so the pool never marks it exhausted
+* **Symptom:** `devin_cli` failed all three of its reviewer attempts on `HOWLFRAM-BUG-50` in 1.606-1.718s, and the pool went on offering it as a reviewer candidate every cycle, burning one of the two bounded failover attempts each time.
+* **Deterministic reproduction:**
+
+  ```
+  $ cd <any trusted workspace> && devin -p "Reply with exactly: DEVIN_OK" --permission-mode auto
+  EXIT=1  DURATION=1.517s
+  Error: Agent error: Your weekly usage quota has been exhausted. ... (trace ID: ...): {
+    "cognition.ai/errorKind": "resource_exhausted",
+    "cognition.ai/retryable": true
+  }
+  ```
+
+  The duration matches the three observed failures. Note this is **not** a launch failure and **not** a timeout: the process launched and exited non-zero with a structured provider error.
+* **Root Cause:** `ProviderPoolManager.classify_failure` returns `ENGINEERING_FAILURE` for that stderr (verified directly by constructing the `AgentExecutionResult` and calling the classifier). Its quota and rate markers do not match Devin's phrasing or its structured `cognition.ai/errorKind: resource_exhausted` envelope. Because the class is not one of the availability classes, `detect_exhaustion` returns `None`, the pool records no exhaustion event, and Devin's capacity state stays clean.
+* **Impact:** an exhausted provider is repeatedly selected, consuming bounded failover depth that should go to a provider able to answer. It also misattributes a provider-capacity condition as an engineering result.
+* **Proposed fix:** teach the shared classifier Devin's quota shape — prefer the structured `errorKind` envelope over prose matching, consistent with the "structural evidence outranks transcript text" rule the classifier already documents. This belongs in the shared provider taxonomy and affects implementation routing as well as review, so it is deliberately not bundled into the review-budget change.
+* **Deterministic acceptance:** an `AgentExecutionResult` carrying the stderr above classifies as `QUOTA_EXHAUSTED`, `detect_exhaustion` returns an event, and the resource is not offered as a subsequent reviewer candidate while exhausted.
+* **Adjacent observation (same area, separate change):** `src/control_plane/synthesis/engine.py:680` calls `build_reviewer_candidates` without an `implementer` argument, so PR #60's implementer-last ordering does not apply on the product-synthesis review path.
 
 ### 12. Approving a pre-verification escalation completes the task without ever running the deterministic verification plan
 * **Symptom:** `HOWLFRAM-BUG-50` hit the remediation limit and escalated to `awaiting_human` during Stage 5, before the deterministic verification gate ran. After `ai approve` and `ai resume`, the task reported `Final state: COMPLETE (Exit 0)` while `verification_plan.json` still read `overall_status: unverified` with all four steps `claimed` and `exit_code: null`. The run summary had already said `Executed: 0 — NOT RUN — task awaiting_human before verification`.

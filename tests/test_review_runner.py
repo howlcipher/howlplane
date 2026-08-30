@@ -5,12 +5,27 @@ Unit tests for independent review execution, structured findings validation,
 and targeted re-review role determination.
 """
 
-from src.control_plane.reconciliation import ReviewFinding
-from src.control_plane.review_runner import (
-    ReviewRunner,
-    build_reviewer_candidates,
-    parse_and_validate_findings,
+from src.control_plane.agent_execution import (
+    AgentExecutionResult,
+    LAUNCH_OUTCOME_KEY,
+    LAUNCH_OUTCOME_LAUNCHED,
+    LAUNCH_OUTCOME_SPAWN_FAILED,
+    TIMEOUT_SOURCE_KEY,
+    TIMEOUT_SOURCE_HARNESS,
 )
+from src.control_plane.atomic_io import safe_load_json
+from src.control_plane.reconciliation import ReviewFinding
+from src.control_plane.resource_models import ProviderFailureClass
+from src.control_plane.review_runner import (
+    REVIEW_TIMEOUT_SECONDS,
+    ReviewRunner,
+    SingleReviewResult,
+    build_reviewer_candidates,
+    invoke_reviewer_with_failover,
+    parse_and_validate_findings,
+    write_review_result,
+)
+from src.control_plane.synthesis.provider_pool import ProviderPoolManager
 from src.control_plane.task_spec import TaskSpec
 
 
@@ -275,3 +290,190 @@ def test_candidate_order_is_unchanged_when_the_implementer_is_not_a_candidate():
 def test_no_implementer_supplied_preserves_previous_ordering():
     order = _candidates(["agy", "claude_code"], preferred="agy", implementer=None)
     assert order[0] == "agy"
+
+
+# ---------------------------------------------------------------------------
+# Review budget and failure taxonomy (issues.md #13, #14)
+# ---------------------------------------------------------------------------
+
+
+def _real_pool():
+    """A real ProviderPoolManager, used only for its failure classifier."""
+    from src.control_plane.agent_registry import AgentRegistry
+
+    return ProviderPoolManager(
+        registry=AgentRegistry([]), backend_resolver=None, probe_on_start=False
+    )
+
+
+class _FakePool:
+    """Provider pool exposing only what reviewer failover consults."""
+
+    def __init__(self, pool=(), exhausted=()):
+        self._pool = list(pool)
+        self._exhausted = set(exhausted)
+
+    def select_candidates(self, task_category=None, avoid_provider=None, task=None, role=None):
+        return [c for c in self._pool if c != avoid_provider]
+
+    def get_status(self, candidate):
+        return None
+
+    def detect_exhaustion(self, candidate, result, task_id=None):
+        return object() if candidate in self._exhausted else None
+
+    def classify_failure(self, agent_id, result):
+        return _real_pool().classify_failure(agent_id, result)
+
+
+def _result(agent_id, **kw):
+    base = dict(
+        agent_id=agent_id, role="review", command=agent_id, exit_code=0,
+        stdout="findings: []", stderr="", duration_seconds=1.0, success=True,
+    )
+    base.update(kw)
+    return AgentExecutionResult(**base)
+
+
+def _timed_out(agent_id, seconds):
+    return _result(
+        agent_id, exit_code=-1, stdout="", stderr=f"Timeout after {seconds}s.",
+        duration_seconds=seconds, success=False, timed_out=True,
+        metadata={LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_LAUNCHED,
+                  TIMEOUT_SOURCE_KEY: TIMEOUT_SOURCE_HARNESS},
+    )
+
+
+def _spawn_failed(agent_id):
+    return _result(
+        agent_id, exit_code=127, stdout="", stderr="", duration_seconds=0.0, success=False,
+        metadata={LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_SPAWN_FAILED},
+    )
+
+
+def _launched_then_failed(agent_id):
+    return _result(
+        agent_id, exit_code=2, stdout="", stderr="reviewer blew up", duration_seconds=4.0,
+        success=False, metadata={LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_LAUNCHED},
+    )
+
+
+def _invoke(results, candidates, pool=None):
+    """Runs reviewer failover against scripted per-candidate results."""
+    backends = {aid: type("B", (), {
+        "is_available": lambda self: True,
+        "execute": (lambda res: (lambda self, **kw: res))(res),
+    })() for aid, res in results.items()}
+    return invoke_reviewer_with_failover(
+        role_id="correctness-reviewer",
+        candidates=candidates,
+        task=TaskSpec(task_id="T-1", repository="repo", objective="obj"),
+        cwd=".",
+        prompt_override="brief",
+        backend_lookup=lambda aid: backends.get(aid),
+        provider_pool=pool or _FakePool(),
+    )
+
+
+def test_review_budget_admits_a_reviewer_slower_than_the_old_180s_ceiling():
+    """The old budget sat at the median review duration (issues.md #13)."""
+    assert REVIEW_TIMEOUT_SECONDS >= 600
+    # The four reviews that completed on HOWLFRAM-BUG-50 took 124-178s, and the
+    # deadline cut off 13 of 20 attempts at ~180s. A 300s reviewer is exactly
+    # the case the old ceiling rejected and the new one must accept.
+    assert 300 < REVIEW_TIMEOUT_SECONDS
+
+
+def test_a_harness_timeout_is_durably_classified_as_a_budget_failure():
+    winner, agent_res, attempts = _invoke(
+        {"claude_code": _timed_out("claude_code", 600.1)}, ["claude_code"]
+    )
+    assert winner is None
+    attempt = attempts[-1]
+    assert attempt["outcome"] == "reviewer_failure"
+    assert attempt["timed_out"] is True
+    assert attempt["timeout_source"] == TIMEOUT_SOURCE_HARNESS
+    assert attempt["failure_class"] == ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED.value
+
+
+def test_a_spawn_failure_is_classified_differently_from_a_timeout():
+    _w, _r, attempts = _invoke({"ghost": _spawn_failed("ghost")}, ["ghost"])
+    attempt = attempts[-1]
+    assert attempt["timed_out"] is False
+    assert attempt["launch_outcome"] == LAUNCH_OUTCOME_SPAWN_FAILED
+    assert attempt["failure_class"] == ProviderFailureClass.MISSING_EXECUTABLE.value
+
+
+def test_a_launched_process_that_exits_nonzero_is_not_a_launch_failure():
+    _w, _r, attempts = _invoke({"codex": _launched_then_failed("codex")}, ["codex"])
+    attempt = attempts[-1]
+    assert attempt["launch_outcome"] == LAUNCH_OUTCOME_LAUNCHED
+    assert attempt["failure_class"] != ProviderFailureClass.MISSING_EXECUTABLE.value
+    assert attempt["exit_code"] == 2
+
+
+def test_failover_still_advances_and_records_every_attempt():
+    winner, agent_res, attempts = _invoke(
+        {"claude_code": _timed_out("claude_code", 600.1), "agy": _result("agy")},
+        ["claude_code", "agy"],
+    )
+    assert winner == "agy"
+    assert [a["provider"] for a in attempts] == ["claude_code", "agy"]
+    assert attempts[0]["failure_class"] == ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED.value
+    assert attempts[-1]["outcome"] == "completed"
+
+
+def test_malformed_and_invalid_output_keep_their_existing_statuses():
+    _w, _r, malformed = _invoke(
+        {"a": _result("a", stdout="findings: [oops")}, ["a"]
+    )
+    assert malformed[-1]["outcome"] == "malformed_output"
+    _w2, _r2, invalid = _invoke({"b": _result("b", stdout="")}, ["b"])
+    assert invalid[-1]["outcome"] == "output_invalid"
+
+
+def test_failure_classification_survives_into_role_level_evidence(tmp_path):
+    """A total failure must still say why, in result.json (issues.md #14)."""
+    _w, _r, attempts = _invoke(
+        {"claude_code": _timed_out("claude_code", 600.1),
+         "agy": _timed_out("agy", 600.2)},
+        ["claude_code", "agy"],
+    )
+    single = SingleReviewResult(
+        reviewer_role="correctness-reviewer", reviewer_name="Correctness Reviewer",
+        status="reviewer_failure", error_message="All candidate reviewers failed or were unavailable",
+        attempts=attempts,
+    )
+    write_review_result(tmp_path, "correctness-reviewer", single, implementer="agy",
+                        assigned_resource="claude_code")
+    persisted = safe_load_json(tmp_path / "correctness-reviewer" / "result.json")
+
+    assert persisted["status"] == "reviewer_failure"          # contract unchanged
+    assert persisted["process"]["timed_out"] is True          # was null
+    assert persisted["timeout_source"] == TIMEOUT_SOURCE_HARNESS
+    assert persisted["normalized_failure"] == ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED.value
+    # A role that consumed two full budgets did not take 0.0 seconds.
+    assert persisted["duration_seconds"] > 1000
+    assert persisted["output_valid"] is False
+
+
+def test_a_quota_failure_is_distinguishable_from_a_timeout_in_evidence(tmp_path):
+    """The two failures that were byte-identical on HOWLFRAM-BUG-50."""
+    _w, _r, fast = _invoke({"devin_cli": _launched_then_failed("devin_cli")}, ["devin_cli"])
+    _w2, _r2, slow = _invoke({"agy": _timed_out("agy", 600.1)}, ["agy"])
+    assert fast[-1]["timed_out"] is False
+    assert slow[-1]["timed_out"] is True
+    assert fast[-1]["failure_class"] != slow[-1]["failure_class"]
+
+
+def test_resume_cannot_read_a_failed_review_as_clean(tmp_path):
+    _w, _r, attempts = _invoke({"agy": _timed_out("agy", 600.1)}, ["agy"])
+    single = SingleReviewResult(
+        reviewer_role="correctness-reviewer", reviewer_name="Correctness Reviewer",
+        status="reviewer_failure", attempts=attempts,
+    )
+    write_review_result(tmp_path, "correctness-reviewer", single)
+    persisted = safe_load_json(tmp_path / "correctness-reviewer" / "result.json")
+    assert persisted["disposition"] == "reviewer_failure"
+    assert persisted["output_present"] is False
+    assert persisted["findings_count"] == 0
