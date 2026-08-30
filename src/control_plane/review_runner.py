@@ -77,16 +77,41 @@ REVIEW_ATTEMPT_STATUSES = (
 # ceiling. The 300s parameter on AgentBackend.execute is a default, not a cap,
 # and no enclosing review-cycle or orchestration deadline exists, so this
 # budget reaches the provider. Worst case is 3 roles x
-# MAX_REVIEWER_FAILOVER_ATTEMPTS x (1 + max_remediation_cycles) cycles; that
-# bound is documented rather than optimised, because truthful governed review
-# is worth more than cutting off a reviewer that would have answered.
+# MAX_REVIEWER_LAUNCH_ATTEMPTS x (1 + max_remediation_cycles) cycles =
+# 3 x 2 x 4 x 600s = 14400s (4h); that bound is documented rather than
+# optimised, because truthful governed review is worth more than cutting off a
+# reviewer that would have answered.
+#
+# Two traversal effects sit on top of that figure and neither is unbounded.
+# Skipping a resource the pool already knows cannot serve launches nothing and
+# so costs no wall-clock. Discovering that a resource is out of capacity does
+# launch it and refunds the budget, so in the worst case a role launches every
+# candidate once -- but a capacity stop returns in seconds (Devin's quota error
+# lands in ~1.5s), and the de-duplicated traversal means total launches per
+# role per cycle can never exceed the candidate set.
 REVIEW_TIMEOUT_SECONDS = 600
 
-# Bounded reviewer failover depth (#59.2 Phase 4): preferred assignment + one
-# fallback candidate. Matches the observed real failure mode (one reviewer
-# times out, not the whole pool) without risking a multi-minute stall chaining
-# through every eligible candidate on every review cycle.
-MAX_REVIEWER_FAILOVER_ATTEMPTS = 2
+# Bounded reviewer *launch* budget: how many candidates a role may actually
+# invoke. This is an opportunity budget, not a traversal limit.
+#
+# It used to be both, because the candidate list was sliced
+# (`candidates[:max_attempts]`) *before* the loop while the availability skip
+# happened inside it. A provider already known to be exhausted therefore
+# consumed one of the two slots without ever being asked anything, so with two
+# dead providers at the head of the list a role failed outright while healthy
+# independent providers sat untried behind them. That converts a provider
+# outage into a governance failure, which is exactly backwards: review roles
+# are the requirement, providers are the interchangeable resource.
+#
+# Now the role traverses its whole eligible candidate list, skipping resources
+# the pool already knows cannot serve -- recorded as evidence, costing no
+# budget -- and spends this budget only on candidates it genuinely launches.
+# Each eligible resource is still attempted at most once per role per cycle,
+# and the traversal terminates because the candidate list is finite.
+MAX_REVIEWER_LAUNCH_ATTEMPTS = 2
+
+# Retained name for callers and tests that predate the distinction above.
+MAX_REVIEWER_FAILOVER_ATTEMPTS = MAX_REVIEWER_LAUNCH_ATTEMPTS
 
 
 REVIEW_RESULT_SCHEMA_VERSION = "howlplane.review_result/v1"
@@ -511,7 +536,7 @@ def invoke_reviewer_with_failover(
     prompt_override: str,
     backend_lookup: Callable[[str], Optional[AgentBackend]],
     provider_pool: Optional[Any] = None,
-    max_attempts: int = MAX_REVIEWER_FAILOVER_ATTEMPTS,
+    max_attempts: int = MAX_REVIEWER_LAUNCH_ATTEMPTS,
 ) -> Tuple[Optional[str], Optional["AgentExecutionResult"], List[Dict[str, Any]]]:
     """
     Tries independent reviewer candidates for one role, in order, bounded by
@@ -529,7 +554,19 @@ def invoke_reviewer_with_failover(
     outcome) for durable evidence regardless of outcome.
     """
     attempts_log: List[Dict[str, Any]] = []
-    for candidate in candidates[:max_attempts]:
+    launch_budget = max_attempts
+    seen: set = set()
+    for candidate in candidates:
+        # Each eligible resource is offered this role at most once per cycle,
+        # so a duplicated candidate list cannot spin. This is what bounds the
+        # traversal even when every launch turns out to be a capacity
+        # discovery and refunds its budget: total launches can never exceed the
+        # candidate set.
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if launch_budget <= 0:
+            break
         # Reviewer assignments are planned when implementation settles, which
         # can be many minutes before the review actually launches. Honour the
         # provider's state now rather than the state it had at planning time:
@@ -537,6 +574,10 @@ def invoke_reviewer_with_failover(
         # transport had already failed, spent the attempt, and got nothing back.
         unavailable_reason = _current_capacity_block(provider_pool, candidate)
         if unavailable_reason:
+            # Recorded, never hidden -- but a resource the pool already knows
+            # cannot serve costs no opportunity. Asking an exhausted provider
+            # the same question again is not an attempt, and must not deny one
+            # to a healthy independent resource behind it.
             attempts_log.append(
                 {
                     "provider": candidate,
@@ -544,24 +585,30 @@ def invoke_reviewer_with_failover(
                     "outcome": "unavailable",
                     "reason": unavailable_reason,
                     "checked_at": "launch",
+                    "consumed_launch_budget": False,
                 }
             )
             continue
         try:
             backend = backend_lookup(candidate)
         except Exception:
-            attempts_log.append({"provider": candidate, "resource_id": candidate, "outcome": "unavailable"})
+            attempts_log.append(_unlaunched_attempt(candidate, "backend_lookup_failed"))
             continue
         if not backend or not backend.is_available():
-            attempts_log.append({"provider": candidate, "resource_id": candidate, "outcome": "unavailable"})
+            attempts_log.append(_unlaunched_attempt(candidate, "backend_unavailable"))
             continue
+
+        # Past this point the provider is actually invoked, so this is where an
+        # opportunity is genuinely spent.
+        launch_budget -= 1
 
         # Tell the backend which candidate this attempt represents. This is a
         # dispatch slot, not an audit field: writing it to `actual_agent` is
         # what let a reviewer's provider id become the task's durable
         # "implementing agent" on HOWLFRAM-BUG-52, where task.yaml ended
-        # `actual_agent: codex` naming the test-falsifier reviewer while
-        # effective_route.json named claude_code (issues.md #16). Backends read
+        # `actual_agent: codex` -- the last reviewer dispatched in the final
+        # cycle, serving simplicity-reviewer -- while effective_route.json
+        # named claude_code (issues.md #16). Backends read
         # `task.dispatch_target`, which falls back to `actual_agent` for the
         # implementation paths that never set a dispatch target.
         task.dispatch_resource_id = candidate
@@ -581,7 +628,27 @@ def invoke_reviewer_with_failover(
 
         exhaustion = provider_pool.detect_exhaustion(candidate, agent_res) if provider_pool else None
         if exhaustion:
+            # Discovering that a provider is out of capacity is not a review
+            # opportunity: it told us nothing about the change, only about the
+            # provider. Refund the budget so the discovery does not deny a turn
+            # to a healthy independent resource behind it.
+            #
+            # Without this, the *first* role to run pays for every exhaustion in
+            # the pool and fails even though a healthy provider was waiting --
+            # which is the same "provider outage becomes governance failure"
+            # this traversal exists to prevent, just moved one step later.
+            # Later roles were already fine, because by then the pool knew.
+            #
+            # This cannot spin: `seen` admits each resource once and the
+            # candidate list is finite, so total launches are bounded by the
+            # candidate set regardless of how many turn out to be exhausted.
+            #
+            # A timeout is deliberately NOT refunded. A provider that launched,
+            # worked, and ran out of clock did consume a real opportunity, and
+            # says nothing about its own availability (issues.md #15).
+            launch_budget += 1
             attempt["outcome"] = "exhausted"
+            attempt["consumed_launch_budget"] = False
             attempts_log.append(attempt)
             continue
         if not agent_res.success:
@@ -604,6 +671,18 @@ def invoke_reviewer_with_failover(
         return candidate, agent_res, attempts_log
 
     return None, None, attempts_log
+
+
+def _unlaunched_attempt(candidate: str, reason: str) -> Dict[str, Any]:
+    """Records a candidate that was never launched, and cost no budget."""
+    return {
+        "provider": candidate,
+        "resource_id": candidate,
+        "outcome": "unavailable",
+        "reason": reason,
+        "checked_at": "launch",
+        "consumed_launch_budget": False,
+    }
 
 
 def _attempt_execution_evidence(

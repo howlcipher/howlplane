@@ -99,6 +99,14 @@ EXHAUSTION_PATTERNS: Dict[str, List[str]] = {
         "rate limited",
         "credits exhausted",
         "insufficient funds",
+        # Devin says "Your weekly usage quota has been exhausted", which none
+        # of the shared markers match: they look for "quota exhausted" as an
+        # adjacent pair. agy already carries both spellings of the structured
+        # token; devin_cli did not (issues.md #15).
+        "resource_exhausted",
+        "resource exhausted",
+        "usage quota has been exhausted",
+        "weekly usage quota",
     ],
     "local_ollama": ["connection refused", "not running", "server unavailable"],
 }
@@ -159,6 +167,60 @@ _TERMINAL_HARD_FAILURE_PATTERNS = (
 )
 
 
+# Normalized error kinds a provider reports in a structured envelope beside its
+# human-readable message. Devin emits
+# `{"cognition.ai/errorKind": "resource_exhausted", ...}` on stderr; the key is
+# vendor-prefixed, so the prefix is matched loosely and the *value* is what is
+# mapped. This is structural evidence in the sense the classifier already
+# documents -- a machine-emitted key/value pair, not transcript prose -- so it
+# outranks the substring scan below (issues.md #15).
+_ERROR_KIND_PATTERN = re.compile(
+    r'"[A-Za-z0-9_.\-/]*error[_ ]?kind"\s*:\s*"([A-Za-z0-9_.\-]+)"',
+    re.IGNORECASE,
+)
+
+_ERROR_KIND_CLASSES: Dict[str, ProviderFailureClass] = {
+    "resource_exhausted": ProviderFailureClass.QUOTA_EXHAUSTED,
+    "quota_exhausted": ProviderFailureClass.QUOTA_EXHAUSTED,
+    "insufficient_quota": ProviderFailureClass.QUOTA_EXHAUSTED,
+    "rate_limited": ProviderFailureClass.RATE_LIMITED,
+    "rate_limit_exceeded": ProviderFailureClass.RATE_LIMITED,
+    "too_many_requests": ProviderFailureClass.RATE_LIMITED,
+    "session_limit": ProviderFailureClass.SESSION_LIMIT,
+    "unauthenticated": ProviderFailureClass.AUTHENTICATION_REQUIRED,
+    "permission_denied": ProviderFailureClass.AUTHENTICATION_REQUIRED,
+    "unavailable": ProviderFailureClass.PROVIDER_UNAVAILABLE,
+    "service_unavailable": ProviderFailureClass.PROVIDER_UNAVAILABLE,
+}
+
+
+def _classify_structured_error_envelope(
+    result: AgentExecutionResult,
+) -> Optional[ProviderFailureClass]:
+    """Classifies a provider's machine-readable error envelope, if it emits one.
+
+    Read only from the provider's own error channels -- structured metadata,
+    `error_message`, and `stderr` -- never from `stdout`, which is an agent
+    transcript and therefore arbitrary third-party content that could contain
+    such a pair by coincidence or by injection.
+
+    Returns None when no recognized envelope is present, so providers that emit
+    none keep exactly their previous classification path.
+    """
+    metadata = result.metadata or {}
+    sources = [metadata.get(TERMINAL_PROVIDER_ERROR_KEY), result.error_message, result.stderr]
+    for text in sources:
+        if not isinstance(text, str) or not text:
+            continue
+        match = _ERROR_KIND_PATTERN.search(text)
+        if match:
+            kind = match.group(1).strip().lower().replace("-", "_")
+            mapped = _ERROR_KIND_CLASSES.get(kind)
+            if mapped is not None:
+                return mapped
+    return None
+
+
 def _last_nonempty_line(text: Optional[str]) -> Optional[str]:
     lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
     return lines[-1] if lines else None
@@ -183,6 +245,9 @@ def _classify_structured_terminal_hard_failure(
     """Classifies authenticated structured terminal error metadata or non-zero stderr.
     Never checks unstructured stdout.
     """
+    envelope = _classify_structured_error_envelope(result)
+    if envelope is not None:
+        return envelope
     structured = (result.metadata or {}).get(TERMINAL_PROVIDER_ERROR_KEY)
     if isinstance(structured, str) and structured.strip():
         normalized = " ".join(structured.strip().split())
@@ -739,6 +804,16 @@ class ProviderPoolManager:
                 return structured_terminal
             return ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
 
+        # A machine-readable error envelope is the strongest signal a provider
+        # can give about why it stopped, and it does not depend on where the
+        # message happens to sit in the output. Devin's quota error is a
+        # multi-line JSON blob whose last non-empty line is "}", so the
+        # anchored line matching below cannot see it at all, whatever patterns
+        # are added (issues.md #15).
+        envelope_failure = _classify_structured_error_envelope(result)
+        if envelope_failure is not None:
+            return envelope_failure
+
         terminal_hard_failure = _classify_terminal_hard_failure(result)
         if terminal_hard_failure is not None:
             return terminal_hard_failure
@@ -858,16 +933,29 @@ class ProviderPoolManager:
             state.observed_at = now.isoformat()
             state.normalized_failure_class = failure_class.value
             state.unavailable_reason = failure_class.value
-            temporary = {
+            # Every capacity condition expires. QUOTA_EXHAUSTED was absent from
+            # this set, so a quota event had no `retry_after` at all and the
+            # resource stayed unavailable until someone called reset_resource --
+            # a single historical quota event permanently removing a provider
+            # from the pool. It now expires on its own, longer clock: a quota is
+            # billed over a day or a week, so re-probing it on the transient
+            # cooldown would spend attempts proving what is already known
+            # (issues.md #15).
+            transient = {
                 ProviderFailureClass.SESSION_LIMIT,
                 ProviderFailureClass.RATE_LIMITED,
                 ProviderFailureClass.TRANSPORT_UNAVAILABLE,
                 ProviderFailureClass.PROVIDER_UNAVAILABLE,
             }
-            if failure_class in temporary and self.policy.cooldown_seconds:
-                state.retry_after = (
-                    now + timedelta(seconds=self.policy.cooldown_seconds)
-                ).isoformat()
+            cooldown = None
+            if failure_class in transient:
+                cooldown = self.policy.cooldown_seconds
+            elif failure_class is ProviderFailureClass.QUOTA_EXHAUSTED:
+                cooldown = getattr(
+                    self.policy, "quota_cooldown_seconds", None
+                ) or self.policy.cooldown_seconds
+            if cooldown:
+                state.retry_after = (now + timedelta(seconds=cooldown)).isoformat()
             state.exhaustion_event = ProviderExhaustionEvent(
                 agent_id=resource_id,
                 failure_type={

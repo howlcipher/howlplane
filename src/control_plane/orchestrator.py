@@ -235,6 +235,16 @@ class OrchestrationConfig:
     verification_isolation: bool = True
 
 
+# A verification plan that has actually run reports one of these. Anything
+# else -- most importantly "unverified" -- means the gate never executed, and
+# must never be read as a verification result (issues.md #12).
+TERMINAL_VERIFICATION_STATUSES = frozenset({"passed", "failed", "partial"})
+
+
+class VerificationPlanMissingError(RuntimeError):
+    """Raised when verification is demanded for a task that has no plan."""
+
+
 @dataclass
 class OrchestrationResult:
     """Complete result packet from governed task execution."""
@@ -1599,6 +1609,109 @@ class GovernedTaskOrchestrator:
         }:
             return FAILURE_CLASS_PROVIDER_UNAVAILABLE
         return FAILURE_CLASS_ENGINEERING
+
+    def run_deterministic_verification(
+        self,
+        task_spec: TaskSpec,
+        run_dir: Optional[Path] = None,
+        progress: Optional[Any] = None,
+        verif_plan: Optional[VerificationPlan] = None,
+        baseline: Optional[GitBaseline] = None,
+        delta: Optional[RepositoryDelta] = None,
+    ) -> str:
+        """Executes the deterministic verification plan for settled work.
+
+        The Stage 6 gate is reachable only by running the whole loop from the
+        top, which re-invokes providers. A task that escalated to
+        `awaiting_human` before Stage 6 already has its implementation, its
+        reviews and its plan on disk; what it never had was the gate. This runs
+        exactly that gate against the same sanitized view Stage 6 uses, and
+        persists the same evidence.
+
+        Idempotent: a plan whose `overall_status` is already terminal is
+        returned unchanged rather than re-executed, so a repeated resume cannot
+        turn a recorded failure into a fresh pass (issues.md #12).
+
+        Returns the plan's overall status. Never transitions the task to
+        `complete` -- that is the caller's policy decision.
+        """
+        run_dir = run_dir or (self.target_repo / ".task_runs" / task_spec.task_id)
+        if verif_plan is None:
+            plan_file = run_dir / "verification_plan.json"
+            if not plan_file.is_file():
+                raise VerificationPlanMissingError(
+                    f"Task '{task_spec.task_id}' has no verification_plan.json at "
+                    f"{plan_file}. Deterministic verification cannot be claimed "
+                    f"for a plan that does not exist."
+                )
+            verif_plan = VerificationPlan.from_dict(safe_load_json(plan_file))
+            if verif_plan.overall_status in TERMINAL_VERIFICATION_STATUSES:
+                return verif_plan.overall_status
+
+        if baseline is None:
+            baseline_file = run_dir / "baseline.json"
+            if baseline_file.is_file():
+                baseline = GitBaseline.from_dict(safe_load_json(baseline_file))
+            else:
+                baseline = capture_baseline(self.target_repo)
+        if delta is None:
+            delta = capture_delta(self.target_repo, baseline)
+
+        CheckpointManager.start_stage(
+            run_dir,
+            task_spec.task_id,
+            "verifying",
+            repo_path=self.target_repo,
+            input_artifacts=[str(run_dir / "diff.patch")],
+        )
+        if task_spec.current_state != "verifying":
+            task_spec.transition_to(
+                "verifying",
+                "Human approval authorized the governed workflow to continue; "
+                "executing the deterministic verification plan that the "
+                "pre-verification escalation skipped.",
+            )
+            task_spec.save_to_file(str(run_dir / "task.yaml"))
+
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id="control_plane",
+            action="verification_started",
+            spec=task_spec,
+            metadata={
+                "steps_count": len(verif_plan.steps),
+                "trigger": "resume_after_pre_verification_escalation",
+            },
+        )
+
+        verif_status = self._execute_verification_plan(
+            verif_plan=verif_plan,
+            task_spec=task_spec,
+            baseline=baseline,
+            delta=delta,
+            run_dir=run_dir,
+            progress=progress,
+        )
+
+        plan_json = verif_plan.to_json()
+        (run_dir / "verification_plan.json").write_text(plan_json, encoding="utf-8")
+        (run_dir / "verification_result.json").write_text(plan_json, encoding="utf-8")
+
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id="control_plane",
+            action="verification_completed",
+            spec=task_spec,
+            result=verif_status,
+            verification_summary={s.name: s.status for s in verif_plan.steps},
+        )
+        CheckpointManager.complete_stage(
+            run_dir,
+            "verifying",
+            output_artifacts=[str(run_dir / "verification_result.json")],
+            result_summary={s.name: s.status for s in verif_plan.steps},
+        )
+        return verif_status
 
     def _set_effective_implementer(
         self,
@@ -3161,47 +3274,22 @@ class GovernedTaskOrchestrator:
         # --------------------------------------------------------------------
         # Stage 6: Deterministic Verification Gate (verifying)
         # --------------------------------------------------------------------
-        CheckpointManager.start_stage(
-            run_dir,
-            task_spec.task_id,
-            "verifying",
-            repo_path=self.target_repo,
-            input_artifacts=[str(run_dir / "diff.patch")],
-        )
-
         if self.config.failure_injection_hook:
             self.config.failure_injection_hook("verifying", run_dir, task_spec)
 
-        task_spec.transition_to("verifying", "Executing deterministic verification plan")
-        task_spec.save_to_file(str(run_dir / "task.yaml"))
-
-        self._record_event(
-            task_id=task_spec.task_id,
-            agent_id="control_plane",
-            action="verification_started",
-            spec=task_spec,
-            metadata={"steps_count": len(verif_plan.steps)},
-        )
-
-        verif_status = self._execute_verification_plan(
-            verif_plan=verif_plan,
-            task_spec=task_spec,
-            baseline=baseline,
-            delta=current_delta,
+        # The same gate the resume path runs, called rather than restated, so a
+        # task verified after a pre-verification escalation and a task verified
+        # in one pass cannot reach different conclusions from the same evidence
+        # (issues.md #12).
+        verif_status = self.run_deterministic_verification(
+            task_spec,
             run_dir=run_dir,
             progress=progress,
+            verif_plan=verif_plan,
+            baseline=baseline,
+            delta=current_delta,
         )
-        (run_dir / "verification_result.json").write_text(verif_plan.to_json(), encoding="utf-8")
-
         verif_summary = {s.name: s.status for s in verif_plan.steps}
-        self._record_event(
-            task_id=task_spec.task_id,
-            agent_id="control_plane",
-            action="verification_completed",
-            spec=task_spec,
-            result=verif_status,
-            verification_summary=verif_summary,
-        )
         if verif_status != "passed":
             failed_steps = [s.name for s in verif_plan.steps if s.status == "failed" and s.required]
             err_msg = f"Deterministic verification failed on required steps: {', '.join(failed_steps)}"
@@ -3253,13 +3341,6 @@ class GovernedTaskOrchestrator:
                 failure_class=FAILURE_CLASS_VERIFICATION,
                 timeout_candidate=timeout_candidate,
             )
-
-        CheckpointManager.complete_stage(
-            run_dir,
-            "verifying",
-            output_artifacts=[str(run_dir / "verification_result.json")],
-            result_summary=verif_summary,
-        )
 
         # --------------------------------------------------------------------
         # Stage 7: Human Authority Boundary Gate (awaiting_human)

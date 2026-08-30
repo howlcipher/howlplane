@@ -28,6 +28,20 @@ from src.control_plane.reconciliation import ReconciliationResult
 from src.control_plane.task_spec import DataClassSerializationMixin, TaskSpec
 from src.control_plane.verification import VerificationPlan
 
+# The only verification status that may stand behind an ordinary verified
+# completion. Approval authorizes the workflow to continue; this is what says
+# the work was actually judged (issues.md #12).
+VERIFICATION_PASSED = "passed"
+
+# A task run that has no verification_plan.json at all never had a
+# deterministic plan under this control plane. Every governed run writes one
+# during routing, before any stage can escalate, so this is reachable only for
+# task runs assembled outside the orchestrator -- whose completion is governed
+# by the bounded-execution receipt path rather than by deterministic gates.
+# Such a task may still complete; what it may not do is describe itself as
+# verified.
+VERIFICATION_NO_PLAN = "no_plan"
+
 
 class HumanLifecycleError(Exception):
     """Base exception for human decision and lifecycle errors."""
@@ -869,6 +883,147 @@ class HumanLifecycleManager:
         return record
 
     @classmethod
+    def _ensure_deterministic_verification(
+        cls,
+        target_repo: Union[str, Path],
+        run_dir: Path,
+        task_spec: Any,
+        orchestrator: Optional[Any],
+        ledger: Optional[EvidenceLedger],
+        lock_ownership: Optional[Any] = None,
+    ) -> str:
+        """Returns the task's real deterministic verification status.
+
+        The question "did this task escalate before Stage 6" is answered by the
+        verification evidence itself rather than inferred from a checkpoint
+        stage: a plan whose `overall_status` is still `unverified` has not run,
+        whatever else the run recorded. That is also the fail-closed reading for
+        tasks serialized before this fix -- they report `unverified`, so the
+        gate executes rather than being assumed to have passed.
+
+        A plan that already reports a terminal status keeps it. Post-verification
+        approvals therefore retain exactly their previous semantics, and a repeat
+        resume cannot re-run a recorded failure into a pass (issues.md #12).
+
+        Returns VERIFICATION_NO_PLAN for a task run that has no plan at all,
+        which no governed run produces.
+        """
+        from src.control_plane.atomic_io import safe_load_json
+        from src.control_plane.orchestrator import (
+            GovernedTaskOrchestrator,
+            OrchestrationConfig,
+            TERMINAL_VERIFICATION_STATUSES,
+        )
+
+        plan_file = run_dir / "verification_plan.json"
+        if not plan_file.is_file():
+            return VERIFICATION_NO_PLAN
+        try:
+            recorded = safe_load_json(plan_file).get("overall_status")
+        except Exception:
+            recorded = None
+        if recorded in TERMINAL_VERIFICATION_STATUSES:
+            return recorded
+
+        runner = orchestrator
+        if runner is None or not hasattr(runner, "run_deterministic_verification"):
+            runner = GovernedTaskOrchestrator(
+                target_repo=target_repo,
+                config=OrchestrationConfig(
+                    acquire_locks=False,
+                    record_evidence=bool(ledger),
+                ),
+            )
+        status = runner.run_deterministic_verification(task_spec, run_dir=run_dir)
+
+        if ledger:
+            ledger.append_entry(
+                EvidenceEntry(
+                    task_id=task_spec.task_id,
+                    agent_id="control_plane",
+                    action="verification_executed_on_resume",
+                    result=status,
+                    metadata={
+                        "trigger": "pre_verification_escalation_approved",
+                        "authorizes": "workflow_continuation_not_correctness",
+                    },
+                )
+            )
+        return status
+
+    @classmethod
+    def _unverified_terminal_result(
+        cls,
+        task_id: str,
+        task_spec: Any,
+        run_dir: Path,
+        verif_status: str,
+        decision: Any,
+        ledger: Optional[EvidenceLedger],
+    ) -> Any:
+        """Ends a resumed task truthfully when verification did not pass.
+
+        There is deliberately no override here. A human authorizing the workflow
+        to continue is a different act from a human overruling a failed
+        deterministic gate; the second would need its own explicit authority
+        operation with its own evidence and its own terminal semantics, and does
+        not exist (issues.md #12).
+        """
+        from src.control_plane.orchestrator import OrchestrationResult
+
+        # `failed` is what the ordinary Stage 6 gate uses for a plan that ran
+        # and failed, so a resumed run reaches the same terminal state by the
+        # same evidence. Anything short of a completed run -- a plan that
+        # errored, was never run, or came back partial -- is `blocked`: the
+        # implementation was not judged, so it must not be recorded as judged.
+        terminal = "failed" if verif_status == "failed" else "blocked"
+        reason = (
+            f"Human approval authorized the governed workflow to continue, not "
+            f"the implementation's correctness. Deterministic verification "
+            f"reported '{verif_status}', so this task cannot be recorded as "
+            f"verified-complete."
+        )
+        task_spec.transition_to(terminal, reason)
+        task_spec.save_to_file(str(run_dir / "task.yaml"))
+
+        summary_file = run_dir / "summary.md"
+        if not summary_file.is_file():
+            summary_file.write_text(
+                f"# Governed Task Run Summary: `{task_id}`\n\n"
+                f"- **Objective:** {task_spec.objective}\n"
+                f"- **Final State:** `{terminal.upper()}`\n"
+                f"- **Deterministic Verification:** `{verif_status}`\n"
+                f"- **Approved At:** {decision.timestamp}\n\n"
+                f"{reason}\n",
+                encoding="utf-8",
+            )
+
+        if ledger:
+            ledger.append_entry(
+                EvidenceEntry(
+                    task_id=task_id,
+                    agent_id="control_plane",
+                    action="resume_blocked_on_verification",
+                    result=verif_status,
+                    task_class=task_spec.task_class,
+                    risk_level=task_spec.risk_level,
+                    metadata={
+                        "human_approved": True,
+                        "verification_status": verif_status,
+                        "final_state": terminal,
+                    },
+                )
+            )
+
+        return OrchestrationResult(
+            task_id=task_id,
+            task_spec=task_spec,
+            final_state=terminal,
+            exit_code=1,
+            run_dir=str(run_dir),
+        )
+
+    @classmethod
     def resume(
         cls,
         target_repo: Union[str, Path],
@@ -1153,6 +1308,37 @@ class HumanLifecycleManager:
                                         )
                                     )
 
+                    # Ordinary approval authorizes the governed workflow to
+                    # continue. It is not a human declaration that the
+                    # implementation is correct, and it cannot stand in for the
+                    # deterministic gate. A task that escalated before Stage 6
+                    # has never had its verification plan executed, so
+                    # completing here would claim a verification that never
+                    # happened -- HOWLFRAM-BUG-50 reported
+                    # `Final state: COMPLETE (Exit 0)` while
+                    # verification_plan.json still read `overall_status:
+                    # unverified` with every step `claimed` (issues.md #12).
+                    verif_status = cls._ensure_deterministic_verification(
+                        target_repo=target_repo,
+                        run_dir=run_dir,
+                        task_spec=task_spec,
+                        orchestrator=orchestrator,
+                        ledger=ledger,
+                        lock_ownership=task_lock.ownership,
+                    )
+                    if verif_status not in (
+                        VERIFICATION_PASSED,
+                        VERIFICATION_NO_PLAN,
+                    ):
+                        return cls._unverified_terminal_result(
+                            task_id=task_id,
+                            task_spec=task_spec,
+                            run_dir=run_dir,
+                            verif_status=verif_status,
+                            decision=decision,
+                            ledger=ledger,
+                        )
+
                     # Valid approval (+ valid bounded execution receipt if required) -> complete
                     if ledger:
                         ledger.append_entry(
@@ -1185,10 +1371,14 @@ class HumanLifecycleManager:
 
                     summary_file = run_dir / "summary.md"
                     if not summary_file.is_file():
+                        # "Verified" is read off the executed plan, never
+                        # asserted because a human approved continuation.
                         summary_file.write_text(
                             f"# Governed Task Run Summary: `{task_id}`\n\n"
                             f"- **Objective:** {task_spec.objective}\n"
-                            f"- **Final State:** `COMPLETE` (Human Approved & Verified)\n"
+                            f"- **Final State:** `COMPLETE` "
+                            f"(Human Approved; Deterministic Verification "
+                            f"`{verif_status}`)\n"
                             f"- **Approved At:** {decision.timestamp}\n",
                             encoding="utf-8",
                         )
