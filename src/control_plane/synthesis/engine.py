@@ -677,7 +677,21 @@ Make the necessary file edits now.
                     recommended_reasoning_tier="tier_2",
                 )
 
-                candidates = build_reviewer_candidates(role_id, preferred, self.provider_pool, review_task)
+                # The implementer is passed so it is ordered *last*, exactly as
+                # on the governed review path. Without it, ordinary failover
+                # could hand a role to the provider that wrote the code --
+                # which is what PR #60 fixed for governed reviews and what this
+                # call site silently opted out of (issues.md #15, adjacent
+                # observation). It stays reachable, because a degraded pool
+                # should still yield some signal rather than none, but only
+                # after every independent candidate has been tried.
+                candidates = build_reviewer_candidates(
+                    role_id,
+                    preferred,
+                    self.provider_pool,
+                    review_task,
+                    implementer=implementing_provider,
+                )
 
                 if self.custom_backend:
                     backend_lookup: Callable[[str], Optional[AgentBackend]] = lambda _cid: self.custom_backend

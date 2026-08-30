@@ -131,11 +131,27 @@ def test_reviewer_failover_recovers_on_second_candidate(tmp_path: Path):
     security_invocation = next(i for i in res.reviewer_invocations if i["role"] == "security-reviewer")
     assert security_invocation["completed"] is True
     assert len(security_invocation["attempts"]) >= 2
-    # All three roles completed via distinct providers here (milestone test
-    # item 11: implementer != completed reviewers where available).
-    completed_providers = {i["provider"] for i in res.reviewer_invocations if i.get("completed")}
-    assert len(completed_providers) == len(res.reviewer_invocations)
-    assert res.completed_diversity is True
+
+    # The property that matters is independence from the implementer, not
+    # diversity among reviewers. Those are different things, and this test used
+    # to assert the second while silently violating the first: before the
+    # implementer was passed to build_reviewer_candidates on this path, the
+    # security role failed over to `codex` -- the provider that wrote the code
+    # -- and that self-review is what made all three providers distinct.
+    #
+    #   before:  security-reviewer  devin_cli(fail) -> codex(completed)    <- implementer
+    #   after:   security-reviewer  devin_cli(fail) -> agy(completed)
+    #
+    # With four providers, one of them the implementer and one scripted to
+    # fail, two independent providers remain to cover three roles, so a
+    # provider necessarily serves two of them. That is allowed: the same
+    # independent provider may satisfy several roles.
+    completed = [i for i in res.reviewer_invocations if i.get("completed")]
+    assert len(completed) == len(res.reviewer_invocations)
+    completed_providers = {i["provider"] for i in completed}
+    assert res.implementing_provider not in completed_providers, (
+        "a reviewer role was satisfied by the provider that implemented the change"
+    )
 
 
 def test_reviewer_failover_is_bounded_not_infinite(tmp_path: Path):
@@ -152,9 +168,17 @@ def test_reviewer_failover_is_bounded_not_infinite(tmp_path: Path):
 
     security_invocation = next(i for i in res.reviewer_invocations if i["role"] == "security-reviewer")
     assert security_invocation["completed"] is False
-    # Bounded: at most MAX_REVIEWER_FAILOVER_ATTEMPTS attempts were made per cycle.
-    from src.control_plane.review_runner import MAX_REVIEWER_FAILOVER_ATTEMPTS
-    assert len(security_invocation["attempts"]) <= MAX_REVIEWER_FAILOVER_ATTEMPTS
+    # Bounded: at most MAX_REVIEWER_LAUNCH_ATTEMPTS providers were actually
+    # invoked per cycle. The attempt log may hold more entries than that --
+    # candidates skipped because the pool already knew they could not serve are
+    # recorded as evidence and cost no opportunity (issues.md #15) -- so the
+    # bound is on launches, not on how far the traversal looked.
+    from src.control_plane.review_runner import MAX_REVIEWER_LAUNCH_ATTEMPTS
+    launched = [
+        a for a in security_invocation["attempts"]
+        if a.get("consumed_launch_budget") is not False
+    ]
+    assert len(launched) <= MAX_REVIEWER_LAUNCH_ATTEMPTS
     # One unsatisfied required role is enough to block full verification.
     assert res.status != "VERIFIED_PRODUCT"
 

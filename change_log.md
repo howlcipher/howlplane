@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+**The Provider Pool Now Behaves Like A Pool**: three defects that together let
+a provider outage become a governance failure.
+
+*Devin's quota read as an engineering failure.* `classify_failure` returned
+`ENGINEERING_FAILURE` for Devin's capacity stop, so `detect_exhaustion` recorded
+nothing and Devin was re-offered as a reviewer candidate every cycle, burning a
+bounded failover attempt each time. Prose matching could not have fixed it:
+Devin's error is a multi-line JSON blob whose last non-empty line is `}`, and
+the anchored tier only inspects the last non-empty line, so the quota text was
+structurally unreachable there whatever patterns were added. Measured against
+the live stderr before any change, all four matching tiers returned nothing.
+A structured error-envelope reader now maps a quoted, vendor-prefixed
+`errorKind` *value* (`resource_exhausted` -> `QUOTA_EXHAUSTED`, and so on),
+running ahead of the prose tier as the classifier's own "structural evidence
+outranks transcript text" rule requires. It reads only the provider's error
+channels, never `stdout`, which is an agent transcript and therefore arbitrary
+third-party content. Providers emitting no envelope keep their previous path.
+
+*A quota event never expired.* `QUOTA_EXHAUSTED` was absent from the set granted
+a `retry_after`, so a quota-exhausted resource stayed unavailable until someone
+called `reset_resource` -- one historical quota event removing a provider from
+the pool permanently. Quota now expires on its own longer clock
+(`quota_cooldown_seconds`, default 6h), distinct from the 300s transient
+cooldown because a quota is billed over days, not minutes.
+
+*Dead providers spent the healthy providers' budget.*
+`invoke_reviewer_with_failover` sliced `candidates[:max_attempts]` before the
+loop while the availability skip happened inside it, so a provider already known
+to be exhausted consumed a slot without being asked anything; two dead providers
+at the head of the list failed a role outright while healthy independent
+providers sat untried. It is now a bounded pool traversal.
+`MAX_REVIEWER_LAUNCH_ATTEMPTS` bounds launches, not traversal. A
+known-unavailable resource is recorded with `consumed_launch_budget: false` and
+costs nothing. A launch that turns out to be a capacity discovery refunds its
+budget, because discovering that a provider is out of capacity is not a review
+opportunity -- it said nothing about the change. A **timeout is deliberately not
+refunded**: a provider that launched, worked and ran out of clock did consume a
+real opportunity, and says nothing about its own availability. The traversal
+cannot spin, because de-duplication is tracked separately from budget
+accounting: total launches per role per cycle can never exceed the candidate
+set. Worst-case latency is unchanged at 4h.
+
+*Synthesis review could hand a role to the implementer.* `synthesis/engine.py`
+called `build_reviewer_candidates` without an `implementer`, so PR #60's
+implementer-last ordering did not apply there. `implementing_provider` was
+already in scope. Passing it changed real routing and revealed that
+`test_reviewer_failover_recovers_on_second_candidate` had been passing *because*
+the implementer reviewed its own code -- that self-review is what made its three
+reviewer providers distinct. The assertion was retargeted at independence from
+the implementer rather than diversity among reviewers, which are different
+properties.
+
+Ten deterministic acceptance tests cover the pool scenarios, all with fake
+backends: one healthy provider satisfying every role while two exhausted ones
+are each asked exactly once; an exhausted provider not consuming attempts;
+only-the-implementer-reachable; no-usable-provider stopping cleanly with a
+machine-readable reason and no loop; and a timed-out provider being reused
+rather than blacklisted. (issues.md #15)
+
 **Approval Authorizes The Workflow To Continue, Not The Implementation To Be
 Correct**: a task that escalated to `awaiting_human` before Stage 6 transitioned
 straight to `complete` on a valid approval, because `human_boundary.py` had no
