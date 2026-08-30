@@ -33,7 +33,7 @@ from tests.test_dogfood_hardening import _seed_valid_howl_files
 class ScriptedReviewBackend(AgentBackend):
     """
     Fake backend distinguishing implementation from independent review calls.
-    Review outcomes are keyed by (actual_agent, role); a role/provider pair
+    Review outcomes are keyed by (dispatch_target, role); a role/provider pair
     not present in `review_outcomes` defaults to a clean "findings: []" result
     so tests only need to script the specific role(s) they care about.
     """
@@ -48,15 +48,15 @@ class ScriptedReviewBackend(AgentBackend):
     def execute(self, task, cwd, role="implementation", prompt_override=None, **kwargs):
         if role == "implementation":
             _seed_valid_howl_files(task, Path(cwd), prompt_override or "")
-            return scripted_result(role, task.actual_agent, exit_code=0, stdout="Implemented successfully.")
+            return scripted_result(role, task.dispatch_target, exit_code=0, stdout="Implemented successfully.")
         if role == "remediation":
-            return scripted_result(role, task.actual_agent, exit_code=0, stdout="Remediated.")
+            return scripted_result(role, task.dispatch_target, exit_code=0, stdout="Remediated.")
 
-        self.review_calls.append((task.actual_agent, role))
+        self.review_calls.append((task.dispatch_target, role))
         code, stdout, stderr = self.review_outcomes.get(
-            (task.actual_agent, role), (0, "findings: []", ""),
+            (task.dispatch_target, role), (0, "findings: []", ""),
         )
-        return scripted_result(role, task.actual_agent, exit_code=code, stdout=stdout, stderr=stderr)
+        return scripted_result(role, task.dispatch_target, exit_code=code, stdout=stdout, stderr=stderr)
 
 
 def _pool(available=("codex", "agy", "claude_code", "devin_cli")) -> ProviderPoolManager:
@@ -118,7 +118,7 @@ def test_reviewer_failover_recovers_on_second_candidate(tmp_path: Path):
             if role == "security-reviewer":
                 self._security_attempts += 1
                 if self._security_attempts == 1:
-                    return scripted_result(role, task.actual_agent, exit_code=1, stderr="unsuccessful")
+                    return scripted_result(role, task.dispatch_target, exit_code=1, stderr="unsuccessful")
             return super().execute(task, cwd, role=role, prompt_override=prompt_override, **kwargs)
 
     backend = FirstAttemptFailsBackend()
@@ -189,8 +189,8 @@ def test_completed_diversity_true_when_a_single_role_completes(tmp_path: Path):
 
     class SingleSurvivorBackend(ScriptedReviewBackend):
         def execute(self, task, cwd, role="implementation", prompt_override=None, **kwargs):
-            if role != "implementation" and task.actual_agent != survivor:
-                return scripted_result(role, task.actual_agent, exit_code=1, stderr="unsuccessful")
+            if role != "implementation" and task.dispatch_target != survivor:
+                return scripted_result(role, task.dispatch_target, exit_code=1, stderr="unsuccessful")
             return super().execute(task, cwd, role=role, prompt_override=prompt_override, **kwargs)
 
     backend = SingleSurvivorBackend()

@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+**One Authoritative Effective-Implementer Identity**: `actual_agent` was doing
+two incompatible jobs -- durable audit metadata answering "who produced this
+work", and a mutable dispatch slot telling a backend which resource the next
+invocation represents. `invoke_reviewer_with_failover` wrote the second meaning
+into the first, so on HOWLFRAM-BUG-52 the task finished with four disagreeing
+answers: `task.yaml` said `actual_agent: codex` (the *test-falsifier reviewer*,
+not any implementation attempt), `effective_route.json` said
+`selected_agent_id: claude_code` beside `selected_agent_name: "Antigravity CLI
+(agy)"`, and both `accepted_implementation_resource` and
+`final_implementation_resource` were `null`. Reviewer independence stayed
+correct only by accident, because it read a local variable that never reached
+disk.
+
+The two meanings are now separate fields.
+`TaskSpec.effective_implementer_resource_id` is the single authoritative
+identity, written where implementation settles -- on success, on promotion of a
+retained candidate, and on recovery after an interruption -- and never written
+by any review, remediation or dispatch path. `actual_agent` mirrors it.
+`TaskSpec.dispatch_resource_id` is the transient per-invocation slot, read
+through the non-serialized `dispatch_target` property so implementation paths
+that construct a fresh TaskSpec per candidate are unaffected.
+
+Two consequences beyond the rename. The identity is now pinned *before* the
+authority gate rather than only on the accepted path, so a task that escalates
+before Stage 6 records who produced its candidate instead of `null`. And
+`effective_route.json`'s `selected_agent_name` follows its `selected_agent_id`
+rather than keeping the originally routed provider's name attached to a
+different resource.
+
+Full attempt history is untouched: every provider that was asked still has its
+own record under `implementation/attempts/`, and promotion still credits the
+producer without rewriting which attempt actually ran last. (issues.md #16)
+
 **Reviewer Invocation Budget Raised From 180s To 600s On Production Evidence**:
 independent review was failing far more often than it was completing.
 `HOWLFRAM-BUG-50`, the first real governed run, produced 20 reviewer attempts of

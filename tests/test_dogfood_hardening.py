@@ -93,24 +93,24 @@ class ProgrammableDispatcherBackend(AgentBackend):
         return True
 
     def execute(self, task, cwd, role="implementation", prompt_override=None, **kwargs):
-        self.invocations.append(task.actual_agent)
+        self.invocations.append(task.dispatch_target)
         if role not in ("implementation", "remediation"):
             # Independent review roles: these tests exercise implementation-
             # provider failover, not review content.
-            return clean_review_result(role, task.actual_agent)
-        code, stdout, stderr = self.outcomes.get(task.actual_agent, (1, "", "unknown error"))
+            return clean_review_result(role, task.dispatch_target)
+        code, stdout, stderr = self.outcomes.get(task.dispatch_target, (1, "", "unknown error"))
         if code == 0:
             _seed_valid_howl_files(task, Path(cwd), prompt_override or "")
         return AgentExecutionResult(
-            agent_id=task.actual_agent,
+            agent_id=task.dispatch_target,
             role=role,
-            command=task.actual_agent,
+            command=task.dispatch_target,
             exit_code=code,
             stdout=stdout,
             stderr=stderr,
             duration_seconds=0.02,
             success=(code == 0),
-            error_message=self.error_messages.get(task.actual_agent),
+            error_message=self.error_messages.get(task.dispatch_target),
         )
 
 

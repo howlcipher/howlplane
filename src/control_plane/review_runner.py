@@ -556,11 +556,15 @@ def invoke_reviewer_with_failover(
             attempts_log.append({"provider": candidate, "resource_id": candidate, "outcome": "unavailable"})
             continue
 
-        # Tell the backend which candidate this attempt represents, matching
-        # the pattern implementation/repair failover already uses (engine.py
-        # sets TaskSpec.actual_agent=candidate per attempt) -- a dispatcher
-        # backend keyed by actual_agent needs this to answer per-candidate.
-        task.actual_agent = candidate
+        # Tell the backend which candidate this attempt represents. This is a
+        # dispatch slot, not an audit field: writing it to `actual_agent` is
+        # what let a reviewer's provider id become the task's durable
+        # "implementing agent" on HOWLFRAM-BUG-52, where task.yaml ended
+        # `actual_agent: codex` naming the test-falsifier reviewer while
+        # effective_route.json named claude_code (issues.md #16). Backends read
+        # `task.dispatch_target`, which falls back to `actual_agent` for the
+        # implementation paths that never set a dispatch target.
+        task.dispatch_resource_id = candidate
         agent_res = backend.execute(
             task=task,
             cwd=cwd,

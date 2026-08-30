@@ -1600,6 +1600,33 @@ class GovernedTaskOrchestrator:
             return FAILURE_CLASS_PROVIDER_UNAVAILABLE
         return FAILURE_CLASS_ENGINEERING
 
+    def _set_effective_implementer(
+        self,
+        task_spec: TaskSpec,
+        run_dir: Path,
+        resource_id: Optional[str],
+    ) -> None:
+        """Pins the single authoritative effective-implementer identity.
+
+        `actual_agent` mirrors it so durable task metadata, the
+        reviewer-independence records (which read the same resource id) and the
+        final summary cannot disagree about who produced the governed
+        candidate. Full attempt history is untouched -- every provider that was
+        asked still has its own record under implementation/attempts/.
+
+        A no-op when implementation produced no resource at all, so a task that
+        failed before any provider ran does not claim an implementer
+        (issues.md #16).
+        """
+        if not resource_id:
+            return
+        task_spec.effective_implementer_resource_id = resource_id
+        task_spec.actual_agent = resource_id
+        # The dispatch slot is per-invocation scratch; it must not survive as a
+        # second, contradictory answer to "who implemented this".
+        task_spec.dispatch_resource_id = None
+        task_spec.save_to_file(str(run_dir / "task.yaml"))
+
     def _persist_effective_route(
         self,
         routing: Any,
@@ -1703,11 +1730,28 @@ class GovernedTaskOrchestrator:
             f"independent of the implementer"
         )
 
+        # The effective implementer as durable routing evidence, so
+        # effective_route.json, task.yaml and the summary answer the question
+        # from one value rather than three (issues.md #16).
+        routing.metadata["effective_implementer_resource_id"] = attempt_resource_id
+
         run_dir = self.target_repo / ".task_runs" / task_spec.task_id
         if run_dir.exists():
             atomic_write_json(run_dir / "route.json", asdict(routing))
             effective = asdict(routing)
             effective["selected_agent_id"] = attempt_resource_id
+            # The name has to follow the id. HOWLFRAM-BUG-52's
+            # effective_route.json read `selected_agent_id: claude_code` beside
+            # `selected_agent_name: "Antigravity CLI (agy)"` because only the id
+            # was rewritten here, leaving the originally routed provider's name
+            # attached to a different resource.
+            effective_profile = registry.get_resource(attempt_resource_id)
+            if effective_profile is not None:
+                effective["selected_agent_name"] = getattr(
+                    effective_profile, "name", attempt_resource_id
+                )
+            else:
+                effective["selected_agent_name"] = attempt_resource_id
             atomic_write_json(run_dir / "effective_route.json", effective)
 
         self._record_event(
@@ -2718,6 +2762,15 @@ class GovernedTaskOrchestrator:
                 output_artifacts=[str(run_dir / "diff.patch")],
             )
 
+        # Implementation has settled -- by success, by promotion of a retained
+        # candidate, or by recovery on resume. This is the one place the
+        # effective implementer becomes durable, and it runs before the
+        # authority gate, so a task that escalates before Stage 6 still records
+        # who produced the candidate. HOWLFRAM-BUG-52 escalated here and left
+        # `final_implementation_resource: null` with task.yaml naming a
+        # reviewer (issues.md #16).
+        self._set_effective_implementer(task_spec, run_dir, final_impl_resource_id)
+
         # Whether the work came from this run's attempt loop or was recovered on
         # resume, reviewer independence is settled here. If the final
         # implementation resource differs from the initially
@@ -3591,6 +3644,14 @@ class GovernedTaskOrchestrator:
         remediation_count: int,
         hf_status: Optional[str],
     ) -> str:
+        # One authoritative answer, not a per-line re-derivation. `actual_agent`
+        # mirrors the effective implementer once implementation settles; the
+        # explicit field wins where both exist (issues.md #16).
+        implementer_id = (
+            task.effective_implementer_resource_id
+            or task.actual_agent
+            or routing.selected_agent_id
+        )
         lines = [
             f"# Governed Task Run Summary: `{task.task_id}`",
             "",
@@ -3598,12 +3659,12 @@ class GovernedTaskOrchestrator:
             f"- **Objective:** {task.objective}",
             f"- **Repository:** {self.target_repo.name}",
             f"- **Final State:** `{task.current_state.upper()}`",
-            f"- **Implementing Agent:** {task.actual_agent or routing.selected_agent_id} (`{task.actual_agent or routing.selected_agent_id}`)",
+            f"- **Implementing Agent:** {implementer_id} (`{implementer_id}`)",
             f"- **Reasoning Tier:** {routing.reasoning_tier}",
             f"- **HowlFrame Shadow Audit:** {hf_status or 'N/A'}",
             "",
         ]
-        if task.actual_agent and task.actual_agent != routing.selected_agent_id:
+        if implementer_id and implementer_id != routing.selected_agent_id:
             lines.append(f"- **Initial Route:** {routing.selected_agent_name} (`{routing.selected_agent_id}`)")
             lines.append("")
         lines.extend([
