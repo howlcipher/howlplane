@@ -9,7 +9,7 @@
 
 ## 1. Governing Principles & Resilience Invariants
 
-HowlPlane operates as a local transaction coordinator and safety harness for software engineering agent processes. Unlike naive agent frameworks that restart from scratch on process death or blindly re-execute commands, HowlPlane enforces deterministic crash recovery, durable resumability, repository-level concurrency control, safe cancellation, and exactly-once consequential execution semantics without requiring background daemons, databases, or Redis.
+HowlPlane operates as a local transaction coordinator and safety harness for software engineering agent processes. Unlike naive agent frameworks that restart from scratch on process death or blindly re-execute commands, HowlPlane enforces deterministic crash recovery, durable resumability, repository-level concurrency control, safe cancellation, and exactly-once consequential execution semantics without requiring background daemons or Redis. **No database is required for correctness:** durable files remain the single source of truth, and the optional factory index is a derived, rebuildable accelerator that can be deleted at any time and restored with `howlplane factory reindex`. No recovery, authority, or verification decision may read from it.
 
 ### Core Resilience Invariants
 

@@ -3,6 +3,58 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Changed
+
+**A Named, Evidence-Gated Carve-Out From The Architectural Freeze**: the control
+plane architecture has been frozen since it became infrastructure, and the
+freeze's own admission price is evidence that "real operational portfolio usage
+exposes a correctness, security, verification, authority, or severe usability
+defect." Four such defects were measured from durable state rather than argued
+from first principles.
+
+*A third of all campaigns stop for a condition that resolves itself.* Of the 722
+campaigns recorded in `.dogfood_runs/`, 231 terminated with
+`stop_reason: all_providers_exhausted`. Provider capacity returns on a cooldown
+the pool already tracks in `retry_after`, but nothing in the control plane
+outlives a single CLI invocation, so nothing is alive to wait for it.
+
+*The park path has never fired.* Zero of those 722 campaigns contain a
+`ParkedTaskRecord`, despite `park_and_continue` being a granted action in
+`OVERNIGHT_SAFE_ALLOWED_ACTIONS` and the record schema being complete. Parked
+work is also visible only one campaign at a time, so there is no way to ask what
+needs the operator.
+
+*Operational questions cost a full-file scan.* `evidence_ledger.jsonl` is
+139,870,255 bytes across 147,806 lines with no index and no rotation, and
+`list_all_entries` reads all of it.
+
+*The control plane cannot observe its own recurring failures.*
+`discover_observations` is reachable only from two test modules, and both ranked
+backlogs are entirely hand-authored.
+
+`CONTROL_PLANE.md` gains section 1.1.1 carving out persistent operation, and
+only that. The default rule -- "Is X blocking real engineering work? If no: DO
+NOT BUILD IT" -- is unchanged, and every pull request landing under the
+carve-out must cite operational evidence in the same measured form or fall back
+to it. The carve-out explicitly grants no new authority mechanism:
+`AuthorityProfile`, `AuthorityEnvelope` and `HumanBoundaryGate` remain the only
+authority paths and `NEVER_DELEGATABLE_BOUNDARIES` is untouched. ADR 0006
+records the gap analysis and the abstractions deliberately rejected with it --
+no new orchestration framework, no concurrency, no artifact registry, no learned
+prioritization, and no database as a source of truth.
+
+`OPERATIONAL_RESILIENCE.md`'s "without requiring background daemons, databases,
+or Redis" is narrowed rather than dropped: no database is required for
+correctness, durable files stay authoritative, and the planned factory index is
+a derived accelerator that no recovery, authority, or verification decision may
+read from.
+
+`IMPLEMENTATION_STATUS.md` gains a scope warning. It tracks the Go
+`ai`-framework blueprint, its "current active milestone" predates the entire
+maturity of `src/control_plane/`, and its open question about SQLite state paths
+belongs to that blueprint -- not to the derived index above. It was being read
+as current state and is blueprint history.
+
 ### Fixed
 
 **The Provider Pool Now Behaves Like A Pool**: three defects that together let
