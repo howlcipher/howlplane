@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+**A Backlog-Driven Marathon, Which The Control Plane Did Not Have**:
+`select_next_evidence_backed_task` existed only as a string literal in
+`authority_profile.py`. `ai dogfood`'s `run_marathon` iterates *product
+synthesis benchmarks* against howlplane, and
+`_execute_governed_engineering_improvement` hardcoded `repository="howlplane"`,
+so there was no way to work another repository's ranked backlog at all.
+
+`src/control_plane/backlog_source.py` reads a project's ranked markdown
+backlogs, and `MarathonDogfoodEngine.run_backlog_marathon` works a bounded
+sequence of them through the same
+`_execute_governed_engineering_improvement` every other governed task uses --
+branch, bounded provider failover, independent review, deterministic
+verification, commit, push, PR, CI observation, and merge only if the bound
+envelope delegates it. `ai marathon --dry-run` shows exactly what would be
+worked without invoking a provider or writing anything.
+
+Two parsing rules came from reading the real HowlFrame backlogs rather than
+assuming a shape, and each prevents an unattended run from working something a
+human said it must not. `improvements.md` holds three tables -- the live ranked
+backlog plus two historical V2/V3 tables with a different column count -- so
+only the table under the first `## Ranked Backlog` heading is read. And the
+status column contains `Pending`, `Pending ⚠️ below floor` and
+`Pending — blocked on #88`, so `Pending` is matched exactly: a `startswith`
+test would have admitted an item explicitly below the ROI floor, which the
+backlog says needs human confirmation, and one blocked on another item.
+
+The loop is bounded four independent ways, each of which stops it truthfully:
+maximum tasks, wall-clock deadline checked before a task begins, an exhausted
+eligible backlog, and an unusable provider pool. A task whose authority
+boundary the envelope does not delegate is parked and the loop continues with
+other independent work.
+
+**A Third Authority Profile For The First HowlFrame Marathon**:
+`howframe-overnight` authorizes `howlcipher/howlframe` only.
+`merge_pull_request` is absent from its allow list *and* `max_merges` is 0, so
+an autonomous merge is refused twice over -- the first marathon stops at green
+pull requests and a human authorizes every merge. It is a new profile rather
+than an edit to `overnight-safe`, because extending that profile's
+`authorized_repositories` would silently widen the blast radius of every
+invocation already using it.
+
+Adding it deliberately tripped
+`test_profiles_are_frozen_and_only_two_canonical_instances_exist`, the guard
+whose stated purpose is preventing a campaign from inventing its own authority.
+That guard is now stronger rather than merely renumbered: it asserts every
+`CANONICAL_PROFILES` entry *is* one of the module-level constants by identity,
+so a profile constructed at runtime and registered fails even when the key set
+matches, and it checks all three constants are frozen rather than one. A second
+test pins that the new grant did not widen an existing one -- disjoint
+repositories, `max_merges` 0 against 10, and an action set that is a strict
+subset.
+
+**Two Stale Backlog Rows Corrected**: `issues.md` #13 and #14 were fixed by
+PR #61 and documented in this change log, but their table rows still read
+`Pending`. Under backlog-driven selection #13 is the highest-ranked pending
+item, so an unattended run would have selected already-completed work first.
+Both were verified against the code before being flipped, and carry a dated
+status-correction note rather than a silent edit.
+
 **The Provider Pool Now Behaves Like A Pool**: three defects that together let
 a provider outage become a governance failure.
 
