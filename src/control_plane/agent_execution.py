@@ -680,9 +680,16 @@ class CodexBackend(SubprocessAgentBackend):
             # Codex defaults to a read-only sandbox; implementation and
             # remediation roles must be able to edit files in the workspace.
             # Review roles keep the default read-only sandbox.
-            if r and (r.endswith("-reviewer") or r == "review"):
-                return ["codex", "exec", p]
-            return ["codex", "exec", "--sandbox", "workspace-write", p]
+            if r and (r.endswith("-reviewer") or r == "review" or r.startswith("writing:")):
+                return ["codex", "exec", "--skip-git-repo-check", p]
+            return [
+                "codex",
+                "exec",
+                "--skip-git-repo-check",
+                "--sandbox",
+                "workspace-write",
+                p,
+            ]
         super().__init__("codex", "codex", _codex_cmd)
 
 

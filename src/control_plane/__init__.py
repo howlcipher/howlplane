@@ -85,6 +85,18 @@ from src.control_plane.orchestrator import (
     OrchestrationConfig,
     OrchestrationResult,
 )
+from src.control_plane.role_binding import (
+    RoleDescriptor,
+    RoleBinding,
+    RoleBindingRegistry,
+    RoleExecutionRequest,
+    RoleExecutionResult,
+    RoleDispatcher,
+    IndependenceStatus,
+    RoleNotConfiguredError,
+    RoleExecutionError,
+    get_default_role_registry,
+)
 
 __all__ = [
     "TaskSpec",
@@ -137,4 +149,14 @@ __all__ = [
     "GovernedTaskOrchestrator",
     "OrchestrationConfig",
     "OrchestrationResult",
+    "RoleDescriptor",
+    "RoleBinding",
+    "RoleBindingRegistry",
+    "RoleExecutionRequest",
+    "RoleExecutionResult",
+    "RoleDispatcher",
+    "IndependenceStatus",
+    "RoleNotConfiguredError",
+    "RoleExecutionError",
+    "get_default_role_registry",
 ]

@@ -27,6 +27,7 @@ from src.control_plane.authority_envelope import (
 )
 from src.control_plane.authority_profile import (
     CANONICAL_PROFILES,
+    HOWLFRAME_OVERNIGHT_PROFILE,
     OVERNIGHT_SAFE_PROFILE,
     STRICT_PROFILE,
     UnknownProfileError,
@@ -342,12 +343,59 @@ def test_unknown_profile_id_raises():
         get_profile("god-mode")
 
 
-def test_profiles_are_frozen_and_only_two_canonical_instances_exist():
-    with pytest.raises(Exception):
-        OVERNIGHT_SAFE_PROFILE.max_merges = 999999  # frozen dataclass -> FrozenInstanceError
-    assert set(CANONICAL_PROFILES.keys()) == {"strict", "overnight-safe"}
+def test_profiles_are_frozen_and_every_canonical_entry_is_a_module_constant():
+    """The mechanical guarantee that a campaign cannot invent its own authority.
+
+    This test is a tripwire, and adding a profile is supposed to trip it. The
+    count is not the guarantee -- identity is. Every entry in
+    CANONICAL_PROFILES must BE one of the module-level constants, so a profile
+    cannot be constructed at runtime and registered, and the constants
+    themselves must be frozen so an existing grant cannot be widened in place.
+
+    A new profile therefore has to be added here deliberately, by a reviewed
+    change, which is the point. `howlframe-overnight` was added for the first
+    HowlFrame backlog marathon (issues.md marathon-readiness work).
+    """
+    for profile in (STRICT_PROFILE, OVERNIGHT_SAFE_PROFILE, HOWLFRAME_OVERNIGHT_PROFILE):
+        with pytest.raises(Exception):  # frozen dataclass -> FrozenInstanceError
+            profile.max_merges = 999999
+
+    assert set(CANONICAL_PROFILES.keys()) == {
+        "strict", "overnight-safe", "howlframe-overnight",
+    }
     assert CANONICAL_PROFILES["strict"] is STRICT_PROFILE
     assert CANONICAL_PROFILES["overnight-safe"] is OVERNIGHT_SAFE_PROFILE
+    assert CANONICAL_PROFILES["howlframe-overnight"] is HOWLFRAME_OVERNIGHT_PROFILE
+
+    # No entry may be anything other than one of those module-level constants.
+    module_constants = {
+        id(STRICT_PROFILE), id(OVERNIGHT_SAFE_PROFILE), id(HOWLFRAME_OVERNIGHT_PROFILE),
+    }
+    for profile_id, profile in CANONICAL_PROFILES.items():
+        assert id(profile) in module_constants, (
+            f"'{profile_id}' is not one of the module-level profile constants, so "
+            f"it was constructed somewhere other than authority_profile.py"
+        )
+
+
+def test_adding_a_profile_did_not_widen_an_existing_grant():
+    """A new repository authorization must be a new profile, not an edit.
+
+    Extending OVERNIGHT_SAFE_PROFILE's authorized_repositories would silently
+    widen the blast radius of every invocation that already uses it, including
+    ones authorized before the change. The HowlFrame grant is a separate,
+    explicitly selected profile for exactly that reason.
+    """
+    assert OVERNIGHT_SAFE_PROFILE.authorized_repositories == ["howlcipher/howlplane"]
+    assert HOWLFRAME_OVERNIGHT_PROFILE.authorized_repositories == ["howlcipher/howlframe"]
+    assert not set(OVERNIGHT_SAFE_PROFILE.authorized_repositories) & set(
+        HOWLFRAME_OVERNIGHT_PROFILE.authorized_repositories
+    )
+    # And the new grant is strictly narrower on the axis that matters most.
+    assert HOWLFRAME_OVERNIGHT_PROFILE.max_merges == 0 < OVERNIGHT_SAFE_PROFILE.max_merges
+    assert set(HOWLFRAME_OVERNIGHT_PROFILE.allowed_action_classes) < set(
+        OVERNIGHT_SAFE_PROFILE.allowed_action_classes
+    )
 
 
 def test_save_envelope_refuses_to_overwrite_existing(tmp_path):

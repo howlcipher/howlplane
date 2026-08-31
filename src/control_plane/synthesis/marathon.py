@@ -50,6 +50,7 @@ from src.control_plane.orchestrator import (
     OrchestrationConfig,
 )
 from src.control_plane.proposed_action import ProposedAction
+from src.control_plane.backlog_source import DEFAULT_BACKLOG_FILES
 from src.control_plane.synthesis.campaign_state import (
     CAMPAIGN_STATE_SCHEMA_VERSION,
     DurableCampaignState,
@@ -799,6 +800,161 @@ class MarathonDogfoodEngine:
             "state_dir": str(state_dir),
         }
 
+    def run_backlog_marathon(
+        self,
+        authority_profile_id: str,
+        max_tasks: int = 3,
+        max_runtime_hours: float = 8.0,
+        resume_campaign_id: Optional[str] = None,
+        roi_floor: float = 0.5,
+        backlog_files: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Works a bounded sequence of a project's ranked backlog items.
+
+        This is the marathon the control plane did not previously have.
+        `run_marathon` iterates *product-synthesis benchmarks*; this iterates
+        the target repository's own ranked backlog, which is what
+        `select_next_evidence_backed_task` in the authority profile always
+        meant and never had an implementation for.
+
+        Every task goes through `_execute_governed_engineering_improvement`,
+        so it gets the identical real lifecycle as any other governed task:
+        branch, provider implementation with bounded failover, independent
+        review, deterministic verification, commit, push, PR, CI observation,
+        and merge only if the bound envelope actually delegates it. Nothing
+        here is a shortcut around that.
+
+        Bounded four ways, all of which stop the loop truthfully rather than
+        letting it run on:
+
+        * `max_tasks` -- how many items may be attempted at all
+        * `max_runtime_hours` -- wall clock, checked before starting each task
+          so a task is never begun that cannot plausibly finish
+        * the eligible backlog -- when it empties, the run stops
+        * the usable provider pool -- when it empties, the run parks
+
+        A task whose authority boundary the envelope does not delegate is
+        PARKED and the loop continues with other independent work, which is
+        the `park_and_continue` action the profile grants. The campaign only
+        stops for a human when nothing else can proceed.
+        """
+        from src.control_plane.backlog_source import BacklogSource
+
+        started = time.time()
+        deadline = started + max_runtime_hours * 3600.0
+        self.base_output_dir.mkdir(parents=True, exist_ok=True)
+        self.campaign_base_dir.mkdir(parents=True, exist_ok=True)
+
+        campaign_id = resume_campaign_id or self._generate_campaign_id()
+        state_dir = self.campaign_base_dir / campaign_id
+        state_dir.mkdir(parents=True, exist_ok=True)
+
+        if resume_campaign_id and (state_dir / "campaign_state.json").is_file():
+            campaign_state = DurableCampaignState.load(state_dir)
+            # A resumed run re-probes providers whose cooldown has elapsed
+            # rather than inheriting a stale exhausted view of the pool.
+            self.provider_pool.reset_transient_exhaustion()
+        else:
+            campaign_state = DurableCampaignState(campaign_id=campaign_id)
+
+        self.authority_envelope = self._bind_authority_envelope(
+            state_dir, campaign_id, authority_profile_id,
+            is_resume=bool(resume_campaign_id),
+        )
+        campaign_state.authority_envelope = (
+            self.authority_envelope.to_dict() if self.authority_envelope else None
+        )
+        self.git_executor = self._git_executor_factory(
+            self.authority_envelope, campaign_state.merges_this_campaign,
+        )
+
+        source = BacklogSource(
+            self.target_repo,
+            backlog_files=backlog_files or list(DEFAULT_BACKLOG_FILES),
+            roi_floor=roi_floor,
+        )
+        worked: List[str] = []
+        attempted_ids: List[str] = [
+            task.get("task_id") for task in campaign_state.completed_tasks
+        ] + [task.get("task_id") for task in campaign_state.failed_tasks]
+        attempted_ids += [park.get("task_id") for park in campaign_state.parked_tasks]
+        attempted_ids = [task_id for task_id in attempted_ids if task_id]
+
+        stop_reason = "max_tasks_reached"
+        while len(worked) < max_tasks:
+            if time.time() >= deadline:
+                stop_reason = "max_runtime_reached"
+                break
+            if not self.provider_pool.has_available_providers():
+                # Truthful park, not a loop: nothing usable remains to ask.
+                stop_reason = "resources_unavailable"
+                break
+
+            selection = source.select()
+            item = selection.next_item(skip=attempted_ids)
+            if item is None:
+                stop_reason = "backlog_exhausted"
+                break
+
+            attempted_ids.append(item.task_id)
+            detail = source.item_detail(item)
+            success, git_rec = self._execute_governed_engineering_improvement(
+                task_id=item.task_id,
+                benchmark_key=item.task_id,
+                gap_type="backlog_item",
+                gap_desc=item.title,
+                objective_override=(
+                    f"Resolve {item.source_file} item #{item.item_id}: {item.title}\n\n"
+                    f"{detail}"
+                ),
+                task_class="bug_fix" if item.kind == "bug" else "feature",
+                commit_message_override=(
+                    f"fix({item.source_file.replace('.md', '')} #{item.item_id}): "
+                    f"{item.title[:60]}"
+                ),
+                risk_level="medium",
+                campaign_state=campaign_state,
+                state_dir=state_dir,
+            )
+            worked.append(item.task_id)
+
+            record = {
+                "task_id": item.task_id,
+                "objective": item.title,
+                "source_file": item.source_file,
+                "item_id": item.item_id,
+                "score": item.score,
+                "provider": (git_rec or {}).get("provider", "unknown"),
+            }
+            if (git_rec or {}).get("integration_mode") == "parked":
+                campaign_state.record_park((git_rec or {}).get("parked_record", record))
+            elif success:
+                campaign_state.record_task_completed(record)
+            else:
+                campaign_state.record_task_failed(record)
+            if git_rec and "parked_record" not in git_rec:
+                campaign_state.record_git_integration(git_rec)
+            campaign_state.save(state_dir)
+
+        campaign_state.stop_reason = stop_reason
+        campaign_state.total_duration_seconds = round(time.time() - started, 3)
+        campaign_state.save(state_dir)
+
+        return {
+            "campaign_id": campaign_id,
+            "state_dir": str(state_dir),
+            "target_repo": str(self.target_repo),
+            "repo_slug": self.repo_slug,
+            "authority_profile": authority_profile_id,
+            "tasks_attempted": worked,
+            "tasks_completed": [t.get("task_id") for t in campaign_state.completed_tasks],
+            "tasks_failed": [t.get("task_id") for t in campaign_state.failed_tasks],
+            "tasks_parked": [p.get("task_id") for p in campaign_state.parked_tasks],
+            "git_records": campaign_state.git_records,
+            "stop_reason": stop_reason,
+            "duration_seconds": campaign_state.total_duration_seconds,
+        }
+
     def _run_local_only_continuation(self, campaign_state: DurableCampaignState, avoid_provider: Optional[str]) -> str:
         """
         Bounded local-only engineering continuation, entered only once every cloud
@@ -1087,7 +1243,11 @@ class MarathonDogfoodEngine:
         fabricates a success record for a step that did not actually
         complete.
         """
-        action = ProposedAction(action_type=action_type, target_repo=self.repo_slug or "howlplane", arguments=arguments)
+        action = ProposedAction(
+            action_type=action_type,
+            target_repo=self.repo_slug or self.target_repo.name,
+            arguments=arguments,
+        )
         verdict, decision_id, reason = self.git_executor.evaluate(action, self.target_repo, run_dir)
         if verdict != "ALLOW":
             git_rec.failure_reason = f"{action_type}: {reason or verdict}"
@@ -1264,6 +1424,9 @@ class MarathonDogfoodEngine:
         state_dir: Optional[Path] = None,
         allowed_paths: Optional[List[str]] = None,
         reviewer_requirements: Optional[List[str]] = None,
+        objective_override: Optional[str] = None,
+        task_class: str = "bug_fix",
+        commit_message_override: Optional[str] = None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """
         Executes a bounded engineering task through the REAL governed
@@ -1290,10 +1453,15 @@ class MarathonDogfoodEngine:
         staging anything. Used by the live acceptance canary to guarantee it
         can touch only its designated evidence artifact.
         """
-        objective = f"Resolve {gap_type} for {benchmark_key}: {gap_desc}"
+        objective = objective_override or f"Resolve {gap_type} for {benchmark_key}: {gap_desc}"
+        # The repository is the one this engine was pointed at, not a constant.
+        # It was hardcoded to "howlplane", which is correct for self-improvement
+        # dogfooding and wrong for every other target -- including the HowlFrame
+        # backlog marathon, whose whole purpose is to work another repository.
+        repository = self.target_repo.name
         gap_probe = TaskSpec(
-            task_id=task_id, repository="howlplane",
-            objective=objective, task_class="bug_fix", risk_level=risk_level,
+            task_id=task_id, repository=repository,
+            objective=objective, task_class=task_class, risk_level=risk_level,
             allowed_paths=list(allowed_paths or []),
             reviewer_requirements=list(reviewer_requirements or []),
         )
@@ -1307,11 +1475,13 @@ class MarathonDogfoodEngine:
 
         provider = candidates[0]
         gap_probe.preferred_agent = provider
-        commit_message = f"fix({benchmark_key}): resolve {gap_type} found during marathon dogfooding"
-
+        commit_message = commit_message_override or (
+            f"fix({benchmark_key}): resolve {gap_type} found during marathon dogfooding"
+        )
 
         git_rec = GitIntegrationRecord(
-            task_id=task_id, target_repo="howlplane", provider=provider, commit_message=commit_message,
+            task_id=task_id, target_repo=repository, provider=provider,
+            commit_message=commit_message,
         )
 
         planned_actions = [
@@ -1329,7 +1499,7 @@ class MarathonDogfoodEngine:
                 objective=objective,
                 boundary_type=boundary.triggered_boundaries[0] if boundary.triggered_boundaries else "unknown",
                 requested_action="governed_engineering_improvement",
-                repository=self.repo_slug or "howlplane",
+                repository=self.repo_slug or repository,
                 evidence=list(packet.evidence) if packet else [],
                 risks=list(packet.risks) if packet else [],
                 verification_state="not_reached",
@@ -1338,7 +1508,7 @@ class MarathonDogfoodEngine:
             )
             git_rec.failure_reason = "AWAITING_HUMAN"
             return False, {
-                "task_id": task_id, "target_repo": "howlplane", "integration_mode": "parked",
+                "task_id": task_id, "target_repo": repository, "integration_mode": "parked",
                 "provider": provider, "parked_record": parked.to_dict(),
             }
 

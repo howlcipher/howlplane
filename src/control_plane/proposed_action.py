@@ -98,6 +98,18 @@ SELF_MODIFICATION_PATHS: Tuple[str, ...] = (
     "src/control_plane/executor.py",
 )
 
+# Whole subtrees under the same rule. The exact-path tuple above is matched
+# with `endswith`, which cannot express a directory: a factory module added
+# later would silently escape the rule that every other part of the supervisor
+# obeys. Prefix matching is fail-closed for anything added under these roots.
+#
+# The factory supervisor governs its own dispatch, so a campaign editing it
+# while running under it is the same class of hazard as editing the authority
+# system itself.
+SELF_MODIFICATION_PATH_PREFIXES: Tuple[str, ...] = (
+    "src/control_plane/factory/",
+)
+
 
 def infer_proposed_actions_from_diff(files_changed: List[str], repo_name: str = "") -> List["ProposedAction"]:
     """
@@ -108,7 +120,9 @@ def infer_proposed_actions_from_diff(files_changed: List[str], repo_name: str = 
     """
     for f in files_changed or []:
         normalized = f.replace("\\", "/")
-        if any(normalized.endswith(p) for p in SELF_MODIFICATION_PATHS):
+        if any(normalized.endswith(p) for p in SELF_MODIFICATION_PATHS) or any(
+            prefix in normalized for prefix in SELF_MODIFICATION_PATH_PREFIXES
+        ):
             return [
                 ProposedAction(
                     action_type="authority_enforcement_modification",
