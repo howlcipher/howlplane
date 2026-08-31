@@ -55,7 +55,7 @@ def test_every_factory_module_is_a_self_modification_boundary(module):
 
 def test_a_module_that_does_not_exist_yet_is_still_covered():
     """The whole reason for a prefix rule rather than a path list."""
-    future = "src/control_plane/factory/supervisor.py"
+    future = "src/control_plane/factory/future_guard.py"
     assert not (REPO_ROOT / future).exists()
 
     actions = infer_proposed_actions_from_diff([future])
@@ -104,3 +104,45 @@ def test_a_path_merely_mentioning_factory_is_not_matched():
 def test_the_prefix_list_is_anchored_to_a_directory():
     for prefix in SELF_MODIFICATION_PATH_PREFIXES:
         assert prefix.endswith("/"), f"{prefix!r} must end in / to mean a directory"
+
+
+def test_factory_work_item_with_self_modifying_path_is_parked_by_boundary():
+    from unittest.mock import MagicMock
+
+    from src.control_plane.authority_envelope import create_envelope
+    from src.control_plane.authority_profile import OVERNIGHT_SAFE_PROFILE
+    from src.control_plane.factory.work_item import WorkItem, WorkItemOrigin
+    from src.control_plane.synthesis import MarathonDogfoodEngine
+
+    # Overnight-safe profile allows routine git/GitHub actions but explicitly
+    # denies authority_enforcement_modification via NEVER_DELEGATABLE_BOUNDARIES,
+    # so a factory work item touching the supervisor must park.
+    envelope = create_envelope(
+        OVERNIGHT_SAFE_PROFILE,
+        campaign_id="TEST-CAMPAIGN",
+        operator_origin="test",
+    )
+    pool = MagicMock()
+    pool.select_candidates.return_value = ["codex"]
+    engine = MarathonDogfoodEngine(
+        provider_pool=pool,
+        target_repo=REPO_ROOT,
+    )
+    engine.authority_envelope = envelope
+    engine.git_executor = engine._git_executor_factory(envelope, 0)
+
+    item = WorkItem.create(
+        origin=WorkItemOrigin.EXISTING_BACKLOG,
+        repository="howlcipher/howlplane",
+        title="fix supervisor",
+        identity_keys=["supervisor"],
+        evidence_refs=["src/control_plane/factory/supervisor.py#1"],
+    )
+    success, git_record = engine.execute_factory_work_item(
+        item,
+        files_changed=["src/control_plane/factory/supervisor.py"],
+    )
+    assert success is False
+    assert git_record is not None
+    assert git_record.get("integration_mode") == "parked"
+    pool.select_candidates.assert_called_once()

@@ -538,3 +538,30 @@ class LocalInferenceLock(_BaseFileLock):
     ):
         path = get_local_inference_lock_path(repo_root)
         super().__init__(repo_root, task_id, path, command, "local_inference")
+
+
+def get_supervisor_lock_path(state_dir: Union[str, Path]) -> Path:
+    """Canonical lock path for the singleton factory supervisor run loop."""
+    root = Path(state_dir).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root / "howlplane.supervisor.lock"
+
+
+class SupervisorLock(_BaseFileLock):
+    """
+    Mutual-exclusion lock for the factory supervisor run loop.
+    Prevents more than one supervisor process from driving the same state
+    directory concurrently, which would race on work item selection and
+    provider capacity.
+    """
+
+    lock_type = "factory_supervisor"
+    error_cls = LockError
+
+    def __init__(
+        self,
+        state_dir: Union[str, Path],
+        command: str = "ai factory run",
+    ):
+        path = get_supervisor_lock_path(state_dir)
+        super().__init__(state_dir, "factory_supervisor", path, command, "factory_supervisor_run")

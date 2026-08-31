@@ -46,6 +46,19 @@ def _item(**kwargs):
     return WorkItem.create(**defaults)
 
 
+def _admit(store, **kwargs):
+    defaults = dict(
+        origin=WorkItemOrigin.DISCOVERED_PROBLEM,
+        repository="howlcipher/howlplane",
+        title="flaky test",
+        identity_keys=["traj-1"],
+        evidence_refs=["traj-1"],
+        evidence_fingerprints=["fp-1"],
+    )
+    defaults.update(kwargs)
+    return store.admit_evidence(**defaults)
+
+
 # ---------------------------------------------------------------------------
 # Identity
 # ---------------------------------------------------------------------------
@@ -248,3 +261,77 @@ def test_saving_twice_is_idempotent_and_reflects_the_later_state(tmp_path):
 
     assert len(store.list_all()) == 1
     assert store.load(item.work_item_id).state == WorkItemState.ADMITTED
+
+
+def test_admit_evidence_dedups_by_fingerprint_and_reopens_on_new_evidence(tmp_path):
+    store = WorkItemStore(tmp_path / "work_items")
+    first = _admit(store)
+    second = _admit(store, evidence_refs=["traj-2"])
+    assert first.work_item_id == second.work_item_id
+    assert len(store.list_all()) == 1
+
+    third = _admit(store, evidence_refs=["traj-3"], evidence_fingerprints=["fp-2"])
+    assert third.work_item_id == first.work_item_id
+    assert "fp-2" in third.evidence_fingerprints
+    assert len(store.list_all()) == 1
+
+
+def test_admit_backlog_evidence_is_ready(tmp_path):
+    store = WorkItemStore(tmp_path / "work_items")
+    item = _admit(
+        store,
+        origin=WorkItemOrigin.EXISTING_BACKLOG,
+        title="backlog item",
+        identity_keys=["bugs.md", "1"],
+        evidence_refs=["bugs.md#1"],
+        evidence_fingerprints=["fp-b"],
+    )
+    assert item.state == WorkItemState.READY
+
+
+def test_admit_inferred_ambiguous_evidence_awaits_owner(tmp_path):
+    store = WorkItemStore(tmp_path / "work_items")
+    item = _admit(
+        store,
+        origin=WorkItemOrigin.INFERRED_NEED,
+        title="vague idea",
+        identity_keys=["idea"],
+        evidence_refs=["obs-1"],
+        evidence_fingerprints=["fp-i"],
+        is_ambiguous=True,
+    )
+    assert item.state == WorkItemState.AWAITING_OWNER
+
+
+def test_admit_creative_evidence_awaits_owner(tmp_path):
+    store = WorkItemStore(tmp_path / "work_items")
+    item = _admit(
+        store,
+        origin=WorkItemOrigin.CREATIVE_EXPERIMENT,
+        title="spike",
+        identity_keys=["spike"],
+        evidence_refs=["obs-1"],
+        evidence_fingerprints=["fp-c"],
+    )
+    assert item.state == WorkItemState.AWAITING_OWNER
+
+
+@pytest.mark.parametrize(
+    "trusted, expected_state",
+    [
+        (True, WorkItemState.READY),
+        (False, WorkItemState.AWAITING_OWNER),
+    ],
+)
+def test_admit_owner_direction_respects_trusted_provenance(tmp_path, trusted, expected_state):
+    store = WorkItemStore(tmp_path / "work_items")
+    item = _admit(
+        store,
+        origin=WorkItemOrigin.OWNER_DIRECTION,
+        title="owner request",
+        identity_keys=["owner"],
+        evidence_refs=["obs-1"],
+        evidence_fingerprints=["fp-o"],
+        trusted_provenance=trusted,
+    )
+    assert item.state == expected_state
