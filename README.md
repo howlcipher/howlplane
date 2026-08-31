@@ -252,6 +252,7 @@ The `ai` launcher locates the HowlPlane control plane using the following order:
 ## Documentation Index
 
 - [Control Plane Architecture](documentation/CONTROL_PLANE.md)
+- [Factory 24/7 Acceptance and Falsification](documentation/FACTORY_24X7_ACCEPTANCE.md)
 - [Configurable AI Resource Pool](documentation/AI_RESOURCE_POOL.md)
 - [User Guide & Operator Reference](documentation/USER_GUIDE.md)
 - [Local AI Worker (Ollama) & Bounded Dogfooding](documentation/LOCAL_MODEL.md)

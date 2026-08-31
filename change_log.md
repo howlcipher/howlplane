@@ -3,6 +3,25 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Added
+
+**Factory 24/7 Acceptance and Falsification Harness**: Added deterministic
+fake time, scripted hosted and local provider transitions, fake authority,
+fake Git and pull-request state, named crash injection boundaries, and
+black-box acceptance contracts for the persistent factory slice. The suite
+simulates 72 hours in under one second without hosted provider usage and
+checks provider recovery, portfolio restraint, restart behavior, truthful
+failures, capability reuse, repository proposals, authority boundaries, CI
+gates, external-operation idempotency, operator status, and bounded resource
+growth. Strict expected failures record only deterministically reproduced
+factory blockers and become CI failures when a fix makes the marker stale.
+
+The accompanying
+`documentation/FACTORY_24X7_ACCEPTANCE.md` records the complete failure
+matrix, exactly-once versus at-least-once contract, live disk-growth
+measurements, blocking defect classifications, and the integration interface
+the concurrent factory implementation must satisfy.
+
 ### Fixed
 
 **A Backlog-Driven Marathon, Which The Control Plane Did Not Have**:

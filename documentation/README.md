@@ -6,5 +6,6 @@ Reference this area for overarching principles that apply across multiple projec
 - [Configurable AI Resource Pool](AI_RESOURCE_POOL.md)
 - [Control Plane](CONTROL_PLANE.md)
 - [Data flows and network egress](data_flows.md)
+- [Factory 24/7 acceptance and falsification](FACTORY_24X7_ACCEPTANCE.md)
 - [Local model operation](LOCAL_MODEL.md)
 - [User guide](USER_GUIDE.md)
