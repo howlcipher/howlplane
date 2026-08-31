@@ -193,7 +193,13 @@ rationale: "Direct sentence structure."
     assert len(result.structured_output["changes_made"]) == 1
 
 
-def test_dispatcher_reviewer_independence_multiple_providers():
+def test_dispatcher_reviewer_independence_multiple_providers(monkeypatch):
+    from src.control_plane.agent_execution import SubprocessAgentBackend
+
+    monkeypatch.setattr(
+        SubprocessAgentBackend, "is_available", lambda self: True
+    )
+
     registry = RoleBindingRegistry()
     registry.register_binding(
         RoleBinding(
@@ -203,7 +209,19 @@ def test_dispatcher_reviewer_independence_multiple_providers():
         )
     )
 
-    agent_registry = AgentRegistry()
+    p1 = AgentProfile(
+        agent_id="claude_code",
+        name="Claude Code",
+        provider="anthropic",
+        interface="cli",
+    )
+    p2 = AgentProfile(
+        agent_id="codex",
+        name="Codex",
+        provider="openai",
+        interface="cli",
+    )
+    agent_registry = AgentRegistry(agents=[p1, p2])
 
     dispatcher = RoleDispatcher(
         binding_registry=registry,
@@ -217,6 +235,7 @@ def test_dispatcher_reviewer_independence_multiple_providers():
     )
 
     assert provider_id != "claude_code"
+    assert provider_id == "codex"
     assert status == IndependenceStatus.INDEPENDENT.value
 
 
