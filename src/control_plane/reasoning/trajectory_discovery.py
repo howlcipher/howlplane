@@ -15,9 +15,8 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from src.control_plane.atomic_io import atomic_write_json, safe_load_json
 from src.control_plane.reasoning._json_store import DurableObjectStore
 from src.control_plane.reasoning.artifact_safety import (
     SafeArtifactSerializationMixin,
@@ -292,21 +291,14 @@ class ObservationStore(DurableObjectStore):
             base_dir,
             factory=TrajectoryObservation.from_dict,
             dedup_field=None,
+            id_attr="observation_id",
         )
 
     def save(self, observation: TrajectoryObservation) -> Path:
-        target = self._path(observation.observation_id)
-        atomic_write_json(target, observation.to_dict())
-        return target
-
-    def load(self, observation_id: str) -> TrajectoryObservation:
-        return self._factory(safe_load_json(self._path(observation_id)))
+        return self.save_object(observation)
 
     def find_by_fingerprint(self, fingerprint: str) -> Optional[TrajectoryObservation]:
-        for obs in self.list_all():
-            if obs.fingerprint == fingerprint:
-                return obs
-        return None
+        return self.find_by_field("fingerprint", fingerprint)
 
 
 def discover_observations(
