@@ -3,6 +3,74 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Added
+
+**Factory Work Portfolio**: the first code under the persistent-operation
+carve-out (`CONTROL_PLANE.md` 1.1.1, ADR 0006). Data and one pure function; no
+loop, no dispatch, no authority.
+
+`WorkItem` is the portfolio entity, deliberately distinct from `TaskSpec`. A
+task spec describes one governed execution and its states answer "where is this
+run"; a work item describes something worth doing and its states answer "where
+does this stand in the portfolio". Merging them would make "this item waits on
+another item" indistinguishable from "this task run is blocked", which is the
+distinction blocker handling will rest on. Transitions are refused against an
+explicit adjacency map, the same discipline `task_spec.STATE_TRANSITIONS` uses.
+
+The field with no existing equivalent is `origin`: owner direction, a ranked
+backlog row, a discovered problem, an inferred need, self-improvement,
+maintenance, or a creative experiment. Without it those are all the same shape
+and no policy can tell them apart -- which is why nothing today can stop the
+system spending every cycle on itself.
+
+Identity is a fingerprint over origin, repository, and identity keys.
+Repository is part of it because `BacklogItem.task_id` hardcodes a `HOWLFRAM-`
+prefix for every repository, so HowlPlane and HowlFrame genuinely do produce
+colliding task ids; the work item does not inherit that collision.
+
+`portfolio.select` is pure -- no clock, no filesystem, no provider -- so the
+anti-starvation policy is asserted directly instead of being observed over a
+long run. Owner direction preempts every cap. Otherwise at most 4 of the last
+10 dispatches may be outside the product repository, at most 3 may be
+self-improvement or maintenance, and at most 1 may be a creative experiment.
+Backlog rows keep their committed file order rather than being re-sorted by
+score, because `BacklogSource` already records that a backlog's own ordering
+encodes judgement the code cannot reconstruct. An item ready for more than 72
+hours jumps its repository's queue.
+
+The behaviour that matters most is negative: when every remaining candidate
+would breach a cap, `select` returns nothing and says why. A factory that
+always finds something to do is the failure mode.
+
+`SelectionOutcome.withheld` reports every capped candidate rather than only
+those ahead of the winner, so "why is my self-improvement work not running" has
+an answer even on a tick that dispatched something else.
+
+**Self-Modification Covers The Whole Factory Subtree**: `SELF_MODIFICATION_PATHS`
+is matched with `endswith`, which names a file but cannot name a directory. The
+factory is a package that will grow modules, so an exact-path list would stop
+covering it the first time someone added a file.
+`SELF_MODIFICATION_PATH_PREFIXES` covers the subtree, and its test walks the
+package on disk rather than restating a list. Any diff touching the factory is
+`authority_enforcement_modification` at critical risk with no executor -- a
+never-delegatable boundary -- so the supervisor can never dispatch work that
+rewrites the controller it is running under. The rule over-covers pure data and
+pure functions on purpose: a needless park is cheap, and missing the supervisor
+would not be.
+
+### Changed
+
+**Durable Object Store Is Now Shared**: `DurableObjectStore` moved from
+`reasoning/_json_store.py`, whose docstring called it "intentionally internal",
+to `src/control_plane/durable_store.py`. The work-item store needs the same
+atomicity, idempotency, and path-traversal defence, and a second copy would
+drift from the first. Reasoning callers import through a re-export shim and are
+unchanged. It gained `id_attr`, `save_object`, and `find_by_field`, which let
+`ObservationStore` drop its own `save`, `load`, and `find_by_fingerprint` -- a
+net reduction in the reasoning package. All 76 reasoning tests pass untouched,
+and the duplication ratchet held at 13/13 and 29/29 across roughly 600 added
+lines.
+
 ### Fixed
 
 **A Backlog-Driven Marathon, Which The Control Plane Did Not Have**:
