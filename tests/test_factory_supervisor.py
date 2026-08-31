@@ -581,3 +581,56 @@ def test_default_sleep_is_time_sleep(tmp_path):
         provider_pool=FakeProviderPool(),
     )
     assert supervisor._sleep is time.sleep
+
+
+def test_multiple_consecutive_idle_ticks_do_not_oscillate_or_fail(tmp_path):
+    supervisor, now, sleeps = _make_supervisor(tmp_path)
+    for _ in range(5):
+        res = supervisor.tick()
+        assert res.state == SupervisorState.WAITING_FOR_WORK
+        assert supervisor.state_record.state == SupervisorState.WAITING_FOR_WORK
+        assert supervisor.state_record.failure_count == 0
+    # Exactly one initial transition to waiting_for_work, no backoff oscillation
+    assert len(supervisor.state_record.transition_history) == 1
+    assert supervisor.state_record.transition_history[0]["to_state"] == "waiting_for_work"
+
+
+def test_resume_and_stop_synchronize_with_disk_state(tmp_path):
+    supervisor1, now, sleeps = _make_supervisor(tmp_path)
+    supervisor2, now2, sleeps2 = _make_supervisor(tmp_path)
+
+    # supervisor1 stops
+    supervisor1.stop(reason="external_stop")
+    assert supervisor1.state_record.state == SupervisorState.STOPPED
+
+    # supervisor2 reloads from disk and resumes successfully
+    supervisor2.resume()
+    assert supervisor2.state_record.state == SupervisorState.IDLE
+    assert supervisor2.state_store.load().state == SupervisorState.IDLE
+
+
+def test_proposal_disposition_value_is_canonical_string(tmp_path):
+    supervisor, now, sleeps = _make_supervisor(
+        tmp_path,
+        discovery=lambda: [
+            {
+                "origin": "inferred_need",
+                "repository": "howlcipher/howlplane",
+                "capability_need": {
+                    "capability_id": "metrics_engine",
+                    "has_natural_home": False,
+                    "clear_purpose": True,
+                    "bounded_maintenance": True,
+                    "deterministic_verification": True,
+                    "multiple_consumers": True,
+                    "proposed_repository": "howl-metrics",
+                },
+                "evidence_fingerprints": ["fp-metrics-1"],
+            }
+        ],
+    )
+    supervisor.tick()
+    proposal = supervisor.repo_proposal_store.load("PROP-metrics_engine")
+    assert proposal is not None
+    assert proposal.disposition == "propose_new_repository"
+    assert proposal.rationale == "propose_new_repository"

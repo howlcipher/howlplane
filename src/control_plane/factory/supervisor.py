@@ -133,12 +133,14 @@ class FactorySupervisor:
         }
 
     def stop(self, reason: str = "operator_stop") -> None:
+        self._reload_state()
         if self._state_record.state != SupervisorState.STOPPED:
             self._state_record.transition_to(SupervisorState.STOPPED, reason=reason, at=self._now_iso())
             self._state_record.stopped_reason = reason
             self.state_store.save(self._state_record)
 
     def resume(self) -> None:
+        self._reload_state()
         if self._state_record.state == SupervisorState.STOPPED:
             self._state_record.transition_to(SupervisorState.IDLE, reason="operator_resume", at=self._now_iso())
             self._state_record.stopped_reason = None
@@ -217,10 +219,11 @@ class FactorySupervisor:
             need,
             evidence_fingerprints,
         )
+        disp_value = getattr(disposition, "value", str(disposition))
         decision = {
             "at": self._now_iso(),
             "capability_id": need.get("capability_id"),
-            "disposition": str(disposition),
+            "disposition": disp_value,
             "repository": evidence.get("repository"),
             "evidence_fingerprints": sorted(evidence_fingerprints),
         }
@@ -253,8 +256,8 @@ class FactorySupervisor:
             self.repo_proposal_store.propose(
                 proposal_id=proposal_id,
                 repository_name=need.get("proposed_repository", ""),
-                disposition=str(disposition),
-                rationale=str(disposition),
+                disposition=disp_value,
+                rationale=disp_value,
                 evidence_fingerprints=evidence_fingerprints,
                 bootstrap_plan={
                     "capability_id": need.get("capability_id"),
@@ -572,7 +575,7 @@ class FactorySupervisor:
             next_state = SupervisorState.WAITING_FOR_WORK
             reason = "no_dispatchable_work"
 
-        if self._state_record.state != str(next_state):
+        if self._state_record.state != next_state:
             try:
                 self._state_record.transition_to(next_state, reason=reason, at=now_iso)
             except InvalidSupervisorStateTransitionError:
