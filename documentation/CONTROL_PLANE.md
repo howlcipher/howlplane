@@ -21,6 +21,43 @@ New framework capabilities are forbidden unless real operational portfolio usage
 The default rule for any feature proposal:
 - *"Is X blocking real engineering work?"* If no: **DO NOT BUILD IT**.
 
+### 1.1.1 Named Carve-Out: Persistent Operation
+
+The freeze above stands unchanged for every capability except the one named
+here. Persistent operation is carved out because real operational portfolio
+usage has already exposed the defects the freeze itself asks for as the price of
+admission. The evidence, measured from durable state in this repository on
+2026-08-30:
+
+| Evidence | Measurement | Defect class |
+| :--- | :--- | :--- |
+| Campaigns terminated because the provider pool degraded | **231 of 722** (32%) recorded `stop_reason: all_providers_exhausted` | Severe usability — a third of all runs stop for a condition that resolves itself on a cooldown nothing is alive to wait for |
+| Parked tasks ever surfaced to the operator | **0 of 722** campaigns contain a `ParkedTaskRecord` | Authority — the park-and-continue path that `OVERNIGHT_SAFE_ALLOWED_ACTIONS` grants has never once fired in production |
+| Evidence ledger | `logs/control_plane/evidence_ledger.jsonl` at 139,870,255 bytes / 147,806 lines, no index, no rotation, `list_all_entries()` reads the whole file | Severe usability — every operational question costs a full-file scan |
+| Work discovery | `discover_observations()` is reachable only from two test modules; `issues.md` / `improvements.md` are entirely hand-authored | Verification — the control plane cannot observe its own recurring failures |
+| Durable operator memory | `documentation/agent_memory/` contains only its own init file | Severe usability |
+
+**Scope of the carve-out.** Capability that gives the control plane a lifetime
+longer than one CLI invocation, and the state required to make that lifetime
+honest: a supervisory loop, a durable work portfolio, evidence-backed discovery,
+blocker resolution, an operator-attention inbox, idle and backoff, and a derived
+index over existing evidence.
+
+**What the carve-out does not license.** It grants no new authority mechanism —
+`AuthorityProfile`, `AuthorityEnvelope` and `HumanBoundaryGate` remain the only
+authority paths, and `NEVER_DELEGATABLE_BOUNDARIES` is untouched. It does not
+license concurrency, a package ecosystem, a learned prioritization model, or any
+weakening of deterministic verification, reviewer independence, or the hygiene
+ceilings.
+
+**Standing obligation.** Every pull request landing under this carve-out must
+cite the operational evidence that motivates it, in the same measured form as
+the table above. A proposal that cannot produce such evidence falls back to the
+default rule in §1.1 and is rejected. The carve-out narrows the freeze; it does
+not suspend it.
+
+See `documentation/adr/0006_persistent_factory_supervisor.md`.
+
 ### 1.2 Maintenance Priority Triage
 Future control-plane issues and maintenance requests are classified strictly into:
 
