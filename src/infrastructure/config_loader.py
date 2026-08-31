@@ -45,8 +45,11 @@ def _deep_merge(base: dict, override: dict) -> dict:
 def _resource_local_config(local_data: dict) -> dict:
     """Extracts only supported application overrides from operator TOML."""
     source = local_data.get("ai_resources", local_data)
-    supported = ("operating_mode", "providers", "provider_policy")
-    return {key: source[key] for key in supported if key in source}
+    supported = ("operating_mode", "providers", "provider_policy", "roles")
+    extracted = {key: source[key] for key in supported if key in source}
+    if "roles" in local_data and "roles" not in extracted:
+        extracted["roles"] = local_data["roles"]
+    return extracted
 
 
 class DatabaseSettings(BaseModel):
@@ -194,6 +197,7 @@ class AppSettings(BaseSettings):
     payload_pipeline: PayloadPipelineSettings = PayloadPipelineSettings()
     providers: Dict[str, ProviderResourceSettings] = Field(default_factory=dict)
     provider_policy: ProviderPolicySettings = ProviderPolicySettings()
+    roles: dict = Field(default_factory=dict)
     active_mcps: list = []
     mcp_servers: dict = {}
 
