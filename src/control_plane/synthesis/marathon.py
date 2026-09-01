@@ -1259,14 +1259,15 @@ class MarathonDogfoodEngine:
         if verdict != "ALLOW":
             git_rec.failure_reason = f"{action_type}: {reason or verdict}"
             return None
-        status, receipt, reconciliation_reason = self.git_executor.query_execution_status(
-            decision_id or "", self.target_repo, run_dir, action, task_id
-        )
-        if status == "already_executed":
-            if receipt is not None:
-                return receipt.native_receipt
-            git_rec.failure_reason = reconciliation_reason
-            return {}
+        if action_type in {"create_pull_request", "merge_pull_request"}:
+            status, receipt, reconciliation_reason = self.git_executor.query_execution_status(
+                decision_id or "", self.target_repo, run_dir, action, task_id
+            )
+            if status == "already_executed":
+                if receipt is not None:
+                    return receipt.native_receipt
+                git_rec.failure_reason = reconciliation_reason
+                return {}
         result = self.git_executor.execute(decision_id, self.target_repo, run_dir, action, task_id)
         if result.status != "success":
             git_rec.failure_reason = f"{action_type}: {result.error_message}"

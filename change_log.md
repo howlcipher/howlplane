@@ -127,6 +127,9 @@ lines.
 policy paths are now protected as authority enforcement files, and skipped
 required checks cannot authorize an unattended merge.
 
+Remote reconciliation is applied at the PR and merge boundaries, where a
+replayed operation can otherwise duplicate an accepted GitHub side effect.
+
 **Factory Supervisor Lock Contention**: A process rejected by the singleton
 supervisor lock now leaves durable supervisor state untouched. Previously its
 stale in-memory record could stop the active supervisor.
