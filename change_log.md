@@ -123,6 +123,10 @@ lines.
 
 ### Fixed
 
+**Factory Authority and CI Fail Closed Behavior**: Review and verification
+policy paths are now protected as authority enforcement files, and skipped
+required checks cannot authorize an unattended merge.
+
 **Factory Supervisor Lock Contention**: A process rejected by the singleton
 supervisor lock now leaves durable supervisor state untouched. Previously its
 stale in-memory record could stop the active supervisor.

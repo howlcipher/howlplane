@@ -33,6 +33,8 @@
 
 The persistent factory supervisor uses one lock per state directory. A second
 process is rejected without changing the durable record of the active process.
+Review, verification, and hygiene policy files remain human only, and skipped
+required checks never authorize a merge.
 
 ***
 

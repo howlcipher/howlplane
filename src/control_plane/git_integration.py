@@ -314,12 +314,12 @@ class CIObservation:
 # pass | fail | pending | skipping | cancel. Bucket is authoritative when
 # present; the state map covers older `gh` builds that omit it.
 _BUCKET_CLASS = {
-    "pass": "green", "skipping": "green",
+    "pass": "green", "skipping": "failed",
     "fail": "failed", "cancel": "failed",
     "pending": "pending", "waiting": "pending",
 }
 _STATE_CLASS = {
-    "SUCCESS": "green", "NEUTRAL": "green", "SKIPPED": "green",
+    "SUCCESS": "green", "NEUTRAL": "green", "SKIPPED": "failed",
     "FAILURE": "failed", "CANCELLED": "failed", "TIMED_OUT": "failed",
     "ACTION_REQUIRED": "failed", "STARTUP_FAILURE": "failed", "STALE": "failed",
     "QUEUED": "pending", "IN_PROGRESS": "pending", "WAITING": "pending",
@@ -766,7 +766,25 @@ class GitIntegrationExecutor(AuthorityExecutor):
                 except json.JSONDecodeError:
                     prs = []
                 if prs:
-                    return "already_executed", None, f"PR already exists for branch '{branch}': {prs[0]}"
+                    pr = prs[0]
+                    receipt = ExecutionReceipt(
+                        task_id=task_id,
+                        executor=self.name,
+                        executor_version=GIT_INTEGRATION_EXECUTOR_VERSION,
+                        decision_id=decision_id or "",
+                        action_type=action.action_type,
+                        repository=self.repo_slug,
+                        commit_sha="",
+                        status="success",
+                        executed_at=datetime.now(timezone.utc).isoformat(),
+                        verification_status="PASS",
+                        native_receipt={
+                            "pr_number": pr.get("number"),
+                            "pr_url": pr.get("url"),
+                            "state": pr.get("state"),
+                        },
+                    )
+                    return "already_executed", receipt, f"PR already exists for branch '{branch}': {pr}"
             return "not_executed", None, None
         if action.action_type == "merge_pull_request":
             pr_number = (action.arguments or {}).get("pr_number")

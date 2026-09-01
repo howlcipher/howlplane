@@ -500,13 +500,13 @@ def test_18_in_progress_check_keeps_polling():
     assert obs.authorizes_merge() is True
 
 
-def test_19_all_terminal_green_authorizes_merge():
+def test_19_skipped_required_check_does_not_authorize_merge():
     green = _checks_json(("test-python", "pass", "SUCCESS"), ("test-go", "skipping", "SKIPPED"))
     obs, _ = _poll([green])
 
-    assert obs.all_required_green is True
+    assert obs.all_required_green is False
     assert obs.pending_jobs == []
-    assert obs.authorizes_merge() is True
+    assert obs.authorizes_merge() is False
 
 
 def test_20_terminal_failure_blocks_merge_and_returns_promptly():
