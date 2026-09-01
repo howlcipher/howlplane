@@ -293,6 +293,12 @@ class CIObservation:
     pending_jobs: List[Dict[str, str]] = field(default_factory=list)
     policy: Optional[RequiredCheckPolicy] = None
     timed_out: bool = False
+    # CI is evidence about one immutable PR head, never merely a check name.
+    # Both values are read from GitHub during this observation; equality is
+    # required before any result can authorize a merge.
+    pr_head_sha: Optional[str] = None
+    checks_head_sha: Optional[str] = None
+    observed_at: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
     def authorizes_merge(self) -> bool:
@@ -306,6 +312,8 @@ class CIObservation:
             and not self.failed_jobs
             and not self.pending_jobs
             and not self.timed_out
+            and bool(self.pr_head_sha)
+            and self.pr_head_sha == self.checks_head_sha
         )
 
 
@@ -463,6 +471,19 @@ class GitHubCIObserver:
         """Convenience wrapper; callers gating a merge must use the policy itself."""
         return list(self.required_check_policy(repo_root, repo_slug, branch).contexts)
 
+    def _pr_head_sha(
+        self, repo_root: Union[str, Path], pr_number: int
+    ) -> Optional[str]:
+        """Return the live PR head SHA, or None when GitHub cannot prove it."""
+        proc = self._gh(repo_root, ["pr", "view", str(pr_number), "--json", "headRefOid"], 30)
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return None
+        try:
+            head_sha = json.loads(proc.stdout).get("headRefOid")
+        except (json.JSONDecodeError, AttributeError):
+            return None
+        return str(head_sha) if head_sha else None
+
     def observe_once(
         self,
         repo_root: Union[str, Path],
@@ -472,6 +493,11 @@ class GitHubCIObserver:
     ) -> CIObservation:
         policy = policy or self.required_check_policy(repo_root, repo_slug)
         required = set(policy.contexts)
+        # `gh pr checks` is a PR-head view rather than a historical commit
+        # query. Capture the head both before and after that view. If it moves
+        # in between, its results are deliberately unusable: a successful
+        # check for the earlier head must never authorize the later one.
+        head_before = self._pr_head_sha(repo_root, pr_number)
         proc = self._gh(
             repo_root,
             ["pr", "checks", str(pr_number), "--json", "name,state,bucket,link"],
@@ -484,8 +510,17 @@ class GitHubCIObserver:
             except json.JSONDecodeError:
                 checks = []
 
+        head_after = self._pr_head_sha(repo_root, pr_number)
+        stable_head = head_before if head_before and head_before == head_after else None
+        observed_at = datetime.now(timezone.utc).isoformat()
+        for check in checks:
+            # The GitHub PR checks endpoint reports the current PR head. This
+            # explicit durable annotation makes that binding auditable.
+            check["head_sha"] = stable_head or ""
+            check["observed_at"] = observed_at
+
         observed_names = {c.get("name") for c in checks}
-        all_required_observed = bool(required) and required.issubset(observed_names)
+        all_required_observed = bool(stable_head) and bool(required) and required.issubset(observed_names)
 
         required_checks = [c for c in checks if c.get("name") in required]
         failed_jobs = [c for c in required_checks if classify_check(c) == "failed"]
@@ -507,11 +542,18 @@ class GitHubCIObserver:
             failed_jobs=failed_jobs,
             pending_jobs=pending_jobs,
             policy=policy,
+            pr_head_sha=head_after,
+            checks_head_sha=stable_head,
+            observed_at=observed_at,
             raw={
                 "required": sorted(required),
                 "pr_number": pr_number,
                 "policy_source": policy.source,
                 "policy_reason": policy.reason,
+                "pr_head_sha_before": head_before,
+                "pr_head_sha_after": head_after,
+                "checks_head_sha": stable_head,
+                "observed_at": observed_at,
             },
         )
 
@@ -543,6 +585,12 @@ class GitHubCIObserver:
         if not policy.authorizes_merge_gate():
             # Nothing to wait for: the policy itself is unknown or enforces no
             # required checks. Either way the merge gate is already closed.
+            return observation
+        if not observation.pr_head_sha:
+            # A PR number without a readable live head cannot be bound to CI
+            # evidence. This is a terminal fail-closed observation, not
+            # pending CI work, so do not spin until the ordinary 15-minute
+            # polling deadline.
             return observation
 
         deadline = clock_fn() + timeout_seconds
@@ -753,11 +801,46 @@ class GitIntegrationExecutor(AuthorityExecutor):
         GitHub/git truth, never trusting a possibly-stale local record.
         """
         branch = f"fix/{task_id}"
-        if action.action_type in ("create_task_branch", "commit_task_changes", "push_task_branch"):
+        if action.action_type in ("create_task_branch", "commit_task_changes"):
             ls_remote = self._git(self.repo_root, ["ls-remote", "origin", branch], 30)
             if ls_remote.returncode == 0 and ls_remote.stdout.strip():
                 return "already_executed", None, f"Remote branch '{branch}' already exists."
             return "not_executed", None, None
+        if action.action_type == "push_task_branch":
+            expected_commit = (action.arguments or {}).get("expected_commit")
+            ls_remote = self._git(self.repo_root, ["ls-remote", "origin", branch], 30)
+            if ls_remote.returncode != 0 or not ls_remote.stdout.strip():
+                return "not_executed", None, None
+            remote_commit = ls_remote.stdout.split()[0]
+            if not expected_commit:
+                return (
+                    "reconciliation_conflict", None,
+                    f"Remote branch '{branch}' exists but no expected commit was persisted; human reconciliation required.",
+                )
+            if remote_commit != expected_commit:
+                return (
+                    "reconciliation_conflict", None,
+                    f"Remote branch '{branch}' is at {remote_commit}, expected {expected_commit}; refusing to overwrite.",
+                )
+            receipt = ExecutionReceipt(
+                task_id=task_id,
+                executor=self.name,
+                executor_version=GIT_INTEGRATION_EXECUTOR_VERSION,
+                decision_id=decision_id or "",
+                action_type=action.action_type,
+                repository=self.repo_slug,
+                commit_sha=expected_commit,
+                status="success",
+                executed_at=datetime.now(timezone.utc).isoformat(),
+                verification_status="PASS",
+                native_receipt={
+                    "branch": branch,
+                    "pushed": True,
+                    "remote_commit_sha": remote_commit,
+                    "reconciled": True,
+                },
+            )
+            return "already_executed", receipt, f"Remote branch '{branch}' already points at expected commit."
         if action.action_type == "create_pull_request":
             proc = self._gh(self.repo_root, ["pr", "list", "--head", branch, "--json", "number,url,state"], 30)
             if proc.returncode == 0 and proc.stdout.strip():
@@ -782,6 +865,9 @@ class GitIntegrationExecutor(AuthorityExecutor):
                             "pr_number": pr.get("number"),
                             "pr_url": pr.get("url"),
                             "state": pr.get("state"),
+                            "head_branch": branch,
+                            "reconciled": True,
+                            "resume": "existing_pr_reconciled",
                         },
                     )
                     return "already_executed", receipt, f"PR already exists for branch '{branch}': {pr}"

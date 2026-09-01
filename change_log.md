@@ -60,6 +60,12 @@ would not be.
 
 ### Changed
 
+**Persistent Factory Replay Stabilization**: branch-push recovery now compares
+the live remote ref with the durable expected commit, reconciling only an exact
+match and parking any mismatch for a human rather than overwriting it. Required
+CI checks are recorded against a stable live PR head SHA; unreadable or changed
+head evidence fails closed without entering a long polling loop.
+
 **A Named, Evidence-Gated Carve-Out From The Architectural Freeze**: the control
 plane architecture has been frozen since it became infrastructure, and the
 freeze's own admission price is evidence that "real operational portfolio usage

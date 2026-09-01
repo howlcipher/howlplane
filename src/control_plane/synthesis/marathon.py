@@ -1259,7 +1259,7 @@ class MarathonDogfoodEngine:
         if verdict != "ALLOW":
             git_rec.failure_reason = f"{action_type}: {reason or verdict}"
             return None
-        if action_type in {"create_pull_request", "merge_pull_request"}:
+        if action_type in {"push_task_branch", "create_pull_request", "merge_pull_request"}:
             status, receipt, reconciliation_reason = self.git_executor.query_execution_status(
                 decision_id or "", self.target_repo, run_dir, action, task_id
             )
@@ -1268,6 +1268,13 @@ class MarathonDogfoodEngine:
                     return receipt.native_receipt
                 git_rec.failure_reason = reconciliation_reason
                 return {}
+            if status == "reconciliation_conflict":
+                # An unexpected remote task branch is neither a push success
+                # nor an engineering failure. Preserve it for a human rather
+                # than retrying, force-pushing, or overwriting remote work.
+                git_rec.integration_mode = "parked"
+                git_rec.failure_reason = reconciliation_reason
+                return None
         result = self.git_executor.execute(decision_id, self.target_repo, run_dir, action, task_id)
         if result.status != "success":
             git_rec.failure_reason = f"{action_type}: {result.error_message}"
@@ -1808,7 +1815,7 @@ class MarathonDogfoodEngine:
             return False, git_rec.to_dict()
 
         if self._run_step_or_bail(
-            "push_task_branch", {"branch": git_rec.branch},
+            "push_task_branch", {"branch": git_rec.branch, "expected_commit": git_rec.commit_sha},
             task_id, run_dir, git_rec, campaign_state, state_dir, _apply_push,
         ) is None:
             return False, git_rec.to_dict()
@@ -1833,6 +1840,8 @@ class MarathonDogfoodEngine:
         git_rec.required_checks = ci_obs.checks
         git_rec.required_checks_observed = ci_obs.all_required_observed
         git_rec.required_checks_green = ci_obs.all_required_green
+        git_rec.ci_observed_head_sha = ci_obs.checks_head_sha
+        git_rec.current_pr_head_sha = ci_obs.pr_head_sha
         if policy is not None and not policy.available:
             git_rec.ci_status = "policy_unavailable"
         elif policy is not None and not policy.contexts:

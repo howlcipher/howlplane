@@ -344,6 +344,10 @@ def build_full_merge_flow(
         ["pr", "checks", str(pr_number), "--json", "name,state,bucket,link"],
         returncode=0, stdout=f'[{{"name": "test-python", "state": "{check_state}", "bucket": "{check_bucket}"}}]',
     )
+    gh.on(
+        ["pr", "view", str(pr_number), "--json", "headRefOid"],
+        returncode=0, stdout=f'{{"headRefOid": "{commit_sha}"}}',
+    )
 
     if not ci_green:
         return branch

@@ -104,6 +104,8 @@ class GitIntegrationRecord(DataClassSerializationMixin):
             and self.push_observed
             and self.pr_observed
             and self.required_checks_green
+            and bool(self.ci_observed_head_sha)
+            and self.ci_observed_head_sha == self.current_pr_head_sha
             and self.merge_observed
             and self.remote_main_contains_merge
         )

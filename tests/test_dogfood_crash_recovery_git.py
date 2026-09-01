@@ -71,6 +71,56 @@ def test_crash_after_local_commit_before_push_still_not_executed_remotely():
     assert status == "not_executed"
 
 
+def test_push_reconciliation_accepts_only_the_expected_remote_commit():
+    git = ScriptedRunner()
+    git.on(["ls-remote", "origin", BRANCH], stdout=f"expected-sha\trefs/heads/{BRANCH}\n")
+    executor = _executor(git_runner=git)
+
+    status, receipt, _ = executor.query_execution_status(
+        "dec-push", "/fake/repo", "/fake/run",
+        _action("push_task_branch", expected_commit="expected-sha"), TASK_ID,
+    )
+
+    assert status == "already_executed"
+    assert receipt is not None
+    assert receipt.native_receipt == {
+        "branch": BRANCH, "pushed": True, "remote_commit_sha": "expected-sha", "reconciled": True,
+    }
+    assert not any(call[:1] == ("push",) for call in git.calls)
+
+
+def test_push_reconciliation_parks_unexpected_remote_commit_without_push():
+    git = ScriptedRunner()
+    git.on(["ls-remote", "origin", BRANCH], stdout=f"unexpected-sha\trefs/heads/{BRANCH}\n")
+    executor = _executor(git_runner=git)
+
+    status, receipt, reason = executor.query_execution_status(
+        "dec-push", "/fake/repo", "/fake/run",
+        _action("push_task_branch", expected_commit="expected-sha"), TASK_ID,
+    )
+
+    assert status == "reconciliation_conflict"
+    assert receipt is None
+    assert "refusing to overwrite" in reason
+    assert not any(call[:1] == ("push",) for call in git.calls)
+
+
+def test_push_crash_after_remote_success_reconciles_on_every_retry_without_repush():
+    """A restart after remote push but before durable success sees the same
+    expected ref twice and performs no additional mutating git operation."""
+    git = ScriptedRunner()
+    git.on(["ls-remote", "origin", BRANCH], stdout=f"expected-sha\trefs/heads/{BRANCH}\n")
+    executor = _executor(git_runner=git)
+    action = _action("push_task_branch", expected_commit="expected-sha")
+
+    first = executor.query_execution_status("dec-push", "/fake/repo", "/fake/run", action, TASK_ID)
+    second = executor.query_execution_status("dec-push", "/fake/repo", "/fake/run", action, TASK_ID)
+
+    assert first[0] == second[0] == "already_executed"
+    assert git.calls.count(("ls-remote", "origin", BRANCH)) == 2
+    assert not any(call[:1] == ("push",) for call in git.calls)
+
+
 def test_push_already_observed_on_remote_reports_already_executed():
     """Once the branch genuinely exists on the remote, recovery must
     recognize it and not re-push/re-create."""
@@ -78,7 +128,7 @@ def test_push_already_observed_on_remote_reports_already_executed():
     git.on(["ls-remote", "origin", BRANCH], returncode=0, stdout=f"sha1\trefs/heads/{BRANCH}\n")
     executor = _executor(git_runner=git)
 
-    for action_type in ("create_task_branch", "commit_task_changes", "push_task_branch"):
+    for action_type in ("create_task_branch", "commit_task_changes"):
         status, _, msg = executor.query_execution_status(
             "dec-3", "/fake/repo", "/fake/run", _action(action_type), TASK_ID,
         )
