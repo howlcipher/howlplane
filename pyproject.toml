@@ -95,7 +95,7 @@ all = [
 ]
 
 [project.scripts]
-ai = "src.control_plane.launcher:main"
+ai = "src.control_plane.launcher:legacy_main"
 howlplane = "src.control_plane.launcher:main"
 
 [tool.setuptools.package-data]

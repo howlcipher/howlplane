@@ -38,7 +38,7 @@ defaults below exist specifically to avoid destabilizing the host machine.
 ```bash
 # One-time: install Ollama (official installer) and pull the canonical model,
 # then run a real smoke-test inference. Never installs any other model.
-ai local setup
+howlplane local setup
 
 # Equivalent manual steps:
 ollama pull qwen2.5-coder:7b-instruct
@@ -47,7 +47,7 @@ ollama ps
 ollama run qwen2.5-coder:7b-instruct "Respond only with LOCAL_OK"
 ```
 
-`ai local setup` will not install Ollama itself unless you either install it
+`howlplane local setup` will not install Ollama itself unless you either install it
 yourself first or set `HOWLPLANE_LOCAL_AUTO_INSTALL=1`, in which case it runs
 the official installer (`curl -fsSL https://ollama.com/install.sh | sh`). It
 never installs unofficial packages, custom ROCm stacks, GPU drivers, or
@@ -66,7 +66,7 @@ alters boot/kernel configuration, and never pulls a second model.
 | Consecutive local-only campaign iterations after cloud exhaustion | 10 (fixed; delegated authority can never raise this) |
 | `keep_alive` sent to Ollama | `"5m"` (interactive, matches Ollama's own default) / **`0` (overnight-safe: unload immediately after each inference)** |
 
-Overnight-safe campaigns (`ai dogfood --authority-profile overnight-safe`, see
+Overnight-safe campaigns (`howlplane dogfood --authority-profile overnight-safe`, see
 [`OVERNIGHT_AUTHORITY.md`](OVERNIGHT_AUTHORITY.md)) register a more
 conservative `OllamaLocalBackend` instance for the process's lifetime: a 9 GiB
 launch floor instead of the interactive 8 GiB, and `keep_alive=0` so the model
@@ -145,7 +145,7 @@ run forever.
 
 ## Dogfood campaign UX
 
-`ai dogfood --resume <campaign-id>` restores the campaign's **persisted**
+`howlplane dogfood --resume <campaign-id>` restores the campaign's **persisted**
 benchmark scope; it no longer silently expands into the full default
 benchmark suite. To explicitly widen scope, pass `--benchmarks` on resume —
 this is recorded as an explicit scope extension
@@ -153,7 +153,7 @@ this is recorded as an explicit scope extension
 re-probes live provider availability, so previously exhausted cloud providers
 regain eligibility once their quota resets.
 
-`ai dogfood --status <campaign-id>` is a strictly read-only inspection: it
+`howlplane dogfood --status <campaign-id>` is a strictly read-only inspection: it
 loads durable state directly from disk, never constructs a provider pool,
 never probes agent binaries/services, never invokes a provider, and never
 mutates campaign scope.
@@ -166,7 +166,7 @@ A real end-to-end exercise on the target machine, using the genuine
 1. **Setup:** `ollama pull qwen2.5-coder:7b-instruct` (4.7 GB), `ollama list`
    confirmed, `ollama run qwen2.5-coder:7b-instruct "Respond only with
    LOCAL_OK"` → `LOCAL_OK` in ~5.6s.
-2. **`ai local setup`** (through the actual CLI, not a test double): reported
+2. **`howlplane local setup`** (through the actual CLI, not a test double): reported
    `PASS` with a real inference (`stdout='LOCAL_OK'`, `duration=4.886s`).
 3. **Real low-risk local task:** a genuine HowlFrame compiler diagnostic was
    produced from a deliberately invalid `.howl` file (raw JSON object literal
@@ -200,7 +200,7 @@ Only after local unit tests, a real Ollama smoke test, and a short bounded
 multi-provider campaign have all been verified green:
 
 ```bash
-ai dogfood --until-providers-exhausted --authority-profile overnight-safe
+howlplane dogfood --until-providers-exhausted --authority-profile overnight-safe
 ```
 
 See [`OVERNIGHT_AUTHORITY.md`](OVERNIGHT_AUTHORITY.md) (#59) for the full

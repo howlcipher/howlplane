@@ -267,7 +267,7 @@ HowlPlane serves as a **primary real-world dogfooding consumer** of the HowlFram
   - **Configuration:** `HOWLPLANE_HOWLFRAME_DOGFOOD=shadow` (or `~/.config/howlplane/config.toml` `[dogfood] howlframe = "shadow"`).
   - **Disagreement Model:** Compares local `ProjectAdapter` facts against HowlFrame observed truth (`MATCH`, `MISMATCH`, `HOWLFRAME_FAILURE`, `HOWLFRAME_UNAVAILABLE`, `INVALID_OUTPUT`, `BUDGET_EXCEEDED`, `TIMEOUT`).
   - **Evidence:** Audit results recorded durably into `logs/control_plane/evidence_ledger.jsonl`.
-  - **CLI Surface:** `ai status` and `ai howlframe-audit` display dogfood execution results and findings.
+  - **CLI Surface:** `howlplane status` and `ai howlframe-audit` display dogfood execution results and findings.
 
 ---
 
@@ -390,55 +390,55 @@ Resolution precedence for the control plane:
 ```bash
 # Stand inside any repository and work an objective:
 cd ~/projects/howlchangeops
-ai work "work the next highest-value backlog item"
+howlplane work "work the next highest-value backlog item"
 
 cd ~/projects/howlframe
-ai work "fix runtime memory limit correctness bug"
+howlplane work "fix runtime memory limit correctness bug"
 
 cd ~/projects/Career_Agent_Core
-ai work "fix issue 552"
+howlplane work "fix issue 552"
 
 # Inspect project status, verification suites, and active task runs:
-ai status
+howlplane status
 
 # Deterministically route a task without creating artifacts:
-ai route "patch authentication vulnerability"
+howlplane route "patch authentication vulnerability"
 
 # Inspect configured resources and current readiness/capacity:
-ai providers
-ai providers --json
+howlplane providers
+howlplane providers --json
 
 # Reset only one resource's current capacity observation:
-ai providers reset codex
+howlplane providers reset codex
 
 # Run preflight diagnostics:
-ai doctor
+howlplane doctor
 
 # Execute deterministic verification on the current project:
-ai verify
+howlplane verify
 ```
 
 ### 6.2.1 Recovering a Held Task Lock
 
-A task run holds `.task_runs/<task-id>/.task.lock` while it works. `ai status`
+A task run holds `.task_runs/<task-id>/.task.lock` while it works. `howlplane status`
 reports the owner's state, and what you do next depends on which of three
 things can actually be established about it:
 
 | Owner state | What it means | What to do |
 | --- | --- | --- |
-| `ACTIVE` | The owning process is running on this host. | Wait, or `ai cancel <task-id>`. The lock is never taken from a live owner. |
-| `STALE` | The owner is provably gone (`ESRCH`, or its PID was recycled). | Nothing. The next `ai resume` reclaims it automatically. |
-| `AMBIGUOUS` | Liveness cannot be established here — the lock was written on another host, or the PID belongs to another user. | `ai unlock <task-id>`, then `ai resume <task-id>`. |
+| `ACTIVE` | The owning process is running on this host. | Wait, or `howlplane cancel <task-id>`. The lock is never taken from a live owner. |
+| `STALE` | The owner is provably gone (`ESRCH`, or its PID was recycled). | Nothing. The next `howlplane resume` reclaims it automatically. |
+| `AMBIGUOUS` | Liveness cannot be established here — the lock was written on another host, or the PID belongs to another user. | `howlplane unlock <task-id>`, then `howlplane resume <task-id>`. |
 
 ```bash
 # Reclaim a lock whose owner is gone or cannot be verified:
-ai unlock HOWLFRAM-EXAMPLE-01
-ai resume HOWLFRAM-EXAMPLE-01
+howlplane unlock HOWLFRAM-EXAMPLE-01
+howlplane resume HOWLFRAM-EXAMPLE-01
 ```
 
-`ai unlock` is the only takeover path and is deliberately a human action. It
+`howlplane unlock` is the only takeover path and is deliberately a human action. It
 refuses an `ACTIVE` lock outright and records every reclamation in the
-evidence ledger as `stale_lock_reclaimed`. `ai resume` never steals a lock.
+evidence ledger as `stale_lock_reclaimed`. `howlplane resume` never steals a lock.
 
 ### 6.3 Direct Provider Escape Hatches
 Direct vendor commands remain available as ungoverned escape hatches when full multi-agent orchestration is not desired:
@@ -447,4 +447,4 @@ claude
 codex
 agy
 ```
-`ai work` remains the governed, fail-closed default.
+`howlplane work` remains the governed, fail-closed default.
