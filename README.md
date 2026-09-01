@@ -31,6 +31,9 @@
 > - *Evidence records historical truth.*
 > - *Humans authorize consequential risk.*
 
+The persistent factory supervisor uses one lock per state directory. A second
+process is rejected without changing the durable record of the active process.
+
 ***
 
 ## Everyday Workflow

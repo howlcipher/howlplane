@@ -631,13 +631,10 @@ class FactorySupervisor:
             try:
                 with lock:
                     self._run_loop(until)
-            except LockError as exc:
-                now_iso = self._now_iso()
-                self._state_record.transition_to(
-                    SupervisorState.STOPPED, reason="lock_contention", at=now_iso
-                )
-                self._state_record.stopped_reason = "lock_contention"
-                self._state_record.last_error = str(exc)
-                self._persist()
+            except LockError:
+                # This instance never became the supervisor.  Its cached state
+                # may predate the lock holder's current tick, so persisting a
+                # contention result could overwrite the active supervisor.
+                return
             return
         self._run_loop(until)

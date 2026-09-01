@@ -123,6 +123,10 @@ lines.
 
 ### Fixed
 
+**Factory Supervisor Lock Contention**: A process rejected by the singleton
+supervisor lock now leaves durable supervisor state untouched. Previously its
+stale in-memory record could stop the active supervisor.
+
 **A Backlog-Driven Marathon, Which The Control Plane Did Not Have**:
 `select_next_evidence_backed_task` existed only as a string literal in
 `authority_profile.py`. `ai dogfood`'s `run_marathon` iterates *product

@@ -559,7 +559,11 @@ def test_run_holds_single_supervisor_lock(tmp_path):
     try:
         # With the lock held externally, the run loop should fail to acquire.
         supervisor.run()
-        assert supervisor.state_record.stopped_reason == "lock_contention"
+        # A rejected contender must not persist stale local state over the
+        # supervisor that holds the singleton lock.
+        persisted = supervisor.state_store.load()
+        assert persisted.state == SupervisorState.IDLE
+        assert persisted.stopped_reason is None
     finally:
         lock.release()
 
