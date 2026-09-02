@@ -16,7 +16,7 @@ Machine-readable counterparts:
 | Manifest JSON Schema | `schemas/ai-project.schema.json` |
 | Capability enum JSON Schema | `schemas/capability.schema.json` |
 | Go parser and validator | `internal/project/manifest.go` |
-| Validation command | `ai project validate [path]` (`cmd/ai/project.go`) |
+| Validation command | `howlplane project validate [path]` (`pkg/cli`) |
 | Example manifests | `examples/manifests/*.toml` |
 
 If this document and `schemas/*.json` ever disagree, the schemas are
@@ -289,8 +289,8 @@ which the schema alone cannot express.
 ### 5.1 Running validation
 
 ```bash
-ai project validate            # validate the manifest for the current repository
-ai project validate ./some/dir # discover the root upward from a given directory
+howlplane project validate            # validate the manifest for the current repository
+howlplane project validate ./some/dir # discover the root upward from a given directory
 ```
 
 The command discovers the repository root, loads `.ai-project.toml`, applies

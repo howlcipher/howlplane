@@ -18,7 +18,7 @@ The core product thesis is:
 
 While `.howl` source code, AST, and bytecode representations continue to exist internally as inspectable intermediate representations, audit/debug surfaces, and compilation targets, **manually writing `.howl` is no longer the primary product experience**.
 
-HowlPlane acts as the orchestration and synthesis control plane (`ai create`, `ai run`, `ai dogfood`), translating user intent into verifiable software products that execute on top of HowlFrame's sandboxed virtual machine.
+HowlPlane acts as the orchestration and synthesis control plane (`howlplane create`, `howlplane run`, `howlplane dogfood`), translating user intent into verifiable software products that execute on top of HowlFrame's sandboxed virtual machine.
 
 ---
 
@@ -47,7 +47,7 @@ flowchart TD
     BlackBox -->|Assertion Failure| RepairLoop
     BlackBox -->|All Passed| Reconcile["Cross-Provider Review Reconciliation<br/>(reconciliation.py)"]
     
-    Reconcile --> RunnableProduct["Verified Runnable Product<br/>(ai run <bundle_dir>)"]
+    Reconcile --> RunnableProduct["Verified Runnable Product<br/>(howlplane run <bundle_dir>)"]
 ```
 
 ---
@@ -118,7 +118,7 @@ For fullstack and CLI applications, the **`ProductSpec` -> AST / Bytecode** lowe
 
 ## 5. Verification & Benchmark Evidence
 
-Live synthesis benchmarks executed with `ai dogfood --max-iterations 5`:
+Live synthesis benchmarks executed with `howlplane dogfood --max-iterations 5`:
 
 | Benchmark | Output Directory | Checks Passed | Duration | Status |
 | --- | --- | --- | --- | --- |

@@ -35,14 +35,14 @@ HowlPlane prevents concurrent agent collisions, race conditions, and corrupted g
   │  .task_runs/.repo.lock                       │
   │  • Locks workspace for active mutations      │
   │  • Stale PID detection via OS create_time    │
-  │  • Permits read-only inspection (ai status)  │
+  │  • Permits read-only inspection (howlplane status)  │
   └──────────────────────┬───────────────────────┘
                          │
                          ▼
        TaskLock (Per-Task Execution Scope)
   ┌──────────────────────────────────────────────┐
   │  .task_runs/<task_id>/.task.lock             │
-  │  • Prevents concurrent ai resume / ai run    │
+  │  • Prevents concurrent howlplane resume / howlplane run    │
   │  • Scope limited to single task lifecycle    │
   └──────────────────────────────────────────────┘
 ```
@@ -52,7 +52,7 @@ HowlPlane prevents concurrent agent collisions, race conditions, and corrupted g
 - **Schema:** `howlplane.lock/v1`
 - **Fields:** `task_id`, `pid`, `hostname`, `command`, `lock_type: "repository_mutation"`, `started_at`, `process_create_time`.
 - **Liveness & Stale Reclamation:** On lock collision, HowlPlane inspects the recorded PID and compares `/proc/<pid>/stat` process start ticks (or OS equivalent). If the process is dead, nonexistent, or PID has wrapped around to a different binary, the lock is automatically reclaimed with an audit log. Active processes block concurrent mutations with `RepositoryLockedError`.
-- **Read-Only Coexistence:** Inspection commands (`ai status`, `ai route`, `ai doctor`) do not acquire `RepoLock` and execute safely while a task is running.
+- **Read-Only Coexistence:** Inspection commands (`howlplane status`, `howlplane route`, `howlplane doctor`) do not acquire `RepoLock` and execute safely while a task is running.
 
 ### 2.2 Task Run Lock (`TaskLock`)
 - **Path:** `<workspace>/.task_runs/<task_id>/.task.lock`
@@ -76,7 +76,7 @@ tracked per **lifecycle**, not per object and not per process.
 - Another live process is still blocked, stale locks are still reclaimable, and
   ambiguous ownership still fails closed.
 
-Before this, `ai resume` acquired the task lock and the orchestrator then tried
+Before this, `howlplane resume` acquired the task lock and the orchestrator then tried
 to acquire it again as a separate object, so every documented recovery of an
 interrupted run failed with `Task Run lock already held`
 (HOWLFRAM-SLOPFIX-06).
@@ -90,10 +90,10 @@ task-lock failure stranded `.git/howlplane.lock` and blocked every later run.
 Progress now starts only once the locks are held, so a resume that cannot
 acquire never overwrites the durable progress of the run it was recovering.
 
-### 2.5 Reclaiming Locks (`ai unlock`)
+### 2.5 Reclaiming Locks (`howlplane unlock`)
 
-`ai unlock <task>` inspects **both** the task-run lock and the repository lock,
-so what it can act on matches what `ai status` reports. For each it validates
+`howlplane unlock <task>` inspects **both** the task-run lock and the repository lock,
+so what it can act on matches what `howlplane status` reports. For each it validates
 that the lock belongs to the named task and is a task-owned lock, then:
 
 | Owner state | Behavior |
@@ -121,7 +121,7 @@ When a process crashes or is interrupted (`SIGINT`, power loss, terminal close),
 
 ### 3.2 Stage Recovery Classifications
 
-| Interrupted Stage | Disk Delta Status | Recovery Classification | Action Taken on `ai resume` / rerun |
+| Interrupted Stage | Disk Delta Status | Recovery Classification | Action Taken on `howlplane resume` / rerun |
 | :--- | :--- | :--- | :--- |
 | `planning` | None | `RERUN_STAGE` | Re-runs task router and verification plan generation cleanly |
 | `implementing` | Empty / No changes | `RERUN_STAGE` | Re-launches implementation agent cleanly |
@@ -130,7 +130,7 @@ When a process crashes or is interrupted (`SIGINT`, power loss, terminal close),
 | `remediating` | New changes written | `RECONCILE_FIRST` | Discovers updated diff and routes to re-review cycle |
 | `verifying` | Unchanged workspace | `RERUN_STAGE` | Reruns incomplete verification checks from plan |
 | `verifying` | Drifted workspace | `INVALIDATE_AND_RETRY` | Invalidates prior review & verification; triggers re-review |
-| `awaiting_human` | Decision packet saved | `RECONCILE_FIRST` | Preserved across restarts; requires `ai approve` or `ai reject` |
+| `awaiting_human` | Decision packet saved | `RECONCILE_FIRST` | Preserved across restarts; requires `howlplane approve` or `howlplane reject` |
 
 ### 3.3 Reviewer Execution Evidence
 
@@ -160,14 +160,14 @@ transcript reconstructs as `output_invalid` rather than clean. Inferring
 pass as a completed review, and skipped the retry it was owed
 (HOWLFRAM-SLOPFIX-06).
 
-`ai status` reports the same durable dispositions -- `completed_clean`,
+`howlplane status` reports the same durable dispositions -- `completed_clean`,
 `completed_with_findings`, `invalid`, `failed`, `running`, `pending` -- rather
 than treating the presence of two files as a completed review.
 
 ### 3.4 Recovery Is Audited
 
 Recovery is governed execution, so it leaves evidence like any other stage.
-`ai resume` records `resume_requested`, `resume_lock_state`, `resume_started`,
+`howlplane resume` records `resume_requested`, `resume_lock_state`, `resume_started`,
 and then `resume_completed` or `resume_failed`, capturing the previous
 lifecycle state, every relevant lock's classification and owner, the outcome,
 the failure reason, and the resulting checkpoint. **A failed resume is itself
@@ -194,7 +194,7 @@ HowlPlane manages child agent sub-processes explicitly to avoid orphaned backgro
 ### 5.1 Process Registration
 When launching an implementation or reviewer backend, the process is recorded in `.task_runs/<task_id>/process.json` with its PID, start ticks, backend ID, and invocation command.
 
-### 5.2 Safe Cancellation (`ai cancel <task-id>`)
+### 5.2 Safe Cancellation (`howlplane cancel <task-id>`)
 1. **Target Verification:** Inspects registered PID and verifies create ticks to avoid signaling re-used PIDs.
 2. **Graceful Escalation:** Sends `SIGTERM`, waits up to 3.0s for graceful shutdown, and sends `SIGKILL` only if the child process fails to exit.
 3. **Artifact Integrity:** Cleans up `process.json` and transitions `TaskSpec` to `cancelled`.
@@ -212,7 +212,7 @@ Consequential and high-risk actions (package publishing, database migrations, pr
 - **Execution Is Not Complete Until Verified:** Completion requires a cryptographically verifiable execution receipt from a trusted bounded executor (e.g. `howlcipher/howlchangeops`).
 
 ### 6.2 Idempotent Resume & Replay Hazard Mitigation
-On `ai resume <task_id>`:
+On `howlplane resume <task_id>`:
 1. **State Binding Check:** Computes `RepositoryStateFingerprint` (commit SHA + status + diff) and verifies it matches the approved fingerprint. Any repository drift raises `StaleApprovalError` (fail-closed).
 2. **Native Executor Status Query:** Before calling `executor.execute()`, HowlPlane queries the bounded executor's receipt ledger (e.g. `HowlChangeOpsExecutor.query_execution_status`).
 3. **Duplicate Prevention:** If a native receipt already exists on disk (e.g. from an interrupted execution that completed on the backend before HowlPlane recorded it), the receipt is imported and verified without issuing a duplicate mutation.
@@ -235,9 +235,9 @@ If an artifact is truncated (0-byte) or unparseable, loaders fail closed with `C
 
 | Command | Usage | Description |
 | :--- | :--- | :--- |
-| `ai status` | `ai status` | Displays repository lock state, active task runs, recovery classifications, and pending approvals |
-| `ai cancel` | `ai cancel <task_id>` | Gracefully terminates in-flight child processes and transitions task to `cancelled` while preserving code |
-| `ai approve` | `ai approve <task_id> [--reason <msg>]` | Records human approval with repository fingerprint binding (idempotent) |
-| `ai reject` | `ai reject <task_id> [--reason <msg>]` | Records human rejection and transitions task to `failed` |
-| `ai resume` | `ai resume <task_id>` | Recovers interrupted tasks, checks drift, executes authorized bounded actions, and advances to `complete` |
-| `ai work` | `ai work <task_id>` | Runs governed task orchestrator with automatic `RepoLock` acquisition and stage checkpoints |
+| `howlplane status` | `howlplane status` | Displays repository lock state, active task runs, recovery classifications, and pending approvals |
+| `howlplane cancel` | `howlplane cancel <task_id>` | Gracefully terminates in-flight child processes and transitions task to `cancelled` while preserving code |
+| `howlplane approve` | `howlplane approve <task_id> [--reason <msg>]` | Records human approval with repository fingerprint binding (idempotent) |
+| `howlplane reject` | `howlplane reject <task_id> [--reason <msg>]` | Records human rejection and transitions task to `failed` |
+| `howlplane resume` | `howlplane resume <task_id>` | Recovers interrupted tasks, checks drift, executes authorized bounded actions, and advances to `complete` |
+| `howlplane work` | `howlplane work <task_id>` | Runs governed task orchestrator with automatic `RepoLock` acquisition and stage checkpoints |
