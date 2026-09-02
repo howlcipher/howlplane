@@ -1,6 +1,6 @@
 # Real Autonomous Integration & Delegated Overnight Authority — Milestone #59
 
-HowlPlane's marathon dogfooding campaign (`ai dogfood`) can integrate its own
+HowlPlane's marathon dogfooding campaign (`howlplane dogfood`) can integrate its own
 evidence-backed engineering fixes for real: real branch, real commit, real
 push, real GitHub PR, real observed CI, real merge only when required checks
 are green, independently reconciled against remote `main`. This never
@@ -17,7 +17,7 @@ evidence is the only thing that can satisfy the merge gate.
 ## The command
 
 ```bash
-ai dogfood --until-providers-exhausted --authority-profile overnight-safe
+howlplane dogfood --until-providers-exhausted --authority-profile overnight-safe
 ```
 
 Selecting `overnight-safe` at campaign start is the explicit operator
@@ -52,7 +52,7 @@ step, not just once for the whole task):
 `use_local_ollama_tier3`, `update_task_journal`,
 `select_next_evidence_backed_task`, `park_and_continue`.
 
-Run `ai authority show overnight-safe` for the live, canonical list — this
+Run `howlplane authority show overnight-safe` for the live, canonical list — this
 document can drift; that command cannot (it prints the actual code-defined
 profile, invokes no AI, and performs no writes).
 
@@ -116,7 +116,7 @@ campaign halting:
 ## Morning status — zero provider cost
 
 ```bash
-ai dogfood --status <campaign-id>
+howlplane dogfood --status <campaign-id>
 ```
 
 Loads durable state directly from disk. Never constructs a provider pool,
@@ -128,7 +128,7 @@ recommended action (and its provider), why delegated authority didn't apply,
 and whether it blocks other work.
 
 ```bash
-ai authority show overnight-safe   # or: strict
+howlplane authority show overnight-safe   # or: strict
 ```
 
 Read-only preview of a canonical profile's exact permissions, TTL, budgets,
@@ -136,7 +136,7 @@ and local-resource limits. No AI invoked, no writes.
 
 ## Resume and expiration
 
-`ai dogfood --resume <campaign-id>` preserves the persisted benchmark scope
+`howlplane dogfood --resume <campaign-id>` preserves the persisted benchmark scope
 (#58) and handles authority explicitly:
 
 - If the existing envelope is still valid (TTL not expired, digest verifies,

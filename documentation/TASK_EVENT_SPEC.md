@@ -484,7 +484,7 @@ against the same fixtures independently.
 
 ### 6.1 Running validation
 
-There is no `ai run validate` CLI command yet (see section 8, Non-goals).
+There is no `howlplane run validate` CLI command yet (see section 8, Non-goals).
 The two independent checks are:
 
 ```bash
@@ -653,7 +653,7 @@ they do in `PROJECT_MANIFEST_SPEC.md`'s TOML example.
 This specification covers the shape and validation rules of five run
 artifacts. It deliberately does not cover:
 
-- **`ai run` / `ai route` CLI commands.** No command exists yet to submit a
+- **`howlplane run` / `howlplane route` CLI commands.** No command exists yet to submit a
   task request, stream its events, or inspect its result. `internal/provider`
   now packages the router behind an interface (blueprint 17's ordered backlog
   item 4), but nothing in `cmd/ai` calls it yet.

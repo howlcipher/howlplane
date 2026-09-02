@@ -25,6 +25,7 @@ from src.control_plane.launcher import (
     cmd_doctor,
     cmd_status,
     cmd_verify,
+    legacy_main,
     main as launcher_main,
     TargetRepositoryNotFoundError,
     ControlPlaneNotFoundError,
@@ -209,6 +210,43 @@ def test_ai_route_subcommand(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr().out
     assert "Task class: bug_fix" in captured
     assert "Likely selected:" in captured
+
+
+def test_howlplane_parser_uses_canonical_program_name():
+    parser = launcher_module.build_parser()
+    assert parser.prog == "howlplane"
+
+
+def test_legacy_ai_warning_does_not_contaminate_stdout(monkeypatch, capsys):
+    def emit_machine_readable_output(args=None, program_name=None):
+        print('{"status":"ok"}')
+        return 0
+
+    monkeypatch.setattr(launcher_module, "main", emit_machine_readable_output)
+
+    assert legacy_main(["providers", "--json"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == '{"status":"ok"}\n'
+    assert "'ai' is deprecated" in captured.err
+    assert "howlplane" in captured.err
+
+
+def test_howlplane_shell_launcher_dispatches_native_project_validation(tmp_path):
+    repo_dir = _make_test_repo(
+        tmp_path / "project_repo",
+        {".ai-project.toml": 'schema_version = 1\nname = "shell-fixture"\n'},
+    )
+    launcher = Path(__file__).resolve().parents[1] / "bin" / "howlplane"
+
+    completed = subprocess.run(
+        [str(launcher), "project", "validate", str(repo_dir)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Validation passed." in completed.stdout
 
 
 def test_ai_doctor_subcommand(tmp_path, capsys):

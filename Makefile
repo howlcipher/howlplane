@@ -2,14 +2,16 @@
 
 # Environment and Setup
 install:
-	@echo "Installing Go and Python dependencies and global launcher..."
+	@echo "Installing Go and Python dependencies and global launchers..."
 	go mod tidy
+	go build -o build/howlplane ./cmd/howlplane
 	pip install -e ".[dev]"
 	mkdir -p $(HOME)/.config/howlplane
 	printf '[control_plane]\npath = "%s"\n' "$$(pwd)" > $(HOME)/.config/howlplane/config.toml
 	mkdir -p $(HOME)/.config/ai-control-plane
 	printf '[control_plane]\npath = "%s"\n' "$$(pwd)" > $(HOME)/.config/ai-control-plane/config.toml
 	mkdir -p $(HOME)/.local/bin
+	ln -sf $$(pwd)/bin/howlplane $(HOME)/.local/bin/howlplane
 	ln -sf $$(pwd)/bin/ai $(HOME)/.local/bin/ai
 
 PYTEST ?= $(shell if [ -f /run/media/system/tallgeese/dev/.ci_verify_venv/bin/pytest ]; then echo /run/media/system/tallgeese/dev/.ci_verify_venv/bin/pytest; elif [ -f venv/bin/pytest ]; then echo venv/bin/pytest; else echo pytest; fi)

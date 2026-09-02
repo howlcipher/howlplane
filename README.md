@@ -35,33 +35,58 @@
 
 ## Everyday Workflow
 
-The primary entry point is the global `ai` command. Run it from inside any project repository on your machine:
+HowlPlane's canonical direct command is `howlplane`. The future `howl` ecosystem
+command is owned by the separate `howlcipher/howl` repository and is not shipped
+by this repository. Run the direct command from inside any project repository on
+your machine:
 
 ```bash
 # Stand inside any repository and prepare a governed task run (plan & dry-run):
 cd /path/to/project
-ai work "fix the highest-value open bug"
+howlplane work "fix the highest-value open bug"
 
 # Genuinely execute the complete closed-loop AI engineering lifecycle:
-ai work "fix the highest-value open bug" --execute
+howlplane work "fix the highest-value open bug" --execute
 
 # Force a specific implementation agent (e.g. claude_code, codex, gemini_cli, agy, devin_cli):
-ai work "refactor database adapter" --agent codex --execute
+howlplane work "refactor database adapter" --agent codex --execute
 
 # Inspect active project context, verification suites, and task runs:
-ai status
+howlplane status
 
 # Deterministically route a task and select reviewer roles without mutating code:
-ai route "patch authentication vulnerability"
+howlplane route "patch authentication vulnerability"
 
 # Run system and toolchain preflight diagnostics:
-ai doctor
+howlplane doctor
 
 # Execute deterministic verification suites on the active repository:
-ai verify
+howlplane verify
 ```
 
-Direct vendor commands (`claude`, `codex`, `agy`) remain available as escape hatches when full multi-agent orchestration is not desired; `ai work` remains the governed default.
+Direct vendor commands (`claude`, `codex`, `agy`) remain available as escape hatches when full multi-agent orchestration is not desired; `howlplane work` remains the governed default.
+
+### CLI Ownership and Migration
+
+| Command | Owner | Status |
+| --- | --- | --- |
+| `howl` | `howlcipher/howl` | Future ecosystem umbrella command. Not provided by HowlPlane. |
+| `howlplane` | `howlcipher/howlplane` | Canonical direct HowlPlane command. |
+| `ai` | `howlcipher/howlplane` | Deprecated compatibility command. It writes a migration notice to stderr and then runs the same implementation. |
+
+Migrate direct invocations from `ai ...` to `howlplane ...`. The legacy command
+remains available during the transition so existing scripts keep their arguments,
+exit codes, and stdout. Its notice is written to stderr so JSON and other
+machine-readable stdout remain intact.
+
+The Go project integration command is also available directly:
+
+```bash
+howlplane project validate /path/to/project
+```
+
+For the reusable Go command API and the future umbrella integration contract,
+see [CLI composition](documentation/CLI_COMPOSITION.md).
 
 ---
 
@@ -240,7 +265,7 @@ pip install -e ".[dev]"
 ```
 
 ### Configuration & Discovery Precedence
-The `ai` launcher locates the HowlPlane control plane using the following order:
+The `howlplane` launcher locates the HowlPlane control plane using the following order:
 1. `--control-plane-dir <path>` CLI flag
 2. `HOWLPLANE_HOME` or `HOWLPLANE_DIR` environment variable
 3. `AI_KNOWLEDGE_LIBRARY` environment variable (deprecated fallback)

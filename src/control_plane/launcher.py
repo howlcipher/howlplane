@@ -965,7 +965,7 @@ def cmd_unlock(args: argparse.Namespace) -> int:
     return cp_cmd_unlock(args)
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument(
         "--control-plane-dir",
@@ -986,7 +986,7 @@ def build_parser() -> argparse.ArgumentParser:
     task_base_parser.add_argument("--agent", help="Preferred agent override")
 
     parser = argparse.ArgumentParser(
-        prog="ai",
+        prog=program_name,
         description="Thin Global Entrypoint into the Multi-Agent Engineering Control Plane",
         parents=[common_parser],
     )
@@ -1086,8 +1086,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(args: Optional[List[str]] = None) -> int:
-    p = build_parser()
+def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> int:
+    """Runs the canonical HowlPlane control plane launcher."""
+    p = build_parser(program_name)
     opts = p.parse_args(args if args is not None else sys.argv[1:])
     if not opts.subcommand:
         p.print_help()
@@ -1128,5 +1129,17 @@ def main(args: Optional[List[str]] = None) -> int:
         return 1
 
 
+def legacy_main(args: Optional[List[str]] = None) -> int:
+    """Runs the deprecated ai compatibility entry point without altering stdout."""
+    print(
+        "'ai' is deprecated. Use the Howl ecosystem CLI when available, or "
+        "'howlplane' for direct HowlPlane access.",
+        file=sys.stderr,
+    )
+    return main(args, program_name="ai")
+
+
 if __name__ == "__main__":
+    if os.environ.get("HOWLPLANE_LEGACY_AI") == "1":
+        sys.exit(legacy_main())
     sys.exit(main())
