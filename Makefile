@@ -1,4 +1,4 @@
-.PHONY: install test test-changed lint format clean coverage build docs sync
+.PHONY: install test test-changed test-fast test-fast-python test-unit test-integration test-acceptance test-slow test-live test-full test-coverage lint format clean coverage build docs sync
 
 # Environment and Setup
 install:
@@ -22,6 +22,9 @@ PDOC ?= $(shell if [ -f /run/media/system/tallgeese/dev/.ci_verify_venv/bin/pdoc
 
 # Testing and Coverage
 test:
+	@$(MAKE) test-full
+
+test-full:
 	@echo "Running Python tests..."
 	PYTHONPATH=. $(PYTEST) tests/ -v
 	@echo "Running Go tests..."
@@ -31,9 +34,36 @@ test-changed:
 	@echo "Selecting tests relevant to the current change set..."
 	PYTHONPATH=. $(PYTHON) scripts/select_relevant_tests.py
 
+test-fast:
+	@echo "Running fast deterministic Python tests (all tiers except measured slow/live)..."
+	PYTHONPATH=. $(PYTEST) tests/ -v -m "not slow and not live"
+	@echo "Running Go tests..."
+	go test ./...
+
+test-fast-python:
+	@echo "Running fast deterministic Python tests only..."
+	PYTHONPATH=. $(PYTEST) tests/ -v -m "not slow and not live"
+
+test-unit:
+	PYTHONPATH=. $(PYTEST) tests/ -v -m unit
+
+test-integration:
+	PYTHONPATH=. $(PYTEST) tests/ -v -m integration
+
+test-acceptance:
+	PYTHONPATH=. $(PYTEST) tests/ -v -m acceptance
+
+test-slow:
+	PYTHONPATH=. $(PYTEST) tests/ -v -m slow
+
+test-live:
+	PYTHONPATH=. $(PYTEST) tests/ -v -m live || [ $$? -eq 5 ]
+
 coverage-python:
 	@echo "Generating Python coverage..."
-	PYTHONPATH=. $(PYTEST) tests/ -v --cov=src --cov=scripts --cov-report=term-missing --cov-fail-under=42
+	PYTHONPATH=. $(PYTEST) tests/ -v --cov=src --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=42
+
+test-coverage: coverage-python
 
 coverage-go:
 	@echo "Generating Go coverage..."

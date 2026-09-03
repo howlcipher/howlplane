@@ -7,4 +7,5 @@ Reference this area for overarching principles that apply across multiple projec
 - [Control Plane](CONTROL_PLANE.md)
 - [Data flows and network egress](data_flows.md)
 - [Local model operation](LOCAL_MODEL.md)
+- [Testing strategy](TESTING.md)
 - [User guide](USER_GUIDE.md)

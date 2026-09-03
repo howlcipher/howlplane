@@ -22,9 +22,16 @@ Standards, methodologies, and guidelines for testing, validation, and quality as
 - **Integration Testing**: Write comprehensive integration tests to verify API endpoints, database transactions, and component interactions under realistic scenarios.
 
 ## Enforcements and Metrics
-- **Coverage Thresholds**: Enforce strict, non-negotiable test coverage thresholds (e.g., branch and line coverage) for all new code submissions.
+- **Coverage Signal**: Use branch and line coverage to discover untested risk,
+  never as the sole reason to add tests. Prioritize authority, irreversible
+  actions, durability, fallback, recovery, public contracts, and integration
+  boundaries.
 - **Regression Testing**: Execute full regression test suites on every pull request to identify side-effects or regressions in existing functional paths.
 - **Test-Driven Modification**: Before implementing a feature or fixing a bug, locate or write tests that cover the affected code pathways. Ensure new code is tested under both success and edge/failure conditions.
+- **Suite Relevance**: For every code change, assess whether existing tests still
+  represent intended behavior, whether coverage is missing, and whether a test
+  is obsolete or duplicative. Keep the cheapest test for the inner-loop
+  contract while retaining broader integration coverage at its proper gate.
 
 ## Related Skills
 - Defer to `test_and_verify` for the operational verification workflow (tool discovery, automated execution, sandboxed runs).
