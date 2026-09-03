@@ -128,10 +128,11 @@ a required check that never reports is not a skipped check, it is a permanently
 blocked pull request.
 
 Both Python jobs install the pinned Go toolchain (`tests/test_go_build.py` is
-`integration`, not `slow`, and shells out to `go build` and `gofmt`), and the
-full and nightly jobs install the pinned SlopsLint binary
-(`test_hygiene_policy.py::test_provider_integrity_verification` verifies it on
-the live system and fails closed when it is absent).
+`integration`, not `slow`, and shells out to `go build` and `gofmt`), and all
+Python jobs install the pinned SlopsLint binary
+(`test_hygiene_policy.py::test_provider_integrity_verification` and repository
+hygiene verification steps verify it on the live system and fail closed when it
+is absent).
 
 The current package metadata says `>=3.9`, but the live source imports
 `tomllib`, which is standard-library only from Python 3.11. CI therefore treats

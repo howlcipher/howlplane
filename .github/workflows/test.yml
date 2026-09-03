@@ -42,6 +42,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install .[all,dev]
+      - name: Install SlopsLint
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          bash scripts/install_slopslint.sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Run fast deterministic suite
         run: make test-fast
 
