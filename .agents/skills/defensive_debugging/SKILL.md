@@ -29,6 +29,6 @@ Before modifying any source code or application configurations, execute the foll
 - **Defensive Error Handling**: Always catch, handle, and log exceptions gracefully. Ensure the remediation prevents the leakage of internal system details, raw configuration parameters, or detailed stack traces to end users.
 
 ## Related Skills
-- Defer to `quality_assurance` for regression suites and coverage thresholds that validate a fix.
+- Defer to `quality_assurance` for regression suites and coverage signals that validate a fix.
 - Defer to `test_and_verify` for the automated verification workflow after remediation.
 - Defer to `software_development` for clean-code style and secure-by-default remediation standards.
