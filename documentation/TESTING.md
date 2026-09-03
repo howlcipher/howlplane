@@ -1,8 +1,9 @@
 # Testing Strategy
 
 HowlPlane optimizes for useful defect detection per developer and CI minute.
-Plain `pytest` and `make test-full` remain full regression gates; no marker is
-silently excluded from the default suite.
+Plain `pytest` and `make test-full` remain full regression gates. `live` is the
+single exception, and it is not silent: `tests/conftest.py` deselects it and
+reports the deselection unless `HOWLPLANE_LIVE_PROVIDERS` is set.
 
 ## Tiers
 
@@ -17,6 +18,13 @@ silently excluded from the default suite.
 `tests/conftest.py` assigns exactly one primary tier during collection. There
 are currently no intentionally live pytest tests; the marker exists to prevent a
 future live check from entering normal pytest or ordinary CI accidentally.
+
+That prevention lives in the collection hook, not in a marker expression. Only
+`test-fast` passes `-m "not live"`; `pytest`, `make test-full`,
+`make test-coverage`, and the full and nightly CI jobs all collect without one,
+so a command-line gate would be no gate at all. `HOWLPLANE_LIVE_PROVIDERS` is
+the one signal that opens it, and `make test-live` and the nightly live step
+both set it explicitly.
 
 ### How `slow` is decided
 
@@ -75,12 +83,21 @@ move.
 | Branch coverage | `make test-coverage` |
 | Runtime visibility | `python -m pytest --durations=25` |
 
-`test-changed` maps a changed source to a conventional corresponding test and
-to tests importing or exercising its module. Changed tests run directly.
-Agent and skill changes run their policy and manifest checks. Test
-configuration, CI, central authority/orchestration seams, Go changes, and
-unknown executable paths deliberately fall back to `tests/`. Documentation-only
-changes select no application regression. Renames and deleted paths are
+`test-changed` maps a changed source to a conventional corresponding test, to
+tests importing or exercising its module, and to tests naming any first-party
+module that transitively imports it -- a test frequently reaches a module only
+through an intermediate import and never names it. Changed tests run directly.
+A changed non-Python path runs the tests that name it (a `.gitignore` or a docs
+asset has an executable contract here too). Agent and skill changes run their
+policy and manifest checks. Test configuration, CI, central
+authority/orchestration seams, Go changes, and paths with no evidence at all
+deliberately fall back to `tests/`. Documentation-only changes select no
+application regression.
+
+The evidence is static text, not execution: a test that reaches a module
+without naming it or any of its importers is still not detected. That is the
+residual false-negative risk `test-changed` trades for speed, and it is why the
+full gate, not the selector, is what a pull request is judged on. Renames and deleted paths are
 expanded from Git name-status output so their previous behavioral contract is
 still considered. The selector prints every changed path, selected test, reason,
 and fallback decision.
@@ -114,11 +131,17 @@ Pull requests and normal pushes run `test-fast` on Python 3.11, 3.12, and 3.13, 
 one full branch-coverage regression on Python 3.12. Go coverage runs once.
 This preserves compatibility validation without multiplying every slow
 behavioral flow by every interpreter. The full job publishes its duration
-report as an artifact. Nightly and manual runs execute the full pytest suite on
-all three versions (3.11, 3.12, 3.13), including slow and acceptance markers. A live marker only runs
-when the repository variable `HOWLPLANE_RUN_LIVE_TESTS` explicitly enables it,
-and that step tolerates pytest's exit code 5 so an empty `live` selection does
-not fail the job the moment the gate is switched on.
+report as an artifact, on failing runs as well as passing ones. Nightly and
+manual runs execute the full pytest suite on all three versions (3.11, 3.12,
+3.13), including slow and acceptance markers. A live marker only runs when the
+repository variable `HOWLPLANE_RUN_LIVE_TESTS` explicitly enables it, and that
+step tolerates pytest's exit code 5 so an empty `live` selection does not fail
+the job the moment the gate is switched on.
+
+The full regression step declares `shell: bash`, which is load-bearing. It
+pipes pytest into `tee` to capture the timing report, and GitHub's default
+shell is `bash -e {0}` with no `pipefail`, so without the declaration the step
+would take `tee`'s exit status and the gate could never fail.
 
 The `main-protection` ruleset requires the status check context `test-python`.
 Because the Python work is now split across a matrix, an aggregator job named

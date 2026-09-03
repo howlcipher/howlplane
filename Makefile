@@ -56,8 +56,10 @@ test-acceptance:
 test-slow:
 	PYTHONPATH=. $(PYTEST) tests/ -v -m slow
 
+# HOWLPLANE_LIVE_PROVIDERS is what actually un-gates `live` tests; without it
+# tests/conftest.py deselects them and this target collects nothing (exit 5).
 test-live:
-	PYTHONPATH=. $(PYTEST) tests/ -v -m live || [ $$? -eq 5 ]
+	HOWLPLANE_LIVE_PROVIDERS=1 PYTHONPATH=. $(PYTEST) tests/ -v -m live || [ $$? -eq 5 ]
 
 coverage-python:
 	@echo "Generating Python coverage..."

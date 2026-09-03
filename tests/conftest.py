@@ -108,8 +108,15 @@ _SLOW_TESTS = {
 }
 
 
-def pytest_collection_modifyitems(items):
-    """Apply the canonical tier and measured-runtime markers to every test."""
+def pytest_collection_modifyitems(config, items):
+    """Apply the canonical tier and measured-runtime markers to every test.
+
+    Also enforces the `live` gate. A marker expression on the command line is
+    not enforcement: `pytest`, `make test-full`, `make test-coverage`, and the
+    full/nightly CI jobs all collect without one, so the first `live` test
+    added would contact a real provider on every ordinary run. Deselecting here
+    means the gate holds for every invocation, including a bare `pytest`.
+    """
     for item in items:
         existing_tiers = {
             m.name for m in item.iter_markers() if m.name in {"unit", "integration", "acceptance"}
@@ -128,6 +135,14 @@ def pytest_collection_modifyitems(items):
         base_name = getattr(item, "originalname", None) or item.name.split("[")[0]
         if module_name in _SLOW_MODULES or f"{module_name}::{base_name}" in _SLOW_TESTS:
             item.add_marker(pytest.mark.slow)
+
+    if os.environ.get("HOWLPLANE_LIVE_PROVIDERS"):
+        return
+    gated = [item for item in items if item.get_closest_marker("live")]
+    if not gated:
+        return
+    config.hook.pytest_deselected(items=gated)
+    items[:] = [item for item in items if item.get_closest_marker("live") is None]
 
 
 @pytest.fixture(scope="session", autouse=True)
