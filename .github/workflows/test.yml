@@ -2,13 +2,15 @@ name: Run Tests
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths-ignore:
       - '**.md'
       - 'documentation/**'
       - 'docs/**'
   pull_request:
+  schedule:
+    - cron: '20 3 * * *'
+  workflow_dispatch:
   workflow_call:
 
 concurrency:
@@ -16,61 +18,138 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test-python:
+  fast-python:
+    name: Fast Python (${{ matrix.python-version }})
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
-
+          python-version: ${{ matrix.python-version }}
+      # tests/test_go_build.py is `integration`, not `slow`, so it runs here and
+      # shells out to `go build` and `gofmt`. Pin the toolchain rather than
+      # judging gofmt drift by whatever the runner image happens to ship.
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
           go-version: '1.26.x'
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install .[all,dev]
+      - name: Run fast deterministic suite
+        run: make test-fast
 
+  full-python:
+    name: Full Python regression (3.12)
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.x'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[all,dev]
+      # tests/test_hygiene_policy.py::test_provider_integrity_verification
+      # verifies the pinned binary on the live system and fails closed when it is
+      # absent. The fast job deselects it as `slow`, so this gate is the one that
+      # needs the real executable.
       - name: Install SlopsLint
         run: |
           mkdir -p "$HOME/.local/bin"
           bash scripts/install_slopslint.sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Run Pytest with Coverage
+      - name: Run full regression, branch coverage, and timing report
         run: |
-          set +e
-          make coverage-python > log.txt 2>&1
-          EXIT_CODE=$?
-          set -e
+          PYTHONPATH=. python -m pytest tests/ -v --cov=src --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=42 --durations=25 | tee pytest-full.log
+      - name: Publish timing report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-timings-py312
+          path: pytest-full.log
 
-          if [ $EXIT_CODE -ne 0 ]; then
-            tail -n 200 log.txt > tail_output.txt
-            while IFS= read -r line; do
-              echo "::error::$line"
-            done < tail_output.txt
-            exit $EXIT_CODE
-          fi
+  nightly-python:
+    name: Nightly full Python (${{ matrix.python-version }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.x'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[all,dev]
+      - name: Install SlopsLint
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          bash scripts/install_slopslint.sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Run full, slow, and acceptance coverage
+        run: PYTHONPATH=. python -m pytest tests/ -v --durations=25
+      # Exit code 5 is "no tests collected". There are deliberately no `live`
+      # tests yet, so without this the gate would fail the moment it is switched
+      # on -- a gate that fails on activation is not a gate.
+      - name: Run live tests only when explicitly enabled
+        if: ${{ vars.HOWLPLANE_RUN_LIVE_TESTS == 'true' }}
+        env:
+          HOWLPLANE_LIVE_PROVIDERS: '1'
+        run: |
+          PYTHONPATH=. python -m pytest tests/ -v -m live || [ $? -eq 5 ]
 
+  # The `main-protection` ruleset requires the status check context
+  # `test-python`. A required check that never reports is not a skipped check --
+  # it is a permanently BLOCKED pull request (see the same note in hygiene.yml,
+  # observed on PR #62). This job carries that context forward over the split
+  # fast/full matrix. `always()` makes it report failure instead of being
+  # skipped when a dependency fails; the event guard keeps it skipped on the
+  # nightly schedule, matching its dependencies.
+  test-python:
+    name: test-python
+    if: always() && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    needs: [fast-python, full-python]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any Python gate failed
+        run: |
+          echo "fast-python: ${{ needs.fast-python.result }}"
+          echo "full-python: ${{ needs.full-python.result }}"
+          [ "${{ needs.fast-python.result }}" = "success" ] || exit 1
+          [ "${{ needs.full-python.result }}" = "success" ] || exit 1
+
+  # The `main-protection` ruleset requires the status check context `test-go`.
+  # Do not rename or remove this job without updating branch protection rules.
   test-go:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
           go-version: '1.26.x'
-
       - name: Install dependencies
         run: go mod tidy
-
       - name: Run Go tests with Coverage
         run: make coverage-go

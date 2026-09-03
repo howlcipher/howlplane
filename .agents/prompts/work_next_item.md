@@ -86,7 +86,12 @@ This session is the orchestrator, not the implementer. To preserve Claude sessio
 
 ## 6. Close the Loop
 
-- Verify the change end to end, run the full `make test`, commit as `<type>(<scope>): <description>`, set the item's Status to `Done (YYYY-MM-DD)` with a Done note, delete this task's journal in the final commit, and push.
+- Verify the change end to end using the staged strategy in
+  `documentation/TESTING.md`: affected tests first, then the warranted
+  subsystem and final regression gate. Record the Test Impact Assessment,
+  commit as `<type>(<scope>): <description>`, set the item's Status to `Done
+  (YYYY-MM-DD)` with a Done note, delete this task's journal in the final
+  commit, and push.
 - Record findings discovered during the work as new rows plus detail sections in `improvements.md` or `issues.md`.
 - Promote anything durable learned this session (constraints, decisions, environment facts) into the backlog documents or `documentation/`.
 - Housekeeping: delete any journals whose items are no longer outstanding, and clean up any completed worktrees.
