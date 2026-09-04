@@ -89,3 +89,50 @@ def test_the_scan_would_catch_a_missing_handler(monkeypatch):
     )
     with pytest.raises(AssertionError, match="marathon"):
         test_every_registered_subcommand_has_a_dispatch_target("launcher")
+
+
+# The scans above compare build_parser() against the dispatch table, so they
+# only fire when the two disagree. A subcommand registered in *neither* passes
+# both of them while being entirely absent from the operator's CLI, and that is
+# how `howlplane factory` shipped: cli.build_parser registered the factory
+# subparsers and cli.HANDLERS dispatched them, but the canonical launcher --
+# the console_scripts target in pyproject.toml, and so the only thing an
+# operator or an unattended run actually invokes -- registered neither. The
+# persistent supervisor could be driven with `python -m src.control_plane
+# factory` and not with `howlplane factory`, which is the command the 24/7
+# factory depends on. Presence has to be asserted directly.
+FACTORY_ACTIONS = {"run-once", "run", "status", "stop", "resume"}
+
+
+@pytest.mark.unit
+def test_factory_specifically_dispatches_from_the_canonical_launcher():
+    """The command the persistent factory is operated with."""
+    assert "factory" in _registered_subcommands(launcher.build_parser())
+    assert launcher.ACTIONS["factory"] is cli.cmd_factory
+
+
+@pytest.mark.unit
+def test_every_factory_action_is_reachable_from_the_canonical_launcher():
+    """Reaching `factory` is not enough; each supervisor action must parse."""
+    parser = launcher.build_parser()
+    for action in sorted(FACTORY_ACTIONS):
+        parsed = parser.parse_args(["factory", action])
+        assert parsed.subcommand == "factory"
+        assert parsed.factory_action == action
+
+
+@pytest.mark.unit
+def test_agreement_scans_alone_cannot_catch_a_wholly_absent_subcommand():
+    """Why the two assertions above exist rather than relying on the scans."""
+    stripped = argparse.ArgumentParser(prog="howlplane")
+    subparsers = stripped.add_subparsers(dest="subcommand")
+    subparsers.add_parser("work")
+    table = {"work": launcher.cmd_work}
+
+    # Both scan conditions hold on a CLI that has lost `factory` entirely.
+    registered = _registered_subcommands(stripped)
+    assert not sorted(registered - set(table))
+    assert not sorted(set(table) - registered)
+
+    # The presence assertion is the only one that objects.
+    assert "factory" not in registered

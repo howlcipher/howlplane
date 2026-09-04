@@ -73,6 +73,8 @@ class _AlwaysSucceedGhRunner:
             return subprocess.CompletedProcess(
                 args, 0, stdout='{"state": "MERGED", "merged": true, "mergeCommit": {"oid": "fakemergesha"}}', stderr=""
             )
+        if args[:2] == ["pr", "view"] and "headRefOid" in joined:
+            return subprocess.CompletedProcess(args, 0, stdout='{"headRefOid": "fakesha1234"}', stderr="")
         if args[:2] == ["pr", "view"]:
             return subprocess.CompletedProcess(args, 0, stdout='{"number": 1}', stderr="")
         if args[:2] == ["pr", "checks"]:

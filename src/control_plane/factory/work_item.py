@@ -91,6 +91,7 @@ WORK_ITEM_TRANSITIONS: Dict[str, Set[str]] = {
     WorkItemState.IN_PROGRESS: {
         WorkItemState.VERIFYING, WorkItemState.BLOCKED,
         WorkItemState.AWAITING_OWNER, WorkItemState.FAILED, WorkItemState.SHIPPED,
+        WorkItemState.DEFERRED,
     },
     WorkItemState.VERIFYING: {
         WorkItemState.SHIPPED, WorkItemState.FAILED, WorkItemState.AWAITING_OWNER,
@@ -183,6 +184,7 @@ class WorkItem(SafeArtifactSerializationMixin):
     task_ids: List[str] = field(default_factory=list)
     campaign_id: Optional[str] = None
     attempts: int = 0
+    retry_after: Optional[str] = None
 
     reopening_history: List[Dict[str, Any]] = field(default_factory=list)
     created_at: str = field(default_factory=_now)
@@ -298,3 +300,90 @@ class WorkItemStore(DurableObjectStore):
 
     def find_by_fingerprint(self, fingerprint: str) -> Optional[WorkItem]:
         return self.find_by_field("fingerprint", fingerprint)
+
+    def _admission_state_for_origin(
+        self,
+        origin: str,
+        is_ambiguous: bool,
+        trusted_provenance: bool = True,
+    ) -> str:
+        """Deterministic admission policy: backlog/discovered rows auto-admit to ready; inferred/creative await owner.
+
+        Owner direction is only auto-ready when it carries trusted provenance;
+        otherwise it is reviewed like any other speculative origin.
+        """
+        # Auto-admit origins are trusted sources that the factory may act on
+        # without owner confirmation. Ambiguity only matters for speculative
+        # origins (inferred/creative), which always await owner review.
+        owner_review_origins = {
+            WorkItemOrigin.INFERRED_NEED,
+            WorkItemOrigin.CREATIVE_EXPERIMENT,
+        }
+        if origin in owner_review_origins:
+            return WorkItemState.AWAITING_OWNER
+        if origin == WorkItemOrigin.OWNER_DIRECTION and not trusted_provenance:
+            return WorkItemState.AWAITING_OWNER
+        auto_ready_origins = {
+            WorkItemOrigin.OWNER_DIRECTION,
+            WorkItemOrigin.EXISTING_BACKLOG,
+            WorkItemOrigin.DISCOVERED_PROBLEM,
+            WorkItemOrigin.SELF_IMPROVEMENT,
+            WorkItemOrigin.MAINTENANCE,
+        }
+        if origin in auto_ready_origins:
+            return WorkItemState.READY
+        return WorkItemState.AWAITING_OWNER
+
+    def admit_evidence(
+        self,
+        origin: str,
+        repository: str,
+        title: str,
+        identity_keys: List[str],
+        evidence_refs: List[str],
+        evidence_fingerprints: List[str],
+        is_ambiguous: bool = False,
+        trusted_provenance: bool = True,
+        **kwargs: Any,
+    ) -> WorkItem:
+        fingerprint = work_item_fingerprint(origin, repository, identity_keys)
+        existing = self.find_by_fingerprint(fingerprint)
+        if existing is not None:
+            new_fps = set(evidence_fingerprints).difference(existing.evidence_fingerprints)
+            new_refs = set(evidence_refs).difference(existing.evidence_refs)
+            if not new_fps and not new_refs:
+                return existing
+            existing.reopen(
+                sorted(new_refs), sorted(new_fps), reason="new evidence admitted"
+            )
+            target = self._admission_state_for_origin(
+                origin, is_ambiguous, trusted_provenance=trusted_provenance
+            )
+            existing.transition_to(
+                WorkItemState.ADMITTED,
+                reason="reopened evidence readmitted",
+            )
+            existing.transition_to(
+                target,
+                reason=(
+                    f"origin={origin} ambiguous={is_ambiguous} "
+                    f"trusted={trusted_provenance}"
+                ),
+            )
+            self.save_object(existing)
+            return existing
+        item = WorkItem.create(
+            origin=origin,
+            repository=repository,
+            title=title,
+            identity_keys=identity_keys,
+            evidence_refs=sorted(set(evidence_refs)),
+            evidence_fingerprints=sorted(set(evidence_fingerprints)),
+            **kwargs,
+        )
+        item.transition_to(WorkItemState.ADMITTED, reason="evidence admitted")
+        target = self._admission_state_for_origin(origin, is_ambiguous, trusted_provenance=trusted_provenance)
+        if target != WorkItemState.ADMITTED:
+            item.transition_to(target, reason=f"origin={origin} ambiguous={is_ambiguous} trusted={trusted_provenance}")
+        self.save_object(item)
+        return item

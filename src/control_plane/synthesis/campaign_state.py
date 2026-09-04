@@ -61,6 +61,7 @@ class GitIntegrationRecord(DataClassSerializationMixin):
 
     task_id: str
     target_repo: str
+    idempotency_key: Optional[str] = None
     # "real": actual git/GitHub operations performed and independently
     #   verified. "simulated": no real integration was attempted (legacy /
     #   non-campaign paths). "test_fake": test-boundary fakes exercised the
@@ -84,6 +85,8 @@ class GitIntegrationRecord(DataClassSerializationMixin):
     merged: bool = False
     merge_sha: Optional[str] = None  # GitHub-produced squash-merge SHA, distinct from commit_sha
     merged_at: Optional[str] = None
+    ci_observed_head_sha: Optional[str] = None
+    current_pr_head_sha: Optional[str] = None
     remote_main_contains_merge: bool = False
     local_main_synced: bool = False
     provider: Optional[str] = None
@@ -101,6 +104,8 @@ class GitIntegrationRecord(DataClassSerializationMixin):
             and self.push_observed
             and self.pr_observed
             and self.required_checks_green
+            and bool(self.ci_observed_head_sha)
+            and self.ci_observed_head_sha == self.current_pr_head_sha
             and self.merge_observed
             and self.remote_main_contains_merge
         )

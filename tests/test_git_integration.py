@@ -74,6 +74,9 @@ def _gh_with_ruleset(contexts, base_branch="main"):
         ["api", f"repos/{REPO_SLUG}/branches/{base_branch}/protection"],
         returncode=1, stderr="gh: Branch not protected (HTTP 404)",
     )
+    # The observer proves `gh pr checks` against a stable PR head. Most
+    # observer tests use PR #5; a single ScriptedRunner response is reusable.
+    gh.on(["pr", "view", "5", "--json", "headRefOid"], stdout='{"headRefOid": "head-5"}')
     return gh
 
 
@@ -229,6 +232,9 @@ def test_ci_all_green_reports_true():
     assert obs.all_required_green is True
     assert obs.all_required_observed is True
     assert obs.authorizes_merge() is True
+    assert obs.pr_head_sha == "head-5"
+    assert obs.checks_head_sha == "head-5"
+    assert {check["head_sha"] for check in obs.checks} == {"head-5"}
 
 
 def test_simulated_ci_evidence_rejected_in_overnight_mode():
@@ -500,13 +506,13 @@ def test_18_in_progress_check_keeps_polling():
     assert obs.authorizes_merge() is True
 
 
-def test_19_all_terminal_green_authorizes_merge():
+def test_19_skipped_required_check_does_not_authorize_merge():
     green = _checks_json(("test-python", "pass", "SUCCESS"), ("test-go", "skipping", "SKIPPED"))
     obs, _ = _poll([green])
 
-    assert obs.all_required_green is True
+    assert obs.all_required_green is False
     assert obs.pending_jobs == []
-    assert obs.authorizes_merge() is True
+    assert obs.authorizes_merge() is False
 
 
 def test_20_terminal_failure_blocks_merge_and_returns_promptly():
@@ -555,6 +561,97 @@ def test_unknown_check_state_is_treated_as_pending_not_green():
     assert classify_check({"name": "x", "bucket": "", "state": "SOMETHING_NEW"}) == "pending"
     assert classify_check({"name": "x", "bucket": "pass", "state": "SUCCESS"}) == "green"
     assert classify_check({"name": "x", "bucket": "cancel", "state": "CANCELLED"}) == "failed"
+
+
+# ---------------------------------------------------------------------------
+# CI evidence must bind to the current PR head, not a check name or an old
+# durable success record.
+# ---------------------------------------------------------------------------
+
+def test_ci_success_on_stable_current_pr_head_authorizes_merge():
+    obs = _observe(("test-python", "pass", "SUCCESS"))
+
+    assert obs.authorizes_merge() is True
+    assert obs.pr_head_sha == obs.checks_head_sha == "head-5"
+    assert obs.checks[0]["head_sha"] == "head-5"
+    assert obs.checks[0]["observed_at"]
+
+
+def test_ci_success_invalid_when_pr_head_changes_during_observation():
+    gh = ScriptedRunner()
+    gh.on(
+        ["api", f"repos/{REPO_SLUG}/rules/branches/main"],
+        stdout=_ruleset_json(["test-python"]),
+    )
+    gh.on(["pr", "view", "5", "--json", "headRefOid"], stdout='{"headRefOid": "old-head"}')
+    gh.on(["pr", "view", "5", "--json", "headRefOid"], stdout='{"headRefOid": "new-head"}')
+    gh.on(
+        ["pr", "checks", "5", "--json", "name,state,bucket,link"],
+        stdout=_checks_json(("test-python", "pass", "SUCCESS")),
+    )
+    observer = GitHubCIObserver(gh_runner=gh, git_runner=ScriptedRunner())
+
+    obs = observer.observe_once("/fake/repo", 5, REPO_SLUG)
+
+    assert obs.all_required_green is False
+    assert obs.authorizes_merge() is False
+    assert obs.pr_head_sha == "new-head"
+    assert obs.checks_head_sha is None
+
+
+@pytest.mark.parametrize("bucket,state", [("skipping", "SKIPPED"), ("cancel", "CANCELLED")])
+def test_ci_skipped_or_cancelled_required_check_never_authorizes(bucket, state):
+    obs = _observe(("test-python", bucket, state))
+
+    assert obs.all_required_green is False
+    assert obs.authorizes_merge() is False
+
+
+def test_ci_missing_required_check_on_current_head_never_authorizes():
+    obs = _observe(("other", "pass", "SUCCESS"), contexts=["test-python"])
+
+    assert obs.all_required_observed is False
+    assert obs.authorizes_merge() is False
+
+
+def test_unreadable_pr_head_fails_closed_without_ci_polling_loop():
+    gh = _gh_with_ruleset(["test-python"])
+    gh.on(
+        ["pr", "checks", "5", "--json", "name,state,bucket,link"],
+        stdout=_checks_json(("test-python", "pass", "SUCCESS")),
+    )
+    # Override the normal reusable helper response with a separate observer
+    # runner that cannot prove PR #6's head at all.
+    gh.on(
+        ["api", f"repos/{REPO_SLUG}/rules/branches/main"],
+        stdout=_ruleset_json(["test-python"]),
+    )
+    gh.on(
+        ["pr", "checks", "6", "--json", "name,state,bucket,link"],
+        stdout=_checks_json(("test-python", "pass", "SUCCESS")),
+    )
+    observer = GitHubCIObserver(gh_runner=gh, git_runner=ScriptedRunner())
+
+    obs = observer.poll_until_terminal(
+        "/fake/repo", 6, REPO_SLUG, timeout_seconds=100, poll_interval=1,
+        sleep_fn=lambda _s: (_ for _ in ()).throw(AssertionError("must not sleep")),
+    )
+
+    assert obs.pr_head_sha is None
+    assert obs.authorizes_merge() is False
+
+
+def test_durable_ci_success_for_old_head_cannot_authorize_new_head():
+    record = GitIntegrationRecord(
+        task_id="T1", target_repo=REPO_SLUG, integration_mode="real",
+        required_checks_observed=True, required_checks_green=True,
+        ci_observed_head_sha="old-head", current_pr_head_sha="new-head",
+    )
+
+    assert record.ci_observed_head_sha != record.current_pr_head_sha
+    # The live observation gate is mandatory before merge; a durable status
+    # string alone is never used by the executor as permission.
+    assert record.is_fully_integrated() is False
 
 
 def _ticking_clock(step=1.0):
