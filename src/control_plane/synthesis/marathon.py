@@ -1791,6 +1791,17 @@ class MarathonDogfoodEngine:
                 record["failure_code"] = "orchestrator_terminal_state"
                 return False, record
 
+            # `gap_probe.preferred_agent` holds this loop's *current* provider,
+            # not an operator override: gap_probe is constructed above without
+            # one, and the pin exists only to steer the orchestrator at each
+            # attempt. select_resource reads a task-carried preference as an
+            # explicit override and empties the eligible set when that resource
+            # is no longer selectable (provider_pool.py, `if selected is None:
+            # candidates = []`), so asking the pool while the just-failed
+            # provider is still pinned reports that nothing is eligible while
+            # healthy providers are standing by. Ask the unpinned question; the
+            # top of the loop re-pins whichever provider is chosen next.
+            gap_probe.preferred_agent = None
             next_candidates = [
                 c for c in self.provider_pool.select_candidates(
                     task_category="code_heavy", avoid_provider=avoid_provider, task=gap_probe,
