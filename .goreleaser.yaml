@@ -13,13 +13,66 @@ builds:
       - arm64
     main: ./cmd/installer
     binary: ai_installer
+  - id: howlplane
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/howlplane
+    binary: howlplane
+    ldflags:
+      - -s -w -X github.com/howlcipher/howlplane/internal/version.Version={{ .Version }}
+  - id: ai
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/ai
+    binary: ai
+    ldflags:
+      - -s -w -X github.com/howlcipher/howlplane/internal/version.Version={{ .Version }}
 archives:
-  - name_template: >-
+  - id: default
+    ids: [default]
+    name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
+  # Howl's installer expects a github_release artifact named exactly
+  # "howlplane_{version}_{os}_{arch}.{ext}", where {os}/{arch} are Go's
+  # raw runtime.GOOS/GOARCH values (never "x86_64", never title-cased) --
+  # see internal/component/install.go in the howl repo. This archive
+  # bundles the howlplane and (deprecated alias) ai binaries together;
+  # only howlplane is a manifest component Howl activates onto PATH.
+  - id: howlplane
+    ids: [howlplane, ai]
+    name_template: "howlplane_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+checksum:
+  # A static name (not the default "{{ .ProjectName }}_{{ .Version }}_
+  # checksums.txt") so the howl repo's manifest can reference it as a
+  # literal constant -- Howl's github_release.checksum_file is not
+  # template-expanded the way artifact_pattern is. This one file covers
+  # both the ai_installer and howlplane/ai archives above; the
+  # howlplane-engine wheel published by release_control_plane.yml onto
+  # the same tag's release uses a distinctly-named checksums file
+  # instead, to avoid colliding with this one.
+  name_template: "SHA256SUMS"
 nfpms:
   - id: default
     file_name_template: '{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}'

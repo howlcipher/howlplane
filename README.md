@@ -241,7 +241,10 @@ The repository's shared context layer operates as an integrated subsystem within
 
 ## Global Installation & Setup
 
-### Option 1: Standalone Binary Installer (Recommended)
+### Option 0: Howl Ecosystem Installer (Recommended)
+`howl install` downloads and verifies the `howlplane` CLI (a checksummed release binary, from [GitHub Releases](https://github.com/howlcipher/howlplane/releases)) and the Python control-plane engine (a checksummed wheel from the same release, installed into an isolated venv Howl manages) together, as one dependency-ordered ecosystem install -- no local Go toolchain, source checkout, or `pip install -e` required. Everything except `project`-family subcommands is transparently delegated from the `howlplane` binary to the managed engine; see `internal/enginepath` for the resolution order.
+
+### Option 1: Standalone Binary Installer
 1. Download the latest `ai_installer` executable (Linux, macOS, Windows, `.deb`, `.rpm`) from the **[GitHub Releases](https://github.com/howlcipher/howlplane/releases)** page.
 2. Run the executable in your terminal:
    ```bash
@@ -259,10 +262,12 @@ chmod +x scripts/install_global.sh
 .\scripts\install_global.ps1
 ```
 
-### Option 3: Python Development Install
+### Option 3: Developer / Source Install
 ```bash
+go build -o build/howlplane ./cmd/howlplane
 pip install -e ".[dev]"
 ```
+This is the source-build path (Howl's `--profile developer` uses it too); the built `howlplane` binary reports its own version with `howlplane --version`.
 
 ### Configuration & Discovery Precedence
 The `howlplane` launcher locates the HowlPlane control plane using the following order:

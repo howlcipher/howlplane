@@ -4,9 +4,12 @@ package cli
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
+	"github.com/howlcipher/howlplane/internal/enginepath"
 	"github.com/howlcipher/howlplane/internal/project"
+	"github.com/howlcipher/howlplane/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -42,13 +45,87 @@ func NewLegacyRootCommand() *cobra.Command {
 
 func newPlaneCommand(use, short string) *cobra.Command {
 	command := &cobra.Command{
-		Use:           use,
-		Short:         short,
-		SilenceErrors: true,
-		SilenceUsage:  true,
+		Use:     use,
+		Short:   short,
+		Version: version.Version,
+		// ArbitraryArgs lets an unrecognized subcommand fall through to
+		// RunE below instead of Cobra rejecting it as "unknown command"
+		// -- everything this tree doesn't natively implement (i.e.
+		// everything except "project") is the Python control-plane
+		// engine's, not an error. DisableFlagParsing is required for the
+		// same reason: the engine's own subcommands have flags Cobra has
+		// never heard of (e.g. "status --json"), and Cobra rejects any
+		// unrecognized flag before RunE ever runs, and even with
+		// FParseErrWhitelist.UnknownFlags silently drops it rather than
+		// forwarding it -- neither is acceptable when every byte of argv
+		// must reach the engine unchanged. This also turns off Cobra's
+		// automatic --version/--help handling, which runEngineFallback
+		// replaces below.
+		Args:               cobra.ArbitraryArgs,
+		DisableFlagParsing: true,
+		RunE:               runEngineFallback,
+		SilenceErrors:      true,
+		SilenceUsage:       true,
 	}
 	command.AddCommand(newProjectCommand())
 	return command
+}
+
+// EngineExitError reports the sibling Python engine's own exit code, so
+// process entry points (cmd/howlplane, cmd/ai) can propagate it instead
+// of collapsing every engine-side failure to a generic exit(1). The
+// engine has already written its own error output to stderr by the time
+// this is returned, so callers should exit with Code, not print Error().
+type EngineExitError struct {
+	Code int
+}
+
+func (e *EngineExitError) Error() string {
+	return fmt.Sprintf("control-plane engine exited with status %d", e.Code)
+}
+
+// runEngineFallback delegates any subcommand this Go command tree doesn't
+// natively implement to the sibling Python control-plane engine,
+// preserving argv, stdio, and exit code -- the same delegation
+// bin/howlplane performed before Howl could install this binary directly
+// onto PATH.
+//
+// --version and -h/--help are handled here directly rather than
+// forwarded. Cobra's own automatic handling for both requires flag
+// parsing this command deliberately disables (see newPlaneCommand):
+//   - delegating --version to the engine would report the Python
+//     engine's version instead of this compiled Go binary's -- exactly
+//     backwards for what Howl's installer uses this flag for: verifying
+//     the artifact it just activated.
+//   - delegating -h/--help would replace this command tree's own
+//     discoverability (e.g. the "project" subcommand, and this tree
+//     composed under another CLI's root via NewPlaneCommand) with the
+//     engine's argparse help text, which knows nothing about "project".
+func runEngineFallback(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
+		return cmd.Help()
+	}
+	if args[0] == "--version" {
+		fmt.Fprintf(cmd.OutOrStdout(), "%s version %s\n", cmd.Name(), cmd.Version)
+		return nil
+	}
+
+	entrypoint, err := enginepath.Resolve()
+	if err != nil {
+		return err
+	}
+
+	sub := exec.Command(entrypoint, args...)
+	sub.Stdin = cmd.InOrStdin()
+	sub.Stdout = cmd.OutOrStdout()
+	sub.Stderr = cmd.ErrOrStderr()
+	if err := sub.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return &EngineExitError{Code: exitErr.ExitCode()}
+		}
+		return fmt.Errorf("failed to run the control-plane engine: %w", err)
+	}
+	return nil
 }
 
 func newProjectCommand() *cobra.Command {

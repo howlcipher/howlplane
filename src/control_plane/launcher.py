@@ -24,6 +24,7 @@ _repo_root = str(Path(__file__).resolve().parents[2])
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
+from src.control_plane import __version__
 from src.control_plane.cli import (
     cmd_doctor as cp_cmd_doctor,
     cmd_verify as cp_cmd_verify,
@@ -989,6 +990,11 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
         prog=program_name,
         description="Thin Global Entrypoint into the Multi-Agent Engineering Control Plane",
         parents=[common_parser],
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"{program_name} {__version__}",
     )
 
     subparsers = parser.add_subparsers(dest="subcommand", help="Command to execute")
