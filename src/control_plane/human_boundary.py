@@ -1127,7 +1127,7 @@ class HumanLifecycleManager:
                 decision = cls.load_decision(run_dir)
                 if not decision:
                     raise ApprovalRequiredError(
-                        f"Task '{task_id}' is AWAITING_HUMAN and requires explicit human approval before resuming. Run 'howl plane approve {task_id}'."
+                        f"Task '{task_id}' is AWAITING_HUMAN and requires explicit human approval before resuming. Run 'howlplane approve {task_id}'."
                     )
                 if decision.decision == "rejected":
                     raise InvalidTaskStateError(f"Task '{task_id}' authorization was REJECTED by human operator.")

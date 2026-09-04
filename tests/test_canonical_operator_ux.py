@@ -4,11 +4,16 @@ test_canonical_operator_ux.py
 
 Operator-facing output names the canonical CLI.
 
-`howl plane <verb>` is how an operator drives HowlPlane. `ai` is the deprecated
+`howlplane <verb>` is how an operator drives HowlPlane. `ai` is the deprecated
 compatibility launcher -- `pyproject.toml` maps it to `legacy_main`, and `bin/ai`
 says so in its first comment. Telling an operator to run `ai approve TASK-110`
 after a task halts for a human decision hands them a command the canonical
 install is not required to provide.
+
+`howl plane <verb>` is not the answer either: the Howl CLI narrowed to installer
+and lifecycle management and removed its HowlPlane passthrough, so `howlplane`
+is the only name that reaches these commands. `howl install howlplane` is what
+provisions it.
 
 This scans what is actually shown to a person: string literals passed to
 `print()`, and the messages given to `raise`. It deliberately does not touch
@@ -32,9 +37,12 @@ import pytest
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 REPO_ROOT = SRC_DIR.parent
 
-LEGACY_RECOMMENDATION = re.compile(
-    r"\bai (approve|reject|resume|cancel|unlock|work|status|doctor|verify)\b"
-)
+_VERBS = "approve|reject|resume|cancel|unlock|work|status|doctor|verify|marathon"
+
+# Two wrong names for the same commands: `ai` is the deprecated launcher, and
+# `howl plane` was removed when the Howl CLI narrowed to installer and lifecycle
+# management. Only `howlplane` reaches them.
+LEGACY_RECOMMENDATION = re.compile(rf"\b(ai|howl plane) ({_VERBS})\b")
 
 
 def _literal_text(node: ast.AST) -> str:
@@ -81,7 +89,7 @@ def test_no_operator_facing_output_recommends_the_deprecated_ai_cli():
     offenders = _legacy_recommendations()
     assert not offenders, (
         "These strings are shown to an operator and recommend the deprecated "
-        "`ai` launcher instead of `howl plane`:\n" + "\n".join(f"  {o}" for o in offenders)
+        "`ai` launcher instead of `howlplane`:\n" + "\n".join(f"  {o}" for o in offenders)
     )
 
 
@@ -93,7 +101,8 @@ def test_the_scan_reads_both_print_and_raise_and_would_catch_a_regression(tmp_pa
         'def f(task_id):\n'
         '    print(f"Run: ai approve {task_id}")\n'
         '    raise RuntimeError(f"then ai resume {task_id}")\n'
-        '    print("howl plane resume is fine")\n',
+        '    print(f"or howl plane cancel {task_id}")\n'
+        '    print("howlplane resume is fine")\n',
         encoding="utf-8",
     )
     this_module = sys.modules[__name__]
@@ -102,9 +111,10 @@ def test_the_scan_reads_both_print_and_raise_and_would_catch_a_regression(tmp_pa
 
     offenders = _legacy_recommendations()
 
-    assert len(offenders) == 2
+    assert len(offenders) == 3
     assert any("'ai approve'" in o for o in offenders)
     assert any("'ai resume'" in o for o in offenders)
+    assert any("'howl plane cancel'" in o for o in offenders)
 
 
 @pytest.mark.unit

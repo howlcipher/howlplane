@@ -709,7 +709,7 @@ def _handle_decision(args: argparse.Namespace, decision: str) -> int:
         if decision == "approved":
             print("")
             print("Next Action:")
-            print(f"  howl plane resume {record.task_id}")
+            print(f"  howlplane resume {record.task_id}")
         else:
             print("Terminal state:     FAILED (Rejected)")
         print("=" * 60)
@@ -930,7 +930,7 @@ def cmd_unlock(args: argparse.Namespace) -> int:
 
     if reclaimed:
         if not as_json:
-            print(f"You can now run: howl plane resume {args.task_id}")
+            print(f"You can now run: howlplane resume {args.task_id}")
         return 0
 
     return 1 if refusals else 0
@@ -1185,7 +1185,7 @@ def cmd_authority(args: argparse.Namespace) -> int:
 
     if getattr(args, "authority_action", None) != "show":
         from src.control_plane.authority_profile import CANONICAL_PROFILES
-        print(f"Usage: howl plane authority show <{'|'.join(sorted(CANONICAL_PROFILES))}>")
+        print(f"Usage: howlplane authority show <{'|'.join(sorted(CANONICAL_PROFILES))}>")
         return 1
 
     profile = get_profile(args.profile_id)
