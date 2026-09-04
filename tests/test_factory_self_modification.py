@@ -106,7 +106,7 @@ def test_the_prefix_list_is_anchored_to_a_directory():
         assert prefix.endswith("/"), f"{prefix!r} must end in / to mean a directory"
 
 
-def test_factory_work_item_with_self_modifying_path_is_parked_by_boundary():
+def test_factory_work_item_with_self_modifying_path_is_parked_by_boundary(tmp_path):
     from unittest.mock import MagicMock
 
     from src.control_plane.authority_envelope import create_envelope
@@ -127,6 +127,7 @@ def test_factory_work_item_with_self_modifying_path_is_parked_by_boundary():
     engine = MarathonDogfoodEngine(
         provider_pool=pool,
         target_repo=REPO_ROOT,
+        campaign_dir=tmp_path / "campaigns",
     )
     engine.authority_envelope = envelope
     engine.git_executor = engine._git_executor_factory(envelope, 0)
