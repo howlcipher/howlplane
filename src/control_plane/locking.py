@@ -194,7 +194,7 @@ def reclaim_lock(lock_path: Union[str, Path]) -> LockReclamation:
         raise LockError(
             f"Refusing to reclaim: lock for task '{existing.task_id}' is held by "
             f"active process PID {existing.pid} ({existing.command}). {reason}. "
-            f"Stop that process first, or use `ai cancel {existing.task_id}`."
+            f"Stop that process first, or use `howl plane cancel {existing.task_id}`."
         )
 
     record = LockReclamation(
@@ -374,7 +374,7 @@ class _BaseFileLock:
                         f"'{existing.task_id}': PID {existing.pid} ({existing.command}) "
                         f"on host '{existing.hostname}', started at {existing.started_at}. "
                         f"{reason}. If that run is definitely gone, reclaim the lock "
-                        f"explicitly with `ai unlock {existing.task_id}`."
+                        f"explicitly with `howl plane unlock {existing.task_id}`."
                     )
                 # Provably gone: reclaim automatically, as before.
                 try:

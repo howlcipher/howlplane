@@ -271,7 +271,7 @@ class CrashRecoveryEngine:
         if is_process_running:
             classification = RetryClassification.HUMAN_DECISION_REQUIRED
             recommendation = (
-                f"Task is actively running (PID {active_process.pid}). Run 'ai cancel {task_id}' to cancel."
+                f"Task is actively running (PID {active_process.pid}). Run 'howl plane cancel {task_id}' to cancel."
             )
         elif task_spec.current_state == "complete":
             classification = RetryClassification.ALREADY_COMPLETE
@@ -282,7 +282,7 @@ class CrashRecoveryEngine:
         elif native_receipt_found:
             classification = RetryClassification.NEVER_AUTO_RETRY
             recommendation = (
-                f"HowlChangeOps action already executed natively. Run 'ai resume {task_id}' to reconcile receipt."
+                f"HowlChangeOps action already executed natively. Run 'howl plane resume {task_id}' to reconcile receipt."
             )
         elif task_locked and task_lock_state == LockOwnerState.ACTIVE.value:
             # Recommending resume while a live owner holds the lock sends the
@@ -290,14 +290,14 @@ class CrashRecoveryEngine:
             classification = RetryClassification.HUMAN_DECISION_REQUIRED
             recommendation = (
                 f"Task lock is held by active process PID {lock_owner_pid}. "
-                f"Wait for it to finish, or run 'ai cancel {task_id}'."
+                f"Wait for it to finish, or run 'howl plane cancel {task_id}'."
             )
         elif task_locked and task_lock_state == LockOwnerState.AMBIGUOUS.value:
             classification = RetryClassification.HUMAN_DECISION_REQUIRED
             recommendation = (
                 f"Task lock ownership is indeterminate ({task_lock_reason}). "
-                f"If that run is definitely gone, run 'ai unlock {task_id}' "
-                f"first, then 'ai resume {task_id}'."
+                f"If that run is definitely gone, run 'howl plane unlock {task_id}' "
+                f"first, then 'howl plane resume {task_id}'."
             )
         elif repo_locked and repo_lock_state == LockOwnerState.ACTIVE.value:
             classification = RetryClassification.HUMAN_DECISION_REQUIRED
@@ -311,12 +311,12 @@ class CrashRecoveryEngine:
             recommendation = (
                 f"Repository lock ownership is indeterminate "
                 f"({repo_lock_reason}). If that run is definitely gone, run "
-                f"'ai unlock {repo_lock_task_id or task_id}' first, then "
-                f"'ai resume {task_id}'."
+                f"'howl plane unlock {repo_lock_task_id or task_id}' first, then "
+                f"'howl plane resume {task_id}'."
             )
         else:
             classification = classify_stage_retry(last_stage)
-            recommendation = f"Run 'ai resume {task_id}' to recover from {last_stage}."
+            recommendation = f"Run 'howl plane resume {task_id}' to recover from {last_stage}."
 
         return {
             "task_id": task_id,

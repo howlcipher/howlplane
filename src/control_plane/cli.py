@@ -582,10 +582,20 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
     p_marathon.add_argument("--json", action="store_true", help="Output JSON result")
 
     # authority (read-only authority profile inspection, #59 Phase 26)
+    #
+    # The choices come from the canonical registry rather than a second
+    # hard-coded list. The duplicate went stale the moment a third profile was
+    # added: `howlframe-overnight` was a valid marathon authority profile that
+    # could not be inspected, which is the wrong way round -- inspection is
+    # read-only and is exactly what an operator does *before* granting it.
+    # This does not widen any grant; `--authority-profile` choices on dogfood
+    # and acceptance are deliberately left alone.
+    from src.control_plane.authority_profile import CANONICAL_PROFILES
+
     p_authority = subparsers.add_parser("authority", help="Inspect delegated authority profiles (read-only)", **kwargs)
     authority_sub = p_authority.add_subparsers(dest="authority_action", required=True)
     p_authority_show = authority_sub.add_parser("show", help="Show a canonical authority profile's exact permissions")
-    p_authority_show.add_argument("profile_id", choices=["strict", "overnight-safe"])
+    p_authority_show.add_argument("profile_id", choices=sorted(CANONICAL_PROFILES))
     p_authority_show.add_argument("--json", action="store_true", help="Output JSON result")
 
     # local (local Ollama model setup/health check, #58 Phase 3)
@@ -699,7 +709,7 @@ def _handle_decision(args: argparse.Namespace, decision: str) -> int:
         if decision == "approved":
             print("")
             print("Next Action:")
-            print(f"  ai resume {record.task_id}")
+            print(f"  howl plane resume {record.task_id}")
         else:
             print("Terminal state:     FAILED (Rejected)")
         print("=" * 60)
@@ -920,7 +930,7 @@ def cmd_unlock(args: argparse.Namespace) -> int:
 
     if reclaimed:
         if not as_json:
-            print(f"You can now run: ai resume {args.task_id}")
+            print(f"You can now run: howl plane resume {args.task_id}")
         return 0
 
     return 1 if refusals else 0
@@ -1174,7 +1184,8 @@ def cmd_authority(args: argparse.Namespace) -> int:
     from src.control_plane.authority_profile import get_profile
 
     if getattr(args, "authority_action", None) != "show":
-        print("Usage: ai authority show <strict|overnight-safe>")
+        from src.control_plane.authority_profile import CANONICAL_PROFILES
+        print(f"Usage: howl plane authority show <{'|'.join(sorted(CANONICAL_PROFILES))}>")
         return 1
 
     profile = get_profile(args.profile_id)
@@ -1308,6 +1319,37 @@ def _print_local_report(args: argparse.Namespace, report: Dict[str, Any]) -> Non
         print(f"\nResult: {report.get('result')}")
 
 
+# Every subcommand build_parser() registers must appear here; see the same note
+# on launcher.ACTIONS. `acceptance` was registered without a handler, so
+# `howlplane acceptance overnight-integration ...` printed top-level help and
+# exited 1. tests/test_cli_dispatch_completeness.py fails if they diverge.
+HANDLERS = {
+    "init-task": cmd_init_task,
+    "route-task": cmd_route_task,
+    "briefs": cmd_briefs,
+    "prepare-run": cmd_prepare_run,
+    "reconcile": cmd_reconcile,
+    "verify": cmd_verify,
+    "record": cmd_record,
+    "metrics": cmd_metrics,
+    "report": cmd_metrics,
+    "check-boundary": cmd_boundary,
+    "doctor": cmd_doctor,
+    "howlframe-audit": cmd_howlframe_audit,
+    "approve": cmd_approve,
+    "reject": cmd_reject,
+    "resume": cmd_resume,
+    "cancel": cmd_cancel,
+    "create": cmd_create,
+    "run": cmd_run_product,
+    "dogfood": cmd_dogfood,
+    "acceptance": cmd_acceptance,
+    "marathon": cmd_marathon,
+    "authority": cmd_authority,
+    "local": cmd_local,
+}
+
+
 def main(args: Optional[List[str]] = None) -> int:
     if args is None:
         args = sys.argv[1:]
@@ -1318,32 +1360,7 @@ def main(args: Optional[List[str]] = None) -> int:
         parser.print_help()
         return 1
 
-    handlers = {
-        "init-task": cmd_init_task,
-        "route-task": cmd_route_task,
-        "briefs": cmd_briefs,
-        "prepare-run": cmd_prepare_run,
-        "reconcile": cmd_reconcile,
-        "verify": cmd_verify,
-        "record": cmd_record,
-        "metrics": cmd_metrics,
-        "report": cmd_metrics,
-        "check-boundary": cmd_boundary,
-        "doctor": cmd_doctor,
-        "howlframe-audit": cmd_howlframe_audit,
-        "approve": cmd_approve,
-        "reject": cmd_reject,
-        "resume": cmd_resume,
-        "cancel": cmd_cancel,
-        "create": cmd_create,
-        "run": cmd_run_product,
-        "dogfood": cmd_dogfood,
-        "marathon": cmd_marathon,
-        "authority": cmd_authority,
-        "local": cmd_local,
-    }
-
-    handler = handlers.get(parsed_args.subcommand)
+    handler = HANDLERS.get(parsed_args.subcommand)
     if not handler:
         parser.print_help()
         return 1

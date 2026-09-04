@@ -734,7 +734,7 @@ def test_ambiguous_lock_fails_closed_but_is_recoverable(tmp_path):
     assert "INDETERMINATE" in message
     # It must not assert liveness it never established.
     assert "held by active process" not in message
-    assert "ai unlock TASK-AMBIG" in message
+    assert "howl plane unlock TASK-AMBIG" in message
     assert lock_path.exists()
 
     record = reclaim_lock(lock_path)
@@ -806,7 +806,7 @@ def test_recovery_does_not_recommend_resume_behind_a_held_lock(tmp_path):
     diag = CrashRecoveryEngine.inspect_task(repo, "TASK-RECO")
     assert diag["task_locked"] is True
     assert diag["task_lock_state"] == LockOwnerState.AMBIGUOUS.value
-    assert "ai unlock TASK-RECO" in diag["recommendation"]
+    assert "howl plane unlock TASK-RECO" in diag["recommendation"]
     assert diag["classification"] == RetryClassification.HUMAN_DECISION_REQUIRED
 
     owner = subprocess.Popen(["sleep", "30"])
@@ -814,7 +814,7 @@ def test_recovery_does_not_recommend_resume_behind_a_held_lock(tmp_path):
         _write_task_lock(repo, "TASK-RECO", pid=owner.pid)
         diag = CrashRecoveryEngine.inspect_task(repo, "TASK-RECO")
         assert diag["task_lock_state"] == LockOwnerState.ACTIVE.value
-        assert "ai resume" not in diag["recommendation"]
+        assert "howl plane resume" not in diag["recommendation"]
     finally:
         owner.kill()
         owner.wait()
@@ -823,4 +823,4 @@ def test_recovery_does_not_recommend_resume_behind_a_held_lock(tmp_path):
     _write_task_lock(repo, "TASK-RECO", pid=999999)
     diag = CrashRecoveryEngine.inspect_task(repo, "TASK-RECO")
     assert diag["task_locked"] is False
-    assert "ai resume TASK-RECO" in diag["recommendation"]
+    assert "howl plane resume TASK-RECO" in diag["recommendation"]
