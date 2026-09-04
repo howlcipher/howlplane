@@ -40,7 +40,9 @@ from src.control_plane.cli import (
     cmd_marathon as cp_cmd_marathon,
     cmd_authority as cp_cmd_authority,
     cmd_local as cp_cmd_local,
+    cmd_factory as cp_cmd_factory,
     register_synthesis_subparsers,
+    register_factory_subparsers,
 )
 from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
 from src.control_plane.git_env import run_git_in_repo
@@ -991,6 +993,7 @@ ACTIONS = {
     "marathon": cp_cmd_marathon,
     "authority": cp_cmd_authority,
     "local": cp_cmd_local,
+    "factory": cp_cmd_factory,
 }
 
 
@@ -1111,6 +1114,7 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
 
     # create, run, dogfood (Prompt-to-Product Synthesis)
     register_synthesis_subparsers(subparsers, parents=[common_parser])
+    register_factory_subparsers(subparsers, parents=[common_parser])
 
     return parser
 
