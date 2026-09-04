@@ -12,10 +12,12 @@ class FakeEngine:
         self.result = result
         self.last_work_item = None
         self.last_files_changed = None
+        self.dispatch_ids = []
 
-    def execute_factory_work_item(self, work_item, files_changed=None):
+    def execute_factory_work_item(self, work_item, files_changed=None, dispatch_id=None):
         self.last_work_item = work_item
         self.last_files_changed = files_changed
+        self.dispatch_ids.append(dispatch_id)
         return self.result
 
 
@@ -101,3 +103,30 @@ def test_adapter_extracts_files_changed_from_source_ref():
     item.source_ref = {"source_file": "src/control_plane/factory/supervisor.py"}
     adapter.dispatch(item, dispatch_id="D-7", task_id="T-7")
     assert "src/control_plane/factory/supervisor.py" in (engine.last_files_changed or [])
+
+
+def test_dispatch_id_reaches_the_engine_so_retries_get_distinct_trajectories():
+    """Two dispatches of one work item must be distinguishable downstream.
+
+    Found by a live canary. Trajectory identity falls back to the run
+    directory, and the factory reuses one directory per work item
+    (`.task_runs/<work_item_id>`), so a second dispatch derived the id the
+    first had already written. The trajectory store is deliberately immutable
+    -- identical content is an idempotent no-op, differing content raises -- so
+    the retry died with "Artifact 'traj-...' already exists with different
+    content_digest" before reaching a provider, turning a routine retryable
+    provider failure into an orchestrator exception and a backoff.
+
+    The dispatcher already had a unique dispatch_id per dispatch and simply
+    never passed it on.
+    """
+    engine = FakeEngine((True, {"provider": "codex", "merged": True}))
+    adapter = MarathonDispatcherAdapter(engine_factory=lambda: engine)
+    item = _work_item()
+
+    adapter.dispatch(item, dispatch_id="D-1", task_id="T-1")
+    adapter.dispatch(item, dispatch_id="D-2", task_id="T-1")
+
+    assert engine.dispatch_ids == ["D-1", "D-2"], (
+        "the engine cannot tell two dispatches of the same work item apart"
+    )

@@ -1526,6 +1526,7 @@ class MarathonDogfoodEngine:
         risk_level: str = "medium",
         task_class: str = "feature",
         files_changed: Optional[List[str]] = None,
+        dispatch_id: Optional[str] = None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """Public adapter to run a single factory WorkItem through the governed engineering lifecycle.
 
@@ -1544,6 +1545,7 @@ class MarathonDogfoodEngine:
             task_class=task_class,
             files_changed=files_changed,
             repository_override=work_item.repository,
+            dispatch_id=dispatch_id,
         )
 
     def _execute_governed_engineering_improvement(
@@ -1563,6 +1565,7 @@ class MarathonDogfoodEngine:
         commit_message_override: Optional[str] = None,
         files_changed: Optional[List[str]] = None,
         repository_override: Optional[str] = None,
+        dispatch_id: Optional[str] = None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """
         Executes a bounded engineering task through the REAL governed
@@ -1708,6 +1711,20 @@ class MarathonDogfoodEngine:
             gap_probe.preferred_agent = provider
             gap_probe.metadata["provider_attempt_index"] = attempt_index
             gap_probe.metadata["failover_from_resource_id"] = previous_provider
+            # One trajectory per (dispatch, attempt). Without this the
+            # trajectory identity falls back to the run directory, which the
+            # factory reuses for every attempt at a work item
+            # (.task_runs/<work_item_id>), so a retry derives the id the first
+            # attempt already wrote. The trajectory store is deliberately
+            # immutable -- identical content is an idempotent no-op, differing
+            # content raises -- so the retry died with "Artifact 'traj-...'
+            # already exists with different content_digest" before it could
+            # reach a provider at all. dispatch_id is unique per dispatch, so
+            # attempts stay distinguishable across ticks and across restarts.
+            if dispatch_id:
+                gap_probe.metadata["trajectory_event_id"] = (
+                    f"{dispatch_id}:{attempt_index}"
+                )
             git_rec.provider = provider
             attempt_started = time.time()
             attempt_baseline = None

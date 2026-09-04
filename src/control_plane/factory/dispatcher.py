@@ -58,7 +58,7 @@ class MarathonDispatcherAdapter:
         engine = self._engine_factory()
         files_changed = self._files_changed_from_work_item(work_item)
         success, git_record = engine.execute_factory_work_item(
-            work_item, files_changed=files_changed
+            work_item, files_changed=files_changed, dispatch_id=dispatch_id
         )
         if git_record and git_record.get("integration_mode") == "parked":
             return DispatchOutcome(
