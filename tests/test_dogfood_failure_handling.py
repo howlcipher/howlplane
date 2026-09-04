@@ -653,6 +653,7 @@ def _run_marathon_harness(
     gh: Optional[ScriptedRunner] = None,
     configured_pool: bool = False,
     dispatch_id: Optional[str] = None,
+    orchestrator_cls: type = ProviderScriptedOrchestrator,
 ) -> Tuple[bool, Dict[str, Any], ProviderScriptedOrchestrator, ProviderPoolManager]:
     repo_root = tmp_path / "repo"
     init_minimal_python_repo(repo_root)
@@ -683,7 +684,7 @@ def _run_marathon_harness(
     gh_r = gh or ScriptedRunner()
     envelope = create_envelope(get_profile("overnight-safe"), campaign_id, "cli:test@host")
 
-    orch = ProviderScriptedOrchestrator(repo_root / "run", script)
+    orch = orchestrator_cls(repo_root / "run", script)
     engine = MarathonDogfoodEngine(
         provider_pool=pool,
         base_output_dir=tmp_path / "out",
@@ -858,3 +859,45 @@ def test_each_attempt_gets_a_dispatch_scoped_trajectory_event_id(tmp_path):
         f"attempts are not distinguishable by trajectory identity: {event_ids}"
     )
     assert len(set(event_ids)) == len(event_ids)
+
+
+class _StateTrackingOrchestrator(ProviderScriptedOrchestrator):
+    """Scripted orchestrator that also moves the TaskSpec through its lifecycle.
+
+    The plain scripted orchestrator never touches `current_state`, so the
+    marathon failover tests hopped between providers on a TaskSpec frozen in
+    its initial state. The real GovernedTaskOrchestrator transitions the task
+    to `implementing` and, on a failed attempt, to `failed` -- and the
+    lifecycle refuses failed -> implementing. A live canary hit exactly that:
+    failover picked a healthy provider and then could not hand it the task.
+    """
+
+    def run(self, task_spec, planned_actions=None, lock_ownership=None):
+        if task_spec.current_state != "implementing":
+            if task_spec.current_state == "discovered":
+                task_spec.transition_to("planned", reason="test_plan")
+            task_spec.transition_to("implementing", reason="test_impl")
+        result = super().run(task_spec, planned_actions, lock_ownership)
+        if result.final_state == "failed":
+            task_spec.transition_to("failed", reason="test_failed_attempt")
+        return result
+
+
+def test_failover_hop_can_re_enter_implementation_after_a_failed_attempt(tmp_path):
+    """A hop must leave the task in a state the next attempt may start from."""
+    script = {
+        "agy": ("unavailable", "Error: timeout waiting for response\n"),
+        "devin_cli": ("unavailable", "Error: credits exhausted\n"),
+    }
+
+    ok, rec, orch, _ = _run_marathon_harness(
+        tmp_path, script, "ENG-RETRY-STATE", "DOGFOOD-RETRY-STATE",
+        orchestrator_cls=_StateTrackingOrchestrator,
+    )
+
+    assert orch.attempted == ["agy", "devin_cli"], (
+        "the hop never reached the second provider; "
+        f"attempted={orch.attempted}, failure_reason={(rec or {}).get('failure_reason')}"
+    )
+    assert ok is False
+    assert rec["failure_reason"].startswith("NO_ELIGIBLE_PROVIDER_REMAINING")
