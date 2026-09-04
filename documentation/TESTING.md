@@ -97,9 +97,9 @@ application regression.
 The evidence is static text, not execution: a test that reaches a module
 without naming it or any of its importers is still not detected. That is the
 residual false-negative risk `test-changed` trades for speed, and it is why the
-full gate, not the selector, is what a pull request is judged on. Renames and deleted paths are
-expanded from Git name-status output so their previous behavioral contract is
-still considered. The selector prints every changed path, selected test, reason,
+full gate, not the selector, is what a pull request is judged on. Renames
+and deleted paths are expanded from Git name-status output so their previous
+behavioral contract is still considered. The selector prints every changed path, selected test, reason,
 and fallback decision.
 
 ## Continuous Test Impact Assessment

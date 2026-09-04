@@ -53,6 +53,9 @@ def test_cli_dogfood_command(tmp_path: Path, capsys):
         "--benchmarks", "notes,todo",
         "--max-iterations", "2",
         "--output-dir", str(out_dir),
+        # Without this the CLI default resolves `.dogfood_runs` against the
+        # cwd and the test writes a campaign into the real repository.
+        "--campaign-dir", str(tmp_path / "campaigns"),
     ])
 
     captured = capsys.readouterr()

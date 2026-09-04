@@ -158,6 +158,37 @@ def _cleanup_tmp_git_contamination():
     yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _fail_on_campaign_pollution_of_this_repository():
+    """Fail the run if the suite wrote a campaign into this checkout.
+
+    `MarathonDogfoodEngine` resolves its default `campaign_dir` against the
+    process cwd, so a test that forgets `campaign_dir=tmp_path / ...` silently
+    creates `.dogfood_runs/DOGFOOD-*` in the repository the suite is running in.
+    860 such directories accumulated before anyone noticed, because nothing
+    failed. tests/test_campaign_isolation.py catches the omission statically;
+    this catches whatever the static scan cannot see, at the cost of two
+    directory listings per session.
+    """
+    campaign_root = Path(__file__).resolve().parent.parent / ".dogfood_runs"
+
+    def snapshot():
+        if not campaign_root.is_dir():
+            return set()
+        return {entry.name for entry in campaign_root.iterdir()}
+
+    before = snapshot()
+    yield
+    created = sorted(snapshot() - before)
+    assert not created, (
+        f"The test suite wrote {len(created)} campaign director"
+        f"{'y' if len(created) == 1 else 'ies'} into {campaign_root}:\n"
+        + "\n".join(f"  {name}" for name in created[:10])
+        + ("\n  ..." if len(created) > 10 else "")
+        + "\nA test constructed a campaign engine without campaign_dir=tmp_path / \"campaigns\"."
+    )
+
+
 @pytest.fixture(autouse=True)
 def _scrub_inherited_git_repository_selection(monkeypatch):
     """Removes inherited Git repository-selection variables for every test.
