@@ -76,10 +76,17 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           bash scripts/install_slopslint.sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+      # `shell: bash` is load-bearing: it runs the step under `bash -eo pipefail`.
+      # GitHub's default shell is `bash -e {0}`, which does NOT set pipefail, so
+      # piping pytest into `tee` would hand the step tee's exit status and this
+      # gate could never fail.
       - name: Run full regression, branch coverage, and timing report
+        shell: bash
         run: |
           PYTHONPATH=. python -m pytest tests/ -v --cov=src --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=42 --durations=25 | tee pytest-full.log
+      # The timing report is most worth reading on the runs that failed.
       - name: Publish timing report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pytest-timings-py312
@@ -111,6 +118,9 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           bash scripts/install_slopslint.sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+      # `live` tests are deselected by tests/conftest.py unless
+      # HOWLPLANE_LIVE_PROVIDERS is set, so this step cannot reach a real
+      # provider even though it names no marker expression.
       - name: Run full, slow, and acceptance coverage
         run: PYTHONPATH=. python -m pytest tests/ -v --durations=25
       # Exit code 5 is "no tests collected". There are deliberately no `live`
@@ -118,6 +128,7 @@ jobs:
       # on -- a gate that fails on activation is not a gate.
       - name: Run live tests only when explicitly enabled
         if: ${{ vars.HOWLPLANE_RUN_LIVE_TESTS == 'true' }}
+        shell: bash
         env:
           HOWLPLANE_LIVE_PROVIDERS: '1'
         run: |

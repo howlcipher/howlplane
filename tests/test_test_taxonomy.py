@@ -9,6 +9,10 @@ test keeps running there under a stale name). These tests make that rot loud.
 
 import ast
 import importlib.util
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -103,3 +107,55 @@ def test_slow_test_ids_do_not_duplicate_slow_modules():
         f"These tests are already covered by _SLOW_MODULES: {redundant}. "
         "Keep one source of truth per test."
     )
+
+
+LIVE_PROBE = """import pytest
+
+
+@pytest.mark.live
+def test_live_probe():
+    pass
+"""
+
+
+def _run_live_probe(env_value):
+    """Collect a `live`-marked test under the repository conftest gate."""
+    probe_dir = TESTS_DIR / f"_live_gate_probe_{os.getpid()}"
+    probe_dir.mkdir()
+    try:
+        (probe_dir / "test_live_probe.py").write_text(LIVE_PROBE, encoding="utf-8")
+        env = dict(os.environ)
+        env.pop("HOWLPLANE_LIVE_PROVIDERS", None)
+        if env_value is not None:
+            env["HOWLPLANE_LIVE_PROVIDERS"] = env_value
+        env["PYTHONPATH"] = str(REPO_ROOT)
+        return subprocess.run(  # nosec B603 - fixed interpreter and argv.
+            [sys.executable, "-m", "pytest", "-p", "no:cacheprovider",
+             str(probe_dir.relative_to(REPO_ROOT))],
+            cwd=REPO_ROOT, env=env, capture_output=True, text=True,
+        )
+    finally:
+        shutil.rmtree(probe_dir, ignore_errors=True)
+
+
+@pytest.mark.integration
+def test_live_tests_are_deselected_without_explicit_opt_in():
+    """A marker expression on the command line is not a gate.
+
+    `pytest`, `make test-full`, `make test-coverage`, and the full/nightly CI
+    jobs all collect without one, so the gate has to hold at collection time or
+    the first live test added would contact a real provider on every run.
+    """
+    result = _run_live_probe(None)
+
+    assert "1 deselected" in result.stdout, result.stdout
+    assert "1 passed" not in result.stdout, result.stdout
+
+
+@pytest.mark.integration
+def test_live_tests_run_when_live_providers_are_explicitly_enabled():
+    """The gate must open on the one signal that means "contact real services"."""
+    result = _run_live_probe("1")
+
+    assert "1 passed" in result.stdout, result.stdout
+

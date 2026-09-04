@@ -7,6 +7,8 @@ from scripts.select_relevant_tests import (
     print_selection,
     select_tests,
     select_tests_with_reasons,
+    transitive_dependents,
+    build_dependent_index,
 )
 
 TEST_SOURCES = {
@@ -226,3 +228,92 @@ def test_structural_trigger_takes_precedence_over_uncertain_impact():
         ["Makefile", "some_unknown_scratch.xyz"], TEST_SOURCES
     )
     assert trigger == "Makefile"
+
+
+SOURCE_MODULES = {
+    "src/core/provider_preflight.py": "def run_preflight():\n    pass",
+    "src/control_plane/backlog_source.py": "from src.core.provider_preflight import run_preflight",
+    "src/control_plane/authority_profile.py": "from src.control_plane.backlog_source import select_next_item",
+}
+
+
+def test_transitive_dependents_walks_the_whole_import_chain():
+    index = build_dependent_index(SOURCE_MODULES)
+
+    assert transitive_dependents("src/core/provider_preflight.py", index) == [
+        "src/control_plane/backlog_source.py",
+        "src/control_plane/authority_profile.py",
+    ]
+
+
+def test_tests_reaching_a_module_through_an_importer_are_selected():
+    """A test that never names the changed module still exercises it.
+
+    Static text matching against the changed module alone drops every test
+    that reaches it through an intermediate import, and -- because some other
+    test does name it -- suppresses the conservative fallback too, so the
+    regression ships silently.
+    """
+    sources = {
+        "tests/test_backlog_marathon.py": "from src.control_plane.backlog_source import select_next_item",
+    }
+    selected, uncovered, trigger = select_tests(
+        ["src/core/provider_preflight.py"], sources, SOURCE_MODULES
+    )
+
+    assert selected == ["tests/test_backlog_marathon.py"]
+    assert uncovered == []
+    assert trigger is None
+
+
+def test_transitive_selection_records_the_import_chain_as_its_reason():
+    selection = select_tests_with_reasons(
+        ["src/core/provider_preflight.py"],
+        {"tests/test_backlog_marathon.py": "from src.control_plane.backlog_source import select_next_item"},
+        SOURCE_MODULES,
+    )
+
+    assert selection.selected["tests/test_backlog_marathon.py"] == [
+        "imports or exercises src.control_plane.backlog_source, "
+        "which imports src/core/provider_preflight.py"
+    ]
+
+
+def test_non_python_change_runs_the_tests_that_name_it_instead_of_everything():
+    """Non-Python does not mean inert, and it does not mean unknown either."""
+    sources = {
+        "tests/test_profile_privacy.py": 'def test_gitignored():\n    (root / ".gitignore").read_text()',
+        "tests/test_config.py": "import yaml\nfrom src.core import config",
+    }
+    selected, uncovered, trigger = select_tests([".gitignore"], sources)
+
+    assert selected == ["tests/test_profile_privacy.py"]
+    assert uncovered == []
+    assert trigger is None
+
+
+def test_non_python_change_no_test_names_still_falls_back():
+    selected, uncovered, trigger = select_tests(["assets/logo.png"], TEST_SOURCES)
+
+    assert selected == []
+    assert uncovered == ["assets/logo.png"]
+    assert trigger == "uncertain impact: assets/logo.png"
+
+
+def test_uncovered_paths_are_reported_on_the_conservative_fallback_path(capsys):
+    """Every uncovered path also triggers the fallback, so the fallback branch
+    is the only place this list can ever be printed."""
+    print_selection(
+        ["templates/new_template.jinja"],
+        Selection(
+            selected={},
+            uncovered=["templates/new_template.jinja"],
+            fallback_reason="uncertain impact: templates/new_template.jinja",
+        ),
+    )
+
+    output = capsys.readouterr().out
+    assert "Uncovered or uncertain changed paths:" in output
+    assert "templates/new_template.jinja" in output
+    assert "Conservative fallback: yes" in output
+

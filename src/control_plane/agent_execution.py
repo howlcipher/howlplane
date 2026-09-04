@@ -725,14 +725,24 @@ class GeminiCLIBackend(SubprocessAgentBackend):
         super().__init__("gemini_cli", "gemini", _gemini_cmd)
 
 
+# Wall-clock headroom between agy's own print deadline and the harness kill.
+# Handing agy the harness budget verbatim races the two: agy needs time after
+# its deadline to emit its timeout message and exit, so subprocess.TimeoutExpired
+# normally wins and the run is classified EXECUTION_BUDGET_EXCEEDED (harness)
+# instead of by transport (transcript), nondeterministically and with agy's own
+# diagnostic output discarded by the kill.
+AGY_PRINT_TIMEOUT_HEADROOM_SECONDS = 15
+
+
 class AgyBackend(SubprocessAgentBackend):
     def __init__(self):
         def _agy_cmd(t, c, r, p, timeout_seconds: int = 300, **kwargs):
+            print_timeout = max(1, timeout_seconds - AGY_PRINT_TIMEOUT_HEADROOM_SECONDS)
             return [
                 "agy",
                 "-p", p,
                 "--mode", "accept-edits",
-                "--print-timeout", f"{timeout_seconds}s",
+                "--print-timeout", f"{print_timeout}s",
             ]
         super().__init__("agy", "agy", _agy_cmd)
 

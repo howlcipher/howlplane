@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Select a conservative, explainable pytest subset for a Git change set.
 
-The selector runs direct test counterparts, tests that import or exercise an
-affected module, and changed tests. Shared test infrastructure, central
-control-plane seams, and unknown executable changes fall back to the full
-Python suite rather than risking a false negative.
+The selector runs direct test counterparts, changed tests, tests that name an
+affected module, and tests that name any first-party module transitively
+importing it. Evidence is static text, not execution: a test reaching a module
+without naming it or any of its importers is not detected. Shared test
+infrastructure, central control-plane seams, and changes with no evidence at
+all fall back to the full Python suite rather than risking a false negative.
 """
 
 import argparse
@@ -114,17 +116,29 @@ def direct_test_candidates(path: str, test_sources: dict[str, str]) -> set[str]:
     return {test for test in test_sources if Path(test).name == candidate_name}
 
 
+# A dotted identifier chain, captured from its start so a name preceded by a
+# word character or a dot is never mistaken for a standalone reference.
+_DOTTED_TOKEN = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
+
+
 @functools.lru_cache(maxsize=1024)
-def _parsed_test_metadata(test_source: str) -> tuple[frozenset[str], frozenset[str]]:
-    """Extract static import targets and string literals with memoization."""
+def _parsed_test_metadata(
+    test_source: str,
+) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    """Extract import targets, string literals, and textual name prefixes.
+
+    The prefix set is what makes matching a set intersection rather than a
+    regex scan per candidate name. With transitive dependents the candidate
+    list is large enough that the difference is seconds per invocation.
+    """
     try:
         tree = ast.parse(test_source)
     except SyntaxError:
-        return frozenset(), frozenset()
+        tree = None
 
     imports: set[str] = set()
     string_literals: set[str] = set()
-    for node in ast.walk(tree):
+    for node in ast.walk(tree) if tree is not None else ():
         if isinstance(node, ast.Import):
             imports.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
@@ -132,18 +146,24 @@ def _parsed_test_metadata(test_source: str) -> tuple[frozenset[str], frozenset[s
             imports.update(f"{node.module}.{alias.name}" for alias in node.names)
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             string_literals.add(node.value)
-    return frozenset(imports), frozenset(string_literals)
+
+    prefixes: set[str] = set()
+    for token in _DOTTED_TOKEN.findall(test_source):
+        parts = token.split(".")
+        for end in range(1, len(parts) + 1):
+            prefixes.add(".".join(parts[:end]))
+    return frozenset(imports), frozenset(string_literals), frozenset(prefixes)
 
 
 def imported_modules(test_source: str) -> set[str]:
     """Extract static import targets without malformed tests breaking selection."""
-    imports, _ = _parsed_test_metadata(test_source)
+    imports, _, _ = _parsed_test_metadata(test_source)
     return set(imports)
 
 
 def test_exercises_module(test_source: str, names: set[str]) -> Optional[str]:
     """Return the strongest static, string-patch, or textual module evidence in a test source."""
-    imports, string_literals = _parsed_test_metadata(test_source)
+    imports, string_literals, prefixes = _parsed_test_metadata(test_source)
     ordered_names = sorted(names, key=len, reverse=True)
     for name in ordered_names:
         if any(
@@ -165,9 +185,52 @@ def test_exercises_module(test_source: str, names: set[str]) -> Optional[str]:
     # Behavioral tests may patch a module by string or construct imports in a
     # fixture. Retain textual evidence as a conservative supplement.
     for name in ordered_names:
-        if re.search(rf"(?<![\w.]){re.escape(name)}(?:\.|\b)", test_source):
+        if name in prefixes:
             return name
     return None
+
+
+SOURCE_ROOTS = ("src", "scripts")
+
+
+def _importers_of(dependent_index: dict[str, set[str]], names: set[str]) -> set[str]:
+    """Return source paths whose imports resolve to any of ``names``."""
+    importers: set[str] = set()
+    for imported, paths in dependent_index.items():
+        if any(imported == name or imported.startswith(f"{name}.") for name in names):
+            importers.update(paths)
+    return importers
+
+
+def build_dependent_index(source_modules: dict[str, str]) -> dict[str, set[str]]:
+    """Map each imported module name to the first-party sources importing it."""
+    index: dict[str, set[str]] = {}
+    for path, source in source_modules.items():
+        for imported in imported_modules(source):
+            index.setdefault(imported, set()).add(path)
+    return index
+
+
+def transitive_dependents(path: str, dependent_index: dict[str, set[str]]) -> list[str]:
+    """Return first-party sources that reach ``path`` through any import chain.
+
+    A test frequently exercises a module only through an intermediate import
+    and never names it. Matching test text against the changed module alone
+    silently drops those tests, so the changed module's importers -- and their
+    importers, transitively -- are matched too.
+    """
+    seen = {path}
+    frontier = [path]
+    dependents: list[str] = []
+    while frontier:
+        current = frontier.pop()
+        for importer in sorted(_importers_of(dependent_index, module_names(current))):
+            if importer in seen:
+                continue
+            seen.add(importer)
+            dependents.append(importer)
+            frontier.append(importer)
+    return dependents
 
 
 IGNORED_PATHS = {".coverage", "coverage.out"}
@@ -206,12 +269,27 @@ def _add_reason(selected: dict[str, list[str]], test: str, reason: str) -> None:
         reasons.append(reason)
 
 
-def select_tests_with_reasons(changed: list[str], test_sources: dict[str, str]) -> Selection:
+def tests_naming_path(path: str, test_sources: dict[str, str]) -> set[str]:
+    """Return tests whose source names a non-Python path or its file name."""
+    name = Path(path).name
+    return {
+        test
+        for test, source in test_sources.items()
+        if path in source or (name != path and name in source)
+    }
+
+
+def select_tests_with_reasons(
+    changed: list[str],
+    test_sources: dict[str, str],
+    source_modules: Optional[dict[str, str]] = None,
+) -> Selection:
     """Select tests with auditable reasons and a fail-conservative fallback."""
     selected: dict[str, list[str]] = {}
     uncovered: list[str] = []
     structural_trigger: Optional[str] = None
     uncertain_trigger: Optional[str] = None
+    dependent_index = build_dependent_index(source_modules or {})
 
     for path in sorted(set(changed)):
         if is_ignored_path(path):
@@ -234,8 +312,15 @@ def select_tests_with_reasons(changed: list[str], test_sources: dict[str, str]) 
                 uncertain_trigger = uncertain_trigger or f"uncertain impact: {path}"
             continue
         if not path.endswith(".py"):
-            uncovered.append(path)
-            uncertain_trigger = uncertain_trigger or f"uncertain impact: {path}"
+            # A non-Python file is not automatically inert: .gitignore, shell
+            # scripts, and docs assets all have executable contracts here. Run
+            # the tests that name it, and fall back only when none does.
+            naming = tests_naming_path(path, test_sources)
+            for test in sorted(naming):
+                _add_reason(selected, test, f"references {path}")
+            if not naming:
+                uncovered.append(path)
+                uncertain_trigger = uncertain_trigger or f"uncertain impact: {path}"
             continue
 
         names = module_names(path)
@@ -248,6 +333,16 @@ def select_tests_with_reasons(changed: list[str], test_sources: dict[str, str]) 
             if evidence:
                 _add_reason(selected, test, f"imports or exercises {evidence}")
                 matches.add(test)
+        for dependent in transitive_dependents(path, dependent_index):
+            dependent_names = module_names(dependent)
+            for test in direct_test_candidates(dependent, test_sources):
+                _add_reason(selected, test, f"direct module mapping for {dependent}, which imports {path}")
+                matches.add(test)
+            for test, test_source in test_sources.items():
+                evidence = test_exercises_module(test_source, dependent_names)
+                if evidence:
+                    _add_reason(selected, test, f"imports or exercises {evidence}, which imports {path}")
+                    matches.add(test)
         if not matches:
             uncovered.append(path)
             uncertain_trigger = uncertain_trigger or f"uncertain impact: {path}"
@@ -261,10 +356,12 @@ def select_tests_with_reasons(changed: list[str], test_sources: dict[str, str]) 
 
 
 def select_tests(
-    changed: list[str], test_sources: dict[str, str]
+    changed: list[str],
+    test_sources: dict[str, str],
+    source_modules: Optional[dict[str, str]] = None,
 ) -> tuple[list[str], list[str], Optional[str]]:
     """Compatibility wrapper for callers needing paths, gaps, and fallback."""
-    selection = select_tests_with_reasons(changed, test_sources)
+    selection = select_tests_with_reasons(changed, test_sources, source_modules)
     return list(selection.selected), selection.uncovered, selection.fallback_reason
 
 
@@ -276,11 +373,33 @@ def load_test_sources() -> dict[str, str]:
     }
 
 
+def load_source_modules() -> dict[str, str]:
+    """Load first-party Python sources whose imports form the dependency graph."""
+    sources: dict[str, str] = {}
+    for root_name in SOURCE_ROOTS:
+        root = REPO_ROOT / root_name
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*.py")):
+            sources[str(path.relative_to(REPO_ROOT))] = path.read_text(
+                encoding="utf-8", errors="replace"
+            )
+    return sources
+
+
 def print_selection(changed: list[str], selection: Selection) -> None:
     """Print a stable, human-readable explanation of the selection decision."""
     print("Changed files:")
     for path in changed:
         print(f"  {path}")
+
+    # Printed before the fallback branch returns: every uncovered path also
+    # sets the uncertain trigger, so reporting it only in the non-fallback
+    # branch made this list unreachable.
+    if selection.uncovered:
+        print("Uncovered or uncertain changed paths:")
+        for path in selection.uncovered:
+            print(f"  {path}")
 
     if selection.fallback_reason:
         print(f"Conservative fallback: yes ({selection.fallback_reason})")
@@ -296,10 +415,6 @@ def print_selection(changed: list[str], selection: Selection) -> None:
             print(f"  {test}")
             for reason in reasons:
                 print(f"    because: {reason}")
-    if selection.uncovered:
-        print("Uncovered or uncertain changed paths:")
-        for path in selection.uncovered:
-            print(f"  {path}")
 
 
 def main() -> int:
@@ -322,7 +437,9 @@ def main() -> int:
         print("Selected tests: none")
         return 0
 
-    selection = select_tests_with_reasons(changed, load_test_sources())
+    selection = select_tests_with_reasons(
+        changed, load_test_sources(), load_source_modules()
+    )
     print_selection(changed, selection)
     if args.dry_run:
         return 1 if args.strict and selection.uncovered else 0

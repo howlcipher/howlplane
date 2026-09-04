@@ -145,7 +145,14 @@ def test_codex_backend_uses_workspace_write_for_implementation(tmp_path):
     assert "workspace-write" not in review_cmd
 
 
-def test_agy_backend_print_timeout(tmp_path):
+def test_agy_print_timeout_expires_before_the_harness_kills_the_process(tmp_path):
+    """agy must be given room to report its own timeout before the harness kills it.
+
+    Both deadlines firing together is a race: `subprocess.TimeoutExpired`
+    usually wins, so the same budget overrun is classified from a harness
+    timeout instead of agy's transcript, nondeterministically, and agy's
+    diagnostic output is discarded with the process.
+    """
     spec = TaskSpec(
         task_id="TASK-AGY-TIMEOUT-001",
         repository="howlplane",
@@ -155,7 +162,20 @@ def test_agy_backend_print_timeout(tmp_path):
     cmd = backend.build_command(spec, tmp_path, "writer", "prompt", timeout_seconds=600)
     assert "--print-timeout" in cmd
     idx = cmd.index("--print-timeout")
-    assert cmd[idx + 1] == "600s"
+    assert cmd[idx + 1].endswith("s")
+    assert int(cmd[idx + 1][:-1]) < 600
+
+
+def test_agy_print_timeout_stays_positive_for_a_budget_below_the_headroom(tmp_path):
+    """A tiny budget must still produce a usable duration, not zero or negative."""
+    spec = TaskSpec(
+        task_id="TASK-AGY-TIMEOUT-002",
+        repository="howlplane",
+        objective="Run agy writer with a very small budget",
+    )
+    cmd = AgyBackend().build_command(spec, tmp_path, "writer", "prompt", timeout_seconds=5)
+    idx = cmd.index("--print-timeout")
+    assert int(cmd[idx + 1][:-1]) >= 1
 
 
 def test_all_registered_backends_support_build_command_with_timeout(tmp_path):
