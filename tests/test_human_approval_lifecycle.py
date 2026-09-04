@@ -310,8 +310,8 @@ def test_scenario_10_status_ux_and_cli_dispatch(tmp_path: Path, capsys):
     assert ret == 0
     out = capsys.readouterr().out
     assert "AWAITING_HUMAN" in out
-    assert "howl plane approve TASK-110" in out
-    assert "howl plane reject TASK-110" in out
+    assert "howlplane approve TASK-110" in out
+    assert "howlplane reject TASK-110" in out
 
     # Test CLI approve command
     opts_appr = parser.parse_args(["approve", "TASK-110", "--repo", str(tmp_path), "--reason", "LGTM"])
@@ -319,14 +319,14 @@ def test_scenario_10_status_ux_and_cli_dispatch(tmp_path: Path, capsys):
     assert ret_appr == 0
     out_appr = capsys.readouterr().out
     assert "TASK AUTHORIZED: TASK-110" in out_appr
-    assert "howl plane resume TASK-110" in out_appr
+    assert "howlplane resume TASK-110" in out_appr
 
     # Test status after approval
     opts_status2 = parser.parse_args(["status", "--repo", str(tmp_path)])
     cmd_status(opts_status2)
     out_status2 = capsys.readouterr().out
     assert "APPROVED" in out_status2
-    assert "howl plane resume TASK-110" in out_status2
+    assert "howlplane resume TASK-110" in out_status2
 
     # Test CLI resume command
     opts_resume = parser.parse_args(["resume", "TASK-110", "--repo", str(tmp_path), "--json"])

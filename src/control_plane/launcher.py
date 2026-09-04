@@ -815,8 +815,8 @@ def cmd_status(args: argparse.Namespace) -> int:
                             print(f"  Decision Packet:    {dp_rel}")
                         print("")
                         print("  Next Action:")
-                        print(f"    howl plane approve {t_spec.task_id}")
-                        print(f"    howl plane reject {t_spec.task_id}")
+                        print(f"    howlplane approve {t_spec.task_id}")
+                        print(f"    howlplane reject {t_spec.task_id}")
                     elif dec_record.decision == "approved":
                         has_drift, drift_reason = (
                             check_repository_drift(dec_record.repository_state, current_fp)
@@ -832,9 +832,9 @@ def cmd_status(args: argparse.Namespace) -> int:
                         print("")
                         print("  Next Action:")
                         if has_drift:
-                            print(f"    howl plane approve {t_spec.task_id} --reason \"re-approved after drift\"")
+                            print(f"    howlplane approve {t_spec.task_id} --reason \"re-approved after drift\"")
                         else:
-                            print(f"    howl plane resume {t_spec.task_id}")
+                            print(f"    howlplane resume {t_spec.task_id}")
                     elif dec_record.decision == "rejected":
                         print(f"  Decision:           REJECTED")
                         if dec_record.reason:
@@ -878,7 +878,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                         if disposition not in ("completed_clean", "completed_with_findings"):
                             print(f"      - {role}: {disposition.upper()}")
                     if not is_proc_alive:
-                        rec_action = rec_diag.get('recommendation') or f"howl plane resume {t_spec.task_id}"
+                        rec_action = rec_diag.get('recommendation') or f"howlplane resume {t_spec.task_id}"
                         print(f"    Recommendation:    {rec_action}")
                     print("-" * 40)
                 elif t_spec.current_state in ("interrupted", "cancelled", "implementing", "reviewing", "remediating", "verifying"):
