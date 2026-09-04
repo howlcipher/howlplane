@@ -652,6 +652,7 @@ def _run_marathon_harness(
     git: Optional[ScriptedRunner] = None,
     gh: Optional[ScriptedRunner] = None,
     configured_pool: bool = False,
+    dispatch_id: Optional[str] = None,
 ) -> Tuple[bool, Dict[str, Any], ProviderScriptedOrchestrator, ProviderPoolManager]:
     repo_root = tmp_path / "repo"
     init_minimal_python_repo(repo_root)
@@ -709,6 +710,7 @@ def _run_marathon_harness(
         risk_level="medium",
         campaign_state=state,
         state_dir=state_dir,
+        dispatch_id=dispatch_id,
     )
     return ok, rec, orch, pool
 
@@ -830,3 +832,29 @@ def test_local_budget_kill_is_not_transport_unavailable():
     pool.record_result("agy", provider_reported)
     assert pool.get_status("agy") == ProviderAvailabilityStatus.UNREACHABLE
     assert pool.get_resource_status("agy").retry_after is not None
+
+
+def test_each_attempt_gets_a_dispatch_scoped_trajectory_event_id(tmp_path):
+    """Retrying a work item must not derive the trajectory id of an earlier run.
+
+    Trajectory identity falls back to the run directory, and the factory reuses
+    one directory per work item, so a retry produced the id the first attempt
+    had already written. The trajectory store is immutable, so the retry raised
+    "Artifact 'traj-...' already exists with different content_digest" and the
+    tick recorded an orchestrator_exception instead of retrying -- observed on a
+    live canary, where it turned a routine provider failure into a backoff.
+    """
+    script = {
+        "agy": ("unavailable", "Error: timeout waiting for response\n"),
+        "devin_cli": ("unavailable", "Error: credits exhausted\n"),
+    }
+
+    _, _, orch, _ = _run_marathon_harness(
+        tmp_path, script, "ENG-TRAJ-01", "DOGFOOD-TRAJ", dispatch_id="D-42",
+    )
+
+    event_ids = [m.get("trajectory_event_id") for m in orch.seen_metadata]
+    assert event_ids == ["D-42:1", "D-42:2"], (
+        f"attempts are not distinguishable by trajectory identity: {event_ids}"
+    )
+    assert len(set(event_ids)) == len(event_ids)

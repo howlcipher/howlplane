@@ -33,7 +33,7 @@ class FakeProviderPool:
 
 
 class SuccessEngine:
-    def execute_factory_work_item(self, item, files_changed=None):
+    def execute_factory_work_item(self, item, files_changed=None, dispatch_id=None):
         return True, {"provider": "fake"}
 
 

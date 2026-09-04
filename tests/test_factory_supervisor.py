@@ -25,12 +25,12 @@ from src.control_plane.factory.work_item import WorkItem, WorkItemOrigin, WorkIt
 
 
 class _ParkedAuthorityEngine:
-    def execute_factory_work_item(self, item, files_changed=None):
+    def execute_factory_work_item(self, item, files_changed=None, dispatch_id=None):
         return False, {"integration_mode": "parked"}
 
 
 class _ProviderExhaustedEngine:
-    def execute_factory_work_item(self, item, files_changed=None):
+    def execute_factory_work_item(self, item, files_changed=None, dispatch_id=None):
         return False, {
             "failure_reason": "NO_ELIGIBLE_PROVIDER_REMAINING: tried codex",
             "failure_class": "PROVIDER_EXHAUSTED",
@@ -38,7 +38,7 @@ class _ProviderExhaustedEngine:
 
 
 class _BlockedEngine:
-    def execute_factory_work_item(self, item, files_changed=None):
+    def execute_factory_work_item(self, item, files_changed=None, dispatch_id=None):
         return False, {
             "failure_reason": "BLOCKED: missing dependency",
             "failure_class": "DEPENDENCY_BLOCKED",
@@ -46,7 +46,7 @@ class _BlockedEngine:
 
 
 class _FailingEngine:
-    def execute_factory_work_item(self, item, files_changed=None):
+    def execute_factory_work_item(self, item, files_changed=None, dispatch_id=None):
         return False, {"failure_reason": "orchestrator_final_state:failed"}
 
 
@@ -325,7 +325,7 @@ def test_deferred_item_is_requeued_only_when_retry_after_is_due(tmp_path):
         def __init__(self):
             self.calls = 0
 
-        def execute_factory_work_item(self, item, files_changed=None):
+        def execute_factory_work_item(self, item, files_changed=None, dispatch_id=None):
             self.calls += 1
             if self.calls == 1:
                 return False, {
