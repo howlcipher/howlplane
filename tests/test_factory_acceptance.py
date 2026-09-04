@@ -98,5 +98,3 @@ def test_run_loop_uses_exact_retry_after_without_spin(tmp_path):
     assert calls[0] == 42.0
     # No zero-length sleeps that would indicate a spin loop.
     assert all(c > 0 for c in calls)
-
-
