@@ -108,6 +108,33 @@ def test_the_scan_reads_both_print_and_raise_and_would_catch_a_regression(tmp_pa
 
 
 @pytest.mark.unit
+def test_no_operator_facing_error_names_the_deprecated_launcher():
+    """A bare mention is as misleading as a recommendation.
+
+    The launcher's program name is chosen at runtime -- `howlplane` normally,
+    `ai` only through the deprecated entry point -- so an error hard-coding
+    "'ai' must be run inside a Git repository" names the wrong CLI for almost
+    every caller. `legacy_main`'s own deprecation notice is the one place `ai`
+    is the correct subject, so it is excluded by name.
+    """
+    from src.control_plane import launcher
+
+    offenders = []
+    for path in sorted(SRC_DIR.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for line, text in _operator_facing_strings(tree):
+            if "'ai'" in text and "is deprecated" not in text:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{line}: {text.strip()!r}")
+
+    assert not offenders, (
+        "These operator-facing strings name the deprecated `ai` launcher:\n"
+        + "\n".join(f"  {o}" for o in offenders)
+    )
+    # The deprecation notice itself must survive.
+    assert callable(launcher.legacy_main)
+
+
+@pytest.mark.unit
 def test_the_deprecated_ai_entry_point_still_exists():
     """Modernizing the recommendations must not remove backwards compatibility."""
     from src.control_plane import launcher

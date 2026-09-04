@@ -104,7 +104,7 @@ def find_git_repo_root(start_dir: Optional[Union[str, Path]] = None) -> Path:
         curr = curr.parent
 
     raise TargetRepositoryNotFoundError(
-        f"ERROR: no target Git repository found in '{target}'. 'ai' must be executed inside a Git repository."
+        f"ERROR: no target Git repository found in '{target}'. HowlPlane must be run inside a Git repository."
     )
 
 
