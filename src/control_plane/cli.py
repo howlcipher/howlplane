@@ -608,6 +608,7 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
 def cmd_marathon(args: argparse.Namespace) -> int:
     """Works a bounded sequence of the target repository's ranked backlog."""
     import json as _json
+    import sys as _sys
     from src.control_plane.backlog_source import BacklogSource
     from src.control_plane.synthesis import MarathonDogfoodEngine
     from src.control_plane.synthesis.provider_pool import ProviderPoolManager
@@ -663,6 +664,22 @@ def cmd_marathon(args: argparse.Namespace) -> int:
         resume_campaign_id=getattr(args, "resume", None),
         roi_floor=getattr(args, "roi_floor", 0.5),
     )
+
+    if report.get("refused"):
+        # Fail-closed preflight: the campaign never started. Reported on stderr
+        # with a non-zero exit so an unattended wrapper cannot read it as a run
+        # that simply found nothing to do.
+        if getattr(args, "json", False):
+            print(_json.dumps(report, indent=2))
+        else:
+            print("=" * 60, file=_sys.stderr)
+            print("HOWLPLANE — MARATHON REFUSED", file=_sys.stderr)
+            print("=" * 60, file=_sys.stderr)
+            print(report["refusal_reason"], file=_sys.stderr)
+            print("\nWorking tree changes found:", file=_sys.stderr)
+            for path in report["dirty_files"]:
+                print(f"  {path}", file=_sys.stderr)
+        return 2
 
     if getattr(args, "json", False):
         print(_json.dumps(report, indent=2))
