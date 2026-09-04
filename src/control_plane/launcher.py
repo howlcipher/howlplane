@@ -37,6 +37,7 @@ from src.control_plane.cli import (
     cmd_run_product as cp_cmd_run_product,
     cmd_dogfood as cp_cmd_dogfood,
     cmd_acceptance as cp_cmd_acceptance,
+    cmd_marathon as cp_cmd_marathon,
     cmd_authority as cp_cmd_authority,
     cmd_local as cp_cmd_local,
     register_synthesis_subparsers,
@@ -103,7 +104,7 @@ def find_git_repo_root(start_dir: Optional[Union[str, Path]] = None) -> Path:
         curr = curr.parent
 
     raise TargetRepositoryNotFoundError(
-        f"ERROR: no target Git repository found in '{target}'. 'ai' must be executed inside a Git repository."
+        f"ERROR: no target Git repository found in '{target}'. HowlPlane must be run inside a Git repository."
     )
 
 
@@ -814,8 +815,8 @@ def cmd_status(args: argparse.Namespace) -> int:
                             print(f"  Decision Packet:    {dp_rel}")
                         print("")
                         print("  Next Action:")
-                        print(f"    ai approve {t_spec.task_id}")
-                        print(f"    ai reject {t_spec.task_id}")
+                        print(f"    howlplane approve {t_spec.task_id}")
+                        print(f"    howlplane reject {t_spec.task_id}")
                     elif dec_record.decision == "approved":
                         has_drift, drift_reason = (
                             check_repository_drift(dec_record.repository_state, current_fp)
@@ -831,9 +832,9 @@ def cmd_status(args: argparse.Namespace) -> int:
                         print("")
                         print("  Next Action:")
                         if has_drift:
-                            print(f"    ai approve {t_spec.task_id} --reason \"re-approved after drift\"")
+                            print(f"    howlplane approve {t_spec.task_id} --reason \"re-approved after drift\"")
                         else:
-                            print(f"    ai resume {t_spec.task_id}")
+                            print(f"    howlplane resume {t_spec.task_id}")
                     elif dec_record.decision == "rejected":
                         print(f"  Decision:           REJECTED")
                         if dec_record.reason:
@@ -877,7 +878,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                         if disposition not in ("completed_clean", "completed_with_findings"):
                             print(f"      - {role}: {disposition.upper()}")
                     if not is_proc_alive:
-                        rec_action = rec_diag.get('recommendation') or f"ai resume {t_spec.task_id}"
+                        rec_action = rec_diag.get('recommendation') or f"howlplane resume {t_spec.task_id}"
                         print(f"    Recommendation:    {rec_action}")
                     print("-" * 40)
                 elif t_spec.current_state in ("interrupted", "cancelled", "implementing", "reviewing", "remediating", "verifying"):
@@ -965,7 +966,35 @@ def cmd_unlock(args: argparse.Namespace) -> int:
     return cp_cmd_unlock(args)
 
 
-def build_parser() -> argparse.ArgumentParser:
+# Every subcommand build_parser() registers must appear here. A registered
+# subcommand with no entry does not error -- argparse accepts it, main() finds
+# nothing, and the operator gets top-level help and exit 1, which reads like a
+# usage mistake rather than a missing dispatch. `marathon` shipped that way.
+# tests/test_cli_dispatch_completeness.py fails if the two ever diverge again.
+ACTIONS = {
+    "work": cmd_work,
+    "route": cmd_route,
+    "providers": cmd_providers,
+    "doctor": cmd_doctor,
+    "status": cmd_status,
+    "approve": cmd_approve,
+    "reject": cmd_reject,
+    "resume": cmd_resume,
+    "cancel": cmd_cancel,
+    "unlock": cmd_unlock,
+    "verify": cmd_verify,
+    "howlframe-audit": cmd_howlframe_audit,
+    "create": cp_cmd_create,
+    "run": cp_cmd_run_product,
+    "dogfood": cp_cmd_dogfood,
+    "acceptance": cp_cmd_acceptance,
+    "marathon": cp_cmd_marathon,
+    "authority": cp_cmd_authority,
+    "local": cp_cmd_local,
+}
+
+
+def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument(
         "--control-plane-dir",
@@ -986,7 +1015,7 @@ def build_parser() -> argparse.ArgumentParser:
     task_base_parser.add_argument("--agent", help="Preferred agent override")
 
     parser = argparse.ArgumentParser(
-        prog="ai",
+        prog=program_name,
         description="Thin Global Entrypoint into the Multi-Agent Engineering Control Plane",
         parents=[common_parser],
     )
@@ -1086,34 +1115,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(args: Optional[List[str]] = None) -> int:
-    p = build_parser()
+def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> int:
+    """Runs the canonical HowlPlane control plane launcher."""
+    p = build_parser(program_name)
     opts = p.parse_args(args if args is not None else sys.argv[1:])
     if not opts.subcommand:
         p.print_help()
         return 1
 
-    actions = {
-        "work": cmd_work,
-        "route": cmd_route,
-        "providers": cmd_providers,
-        "doctor": cmd_doctor,
-        "status": cmd_status,
-        "approve": cmd_approve,
-        "reject": cmd_reject,
-        "resume": cmd_resume,
-        "cancel": cmd_cancel,
-        "unlock": cmd_unlock,
-        "verify": cmd_verify,
-        "howlframe-audit": cmd_howlframe_audit,
-        "create": cp_cmd_create,
-        "run": cp_cmd_run_product,
-        "dogfood": cp_cmd_dogfood,
-        "acceptance": cp_cmd_acceptance,
-        "authority": cp_cmd_authority,
-        "local": cp_cmd_local,
-    }
-    fn = actions.get(opts.subcommand)
+    fn = ACTIONS.get(opts.subcommand)
     if not fn:
         p.print_help()
         return 1
@@ -1128,5 +1138,17 @@ def main(args: Optional[List[str]] = None) -> int:
         return 1
 
 
+def legacy_main(args: Optional[List[str]] = None) -> int:
+    """Runs the deprecated ai compatibility entry point without altering stdout."""
+    print(
+        "'ai' is deprecated. Use the Howl ecosystem CLI when available, or "
+        "'howlplane' for direct HowlPlane access.",
+        file=sys.stderr,
+    )
+    return main(args, program_name="ai")
+
+
 if __name__ == "__main__":
+    if os.environ.get("HOWLPLANE_LEGACY_AI") == "1":
+        sys.exit(legacy_main())
     sys.exit(main())

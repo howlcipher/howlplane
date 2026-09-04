@@ -309,11 +309,14 @@ def test_orchestrator_run_loop_humanize_disabled_via_config(mock_proxy, mock_gen
 def test_main(monkeypatch):
     import sys
     from src.core.orchestrator import main
-    
-    with patch("src.core.orchestrator.Orchestrator.run_loop") as mock_run:
+
+    # CLI argument forwarding is the contract here. Constructing the real
+    # orchestrator would also start configured MCP processes, which belongs to
+    # explicit integration coverage rather than this CLI unit test.
+    with patch("src.core.orchestrator.Orchestrator") as mock_orchestrator:
         monkeypatch.setattr(sys, "argv", ["orchestrator.py", "What is AI?"])
         main()
-        mock_run.assert_called_once_with("What is AI?")
+        mock_orchestrator.return_value.run_loop.assert_called_once_with("What is AI?")
 
 
 def test_build_tier_agent_returns_plain_agent_for_litellm_model():
@@ -334,6 +337,7 @@ def test_build_tier_agent_returns_claude_code_agent_for_sentinel():
 def test_orchestrator_factory_provides_shutdown_callable(orchestrator_factory):
     orchestrator = orchestrator_factory()
     assert callable(orchestrator.shutdown)
+    assert orchestrator.mcp_clients == {}
 
 @patch("src.core.mcp_client.SyncMCPClient")
 def test_orchestrator_shutdown_calls_close_on_every_mcp_client(mock_sync_cls):
@@ -400,4 +404,3 @@ def test_qa_node_operating_mode_langsmith_gating(
         )
     else:
         mock_client_cls.assert_not_called()
-

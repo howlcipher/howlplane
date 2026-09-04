@@ -1,15 +1,17 @@
-.PHONY: install test test-changed lint format clean coverage build docs sync
+.PHONY: install test test-changed test-fast test-fast-python test-unit test-integration test-acceptance test-slow test-live test-full test-coverage lint format clean coverage build docs sync
 
 # Environment and Setup
 install:
-	@echo "Installing Go and Python dependencies and global launcher..."
+	@echo "Installing Go and Python dependencies and global launchers..."
 	go mod tidy
+	go build -o build/howlplane ./cmd/howlplane
 	pip install -e ".[dev]"
 	mkdir -p $(HOME)/.config/howlplane
 	printf '[control_plane]\npath = "%s"\n' "$$(pwd)" > $(HOME)/.config/howlplane/config.toml
 	mkdir -p $(HOME)/.config/ai-control-plane
 	printf '[control_plane]\npath = "%s"\n' "$$(pwd)" > $(HOME)/.config/ai-control-plane/config.toml
 	mkdir -p $(HOME)/.local/bin
+	ln -sf $$(pwd)/bin/howlplane $(HOME)/.local/bin/howlplane
 	ln -sf $$(pwd)/bin/ai $(HOME)/.local/bin/ai
 
 PYTEST ?= $(shell if [ -f /run/media/system/tallgeese/dev/.ci_verify_venv/bin/pytest ]; then echo /run/media/system/tallgeese/dev/.ci_verify_venv/bin/pytest; elif [ -f venv/bin/pytest ]; then echo venv/bin/pytest; else echo pytest; fi)
@@ -20,6 +22,9 @@ PDOC ?= $(shell if [ -f /run/media/system/tallgeese/dev/.ci_verify_venv/bin/pdoc
 
 # Testing and Coverage
 test:
+	@$(MAKE) test-full
+
+test-full:
 	@echo "Running Python tests..."
 	PYTHONPATH=. $(PYTEST) tests/ -v
 	@echo "Running Go tests..."
@@ -29,9 +34,38 @@ test-changed:
 	@echo "Selecting tests relevant to the current change set..."
 	PYTHONPATH=. $(PYTHON) scripts/select_relevant_tests.py
 
+test-fast:
+	@echo "Running fast deterministic Python tests (all tiers except measured slow/live)..."
+	PYTHONPATH=. $(PYTEST) tests/ -v -m "not slow and not live"
+	@echo "Running Go tests..."
+	go test ./...
+
+test-fast-python:
+	@echo "Running fast deterministic Python tests only..."
+	PYTHONPATH=. $(PYTEST) tests/ -v -m "not slow and not live"
+
+test-unit:
+	PYTHONPATH=. $(PYTEST) tests/ -v -m unit
+
+test-integration:
+	PYTHONPATH=. $(PYTEST) tests/ -v -m integration
+
+test-acceptance:
+	PYTHONPATH=. $(PYTEST) tests/ -v -m acceptance
+
+test-slow:
+	PYTHONPATH=. $(PYTEST) tests/ -v -m slow
+
+# HOWLPLANE_LIVE_PROVIDERS is what actually un-gates `live` tests; without it
+# tests/conftest.py deselects them and this target collects nothing (exit 5).
+test-live:
+	HOWLPLANE_LIVE_PROVIDERS=1 PYTHONPATH=. $(PYTEST) tests/ -v -m live || [ $$? -eq 5 ]
+
 coverage-python:
 	@echo "Generating Python coverage..."
-	PYTHONPATH=. $(PYTEST) tests/ -v --cov=src --cov=scripts --cov-report=term-missing --cov-fail-under=42
+	PYTHONPATH=. $(PYTEST) tests/ -v --cov=src --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=42
+
+test-coverage: coverage-python
 
 coverage-go:
 	@echo "Generating Go coverage..."

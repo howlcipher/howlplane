@@ -3,10 +3,12 @@ test_agent_execution.py
 
 Unit and integration tests for normalized agent execution abstraction.
 """
+import pytest
 
 from src.control_plane.agent_execution import (
     AgentBackendRegistry,
     AgentExecutionResult,
+    AgyBackend,
     ClaudeCodeBackend,
     CodexBackend,
     FakeAgentBackend,
@@ -141,3 +143,113 @@ def test_codex_backend_uses_workspace_write_for_implementation(tmp_path):
     review_cmd = backend.build_command(spec, tmp_path, "correctness-reviewer", "prompt")
     assert "--sandbox" not in review_cmd
     assert "workspace-write" not in review_cmd
+
+
+def test_agy_print_timeout_expires_before_the_harness_kills_the_process(tmp_path):
+    """agy must be given room to report its own timeout before the harness kills it.
+
+    Both deadlines firing together is a race: `subprocess.TimeoutExpired`
+    usually wins, so the same budget overrun is classified from a harness
+    timeout instead of agy's transcript, nondeterministically, and agy's
+    diagnostic output is discarded with the process.
+    """
+    spec = TaskSpec(
+        task_id="TASK-AGY-TIMEOUT-001",
+        repository="howlplane",
+        objective="Run agy writer with timeout",
+    )
+    backend = AgyBackend()
+    cmd = backend.build_command(spec, tmp_path, "writer", "prompt", timeout_seconds=600)
+    assert "--print-timeout" in cmd
+    idx = cmd.index("--print-timeout")
+    assert cmd[idx + 1].endswith("s")
+    assert int(cmd[idx + 1][:-1]) < 600
+
+
+def test_agy_print_timeout_stays_positive_for_a_budget_below_the_headroom(tmp_path):
+    """A tiny budget must still produce a usable duration, not zero or negative."""
+    spec = TaskSpec(
+        task_id="TASK-AGY-TIMEOUT-002",
+        repository="howlplane",
+        objective="Run agy writer with a very small budget",
+    )
+    cmd = AgyBackend().build_command(spec, tmp_path, "writer", "prompt", timeout_seconds=5)
+    idx = cmd.index("--print-timeout")
+    assert int(cmd[idx + 1][:-1]) >= 1
+
+
+def test_all_registered_backends_support_build_command_with_timeout(tmp_path):
+    spec = TaskSpec(
+        task_id="TASK-POLYMORPHIC-TIMEOUT-001",
+        repository="howlplane",
+        objective="Verify backend build_command handles timeout_seconds polymorphically",
+    )
+    for agent_id in ["agy", "claude_code", "codex", "gemini_cli", "devin_cli"]:
+        backend = AgentBackendRegistry.get_backend(agent_id)
+        assert backend is not None
+        cmd = backend.build_command(spec, tmp_path, "implementation", "prompt", timeout_seconds=450)
+        assert isinstance(cmd, list)
+        assert len(cmd) > 0
+
+
+def test_backend_internal_type_error_is_propagated_and_not_swallowed(tmp_path):
+    spec = TaskSpec(
+        task_id="TASK-INTERNAL-TYPE-ERROR-001",
+        repository="howlplane",
+        objective="Verify internal TypeError in builder is propagated",
+    )
+
+    def broken_builder(t, c, r, p, timeout_seconds=300):
+        raise TypeError("internal TypeError within backend implementation")
+
+    backend = SubprocessAgentBackend("broken", "broken", broken_builder)
+    with pytest.raises(TypeError, match="internal TypeError within backend implementation"):
+        backend.build_command(spec, tmp_path, "implementation", "prompt", timeout_seconds=300)
+
+
+def test_backend_legacy_four_argument_builder_compatibility(tmp_path):
+    spec = TaskSpec(
+        task_id="TASK-LEGACY-BUILDER-001",
+        repository="howlplane",
+        objective="Verify legacy 4-arg builder works via signature inspection",
+    )
+
+    def legacy_builder(t, c, r, p):
+        return ["legacy", "-p", p]
+
+    backend = SubprocessAgentBackend("legacy", "legacy", legacy_builder)
+    cmd = backend.build_command(spec, tmp_path, "implementation", "prompt", timeout_seconds=300)
+    assert cmd == ["legacy", "-p", "prompt"]
+
+
+def test_legacy_builder_internal_type_error_is_propagated(tmp_path):
+    spec = TaskSpec(
+        task_id="TASK-LEGACY-ERR-001",
+        repository="howlplane",
+        objective="Verify internal TypeError in legacy builder is propagated",
+    )
+
+    def broken_legacy_builder(t, c, r, p):
+        raise TypeError("internal TypeError within legacy builder")
+
+    backend = SubprocessAgentBackend("broken_legacy", "broken_legacy", broken_legacy_builder)
+    with pytest.raises(TypeError, match="internal TypeError within legacy builder"):
+        backend.build_command(spec, tmp_path, "implementation", "prompt", timeout_seconds=300)
+
+
+def test_execute_propagates_timeout_seconds_to_build_command(tmp_path, monkeypatch):
+    spec = TaskSpec(
+        task_id="TASK-EXEC-TIMEOUT-001",
+        repository="howlplane",
+        objective="Verify execute passes timeout_seconds to build_command",
+    )
+    recorded_timeout = {}
+
+    def builder(t, c, r, p, timeout_seconds=300):
+        recorded_timeout["val"] = timeout_seconds
+        return ["echo", "done"]
+
+    backend = SubprocessAgentBackend("test_exec", "echo", builder)
+    monkeypatch.setattr(backend, "is_available", lambda: True)
+    backend.execute(spec, tmp_path, timeout_seconds=420)
+    assert recorded_timeout.get("val") == 420

@@ -18,7 +18,7 @@ The repository currently functions as a hybrid Go/Python project. Go provides th
 ## Completed Blueprint Capabilities
 - **Portable Project Manifest (`.ai-project.toml`) v1:** schema (`schemas/ai-project.schema.json`), capability vocabulary (`schemas/capability.schema.json`), Go parser and validator (`internal/project/manifest.go`) enforcing schema version, required fields, known capabilities, relative/non-escaping context paths, and argv-array (non-shell-string) commands. Backed by `internal/project/manifest_test.go`, `internal/project/examples_test.go`, and the Python schema-drift regression test `tests/test_manifest_schema_drift.py`.
 - **Project root discovery:** `internal/project/discover.go` walks up from a start path to the nearest `.ai-project.toml` or `.git`, with cross-platform-flavored coverage in `internal/project/discover_test.go`.
-- **`ai project validate` command:** `cmd/ai/project.go` discovers the project root, loads and validates the manifest, and reports specific errors on failure.
+- **`howlplane project validate` command:** `pkg/cli` constructs the reusable command adapter, `cmd/howlplane` provides the direct entry point, and `cmd/ai` remains a deprecated compatibility shim. The command discovers the project root, loads and validates the manifest, and reports specific errors on failure.
 - **Manifest specification document:** `documentation/PROJECT_MANIFEST_SPEC.md`.
 - **Task/event/result/handoff schemas (blueprint section 11):** `schemas/task-request.schema.json`, `schemas/run-event.schema.json`, `schemas/run-result.schema.json`, `schemas/handoff.schema.json`, and the shared `schemas/failure-class.schema.json` taxonomy (blueprint section 8.3). Mirrored on the Go side by `internal/runtime` (`TaskRequest`, `RunEvent`, `RunResult`, `Handoff`, `FailureClass`, each with `Load<Type>`/`Parse<Type>`/`Validate`). Backed by `internal/runtime/*_test.go` and the Python schema-drift regression test `tests/test_task_event_schema_drift.py`. Example fixtures live in `examples/runs/`.
 - **Provider interface and router (blueprint sections 8.2, 3.5):** `internal/provider` defines the `Provider` adapter contract (`Probe`, `Health`, `Capabilities`, `Prepare`, `Execute`, `Normalize`, `ClassifyFailure`, `Redact`) and a `Router` that selects among registered providers, returning an explainable `RouteDecision` (candidates considered, exclusion reasons, final selection). No adapters implement `Provider` yet — see Partially Completed Capabilities.
@@ -32,7 +32,7 @@ The repository currently functions as a hybrid Go/Python project. Go provides th
 - **Provider Routing:** The shared `Provider` interface and `Router` exist in `internal/provider`, but no adapter (Claude Code, Codex, Gemini, Ollama) implements the interface, nothing in `cmd/ai` calls the router, and the legacy Python logic in `src/core` (`provider_preflight.py`, `transport_retry.py`, `claude_code_backend.py`) is not yet migrated behind it.
 
 ## Missing Capabilities
-- `ai adopt`, `ai route`, `ai run`, and the remaining unified CLI surface from blueprint section 6.1.
+- Go-native adapters for `howlplane adopt`, `howlplane route`, `howlplane run`, and the remaining unified CLI surface from blueprint section 6.1.
 - Real provider adapters implementing `internal/provider.Provider`, and health checks wired to them.
 - State-directory and run-artifact persistence (blueprint 11.1): nothing yet writes `internal/runtime` documents to `~/.local/state/ai-framework/runs/<run-id>/`.
 - Scoped context indexing.
@@ -66,6 +66,6 @@ All deliverables landed:
 - Task/event spec document (`documentation/TASK_EVENT_SPEC.md`).
 - Go test coverage (`internal/runtime/*_test.go`, `internal/provider/router_test.go`, `internal/capability/capability_test.go`) and a Python schema-drift regression test (`tests/test_task_event_schema_drift.py`) that keeps the JSON schemas and example fixtures from silently diverging.
 
-Previous milestone: **Portable Project Contract v1 — complete** (`.ai-project.toml` schema, project discovery, `ai project validate`, `documentation/PROJECT_MANIFEST_SPEC.md`).
+Previous milestone: **Portable Project Contract v1 — complete** (`.ai-project.toml` schema, project discovery, `howlplane project validate`, `documentation/PROJECT_MANIFEST_SPEC.md`).
 
 Next milestone per the ordered backlog above: establish the state-directory policy (blueprint 11.1), which unblocks persisting `internal/runtime` documents to real run directories and, after that, a first real provider adapter.

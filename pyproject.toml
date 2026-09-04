@@ -95,7 +95,7 @@ all = [
 ]
 
 [project.scripts]
-ai = "src.control_plane.launcher:main"
+ai = "src.control_plane.launcher:legacy_main"
 howlplane = "src.control_plane.launcher:main"
 
 [tool.setuptools.package-data]
@@ -104,3 +104,11 @@ howlplane = "src.control_plane.launcher:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "--strict-markers"
+markers = [
+    "unit: fast, isolated behavioral coverage with no real external boundary",
+    "integration: multiple HowlPlane components with external boundaries faked",
+    "acceptance: end-to-end in-process capability or governed-flow coverage",
+    "slow: measured as unsuitable for the rapid inner development loop",
+    "live: intentionally contacts a real external provider or service; explicitly gated",
+]

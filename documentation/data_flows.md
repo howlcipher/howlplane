@@ -29,9 +29,9 @@ HowlPlane operates primarily as a **local-first control plane and knowledge base
 | **GitHub Actions CI/CD** | Git push to remote repository | Repository commits, test execution | GitHub runners (`github.com`) | Standard Git push operations | CI only on push |
 
 Resource selection applies `local_only` and per-task no-egress filters before
-hosted adapter lookup. In local-only mode `ai providers`, `ai doctor`, governed
+hosted adapter lookup. In local-only mode `howlplane providers`, `howlplane doctor`, governed
 planning, implementation, review, remediation, synthesis, and dogfood perform
-zero hosted readiness requests and zero hosted generation. `ai route` is
+zero hosted readiness requests and zero hosted generation. `howlplane route` is
 read-only in every mode and uses persisted capacity without probing. Local
 Ollama traffic remains loopback-only. Operator configuration and current
 capacity live outside the repository in `~/.config/howlplane/`; neither carries

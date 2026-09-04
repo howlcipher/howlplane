@@ -157,20 +157,20 @@ a false success.
 
 ## CLI
 
-`ai providers` shows all registered resources and distinct configured, enabled,
+`howlplane providers` shows all registered resources and distinct configured, enabled,
 readiness, authentication, and capacity facts. `--json` emits
 `howlplane.ai_resources/v1` and never guesses quota percentages.
 
-`ai providers reset <resource-id>` clears and re-probes only current state for
+`howlplane providers reset <resource-id>` clears and re-probes only current state for
 that resource and appends an audit event. It does not remove trajectories,
 experiments, performance history, or other evidence.
 
-`ai route "objective" --role implementation` is read-only. It loads persisted
+`howlplane route "objective" --role implementation` is read-only. It loads persisted
 capacity without probing or generation and explains requirements, eligible and
 excluded resources, economics, recommendation, and likely selected identity.
 `--json` emits `howlplane.resource_selection/v1`.
 
-`ai doctor` validates configuration and runs non-generative readiness checks.
+`howlplane doctor` validates configuration and runs non-generative readiness checks.
 Hosted CLI checks inspect executable presence only; generation capacity and
 authentication remain unknown unless safely observed elsewhere. In local-only
 mode it does not touch hosted adapters.

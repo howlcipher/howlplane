@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 
+**Composable HowlPlane CLI**: added the reusable Go command package
+`pkg/cli`, the direct `cmd/howlplane` entry point, and an embeddable `plane`
+command for the future ecosystem root. The direct user command is now
+`howlplane`; `ai` remains a stderr-warning compatibility path. No `howl`
+executable is added by this repository. `documentation/CLI_COMPOSITION.md`
+records the direct Go and process-adapter integration contract for the future
+root repository.
+
 **Factory Work Portfolio**: the first code under the persistent-operation
 carve-out (`CONTROL_PLANE.md` 1.1.1, ADR 0006). Data and one pure function; no
 loop, no dispatch, no authority.

@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Thin deterministic launcher for the HowlPlane control plane.
+set -euo pipefail
+
+# 1. Determine script directory (in case invoked directly from howlplane/bin/howlplane)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd || true)"
+
+CP_DIR=""
+
+# 2. Check canonical environment variables: HOWLPLANE_HOME / HOWLPLANE_DIR
+if [[ -n "${HOWLPLANE_HOME:-}" && -d "${HOWLPLANE_HOME}/src/control_plane" ]]; then
+    CP_DIR="${HOWLPLANE_HOME}"
+elif [[ -n "${HOWLPLANE_DIR:-}" && -d "${HOWLPLANE_DIR}/src/control_plane" ]]; then
+    CP_DIR="${HOWLPLANE_DIR}"
+elif [[ -n "${AI_KNOWLEDGE_LIBRARY:-}" && -d "${AI_KNOWLEDGE_LIBRARY}/src/control_plane" ]]; then
+    CP_DIR="${AI_KNOWLEDGE_LIBRARY}"
+fi
+
+# 3. Check canonical user config file ~/.config/howlplane/config.toml
+if [[ -z "${CP_DIR}" && -f "${HOME}/.config/howlplane/config.toml" ]]; then
+    CFG_PATH="$(grep -E '^[[:space:]]*path[[:space:]]*=' "${HOME}/.config/howlplane/config.toml" 2>/dev/null | head -n1 | sed -E 's/^[[:space:]]*path[[:space:]]*=[[:space:]]*["'"'"']?([^"'"'"']+)["'"'"']?.*/\1/' || true)"
+    if [[ -n "${CFG_PATH}" && -d "${CFG_PATH}/src/control_plane" ]]; then
+        CP_DIR="${CFG_PATH}"
+    fi
+fi
+
+# 4. Check legacy user config file ~/.config/ai-control-plane/config.toml
+if [[ -z "${CP_DIR}" && -f "${HOME}/.config/ai-control-plane/config.toml" ]]; then
+    CFG_PATH="$(grep -E '^[[:space:]]*path[[:space:]]*=' "${HOME}/.config/ai-control-plane/config.toml" 2>/dev/null | head -n1 | sed -E 's/^[[:space:]]*path[[:space:]]*=[[:space:]]*["'"'"']?([^"'"'"']+)["'"'"']?.*/\1/' || true)"
+    if [[ -n "${CFG_PATH}" && -d "${CFG_PATH}/src/control_plane" ]]; then
+        CP_DIR="${CFG_PATH}"
+    fi
+fi
+
+# 5. Check user config file ~/.config/ai/config.toml
+if [[ -z "${CP_DIR}" && -f "${HOME}/.config/ai/config.toml" ]]; then
+    CFG_PATH="$(grep -E '^[[:space:]]*path[[:space:]]*=' "${HOME}/.config/ai/config.toml" 2>/dev/null | head -n1 | sed -E 's/^[[:space:]]*path[[:space:]]*=[[:space:]]*["'"'"']?([^"'"'"']+)["'"'"']?.*/\1/' || true)"
+    if [[ -n "${CFG_PATH}" && -d "${CFG_PATH}/src/control_plane" ]]; then
+        CP_DIR="${CFG_PATH}"
+    fi
+fi
+
+# 6. Check script directory
+if [[ -z "${CP_DIR}" && -n "${SCRIPT_DIR}" && -d "${SCRIPT_DIR}/src/control_plane" ]]; then
+    CP_DIR="${SCRIPT_DIR}"
+fi
+
+# 7. If still not found, check default development location
+if [[ -z "${CP_DIR}" && -d "/run/media/system/tallgeese/dev/howlplane/src/control_plane" ]]; then
+    CP_DIR="/run/media/system/tallgeese/dev/howlplane"
+elif [[ -z "${CP_DIR}" && -d "/run/media/system/tallgeese/dev/ai_knowledge_library/src/control_plane" ]]; then
+    CP_DIR="/run/media/system/tallgeese/dev/ai_knowledge_library"
+fi
+
+if [[ -z "${CP_DIR}" ]]; then
+    echo "ERROR: configured HowlPlane control plane not found." >&2
+    echo "Please set HOWLPLANE_HOME or configure ~/.config/howlplane/config.toml" >&2
+    exit 1
+fi
+
+# The project command is implemented by the reusable Go Cobra package. The
+# installer builds it ahead of time; the fallback keeps source checkouts usable.
+if [[ "${1:-}" == "project" ]]; then
+    if [[ -x "${CP_DIR}/build/howlplane" ]]; then
+        exec "${CP_DIR}/build/howlplane" "$@"
+    fi
+
+    if command -v go >/dev/null 2>&1; then
+        if [[ "${2:-}" == "validate" && "$#" -eq 2 ]]; then
+            set -- project validate "$(pwd -P)"
+        fi
+        cd "${CP_DIR}"
+        exec go run ./cmd/howlplane "$@"
+    fi
+
+    echo "ERROR: the native HowlPlane project CLI is unavailable. Run make install or install Go." >&2
+    exit 1
+fi
+
+# Locate suitable Python binary
+PYTHON_BIN=""
+
+if [[ -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/python" ]]; then
+    PYTHON_BIN="${VIRTUAL_ENV}/bin/python"
+elif [[ -x "${CP_DIR}/venv/bin/python" ]]; then
+    PYTHON_BIN="${CP_DIR}/venv/bin/python"
+elif [[ -x "/run/media/system/tallgeese/dev/.ci_verify_venv/bin/python" ]]; then
+    PYTHON_BIN="/run/media/system/tallgeese/dev/.ci_verify_venv/bin/python"
+elif [[ -x "${CP_DIR}/.venv/bin/python" ]]; then
+    PYTHON_BIN="${CP_DIR}/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python)"
+else
+    echo "ERROR: No valid Python interpreter found." >&2
+    exit 1
+fi
+
+export PYTHONPATH="${CP_DIR}:${PYTHONPATH:-}"
+exec "$PYTHON_BIN" -m src.control_plane.launcher "$@"

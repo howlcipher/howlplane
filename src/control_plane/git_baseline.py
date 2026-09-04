@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 
 from src.control_plane.git_env import run_git_in_repo
 from src.control_plane.task_spec import DataClassSerializationMixin
@@ -146,6 +146,84 @@ def _parse_porcelain_lines(status_text: str) -> Tuple[Set[str], Set[str], Set[st
         else:
             modified.add(f_path)
     return untracked, modified, deleted, added
+
+
+@dataclass(frozen=True)
+class WorkingTreeStatus:
+    """Whether a repository's working tree carries changes someone else owns.
+
+    `capture_baseline` records dirt so a task can be held responsible only for
+    what it added; this answers the different question of whether it is safe to
+    *begin* at all. Both read the same porcelain, so they agree on what counts.
+
+    `git status --porcelain` is deliberately invoked without `--ignored`, so
+    ignored runtime metadata is invisible here by git's own default rather than
+    by a list this module would have to maintain. Control-plane state
+    (`.task_runs`, `.howlchangeops`) is excluded by
+    `is_internal_control_plane_path`, since that is the control plane's own
+    bookkeeping and not a person's unfinished work.
+    """
+
+    repo_root: str
+    is_clean: bool
+    modified: List[str] = field(default_factory=list)
+    added: List[str] = field(default_factory=list)
+    deleted: List[str] = field(default_factory=list)
+    untracked: List[str] = field(default_factory=list)
+
+    def all_paths(self) -> List[str]:
+        return sorted(set(self.modified) | set(self.added) | set(self.deleted) | set(self.untracked))
+
+    def describe(self) -> str:
+        """Human-readable summary naming what is dirty and how."""
+        groups = (
+            ("modified", self.modified),
+            ("staged", self.added),
+            ("deleted", self.deleted),
+            ("untracked", self.untracked),
+        )
+        return "; ".join(
+            f"{label}: {', '.join(sorted(paths))}" for label, paths in groups if paths
+        ) or "clean"
+
+
+def describe_working_tree(
+    repo_dir: Union[str, Path],
+    extra_internal_prefixes: Sequence[str] = (),
+) -> WorkingTreeStatus:
+    """Reports the working-tree state of `repo_dir` for a fail-closed preflight.
+
+    `extra_internal_prefixes` names additional control-plane-owned paths to
+    ignore -- a campaign directory configured to live inside the target repo is
+    the engine's own state, not a change it should refuse to start over.
+    """
+    root = Path(repo_dir).resolve()
+    status_out = _run_git_cmd(root, ["status", "--porcelain"]).stdout or ""
+    untracked, modified, deleted, added = _parse_porcelain_lines(status_out)
+
+    if extra_internal_prefixes:
+        def owned_by_control_plane(path: str) -> bool:
+            norm = path.strip().replace("\\", "/").rstrip("/")
+            return any(
+                norm == prefix.rstrip("/") or norm.startswith(prefix.rstrip("/") + "/")
+                for prefix in extra_internal_prefixes
+            )
+
+        def prune(paths: Iterable[str]) -> Set[str]:
+            return {p for p in paths if not owned_by_control_plane(p)}
+
+        untracked, modified, deleted, added = (
+            prune(untracked), prune(modified), prune(deleted), prune(added),
+        )
+
+    return WorkingTreeStatus(
+        repo_root=str(root),
+        is_clean=not (untracked or modified or deleted or added),
+        modified=sorted(modified),
+        added=sorted(added),
+        deleted=sorted(deleted),
+        untracked=sorted(untracked),
+    )
 
 
 def _snapshot_file(path: Path, size_limit_bytes: int) -> Optional[bytes]:

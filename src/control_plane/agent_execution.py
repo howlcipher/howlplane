@@ -10,7 +10,7 @@ and deterministic mock/fake backends for testing and CI.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-import hashlib, json, os, re, shlex, shutil, subprocess, time
+import hashlib, inspect, json, os, re, shlex, shutil, subprocess, time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -350,7 +350,7 @@ class SubprocessAgentBackend(AgentBackend):
         self,
         agent_id: str,
         binary_name: str,
-        cmd_builder: Optional[Callable[[TaskSpec, Path, str, str], List[str]]] = None,
+        cmd_builder: Optional[Callable[..., List[str]]] = None,
     ):
         self.agent_id = agent_id
         self.binary_name = binary_name
@@ -382,8 +382,23 @@ class SubprocessAgentBackend(AgentBackend):
             ),
         )
 
-    def build_command(self, task: TaskSpec, cwd: Path, role: str, prompt: str) -> List[str]:
+    def build_command(
+        self,
+        task: TaskSpec,
+        cwd: Path,
+        role: str,
+        prompt: str,
+        timeout_seconds: int = 300,
+    ) -> List[str]:
         if self._builder:
+            sig = inspect.signature(self._builder)
+            params = sig.parameters
+            if "timeout_seconds" in params or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+            ):
+                return self._builder(
+                    task, cwd, role, prompt, timeout_seconds=timeout_seconds
+                )
             return self._builder(task, cwd, role, prompt)
         return [self.binary_name, prompt]
 
@@ -413,7 +428,9 @@ class SubprocessAgentBackend(AgentBackend):
             )
 
         prompt = prompt_override or f"Execute task {task.task_id}: {task.objective}"
-        cmd_args = self.build_command(task, target_cwd, role, prompt)
+        cmd_args = self.build_command(
+            task, target_cwd, role, prompt, timeout_seconds=timeout_seconds
+        )
         cmd_str = " ".join(shlex.quote(c) for c in cmd_args)
 
         env = os.environ.copy()
@@ -586,7 +603,15 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
         )
         return readiness
 
-    def build_command(self, task: TaskSpec, cwd: Path, role: str, prompt: str) -> List[str]:
+    def build_command(
+        self,
+        task: TaskSpec,
+        cwd: Path,
+        role: str,
+        prompt: str,
+        timeout_seconds: int = 300,
+        **kwargs,
+    ) -> List[str]:
         profile = self.build_execution_profile(task, cwd, role)
         cmd = ["claude", "-p", prompt, "--output-format", "json"]
         allowed = profile.allowed_tools()
@@ -676,7 +701,7 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
 
 class CodexBackend(SubprocessAgentBackend):
     def __init__(self):
-        def _codex_cmd(t, c, r, p):
+        def _codex_cmd(t, c, r, p, timeout_seconds: int = 300, **kwargs):
             # Codex defaults to a read-only sandbox; implementation and
             # remediation roles must be able to edit files in the workspace.
             # Review roles keep the default read-only sandbox.
@@ -695,17 +720,36 @@ class CodexBackend(SubprocessAgentBackend):
 
 class GeminiCLIBackend(SubprocessAgentBackend):
     def __init__(self):
-        super().__init__("gemini_cli", "gemini", lambda t, c, r, p: ["gemini", "-p", p])
+        def _gemini_cmd(t, c, r, p, timeout_seconds: int = 300, **kwargs):
+            return ["gemini", "-p", p]
+        super().__init__("gemini_cli", "gemini", _gemini_cmd)
+
+
+# Wall-clock headroom between agy's own print deadline and the harness kill.
+# Handing agy the harness budget verbatim races the two: agy needs time after
+# its deadline to emit its timeout message and exit, so subprocess.TimeoutExpired
+# normally wins and the run is classified EXECUTION_BUDGET_EXCEEDED (harness)
+# instead of by transport (transcript), nondeterministically and with agy's own
+# diagnostic output discarded by the kill.
+AGY_PRINT_TIMEOUT_HEADROOM_SECONDS = 15
 
 
 class AgyBackend(SubprocessAgentBackend):
     def __init__(self):
-        super().__init__("agy", "agy", lambda t, c, r, p: ["agy", "-p", p, "--mode", "accept-edits"])
+        def _agy_cmd(t, c, r, p, timeout_seconds: int = 300, **kwargs):
+            print_timeout = max(1, timeout_seconds - AGY_PRINT_TIMEOUT_HEADROOM_SECONDS)
+            return [
+                "agy",
+                "-p", p,
+                "--mode", "accept-edits",
+                "--print-timeout", f"{print_timeout}s",
+            ]
+        super().__init__("agy", "agy", _agy_cmd)
 
 
 class DevinCLIBackend(SubprocessAgentBackend):
     def __init__(self):
-        def _devin_cmd(t, c, r, p):
+        def _devin_cmd(t, c, r, p, timeout_seconds: int = 300, **kwargs):
             return ["devin", "-p", p, "--permission-mode", "accept-edits"]
         super().__init__("devin_cli", "devin", _devin_cmd)
 
