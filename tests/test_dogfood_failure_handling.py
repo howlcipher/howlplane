@@ -63,9 +63,11 @@ from src.control_plane.resource_models import ProviderFailureClass
 from src.control_plane.router import RoutingDecision
 from src.control_plane.synthesis.campaign_state import DurableCampaignState
 from src.control_plane.synthesis.marathon import MarathonDogfoodEngine
+from src.control_plane.agent_registry import AgentRegistry
 from src.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
+    ProviderResourceSettings,
 )
 from src.control_plane.task_spec import TaskSpec
 from src.control_plane.verification import VerificationPlan, VerificationStep
@@ -649,11 +651,28 @@ def _run_marathon_harness(
     campaign_id: str,
     git: Optional[ScriptedRunner] = None,
     gh: Optional[ScriptedRunner] = None,
+    configured_pool: bool = False,
 ) -> Tuple[bool, Dict[str, Any], ProviderScriptedOrchestrator, ProviderPoolManager]:
     repo_root = tmp_path / "repo"
     init_minimal_python_repo(repo_root)
 
-    pool = ProviderPoolManager()
+    if configured_pool:
+        # ProviderPoolManager() with no `resources` is legacy mode, and legacy
+        # selection never consults the task, so it cannot exercise the
+        # capability-aware path the factory actually runs
+        # (ProviderPoolManager.from_config()). Passing `resources` selects that
+        # path, which is where a task-carried preference gates selection.
+        registry = AgentRegistry()
+        pool = ProviderPoolManager(
+            registry=registry,
+            resources={
+                profile.resource_id: ProviderResourceSettings(enabled=True)
+                for profile in registry.list_resources()
+            },
+            probe_on_start=False,
+        )
+    else:
+        pool = ProviderPoolManager()
     for agent_id in list(pool.get_all_statuses()):
         pool.set_status(agent_id, ProviderAvailabilityStatus.UNAVAILABLE)
     for p in script:
@@ -694,11 +713,27 @@ def _run_marathon_harness(
     return ok, rec, orch, pool
 
 
-def test_timeout_failover_in_marathon_engine(tmp_path):
-    """A transient timeout from AGY triggers failover to an alternate provider (devin_cli) and completes."""
+@pytest.mark.parametrize("configured_pool", [False, True], ids=["legacy_pool", "configured_pool"])
+def test_timeout_failover_in_marathon_engine(tmp_path, configured_pool):
+    """A transient timeout from AGY fails over to devin_cli and completes.
+
+    Both selection paths are covered because only one of them is production.
+    A bare ProviderPoolManager() is legacy mode (`_legacy_mode = resources is
+    None`) and never consults the task; the factory builds its pool with
+    ProviderPoolManager.from_config(), which passes `resources` and takes the
+    capability-aware path. This test previously ran legacy-only, which is why a
+    live canary, not this suite, found that failover could not hop there: the
+    loop pins `gap_probe.preferred_agent` to the provider being attempted, and
+    select_resource reads a task-carried preference as an explicit override,
+    emptying the eligible set once that provider stops being selectable. The
+    re-selection then reported NO_ELIGIBLE_PROVIDER_REMAINING with three healthy
+    providers standing by.
+    """
+    suffix = "CONFIGURED" if configured_pool else "LEGACY"
+    task_id = f"ENG-TIMEOUT-{suffix}"
     git, gh = ScriptedRunner(), ScriptedRunner()
     build_full_merge_flow(
-        git, gh, task_id="ENG-TIMEOUT-01", repo_slug="howlcipher/howlplane", pr_number=10,
+        git, gh, task_id=task_id, repo_slug="howlcipher/howlplane", pr_number=10,
         commit_message="fix: resolve timeout gap",
         pr_title="fix: timeout gap",
         pr_body="Automated fix",
@@ -710,11 +745,15 @@ def test_timeout_failover_in_marathon_engine(tmp_path):
     }
 
     ok, rec, orch, pool = _run_marathon_harness(
-        tmp_path, script, "ENG-TIMEOUT-01", "DOGFOOD-TIMEOUT", git=git, gh=gh,
+        tmp_path, script, task_id, f"DOGFOOD-TIMEOUT-{suffix}",
+        git=git, gh=gh, configured_pool=configured_pool,
     )
 
+    assert orch.attempted == ["agy", "devin_cli"], (
+        "failover did not hop; "
+        f"attempted={orch.attempted}, failure_reason={(rec or {}).get('failure_reason')}"
+    )
     assert ok is True
-    assert orch.attempted == ["agy", "devin_cli"]
     assert rec["provider"] == "devin_cli"
     assert pool.get_status("agy") == ProviderAvailabilityStatus.UNREACHABLE
     assert pool.get_status("devin_cli") == ProviderAvailabilityStatus.AVAILABLE
