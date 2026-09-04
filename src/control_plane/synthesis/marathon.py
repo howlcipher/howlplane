@@ -1836,6 +1836,15 @@ class MarathonDogfoodEngine:
                 return False, record
             previous_provider = provider
             provider = next_candidates[0]
+            # Every hop reuses this one TaskSpec, and the attempt that just
+            # failed left it in `failed`. The lifecycle allows
+            # failed -> planned precisely so work can be re-attempted, and
+            # refuses failed -> implementing, so without this the next
+            # orchestrator.run dies with "Cannot transition task ... from
+            # 'failed' to 'implementing'" -- the failover selects a healthy
+            # provider and then cannot hand it the task.
+            if gap_probe.current_state == "failed":
+                gap_probe.transition_to("planned", reason="provider_failover_retry")
 
         delta = result.final_delta
         if delta is None or delta.is_empty:
