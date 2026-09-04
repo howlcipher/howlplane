@@ -38,7 +38,7 @@ from src.control_plane.decision_queue import (
     compute_blocks_other_work,
 )
 from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
-from src.control_plane.git_baseline import capture_baseline, capture_delta
+from src.control_plane.git_baseline import capture_baseline, capture_delta, describe_working_tree
 from src.control_plane.git_integration import GitIntegrationExecutor, detect_repo_slug, run_git
 from src.control_plane.human_boundary import HumanBoundaryGate
 from src.control_plane.orchestrator import (
@@ -198,6 +198,15 @@ class MarathonSummaryReport(DataClassSerializationMixin):
             next_action=self.next_action,
         )
         return state.render_markdown()
+
+
+# Stop reason for a campaign that never started because the target working tree
+# carried work the campaign does not own.
+DIRTY_TARGET_STOP_REASON = "dirty_target_repository"
+
+# Mirrors the CLI's --campaign-dir default, so a campaign root left at the
+# default inside a target repository is recognised as control-plane state.
+DEFAULT_CAMPAIGN_DIR_NAME = ".dogfood_runs"
 
 
 class MarathonDogfoodEngine:
@@ -800,6 +809,70 @@ class MarathonDogfoodEngine:
             "state_dir": str(state_dir),
         }
 
+    def _refuse_if_target_is_dirty(
+        self,
+        campaign_id: str,
+        state_dir: Path,
+        authority_profile_id: str,
+        started: float,
+    ) -> Optional[Dict[str, Any]]:
+        """Refuses to begin a new campaign against a working tree someone else owns.
+
+        A marathon implements directly in the target checkout: the orchestrator
+        edits files in place, and `capture_baseline` then distinguishes what the
+        task changed from what was already there. That is the right design for
+        attribution, and the wrong thing to start on top of unresolved work --
+        an unattended run would interleave its own changes with a person's,
+        commit the result, and open a pull request nobody can cleanly separate.
+        The HowlFrame checkout is the live example: four modified files owned by
+        a task that is AWAITING_HUMAN.
+
+        This runs before anything: before an authority envelope is bound, before
+        a provider is invoked, before a task is selected, before a branch,
+        commit, push, or pull request, and before any directory is created --
+        including the campaign's own state directory, so a refusal leaves no
+        trace to clean up.
+
+        Nothing is cleaned, stashed, reset, or adopted. Ownership of unexplained
+        work is a human's call, and this only reports what it found.
+        """
+        # A campaign directory configured to live inside the target repository
+        # is this engine's own state, not a change to refuse over.
+        internal_prefixes = [DEFAULT_CAMPAIGN_DIR_NAME]
+        try:
+            internal_prefixes.append(str(self.campaign_base_dir.relative_to(self.target_repo)))
+        except ValueError:
+            pass
+
+        tree = describe_working_tree(self.target_repo, extra_internal_prefixes=internal_prefixes)
+        if tree.is_clean:
+            return None
+
+        return {
+            "campaign_id": campaign_id,
+            "state_dir": str(state_dir),
+            "target_repo": str(self.target_repo),
+            "repo_slug": self.repo_slug,
+            "authority_profile": authority_profile_id,
+            "tasks_attempted": [],
+            "tasks_completed": [],
+            "tasks_failed": [],
+            "tasks_parked": [],
+            "git_records": [],
+            "stop_reason": DIRTY_TARGET_STOP_REASON,
+            "refused": True,
+            "duration_seconds": round(time.time() - started, 3),
+            "dirty_files": tree.all_paths(),
+            "dirty_summary": tree.describe(),
+            "refusal_reason": (
+                f"Refusing to start a new marathon: {self.target_repo} contains "
+                f"uncommitted changes ({tree.describe()}). Resolve or preserve "
+                f"the existing work before starting a campaign, or pass --resume "
+                f"to continue the campaign that owns it. Nothing was cleaned, "
+                f"stashed, or reset, no provider was invoked, and nothing was written."
+            ),
+        }
+
     def run_backlog_marathon(
         self,
         authority_profile_id: str,
@@ -842,14 +915,26 @@ class MarathonDogfoodEngine:
 
         started = time.time()
         deadline = started + max_runtime_hours * 3600.0
-        self.base_output_dir.mkdir(parents=True, exist_ok=True)
-        self.campaign_base_dir.mkdir(parents=True, exist_ok=True)
 
         campaign_id = resume_campaign_id or self._generate_campaign_id()
         state_dir = self.campaign_base_dir / campaign_id
+        # The same condition that decides whether campaign state is loaded
+        # below, evaluated early because the preflight applies only to a new
+        # campaign. A resumed campaign's durable state legitimately owns an
+        # unfinished worktree; refusing that would make an interrupted task
+        # impossible to finish.
+        is_resume = bool(resume_campaign_id and (state_dir / "campaign_state.json").is_file())
+
+        if not is_resume:
+            refusal = self._refuse_if_target_is_dirty(campaign_id, state_dir, authority_profile_id, started)
+            if refusal is not None:
+                return refusal
+
+        self.base_output_dir.mkdir(parents=True, exist_ok=True)
+        self.campaign_base_dir.mkdir(parents=True, exist_ok=True)
         state_dir.mkdir(parents=True, exist_ok=True)
 
-        if resume_campaign_id and (state_dir / "campaign_state.json").is_file():
+        if is_resume:
             campaign_state = DurableCampaignState.load(state_dir)
             # A resumed run re-probes providers whose cooldown has elapsed
             # rather than inheriting a stale exhausted view of the pool.
