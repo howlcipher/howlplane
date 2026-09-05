@@ -1673,9 +1673,30 @@ class MarathonDogfoodEngine:
             }
 
         if self.git_executor is None:
-            git_rec.failure_reason = "NO_GIT_EXECUTOR_CONFIGURED"
-            self._persist_git_record(git_rec, campaign_state, state_dir)
-            return False, git_rec.to_dict()
+            # No --authority-profile was bound for this campaign, so no
+            # GitIntegrationExecutor was ever constructed (see cli.py's
+            # campaign setup, which only builds one when an envelope is
+            # present). This is a human-authority condition, not an
+            # engineering failure: without delegated authority there is no
+            # basis to create a branch/push/PR/merge autonomously. Park it
+            # exactly like the AWAITING_HUMAN branch above rather than
+            # returning a bare failure the supervisor would count against
+            # failure_count/backoff (#B5).
+            parked = ParkedTaskRecord(
+                task_id=task_id,
+                objective=objective,
+                boundary_type="no_authority_envelope",
+                requested_action="governed_engineering_improvement",
+                repository=self.repo_slug or repository,
+                evidence=["No --authority-profile was bound for this campaign, so no delegated authority exists for git/GitHub actions."],
+                verification_state="not_reached",
+                why_delegated_authority_did_not_apply="no_authority_envelope",
+            )
+            git_rec.failure_reason = "AWAITING_HUMAN"
+            return False, {
+                "task_id": task_id, "target_repo": repository, "integration_mode": "parked",
+                "provider": provider, "parked_record": parked.to_dict(),
+            }
 
         # --------------------------------------------------------------------
         # Bounded provider failover (#59.1 Phase 2).
