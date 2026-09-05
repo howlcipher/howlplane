@@ -2,11 +2,13 @@
 """Deterministic factory supervisor tick/run loop."""
 
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from src.control_plane.atomic_io import atomic_write_text
 from src.control_plane.factory.dispatcher import DispatchOutcome, MarathonDispatcherAdapter
 from src.control_plane.factory.portfolio import FactoryPolicy, select
 from src.control_plane.factory.repo_proposal import (
@@ -78,9 +80,35 @@ class FactorySupervisor:
         self.max_backoff_seconds = max_backoff_seconds
         self._state_dir = Path(state_dir) if state_dir else None
         self._lock = lock
+        self.instance_id: str = self._resolve_instance_id()
         self._state_record = self.state_store.load()
         if self._state_record.created_at is None:
             self._state_record.created_at = clock().isoformat()
+
+    def _resolve_instance_id(self) -> str:
+        """Resolve or persist a unique instance identifier scoped to the state directory."""
+        candidates = []
+        if self._state_dir is not None:
+            candidates.append(Path(self._state_dir) / "instance_id")
+            candidates.append(Path(self._state_dir) / "supervisor" / "instance_id")
+        candidates.append(Path(self.state_store.base_dir) / "instance_id")
+
+        for p in candidates:
+            if p.is_file():
+                try:
+                    val = p.read_text(encoding="utf-8").strip()
+                    if val:
+                        return val
+                except OSError:
+                    pass
+
+        target_file = candidates[0]
+        new_id = uuid.uuid4().hex[:12]
+        try:
+            atomic_write_text(target_file, new_id + "\n")
+        except Exception:
+            pass
+        return new_id
 
     @property
     def state_record(self) -> SupervisorStateRecord:
@@ -105,6 +133,7 @@ class FactorySupervisor:
     def status(self) -> Dict[str, Any]:
         return {
             "supervisor_id": self._state_record.supervisor_id,
+            "instance_id": self.instance_id,
             "state": self._state_record.state,
             "created_at": self._state_record.created_at,
             "last_tick_at": self._state_record.last_tick_at,
@@ -353,7 +382,7 @@ class FactorySupervisor:
             return None
 
         item = fresh_item
-        dispatch_id = f"D-{item.work_item_id}-{self._state_record.observations_consumed}"
+        dispatch_id = f"D-{item.work_item_id}-{self.instance_id}-{self._state_record.observations_consumed}"
         task_id = f"FACTORY-{item.work_item_id}"
         item.transition_to(WorkItemState.IN_PROGRESS, reason="dispatched")
         item.task_ids = sorted(set(item.task_ids) | {task_id})
