@@ -34,7 +34,6 @@ from src.control_plane.atomic_io import (
     safe_load_yaml,
 )
 from src.control_plane.checkpoints import CheckpointManager, StageCheckpoint
-from src.control_plane.durable_store import ArtifactIdentityError
 from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
 from src.control_plane.git_baseline import (
     GitBaseline,
