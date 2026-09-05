@@ -2110,9 +2110,26 @@ class GovernedTaskOrchestrator:
                     task_spec, planned_actions, start_time, progress=progress
                 )
                 if self.trajectory_store is not None:
-                    traj = ExecutionTrajectoryBuilder.from_orchestration_result(result)
-                    self.trajectory_store.save(traj)
-                    result.trajectory_id = traj.trajectory_id
+                    try:
+                        traj = ExecutionTrajectoryBuilder.from_orchestration_result(result)
+                        self.trajectory_store.save(traj)
+                        result.trajectory_id = traj.trajectory_id
+                    except Exception as exc:
+                        # Evidence persistence must never fail live engineering work (#B10).
+                        # Degrade safely (record the conflict, continue) rather than killing the run.
+                        self._record_event(
+                            task_id=task_spec.task_id,
+                            agent_id="control_plane",
+                            action="trajectory_persistence_conflict",
+                            result=str(exc),
+                            spec=task_spec,
+                            metadata={
+                                "conflict_error": str(exc),
+                                "trajectory_id": getattr(traj, "trajectory_id", None) if "traj" in locals() else None,
+                            },
+                        )
+                        if getattr(result, "trajectory_id", None) is None and "traj" in locals() and traj is not None:
+                            result.trajectory_id = traj.trajectory_id
                 return result
             except Exception as exc:
                 progress.record_terminal(
