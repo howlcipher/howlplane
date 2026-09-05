@@ -18,7 +18,10 @@ from src.control_plane.git_integration import GitIntegrationExecutor
 from src.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
 from src.control_plane.reasoning.execution_trajectory import ExecutionTrajectory, TrajectoryStore
 from src.control_plane.synthesis.marathon import MarathonDogfoodEngine
-from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+from src.control_plane.synthesis.provider_pool import (
+    ProviderAvailabilityStatus,
+    ProviderPoolManager,
+)
 from tests.test_local_ollama_provider import _AlwaysSucceedGhRunner, _AlwaysSucceedGitRunner
 from tests._dogfood_test_helpers import init_minimal_python_repo
 from tests._factory_test_helpers import make_supervisor, ready_work_item
@@ -27,7 +30,14 @@ from tests._factory_test_helpers import make_supervisor, ready_work_item
 def _setup_engine(
     repo: Path, shared_traj_dir: Path, campaign_name: str, campaign_dir: Path
 ) -> MarathonDogfoodEngine:
-    pool = ProviderPoolManager.from_config(probe_on_start=False)
+    # A bare pool with explicit statuses, never `from_config()`. Reading the
+    # configured pool makes provider selection depend on which CLIs happen to be
+    # installed on the host, so these tests passed locally (where the real
+    # provider CLIs exist) and deferred the work item in CI (where they do not).
+    pool = ProviderPoolManager()
+    for provider in ("codex", "agy", "devin_cli", "gemini_cli", "local_ollama"):
+        pool.set_status(provider, ProviderAvailabilityStatus.SESSION_EXHAUSTED)
+    pool.set_status("claude_code", ProviderAvailabilityStatus.AVAILABLE)
     backend = FakeAgentBackend(
         agent_id="claude_code",
         side_effect=lambda task, cwd, prompt: (cwd / "src" / "feature.py").write_text(
