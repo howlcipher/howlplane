@@ -23,7 +23,11 @@ from src.control_plane.synthesis.provider_pool import (
 def test_marathon_dogfood_runs_selected_benchmarks(tmp_path: Path):
     ledger_path = tmp_path / "ledger.jsonl"
     ledger = EvidenceLedger(ledger_path)
-    engine = MarathonDogfoodEngine(base_output_dir=tmp_path / "dogfood", ledger=ledger)
+    engine = MarathonDogfoodEngine(
+        base_output_dir=tmp_path / "dogfood",
+        campaign_dir=tmp_path / "campaigns",
+        ledger=ledger,
+    )
 
     report = engine.run_marathon(
         benchmarks=["notes", "todo"],
@@ -50,7 +54,11 @@ def test_marathon_stops_when_all_providers_exhausted(tmp_path: Path):
     for agent in ["agy", "codex", "claude_code", "devin_cli", "local_ollama", "gemini_cli"]:
         pool.set_status(agent, ProviderAvailabilityStatus.SESSION_EXHAUSTED)
 
-    engine = MarathonDogfoodEngine(provider_pool=pool, base_output_dir=tmp_path / "dogfood")
+    engine = MarathonDogfoodEngine(
+        provider_pool=pool,
+        base_output_dir=tmp_path / "dogfood",
+        campaign_dir=tmp_path / "campaigns",
+    )
     report = engine.run_marathon(benchmarks=["notes", "todo"])
 
     assert report.iterations_attempted == 0

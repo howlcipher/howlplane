@@ -38,9 +38,12 @@ from src.control_plane.cli import (
     cmd_run_product as cp_cmd_run_product,
     cmd_dogfood as cp_cmd_dogfood,
     cmd_acceptance as cp_cmd_acceptance,
+    cmd_marathon as cp_cmd_marathon,
     cmd_authority as cp_cmd_authority,
     cmd_local as cp_cmd_local,
+    cmd_factory as cp_cmd_factory,
     register_synthesis_subparsers,
+    register_factory_subparsers,
 )
 from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
 from src.control_plane.git_env import run_git_in_repo
@@ -104,7 +107,7 @@ def find_git_repo_root(start_dir: Optional[Union[str, Path]] = None) -> Path:
         curr = curr.parent
 
     raise TargetRepositoryNotFoundError(
-        f"ERROR: no target Git repository found in '{target}'. 'ai' must be executed inside a Git repository."
+        f"ERROR: no target Git repository found in '{target}'. HowlPlane must be run inside a Git repository."
     )
 
 
@@ -815,8 +818,8 @@ def cmd_status(args: argparse.Namespace) -> int:
                             print(f"  Decision Packet:    {dp_rel}")
                         print("")
                         print("  Next Action:")
-                        print(f"    ai approve {t_spec.task_id}")
-                        print(f"    ai reject {t_spec.task_id}")
+                        print(f"    howlplane approve {t_spec.task_id}")
+                        print(f"    howlplane reject {t_spec.task_id}")
                     elif dec_record.decision == "approved":
                         has_drift, drift_reason = (
                             check_repository_drift(dec_record.repository_state, current_fp)
@@ -832,9 +835,9 @@ def cmd_status(args: argparse.Namespace) -> int:
                         print("")
                         print("  Next Action:")
                         if has_drift:
-                            print(f"    ai approve {t_spec.task_id} --reason \"re-approved after drift\"")
+                            print(f"    howlplane approve {t_spec.task_id} --reason \"re-approved after drift\"")
                         else:
-                            print(f"    ai resume {t_spec.task_id}")
+                            print(f"    howlplane resume {t_spec.task_id}")
                     elif dec_record.decision == "rejected":
                         print(f"  Decision:           REJECTED")
                         if dec_record.reason:
@@ -878,7 +881,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                         if disposition not in ("completed_clean", "completed_with_findings"):
                             print(f"      - {role}: {disposition.upper()}")
                     if not is_proc_alive:
-                        rec_action = rec_diag.get('recommendation') or f"ai resume {t_spec.task_id}"
+                        rec_action = rec_diag.get('recommendation') or f"howlplane resume {t_spec.task_id}"
                         print(f"    Recommendation:    {rec_action}")
                     print("-" * 40)
                 elif t_spec.current_state in ("interrupted", "cancelled", "implementing", "reviewing", "remediating", "verifying"):
@@ -964,6 +967,35 @@ def cmd_unlock(args: argparse.Namespace) -> int:
     args.repo_dir = str(target_repo)
     args.ledger_file = str(cp_root / "logs" / "control_plane" / "evidence_ledger.jsonl")
     return cp_cmd_unlock(args)
+
+
+# Every subcommand build_parser() registers must appear here. A registered
+# subcommand with no entry does not error -- argparse accepts it, main() finds
+# nothing, and the operator gets top-level help and exit 1, which reads like a
+# usage mistake rather than a missing dispatch. `marathon` shipped that way.
+# tests/test_cli_dispatch_completeness.py fails if the two ever diverge again.
+ACTIONS = {
+    "work": cmd_work,
+    "route": cmd_route,
+    "providers": cmd_providers,
+    "doctor": cmd_doctor,
+    "status": cmd_status,
+    "approve": cmd_approve,
+    "reject": cmd_reject,
+    "resume": cmd_resume,
+    "cancel": cmd_cancel,
+    "unlock": cmd_unlock,
+    "verify": cmd_verify,
+    "howlframe-audit": cmd_howlframe_audit,
+    "create": cp_cmd_create,
+    "run": cp_cmd_run_product,
+    "dogfood": cp_cmd_dogfood,
+    "acceptance": cp_cmd_acceptance,
+    "marathon": cp_cmd_marathon,
+    "authority": cp_cmd_authority,
+    "local": cp_cmd_local,
+    "factory": cp_cmd_factory,
+}
 
 
 def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
@@ -1088,6 +1120,7 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
 
     # create, run, dogfood (Prompt-to-Product Synthesis)
     register_synthesis_subparsers(subparsers, parents=[common_parser])
+    register_factory_subparsers(subparsers, parents=[common_parser])
 
     return parser
 
@@ -1100,27 +1133,7 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
         p.print_help()
         return 1
 
-    actions = {
-        "work": cmd_work,
-        "route": cmd_route,
-        "providers": cmd_providers,
-        "doctor": cmd_doctor,
-        "status": cmd_status,
-        "approve": cmd_approve,
-        "reject": cmd_reject,
-        "resume": cmd_resume,
-        "cancel": cmd_cancel,
-        "unlock": cmd_unlock,
-        "verify": cmd_verify,
-        "howlframe-audit": cmd_howlframe_audit,
-        "create": cp_cmd_create,
-        "run": cp_cmd_run_product,
-        "dogfood": cp_cmd_dogfood,
-        "acceptance": cp_cmd_acceptance,
-        "authority": cp_cmd_authority,
-        "local": cp_cmd_local,
-    }
-    fn = actions.get(opts.subcommand)
+    fn = ACTIONS.get(opts.subcommand)
     if not fn:
         p.print_help()
         return 1

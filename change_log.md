@@ -68,6 +68,12 @@ would not be.
 
 ### Changed
 
+**Persistent Factory Replay Stabilization**: branch-push recovery now compares
+the live remote ref with the durable expected commit, reconciling only an exact
+match and parking any mismatch for a human rather than overwriting it. Required
+CI checks are recorded against a stable live PR head SHA; unreadable or changed
+head evidence fails closed without entering a long polling loop.
+
 **A Named, Evidence-Gated Carve-Out From The Architectural Freeze**: the control
 plane architecture has been frozen since it became infrastructure, and the
 freeze's own admission price is evidence that "real operational portfolio usage
@@ -130,6 +136,17 @@ and the duplication ratchet held at 13/13 and 29/29 across roughly 600 added
 lines.
 
 ### Fixed
+
+**Factory Authority and CI Fail Closed Behavior**: Review and verification
+policy paths are now protected as authority enforcement files, and skipped
+required checks cannot authorize an unattended merge.
+
+Remote reconciliation is applied at the PR and merge boundaries, where a
+replayed operation can otherwise duplicate an accepted GitHub side effect.
+
+**Factory Supervisor Lock Contention**: A process rejected by the singleton
+supervisor lock now leaves durable supervisor state untouched. Previously its
+stale in-memory record could stop the active supervisor.
 
 **A Backlog-Driven Marathon, Which The Control Plane Did Not Have**:
 `select_next_evidence_backed_task` existed only as a string literal in

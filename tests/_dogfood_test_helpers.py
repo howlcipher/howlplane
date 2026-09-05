@@ -16,7 +16,7 @@ marathon.py logic exercised through them is real (#59 Phase 20).
 from dataclasses import dataclass, field
 from pathlib import Path
 import subprocess
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from src.control_plane.agent_execution import AgentExecutionResult, FakeAgentBackend
 from src.control_plane.git_baseline import RepositoryDelta
@@ -344,6 +344,10 @@ def build_full_merge_flow(
         ["pr", "checks", str(pr_number), "--json", "name,state,bucket,link"],
         returncode=0, stdout=f'[{{"name": "test-python", "state": "{check_state}", "bucket": "{check_bucket}"}}]',
     )
+    gh.on(
+        ["pr", "view", str(pr_number), "--json", "headRefOid"],
+        returncode=0, stdout=f'{{"headRefOid": "{commit_sha}"}}',
+    )
 
     if not ci_green:
         return branch
@@ -455,11 +459,13 @@ class ProviderScriptedOrchestrator:
         self.script = dict(script)
         self.modified_files = [modified_files] if isinstance(modified_files, str) else list(modified_files)
         self.attempted: List[str] = []
+        self.seen_metadata: List[Dict[str, Any]] = []
         self.on_attempt = on_attempt
 
     def run(self, task_spec, planned_actions=None, lock_ownership=None) -> OrchestrationResult:
         provider = task_spec.preferred_agent or "unknown"
         self.attempted.append(provider)
+        self.seen_metadata.append(dict(task_spec.metadata or {}))
         if self.on_attempt is not None:
             self.on_attempt(provider)
         outcome, detail = self.script.get(provider, ("complete", None))

@@ -108,8 +108,15 @@ _SLOW_TESTS = {
 }
 
 
-def pytest_collection_modifyitems(items):
-    """Apply the canonical tier and measured-runtime markers to every test."""
+def pytest_collection_modifyitems(config, items):
+    """Apply the canonical tier and measured-runtime markers to every test.
+
+    Also enforces the `live` gate. A marker expression on the command line is
+    not enforcement: `pytest`, `make test-full`, `make test-coverage`, and the
+    full/nightly CI jobs all collect without one, so the first `live` test
+    added would contact a real provider on every ordinary run. Deselecting here
+    means the gate holds for every invocation, including a bare `pytest`.
+    """
     for item in items:
         existing_tiers = {
             m.name for m in item.iter_markers() if m.name in {"unit", "integration", "acceptance"}
@@ -129,6 +136,14 @@ def pytest_collection_modifyitems(items):
         if module_name in _SLOW_MODULES or f"{module_name}::{base_name}" in _SLOW_TESTS:
             item.add_marker(pytest.mark.slow)
 
+    if os.environ.get("HOWLPLANE_LIVE_PROVIDERS"):
+        return
+    gated = [item for item in items if item.get_closest_marker("live")]
+    if not gated:
+        return
+    config.hook.pytest_deselected(items=gated)
+    items[:] = [item for item in items if item.get_closest_marker("live") is None]
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _cleanup_tmp_git_contamination():
@@ -141,6 +156,37 @@ def _cleanup_tmp_git_contamination():
         except OSError:
             pass
     yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _fail_on_campaign_pollution_of_this_repository():
+    """Fail the run if the suite wrote a campaign into this checkout.
+
+    `MarathonDogfoodEngine` resolves its default `campaign_dir` against the
+    process cwd, so a test that forgets `campaign_dir=tmp_path / ...` silently
+    creates `.dogfood_runs/DOGFOOD-*` in the repository the suite is running in.
+    860 such directories accumulated before anyone noticed, because nothing
+    failed. tests/test_campaign_isolation.py catches the omission statically;
+    this catches whatever the static scan cannot see, at the cost of two
+    directory listings per session.
+    """
+    campaign_root = Path(__file__).resolve().parent.parent / ".dogfood_runs"
+
+    def snapshot():
+        if not campaign_root.is_dir():
+            return set()
+        return {entry.name for entry in campaign_root.iterdir()}
+
+    before = snapshot()
+    yield
+    created = sorted(snapshot() - before)
+    assert not created, (
+        f"The test suite wrote {len(created)} campaign director"
+        f"{'y' if len(created) == 1 else 'ies'} into {campaign_root}:\n"
+        + "\n".join(f"  {name}" for name in created[:10])
+        + ("\n  ..." if len(created) > 10 else "")
+        + "\nA test constructed a campaign engine without campaign_dir=tmp_path / \"campaigns\"."
+    )
 
 
 @pytest.fixture(autouse=True)

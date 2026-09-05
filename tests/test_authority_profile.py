@@ -403,3 +403,39 @@ def test_save_envelope_refuses_to_overwrite_existing(tmp_path):
     save_envelope(envelope, tmp_path)
     with pytest.raises(EnvelopeAlreadyExistsError):
         save_envelope(envelope, tmp_path)
+
+
+def test_scenario_18_missing_authority_profile_parks_rather_than_fails(tmp_path):
+    """#B5: running without --authority-profile must park, not fail.
+
+    cli.py only constructs a GitIntegrationExecutor when an authority
+    envelope is bound; without --authority-profile, `engine.git_executor`
+    stays at its class default of None. The ordinary git actions this method
+    plans (branch/commit/push/PR/merge) never trigger HumanBoundaryGate's
+    consequential-action pre-check on their own -- that pre-check exists for
+    high-risk categories (force push, production deploy, etc.), not routine
+    git integration, which is properly gated per-action by
+    GitIntegrationExecutor using the envelope. Without a bound envelope that
+    gate never runs at all, so the method's own documented contract (see its
+    docstring: "Returns ... integration_mode_parked ... when a boundary
+    requires human authority the campaign's envelope does not delegate") must
+    still hold: no delegated authority for git actions is exactly that case,
+    and it must be recorded as a park the supervisor can continue past, not a
+    failure that increments failure_count and backs off.
+    """
+    engine = MarathonDogfoodEngine(
+        provider_pool=_pool_with_codex(),
+        base_output_dir=tmp_path / "out", campaign_dir=tmp_path / "campaigns",
+        target_repo=tmp_path, repo_slug=REPO_SLUG,
+    )
+    assert engine.authority_envelope is None
+    assert engine.git_executor is None
+
+    ok, rec = engine._execute_governed_engineering_improvement(
+        task_id="ENG-B5-01", benchmark_key="x", gap_type="X_GAP", gap_desc="desc",
+    )
+
+    assert ok is False
+    assert rec["integration_mode"] == "parked"
+    assert rec["parked_record"]["boundary_type"] == "no_authority_envelope"
+    assert rec["parked_record"]["objective"] == "Resolve X_GAP for x: desc"

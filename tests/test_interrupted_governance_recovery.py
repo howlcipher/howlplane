@@ -899,7 +899,7 @@ def test_status_recommends_a_command_that_can_actually_work(tmp_path):
 
     diagnosis = CrashRecoveryEngine.inspect_task(repo, "T-RECOMMEND")
     assert diagnosis["repo_lock_state"] == "AMBIGUOUS"
-    assert "ai unlock T-RECOMMEND" in diagnosis["recommendation"]
+    assert "howlplane unlock T-RECOMMEND" in diagnosis["recommendation"]
 
 
 def test_a_second_process_cannot_take_an_actively_held_task(tmp_path):

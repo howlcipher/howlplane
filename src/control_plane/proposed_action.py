@@ -96,6 +96,11 @@ SELF_MODIFICATION_PATHS: Tuple[str, ...] = (
     "src/control_plane/authority_envelope.py",
     "src/control_plane/human_boundary.py",
     "src/control_plane/executor.py",
+    "src/control_plane/reviewers.py",
+    "src/control_plane/review_runner.py",
+    "src/control_plane/reconciliation.py",
+    "src/control_plane/verification.py",
+    "src/control_plane/hygiene_policy.py",
 )
 
 # Whole subtrees under the same rule. The exact-path tuple above is matched

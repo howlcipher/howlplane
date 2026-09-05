@@ -486,9 +486,65 @@ def build_parser() -> argparse.ArgumentParser:
     p_can.add_argument("--ledger-file", help="Ledger file path")
     p_can.add_argument("--json", action="store_true", help="Output JSON result")
 
+    register_factory_subparsers(subparsers)
     register_synthesis_subparsers(subparsers)
 
     return parser
+
+
+def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = None) -> None:
+    kwargs = {"parents": parents} if parents else {}
+    p_factory = subparsers.add_parser(
+        "factory", help="Persistent factory supervisor", **kwargs
+    )
+    factory_sub = p_factory.add_subparsers(dest="factory_action", required=True)
+
+    p_run_once = factory_sub.add_parser(
+        "run-once", help="Execute a single factory supervisor tick", **kwargs
+    )
+    p_run_once.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
+    p_run_once.add_argument("--target-repo", default=".", help="Repository to discover work from")
+    p_run_once.add_argument(
+        "--authority-profile",
+        choices=["strict", "overnight-safe", "howlframe-overnight"],
+        default=None,
+        help="Bind delegated campaign authority for autonomous git/GitHub actions. "
+             "Without this, authority-required work is parked rather than executed.",
+    )
+    p_run_once.add_argument("--json", action="store_true", help="Output JSON result")
+
+    p_run = factory_sub.add_parser(
+        "run", help="Run the factory supervisor loop until stopped", **kwargs
+    )
+    p_run.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
+    p_run.add_argument("--target-repo", default=".", help="Repository to discover work from")
+    p_run.add_argument("--until", type=float, help="Run for at most N seconds")
+    p_run.add_argument(
+        "--authority-profile",
+        choices=["strict", "overnight-safe", "howlframe-overnight"],
+        default=None,
+        help="Bind delegated campaign authority for autonomous git/GitHub actions. "
+             "Without this, authority-required work is parked rather than executed.",
+    )
+    p_run.add_argument("--json", action="store_true", help="Output JSON result")
+
+    p_status = factory_sub.add_parser(
+        "status", help="Show factory supervisor state", **kwargs
+    )
+    p_status.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
+    p_status.add_argument("--json", action="store_true", help="Output JSON result")
+
+    p_stop = factory_sub.add_parser(
+        "stop", help="Stop the factory supervisor loop", **kwargs
+    )
+    p_stop.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
+    p_stop.add_argument("--json", action="store_true", help="Output JSON result")
+
+    p_resume = factory_sub.add_parser(
+        "resume", help="Resume a stopped factory supervisor", **kwargs
+    )
+    p_resume.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
+    p_resume.add_argument("--json", action="store_true", help="Output JSON result")
 
 
 def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] = None) -> None:
@@ -582,10 +638,20 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
     p_marathon.add_argument("--json", action="store_true", help="Output JSON result")
 
     # authority (read-only authority profile inspection, #59 Phase 26)
+    #
+    # The choices come from the canonical registry rather than a second
+    # hard-coded list. The duplicate went stale the moment a third profile was
+    # added: `howlframe-overnight` was a valid marathon authority profile that
+    # could not be inspected, which is the wrong way round -- inspection is
+    # read-only and is exactly what an operator does *before* granting it.
+    # This does not widen any grant; `--authority-profile` choices on dogfood
+    # and acceptance are deliberately left alone.
+    from src.control_plane.authority_profile import CANONICAL_PROFILES
+
     p_authority = subparsers.add_parser("authority", help="Inspect delegated authority profiles (read-only)", **kwargs)
     authority_sub = p_authority.add_subparsers(dest="authority_action", required=True)
     p_authority_show = authority_sub.add_parser("show", help="Show a canonical authority profile's exact permissions")
-    p_authority_show.add_argument("profile_id", choices=["strict", "overnight-safe"])
+    p_authority_show.add_argument("profile_id", choices=sorted(CANONICAL_PROFILES))
     p_authority_show.add_argument("--json", action="store_true", help="Output JSON result")
 
     # local (local Ollama model setup/health check, #58 Phase 3)
@@ -598,6 +664,7 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
 def cmd_marathon(args: argparse.Namespace) -> int:
     """Works a bounded sequence of the target repository's ranked backlog."""
     import json as _json
+    import sys as _sys
     from src.control_plane.backlog_source import BacklogSource
     from src.control_plane.synthesis import MarathonDogfoodEngine
     from src.control_plane.synthesis.provider_pool import ProviderPoolManager
@@ -654,6 +721,22 @@ def cmd_marathon(args: argparse.Namespace) -> int:
         roi_floor=getattr(args, "roi_floor", 0.5),
     )
 
+    if report.get("refused"):
+        # Fail-closed preflight: the campaign never started. Reported on stderr
+        # with a non-zero exit so an unattended wrapper cannot read it as a run
+        # that simply found nothing to do.
+        if getattr(args, "json", False):
+            print(_json.dumps(report, indent=2))
+        else:
+            print("=" * 60, file=_sys.stderr)
+            print("HOWLPLANE — MARATHON REFUSED", file=_sys.stderr)
+            print("=" * 60, file=_sys.stderr)
+            print(report["refusal_reason"], file=_sys.stderr)
+            print("\nWorking tree changes found:", file=_sys.stderr)
+            for path in report["dirty_files"]:
+                print(f"  {path}", file=_sys.stderr)
+        return 2
+
     if getattr(args, "json", False):
         print(_json.dumps(report, indent=2))
     else:
@@ -699,7 +782,7 @@ def _handle_decision(args: argparse.Namespace, decision: str) -> int:
         if decision == "approved":
             print("")
             print("Next Action:")
-            print(f"  ai resume {record.task_id}")
+            print(f"  howlplane resume {record.task_id}")
         else:
             print("Terminal state:     FAILED (Rejected)")
         print("=" * 60)
@@ -920,10 +1003,276 @@ def cmd_unlock(args: argparse.Namespace) -> int:
 
     if reclaimed:
         if not as_json:
-            print(f"You can now run: ai resume {args.task_id}")
+            print(f"You can now run: howlplane resume {args.task_id}")
         return 0
 
     return 1 if refusals else 0
+
+
+def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
+    from datetime import datetime, timezone
+    from pathlib import Path
+    import getpass
+    import socket
+    import time
+
+    from src.control_plane.authority_envelope import (
+        ENVELOPE_FILENAME,
+        create_envelope,
+        load_envelope,
+        save_envelope,
+    )
+    from src.control_plane.authority_profile import get_profile
+    from src.control_plane.backlog_source import BacklogSource
+    from src.control_plane.factory.dispatcher import MarathonDispatcherAdapter
+    from src.control_plane.factory.repo_proposal import CapabilityStore, RepoProposalStore
+    from src.control_plane.factory.supervisor import FactorySupervisor
+    from src.control_plane.factory.supervisor_state import SupervisorStateStore
+    from src.control_plane.factory.work_item import WorkItemStore
+    from src.control_plane.git_integration import detect_repo_slug
+    from src.control_plane.synthesis import MarathonDogfoodEngine
+    from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+
+    state_dir = Path(args.state_dir).resolve()
+    state_store = SupervisorStateStore(state_dir / "supervisor")
+    work_item_store = WorkItemStore(state_dir / "work_items")
+    repo_proposal_store = RepoProposalStore(state_dir / "repo_proposals")
+    capability_store = CapabilityStore(state_dir / "capabilities")
+    target_repo = Path(getattr(args, "target_repo", None) or ".").resolve()
+
+    def _backlog_rank(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    def _discovery():
+        try:
+            selection = BacklogSource(target_repo).select()
+        except Exception:
+            return []
+        repo = detect_repo_slug(target_repo) or str(target_repo)
+        return [
+            {
+                "origin": "existing_backlog",
+                "repository": repo,
+                "title": item.title,
+                "identity_keys": [item.source_file, item.item_id],
+                "evidence_refs": [f"{item.source_file}#{item.item_id}"],
+                "evidence_fingerprints": [f"backlog:{item.source_file}:{item.item_id}"],
+                "source_file_rank": 0 if item.source_file == "bugs.md" else 1,
+                "source_rank": _backlog_rank(item.item_id),
+                "kind": item.kind,
+            }
+            for item in selection.eligible
+        ]
+
+    provider_pool = ProviderPoolManager.from_config(probe_on_start=False)
+
+    # Bind operator-selected delegated authority once.  Without an authority
+    # profile the engine truthfully parks anything requiring authority rather
+    # than silently renewing or expanding its own grant per tick.
+    authority_profile_id = getattr(args, "authority_profile", None)
+    envelope = None
+    campaign_dir = state_dir / "campaign"
+    campaign_dir.mkdir(parents=True, exist_ok=True)
+    envelope_path = campaign_dir / ENVELOPE_FILENAME
+    if envelope_path.is_file():
+        envelope = load_envelope(campaign_dir)
+        if authority_profile_id and envelope.profile_id != authority_profile_id:
+            raise ValueError(
+                "Requested authority profile does not match the saved "
+                f"envelope: {authority_profile_id!r} != {envelope.profile_id!r}"
+            )
+    elif authority_profile_id:
+        operator_origin = f"cli:{getpass.getuser()}@{socket.gethostname()}"
+        envelope = create_envelope(
+            get_profile(authority_profile_id), "FACTORY-CAMPAIGN", operator_origin
+        )
+        save_envelope(envelope, campaign_dir)
+
+    engine = MarathonDogfoodEngine(
+        provider_pool=provider_pool,
+        target_repo=target_repo,
+        repo_slug=detect_repo_slug(target_repo) or "",
+    )
+    engine.authority_envelope = envelope
+    if envelope is not None:
+        engine.git_executor = engine._git_executor_factory(
+            envelope, state_store.load().merges_count
+        )
+
+    dispatcher = MarathonDispatcherAdapter(engine_factory=lambda: engine)
+
+    return FactorySupervisor(
+        state_store=state_store,
+        work_item_store=work_item_store,
+        repo_proposal_store=repo_proposal_store,
+        capability_store=capability_store,
+        dispatcher=dispatcher,
+        discovery=_discovery,
+        provider_pool=provider_pool,
+        policy=None,
+        clock=lambda: datetime.now(timezone.utc),
+        sleep=sleep or time.sleep,
+        state_dir=state_dir,
+        lock=None,
+    )
+
+
+def cmd_factory_run_once(args: argparse.Namespace) -> int:
+    supervisor = _build_factory_supervisor(args)
+    result = supervisor.run_once()
+    status = supervisor.status()
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps({"tick": result.__dict__, "status": status}, indent=2, default=str))
+    else:
+        print(f"State: {status['state']}")
+        print(f"Next wake: {status['next_wake_at']}")
+        print(f"Reason: {result.reason}")
+        print(f"Observations consumed: {status['observations_consumed']}")
+        if result.selected_work_item_id:
+            print(f"Selected: {result.selected_work_item_id}")
+    return 0
+
+
+def cmd_factory_run(args: argparse.Namespace) -> int:
+    from datetime import datetime, timedelta, timezone
+    supervisor = _build_factory_supervisor(args)
+    until = None
+    if getattr(args, "until", None):
+        until = datetime.now(timezone.utc) + timedelta(seconds=args.until)
+    supervisor.run(until=until)
+    status = supervisor.status()
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps({"status": status}, indent=2, default=str))
+    else:
+        print(f"Factory stopped. State: {status['state']}")
+        print(f"Stopped reason: {status['stopped_reason']}")
+        print(f"Dispatches: {status['dispatch_history_count']}")
+        print(f"Completed: {len(status['recent_completed'])}")
+        print(f"Failed: {len(status['recent_failed'])}")
+    return 0
+
+
+def _factory_state_store(args: argparse.Namespace):
+    from pathlib import Path
+    from src.control_plane.factory.supervisor_state import SupervisorStateStore
+    return SupervisorStateStore(Path(args.state_dir).resolve() / "supervisor")
+
+
+def cmd_factory_status(args: argparse.Namespace) -> int:
+    from pathlib import Path
+    from src.control_plane.factory.repo_proposal import RepoProposalStore
+    from src.control_plane.factory.work_item import WorkItemState, WorkItemStore
+    store = _factory_state_store(args)
+    record = store.load()
+    work_store = WorkItemStore(Path(args.state_dir).resolve() / "work_items")
+    proposal_store = RepoProposalStore(Path(args.state_dir).resolve() / "repo_proposals")
+    parked = [
+        {"work_item_id": i.work_item_id, "state": i.state, "blocker": i.admission_blocked_reason}
+        for i in work_store.list_all()
+        if i.state in (WorkItemState.AWAITING_OWNER, WorkItemState.BLOCKED, WorkItemState.DEFERRED)
+    ]
+    proposals = [
+        {"proposal_id": p.proposal_id, "repository_name": p.repository_name, "disposition": p.disposition}
+        for p in proposal_store.list_awaiting_authority()
+    ]
+    status = {
+        "supervisor_id": record.supervisor_id,
+        "state": record.state,
+        "created_at": record.created_at,
+        "last_tick_at": record.last_tick_at,
+        "last_successful_tick_at": record.last_successful_tick_at,
+        "next_wake_at": record.next_wake_at,
+        "current_work_item_id": record.current_work_item_id,
+        "current_task_id": record.current_task_id,
+        "current_dispatch_id": record.current_dispatch_id,
+        "observations_consumed": record.observations_consumed,
+        "failure_count": record.failure_count,
+        "last_error": record.last_error,
+        "stopped_reason": record.stopped_reason,
+        "provider_wake_conditions": record.provider_wake_conditions,
+        "recent_completed": record.recent_completed,
+        "recent_failed": record.recent_failed,
+        "dispatch_history_count": len(record.dispatch_history),
+        "transition_history_count": len(record.transition_history),
+        "parked_items": parked,
+        "proposals_awaiting_authority": proposals,
+    }
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(status, indent=2, default=str))
+    else:
+        print(f"State: {status['state']}")
+        print(f"Created: {status['created_at']}")
+        print(f"Last tick: {status['last_tick_at']}")
+        print(f"Last successful tick: {status['last_successful_tick_at']}")
+        print(f"Next wake: {status['next_wake_at']}")
+        print(f"Current item: {status['current_work_item_id']}")
+        print(f"Current task: {status['current_task_id']}")
+        print(f"Current dispatch: {status['current_dispatch_id']}")
+        print(f"Observations: {status['observations_consumed']}")
+        print(f"Failures: {status['failure_count']}")
+        print(f"Last error: {status['last_error']}")
+        print(f"Provider wake: {status['provider_wake_conditions']}")
+        print(f"Recent completed: {len(status['recent_completed'])}")
+        print(f"Recent failed: {len(status['recent_failed'])}")
+        if parked:
+            print("Parked items:")
+            for p in parked:
+                print(f"  - {p['work_item_id']}: {p['state']} ({p['blocker'] or 'no blocker'})")
+        if proposals:
+            print("Proposals awaiting authority:")
+            for p in proposals:
+                print(f"  - {p['proposal_id']}: {p['repository_name']} ({p['disposition']})")
+    return 0
+
+
+def cmd_factory_stop(args: argparse.Namespace) -> int:
+    from src.control_plane.factory.supervisor_state import SupervisorState
+    store = _factory_state_store(args)
+    record = store.load()
+    if record.state == SupervisorState.STOPPED:
+        print("Already stopped.")
+        return 0
+    record.transition_to(SupervisorState.STOPPED, reason="operator_stop")
+    record.stopped_reason = "operator_stop"
+    store.save(record)
+    print("Factory supervisor stopped.")
+    return 0
+
+
+def cmd_factory_resume(args: argparse.Namespace) -> int:
+    from src.control_plane.factory.supervisor_state import SupervisorState
+    store = _factory_state_store(args)
+    record = store.load()
+    if record.state != SupervisorState.STOPPED:
+        print(f"Factory supervisor is not stopped (state={record.state}).")
+        return 1
+    record.transition_to(SupervisorState.IDLE, reason="operator_resume")
+    record.stopped_reason = None
+    store.save(record)
+    print("Factory supervisor resumed.")
+    return 0
+
+
+def cmd_factory(args: argparse.Namespace) -> int:
+    action = getattr(args, "factory_action", None)
+    if action == "run-once":
+        return cmd_factory_run_once(args)
+    if action == "run":
+        return cmd_factory_run(args)
+    if action == "status":
+        return cmd_factory_status(args)
+    if action == "stop":
+        return cmd_factory_stop(args)
+    if action == "resume":
+        return cmd_factory_resume(args)
+    print("Unknown factory action.")
+    return 1
 
 
 def cmd_create(args: argparse.Namespace) -> int:
@@ -1174,7 +1523,8 @@ def cmd_authority(args: argparse.Namespace) -> int:
     from src.control_plane.authority_profile import get_profile
 
     if getattr(args, "authority_action", None) != "show":
-        print("Usage: ai authority show <strict|overnight-safe>")
+        from src.control_plane.authority_profile import CANONICAL_PROFILES
+        print(f"Usage: howlplane authority show <{'|'.join(sorted(CANONICAL_PROFILES))}>")
         return 1
 
     profile = get_profile(args.profile_id)
@@ -1308,6 +1658,38 @@ def _print_local_report(args: argparse.Namespace, report: Dict[str, Any]) -> Non
         print(f"\nResult: {report.get('result')}")
 
 
+# Every subcommand build_parser() registers must appear here; see the same note
+# on launcher.ACTIONS. `acceptance` was registered without a handler, so
+# `howlplane acceptance overnight-integration ...` printed top-level help and
+# exited 1. tests/test_cli_dispatch_completeness.py fails if they diverge.
+HANDLERS = {
+    "init-task": cmd_init_task,
+    "route-task": cmd_route_task,
+    "briefs": cmd_briefs,
+    "prepare-run": cmd_prepare_run,
+    "reconcile": cmd_reconcile,
+    "verify": cmd_verify,
+    "record": cmd_record,
+    "metrics": cmd_metrics,
+    "report": cmd_metrics,
+    "check-boundary": cmd_boundary,
+    "doctor": cmd_doctor,
+    "howlframe-audit": cmd_howlframe_audit,
+    "approve": cmd_approve,
+    "reject": cmd_reject,
+    "resume": cmd_resume,
+    "cancel": cmd_cancel,
+    "create": cmd_create,
+    "run": cmd_run_product,
+    "dogfood": cmd_dogfood,
+    "acceptance": cmd_acceptance,
+    "marathon": cmd_marathon,
+    "authority": cmd_authority,
+    "local": cmd_local,
+    "factory": cmd_factory,
+}
+
+
 def main(args: Optional[List[str]] = None) -> int:
     if args is None:
         args = sys.argv[1:]
@@ -1318,32 +1700,7 @@ def main(args: Optional[List[str]] = None) -> int:
         parser.print_help()
         return 1
 
-    handlers = {
-        "init-task": cmd_init_task,
-        "route-task": cmd_route_task,
-        "briefs": cmd_briefs,
-        "prepare-run": cmd_prepare_run,
-        "reconcile": cmd_reconcile,
-        "verify": cmd_verify,
-        "record": cmd_record,
-        "metrics": cmd_metrics,
-        "report": cmd_metrics,
-        "check-boundary": cmd_boundary,
-        "doctor": cmd_doctor,
-        "howlframe-audit": cmd_howlframe_audit,
-        "approve": cmd_approve,
-        "reject": cmd_reject,
-        "resume": cmd_resume,
-        "cancel": cmd_cancel,
-        "create": cmd_create,
-        "run": cmd_run_product,
-        "dogfood": cmd_dogfood,
-        "marathon": cmd_marathon,
-        "authority": cmd_authority,
-        "local": cmd_local,
-    }
-
-    handler = handlers.get(parsed_args.subcommand)
+    handler = HANDLERS.get(parsed_args.subcommand)
     if not handler:
         parser.print_help()
         return 1

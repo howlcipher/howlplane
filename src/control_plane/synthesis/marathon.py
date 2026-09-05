@@ -38,7 +38,7 @@ from src.control_plane.decision_queue import (
     compute_blocks_other_work,
 )
 from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
-from src.control_plane.git_baseline import capture_baseline, capture_delta
+from src.control_plane.git_baseline import capture_baseline, capture_delta, describe_working_tree
 from src.control_plane.git_integration import GitIntegrationExecutor, detect_repo_slug, run_git
 from src.control_plane.human_boundary import HumanBoundaryGate
 from src.control_plane.orchestrator import (
@@ -200,6 +200,15 @@ class MarathonSummaryReport(DataClassSerializationMixin):
         return state.render_markdown()
 
 
+# Stop reason for a campaign that never started because the target working tree
+# carried work the campaign does not own.
+DIRTY_TARGET_STOP_REASON = "dirty_target_repository"
+
+# Mirrors the CLI's --campaign-dir default, so a campaign root left at the
+# default inside a target repository is recognised as control-plane state.
+DEFAULT_CAMPAIGN_DIR_NAME = ".dogfood_runs"
+
+
 class MarathonDogfoodEngine:
     """
     Drives continuous, evidence-backed dogfooding loops across product benchmarks.
@@ -301,14 +310,21 @@ class MarathonDogfoodEngine:
             return None
 
         if authority_profile_id:
-            # Explicit operator reauthorization on resume (#59 Phase 15).
-            # This is the one legitimate, explicit-operator-driven overwrite
-            # this module anticipates -- save_envelope() otherwise refuses
-            # to overwrite an existing envelope file.
+            if existing is not None and existing.profile_id != authority_profile_id:
+                raise ValueError(
+                    "Requested authority profile does not match the saved "
+                    f"envelope: {authority_profile_id!r} != {existing.profile_id!r}"
+                )
+            if existing is not None and not is_expired(existing):
+                return existing
+            # Reauthorization may renew the same profile, but cannot silently
+            # substitute a different authority policy for the saved campaign.
             envelope_path = state_dir / ENVELOPE_FILENAME
             if envelope_path.is_file():
                 envelope_path.unlink()
-            envelope = create_envelope(get_profile(authority_profile_id), campaign_id, operator_origin)
+            envelope = create_envelope(
+                get_profile(authority_profile_id), campaign_id, operator_origin
+            )
             save_envelope(envelope, state_dir)
             return envelope
 
@@ -800,6 +816,70 @@ class MarathonDogfoodEngine:
             "state_dir": str(state_dir),
         }
 
+    def _refuse_if_target_is_dirty(
+        self,
+        campaign_id: str,
+        state_dir: Path,
+        authority_profile_id: str,
+        started: float,
+    ) -> Optional[Dict[str, Any]]:
+        """Refuses to begin a new campaign against a working tree someone else owns.
+
+        A marathon implements directly in the target checkout: the orchestrator
+        edits files in place, and `capture_baseline` then distinguishes what the
+        task changed from what was already there. That is the right design for
+        attribution, and the wrong thing to start on top of unresolved work --
+        an unattended run would interleave its own changes with a person's,
+        commit the result, and open a pull request nobody can cleanly separate.
+        The HowlFrame checkout is the live example: four modified files owned by
+        a task that is AWAITING_HUMAN.
+
+        This runs before anything: before an authority envelope is bound, before
+        a provider is invoked, before a task is selected, before a branch,
+        commit, push, or pull request, and before any directory is created --
+        including the campaign's own state directory, so a refusal leaves no
+        trace to clean up.
+
+        Nothing is cleaned, stashed, reset, or adopted. Ownership of unexplained
+        work is a human's call, and this only reports what it found.
+        """
+        # A campaign directory configured to live inside the target repository
+        # is this engine's own state, not a change to refuse over.
+        internal_prefixes = [DEFAULT_CAMPAIGN_DIR_NAME]
+        try:
+            internal_prefixes.append(str(self.campaign_base_dir.relative_to(self.target_repo)))
+        except ValueError:
+            pass
+
+        tree = describe_working_tree(self.target_repo, extra_internal_prefixes=internal_prefixes)
+        if tree.is_clean:
+            return None
+
+        return {
+            "campaign_id": campaign_id,
+            "state_dir": str(state_dir),
+            "target_repo": str(self.target_repo),
+            "repo_slug": self.repo_slug,
+            "authority_profile": authority_profile_id,
+            "tasks_attempted": [],
+            "tasks_completed": [],
+            "tasks_failed": [],
+            "tasks_parked": [],
+            "git_records": [],
+            "stop_reason": DIRTY_TARGET_STOP_REASON,
+            "refused": True,
+            "duration_seconds": round(time.time() - started, 3),
+            "dirty_files": tree.all_paths(),
+            "dirty_summary": tree.describe(),
+            "refusal_reason": (
+                f"Refusing to start a new marathon: {self.target_repo} contains "
+                f"uncommitted changes ({tree.describe()}). Resolve or preserve "
+                f"the existing work before starting a campaign, or pass --resume "
+                f"to continue the campaign that owns it. Nothing was cleaned, "
+                f"stashed, or reset, no provider was invoked, and nothing was written."
+            ),
+        }
+
     def run_backlog_marathon(
         self,
         authority_profile_id: str,
@@ -842,14 +922,26 @@ class MarathonDogfoodEngine:
 
         started = time.time()
         deadline = started + max_runtime_hours * 3600.0
-        self.base_output_dir.mkdir(parents=True, exist_ok=True)
-        self.campaign_base_dir.mkdir(parents=True, exist_ok=True)
 
         campaign_id = resume_campaign_id or self._generate_campaign_id()
         state_dir = self.campaign_base_dir / campaign_id
+        # The same condition that decides whether campaign state is loaded
+        # below, evaluated early because the preflight applies only to a new
+        # campaign. A resumed campaign's durable state legitimately owns an
+        # unfinished worktree; refusing that would make an interrupted task
+        # impossible to finish.
+        is_resume = bool(resume_campaign_id and (state_dir / "campaign_state.json").is_file())
+
+        if not is_resume:
+            refusal = self._refuse_if_target_is_dirty(campaign_id, state_dir, authority_profile_id, started)
+            if refusal is not None:
+                return refusal
+
+        self.base_output_dir.mkdir(parents=True, exist_ok=True)
+        self.campaign_base_dir.mkdir(parents=True, exist_ok=True)
         state_dir.mkdir(parents=True, exist_ok=True)
 
-        if resume_campaign_id and (state_dir / "campaign_state.json").is_file():
+        if is_resume:
             campaign_state = DurableCampaignState.load(state_dir)
             # A resumed run re-probes providers whose cooldown has elapsed
             # rather than inheriting a stale exhausted view of the pool.
@@ -1252,6 +1344,22 @@ class MarathonDogfoodEngine:
         if verdict != "ALLOW":
             git_rec.failure_reason = f"{action_type}: {reason or verdict}"
             return None
+        if action_type in {"push_task_branch", "create_pull_request", "merge_pull_request"}:
+            status, receipt, reconciliation_reason = self.git_executor.query_execution_status(
+                decision_id or "", self.target_repo, run_dir, action, task_id
+            )
+            if status == "already_executed":
+                if receipt is not None:
+                    return receipt.native_receipt
+                git_rec.failure_reason = reconciliation_reason
+                return {}
+            if status == "reconciliation_conflict":
+                # An unexpected remote task branch is neither a push success
+                # nor an engineering failure. Preserve it for a human rather
+                # than retrying, force-pushing, or overwriting remote work.
+                git_rec.integration_mode = "parked"
+                git_rec.failure_reason = reconciliation_reason
+                return None
         result = self.git_executor.execute(decision_id, self.target_repo, run_dir, action, task_id)
         if result.status != "success":
             git_rec.failure_reason = f"{action_type}: {result.error_message}"
@@ -1412,6 +1520,34 @@ class MarathonDogfoodEngine:
             return "AUTHORITY_BLOCKED", FAILURE_CLASS_AUTHORITY_BLOCKED
         return "ENGINEERING_FAILURE", FAILURE_CLASS_ENGINEERING
 
+    def execute_factory_work_item(
+        self,
+        work_item: Any,
+        risk_level: str = "medium",
+        task_class: str = "feature",
+        files_changed: Optional[List[str]] = None,
+        dispatch_id: Optional[str] = None,
+    ) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Public adapter to run a single factory WorkItem through the governed engineering lifecycle.
+
+        The factory supervisor selects portfolio-level work; this method hands
+        the selected item to the same bounded lifecycle used by backlog and
+        marathon tasks, instead of duplicating it.
+        """
+        objective = f"{work_item.title}\n\n{work_item.description}".strip()
+        return self._execute_governed_engineering_improvement(
+            task_id=work_item.work_item_id,
+            benchmark_key=work_item.work_item_id,
+            gap_type="factory_work_item",
+            gap_desc=objective,
+            objective_override=objective,
+            risk_level=risk_level,
+            task_class=task_class,
+            files_changed=files_changed,
+            repository_override=work_item.repository,
+            dispatch_id=dispatch_id,
+        )
+
     def _execute_governed_engineering_improvement(
         self,
         task_id: str,
@@ -1427,6 +1563,9 @@ class MarathonDogfoodEngine:
         objective_override: Optional[str] = None,
         task_class: str = "bug_fix",
         commit_message_override: Optional[str] = None,
+        files_changed: Optional[List[str]] = None,
+        repository_override: Optional[str] = None,
+        dispatch_id: Optional[str] = None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """
         Executes a bounded engineering task through the REAL governed
@@ -1458,7 +1597,21 @@ class MarathonDogfoodEngine:
         # It was hardcoded to "howlplane", which is correct for self-improvement
         # dogfooding and wrong for every other target -- including the HowlFrame
         # backlog marathon, whose whole purpose is to work another repository.
-        repository = self.target_repo.name
+        repository = repository_override or self.target_repo.name
+        target_identities = {
+            self.target_repo.name,
+            str(self.target_repo),
+            self.repo_slug,
+        }
+        if repository_override and repository_override not in target_identities:
+            return False, {
+                "task_id": task_id,
+                "target_repo": repository_override,
+                "integration_mode": "parked",
+                "failure_reason": "TARGET_REPOSITORY_MISMATCH",
+                "failure_class": FAILURE_CLASS_AUTHORITY_BLOCKED,
+                "failure_code": "target_repository_mismatch",
+            }
         gap_probe = TaskSpec(
             task_id=task_id, repository=repository,
             objective=objective, task_class=task_class, risk_level=risk_level,
@@ -1471,7 +1624,13 @@ class MarathonDogfoodEngine:
             task=gap_probe,
         )
         if not candidates:
-            return False, None
+            return False, {
+                "task_id": task_id,
+                "target_repo": repository,
+                "failure_reason": "NO_ELIGIBLE_PROVIDER",
+                "failure_class": FAILURE_CLASS_PROVIDER_UNAVAILABLE,
+                "failure_code": "no_eligible_provider",
+            }
 
         provider = candidates[0]
         gap_probe.preferred_agent = provider
@@ -1490,7 +1649,8 @@ class MarathonDogfoodEngine:
         ]
 
         boundary = HumanBoundaryGate.evaluate_with_delegated_authority(
-            gap_probe, planned_actions, self.authority_envelope, self.target_repo, repo_slug=self.repo_slug,
+            gap_probe, planned_actions, self.authority_envelope, self.target_repo,
+            repo_slug=self.repo_slug, files_changed=files_changed,
         )
         if boundary.requires_human_approval:
             packet = boundary.decision_packet
@@ -1513,9 +1673,30 @@ class MarathonDogfoodEngine:
             }
 
         if self.git_executor is None:
-            git_rec.failure_reason = "NO_GIT_EXECUTOR_CONFIGURED"
-            self._persist_git_record(git_rec, campaign_state, state_dir)
-            return False, git_rec.to_dict()
+            # No --authority-profile was bound for this campaign, so no
+            # GitIntegrationExecutor was ever constructed (see cli.py's
+            # campaign setup, which only builds one when an envelope is
+            # present). This is a human-authority condition, not an
+            # engineering failure: without delegated authority there is no
+            # basis to create a branch/push/PR/merge autonomously. Park it
+            # exactly like the AWAITING_HUMAN branch above rather than
+            # returning a bare failure the supervisor would count against
+            # failure_count/backoff (#B5).
+            parked = ParkedTaskRecord(
+                task_id=task_id,
+                objective=objective,
+                boundary_type="no_authority_envelope",
+                requested_action="governed_engineering_improvement",
+                repository=self.repo_slug or repository,
+                evidence=["No --authority-profile was bound for this campaign, so no delegated authority exists for git/GitHub actions."],
+                verification_state="not_reached",
+                why_delegated_authority_did_not_apply="no_authority_envelope",
+            )
+            git_rec.failure_reason = "AWAITING_HUMAN"
+            return False, {
+                "task_id": task_id, "target_repo": repository, "integration_mode": "parked",
+                "provider": provider, "parked_record": parked.to_dict(),
+            }
 
         # --------------------------------------------------------------------
         # Bounded provider failover (#59.1 Phase 2).
@@ -1551,6 +1732,20 @@ class MarathonDogfoodEngine:
             gap_probe.preferred_agent = provider
             gap_probe.metadata["provider_attempt_index"] = attempt_index
             gap_probe.metadata["failover_from_resource_id"] = previous_provider
+            # One trajectory per (dispatch, attempt). Without this the
+            # trajectory identity falls back to the run directory, which the
+            # factory reuses for every attempt at a work item
+            # (.task_runs/<work_item_id>), so a retry derives the id the first
+            # attempt already wrote. The trajectory store is deliberately
+            # immutable -- identical content is an idempotent no-op, differing
+            # content raises -- so the retry died with "Artifact 'traj-...'
+            # already exists with different content_digest" before it could
+            # reach a provider at all. dispatch_id is unique per dispatch, so
+            # attempts stay distinguishable across ticks and across restarts.
+            if dispatch_id:
+                gap_probe.metadata["trajectory_event_id"] = (
+                    f"{dispatch_id}:{attempt_index}"
+                )
             git_rec.provider = provider
             attempt_started = time.time()
             attempt_baseline = None
@@ -1629,8 +1824,22 @@ class MarathonDogfoodEngine:
                 # Engineering failure or authority block: do not fail over.
                 git_rec.failure_reason = f"orchestrator_final_state:{result.final_state}"
                 self._persist_git_record(git_rec, campaign_state, state_dir)
-                return False, git_rec.to_dict()
+                record = git_rec.to_dict()
+                record["failure_class"] = result.failure_class or failure_class
+                record["failure_code"] = "orchestrator_terminal_state"
+                return False, record
 
+            # `gap_probe.preferred_agent` holds this loop's *current* provider,
+            # not an operator override: gap_probe is constructed above without
+            # one, and the pin exists only to steer the orchestrator at each
+            # attempt. select_resource reads a task-carried preference as an
+            # explicit override and empties the eligible set when that resource
+            # is no longer selectable (provider_pool.py, `if selected is None:
+            # candidates = []`), so asking the pool while the just-failed
+            # provider is still pinned reports that nothing is eligible while
+            # healthy providers are standing by. Ask the unpinned question; the
+            # top of the loop re-pins whichever provider is chosen next.
+            gap_probe.preferred_agent = None
             next_candidates = [
                 c for c in self.provider_pool.select_candidates(
                     task_category="code_heavy", avoid_provider=avoid_provider, task=gap_probe,
@@ -1642,9 +1851,21 @@ class MarathonDogfoodEngine:
                     f"NO_ELIGIBLE_PROVIDER_REMAINING: tried {', '.join(sorted(attempted))}"
                 )
                 self._persist_git_record(git_rec, campaign_state, state_dir)
-                return False, git_rec.to_dict()
+                record = git_rec.to_dict()
+                record["failure_class"] = FAILURE_CLASS_PROVIDER_UNAVAILABLE
+                record["failure_code"] = "no_eligible_provider_remaining"
+                return False, record
             previous_provider = provider
             provider = next_candidates[0]
+            # Every hop reuses this one TaskSpec, and the attempt that just
+            # failed left it in `failed`. The lifecycle allows
+            # failed -> planned precisely so work can be re-attempted, and
+            # refuses failed -> implementing, so without this the next
+            # orchestrator.run dies with "Cannot transition task ... from
+            # 'failed' to 'implementing'" -- the failover selects a healthy
+            # provider and then cannot hand it the task.
+            if gap_probe.current_state == "failed":
+                gap_probe.transition_to("planned", reason="provider_failover_retry")
 
         delta = result.final_delta
         if delta is None or delta.is_empty:
@@ -1654,6 +1875,48 @@ class MarathonDogfoodEngine:
 
         run_dir = Path(result.run_dir) if result.run_dir else (self.target_repo / ".task_runs" / task_id)
         paths = list(delta.files_added) + list(delta.files_modified) + list(delta.files_deleted)
+
+        # The pre-execution estimate is not an authority grant for unknown
+        # output. Evaluate the observed final delta before any git operation.
+        final_boundary = HumanBoundaryGate.evaluate_with_delegated_authority(
+            gap_probe,
+            planned_actions,
+            self.authority_envelope,
+            self.target_repo,
+            repo_slug=self.repo_slug,
+            files_changed=paths,
+        )
+        if final_boundary.requires_human_approval:
+            packet = final_boundary.decision_packet
+            git_rec.integration_mode = "parked"
+            git_rec.failure_reason = "AWAITING_HUMAN_FINAL_DELTA"
+            parked = ParkedTaskRecord(
+                task_id=task_id,
+                objective=objective,
+                boundary_type=(
+                    final_boundary.triggered_boundaries[0]
+                    if final_boundary.triggered_boundaries
+                    else "unknown"
+                ),
+                requested_action="integrate_observed_final_delta",
+                repository=repository,
+                evidence=list(packet.evidence) if packet else paths,
+                risks=list(packet.risks) if packet else [],
+                verification_state="complete",
+                why_delegated_authority_did_not_apply="; ".join(
+                    final_boundary.triggered_boundaries
+                ),
+                decision_packet=packet.to_dict() if packet else {},
+            )
+            record = git_rec.to_dict()
+            record.update({
+                "integration_mode": "parked",
+                "parked_record": parked.to_dict(),
+                "failure_class": FAILURE_CLASS_AUTHORITY_BLOCKED,
+                "failure_code": "final_delta_authority_boundary",
+            })
+            self._persist_git_record(git_rec, campaign_state, state_dir)
+            return False, record
 
         baseline_sha: Optional[str] = None
         baseline_file = run_dir / "baseline.json"
@@ -1695,7 +1958,7 @@ class MarathonDogfoodEngine:
             return False, git_rec.to_dict()
 
         if self._run_step_or_bail(
-            "push_task_branch", {"branch": git_rec.branch},
+            "push_task_branch", {"branch": git_rec.branch, "expected_commit": git_rec.commit_sha},
             task_id, run_dir, git_rec, campaign_state, state_dir, _apply_push,
         ) is None:
             return False, git_rec.to_dict()
@@ -1720,6 +1983,8 @@ class MarathonDogfoodEngine:
         git_rec.required_checks = ci_obs.checks
         git_rec.required_checks_observed = ci_obs.all_required_observed
         git_rec.required_checks_green = ci_obs.all_required_green
+        git_rec.ci_observed_head_sha = ci_obs.checks_head_sha
+        git_rec.current_pr_head_sha = ci_obs.pr_head_sha
         if policy is not None and not policy.available:
             git_rec.ci_status = "policy_unavailable"
         elif policy is not None and not policy.contexts:
@@ -1751,6 +2016,10 @@ class MarathonDogfoodEngine:
             return False, git_rec.to_dict()
         if campaign_state is not None:
             campaign_state.increment_merge_count()
+            # Persist immediately after the irreversible merge operation so a
+            # crash before remote verification cannot reset the envelope budget.
+            if state_dir is not None:
+                campaign_state.save(state_dir)
 
         remote_ok = self.git_executor.verify_remote_main_contains(git_rec.merge_sha)
         if not remote_ok:

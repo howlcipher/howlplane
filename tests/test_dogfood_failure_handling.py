@@ -63,9 +63,11 @@ from src.control_plane.resource_models import ProviderFailureClass
 from src.control_plane.router import RoutingDecision
 from src.control_plane.synthesis.campaign_state import DurableCampaignState
 from src.control_plane.synthesis.marathon import MarathonDogfoodEngine
+from src.control_plane.agent_registry import AgentRegistry
 from src.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
+    ProviderResourceSettings,
 )
 from src.control_plane.task_spec import TaskSpec
 from src.control_plane.verification import VerificationPlan, VerificationStep
@@ -649,11 +651,30 @@ def _run_marathon_harness(
     campaign_id: str,
     git: Optional[ScriptedRunner] = None,
     gh: Optional[ScriptedRunner] = None,
+    configured_pool: bool = False,
+    dispatch_id: Optional[str] = None,
+    orchestrator_cls: type = ProviderScriptedOrchestrator,
 ) -> Tuple[bool, Dict[str, Any], ProviderScriptedOrchestrator, ProviderPoolManager]:
     repo_root = tmp_path / "repo"
     init_minimal_python_repo(repo_root)
 
-    pool = ProviderPoolManager()
+    if configured_pool:
+        # ProviderPoolManager() with no `resources` is legacy mode, and legacy
+        # selection never consults the task, so it cannot exercise the
+        # capability-aware path the factory actually runs
+        # (ProviderPoolManager.from_config()). Passing `resources` selects that
+        # path, which is where a task-carried preference gates selection.
+        registry = AgentRegistry()
+        pool = ProviderPoolManager(
+            registry=registry,
+            resources={
+                profile.resource_id: ProviderResourceSettings(enabled=True)
+                for profile in registry.list_resources()
+            },
+            probe_on_start=False,
+        )
+    else:
+        pool = ProviderPoolManager()
     for agent_id in list(pool.get_all_statuses()):
         pool.set_status(agent_id, ProviderAvailabilityStatus.UNAVAILABLE)
     for p in script:
@@ -663,7 +684,7 @@ def _run_marathon_harness(
     gh_r = gh or ScriptedRunner()
     envelope = create_envelope(get_profile("overnight-safe"), campaign_id, "cli:test@host")
 
-    orch = ProviderScriptedOrchestrator(repo_root / "run", script)
+    orch = orchestrator_cls(repo_root / "run", script)
     engine = MarathonDogfoodEngine(
         provider_pool=pool,
         base_output_dir=tmp_path / "out",
@@ -690,15 +711,32 @@ def _run_marathon_harness(
         risk_level="medium",
         campaign_state=state,
         state_dir=state_dir,
+        dispatch_id=dispatch_id,
     )
     return ok, rec, orch, pool
 
 
-def test_timeout_failover_in_marathon_engine(tmp_path):
-    """A transient timeout from AGY triggers failover to an alternate provider (devin_cli) and completes."""
+@pytest.mark.parametrize("configured_pool", [False, True], ids=["legacy_pool", "configured_pool"])
+def test_timeout_failover_in_marathon_engine(tmp_path, configured_pool):
+    """A transient timeout from AGY fails over to devin_cli and completes.
+
+    Both selection paths are covered because only one of them is production.
+    A bare ProviderPoolManager() is legacy mode (`_legacy_mode = resources is
+    None`) and never consults the task; the factory builds its pool with
+    ProviderPoolManager.from_config(), which passes `resources` and takes the
+    capability-aware path. This test previously ran legacy-only, which is why a
+    live canary, not this suite, found that failover could not hop there: the
+    loop pins `gap_probe.preferred_agent` to the provider being attempted, and
+    select_resource reads a task-carried preference as an explicit override,
+    emptying the eligible set once that provider stops being selectable. The
+    re-selection then reported NO_ELIGIBLE_PROVIDER_REMAINING with three healthy
+    providers standing by.
+    """
+    suffix = "CONFIGURED" if configured_pool else "LEGACY"
+    task_id = f"ENG-TIMEOUT-{suffix}"
     git, gh = ScriptedRunner(), ScriptedRunner()
     build_full_merge_flow(
-        git, gh, task_id="ENG-TIMEOUT-01", repo_slug="howlcipher/howlplane", pr_number=10,
+        git, gh, task_id=task_id, repo_slug="howlcipher/howlplane", pr_number=10,
         commit_message="fix: resolve timeout gap",
         pr_title="fix: timeout gap",
         pr_body="Automated fix",
@@ -710,11 +748,15 @@ def test_timeout_failover_in_marathon_engine(tmp_path):
     }
 
     ok, rec, orch, pool = _run_marathon_harness(
-        tmp_path, script, "ENG-TIMEOUT-01", "DOGFOOD-TIMEOUT", git=git, gh=gh,
+        tmp_path, script, task_id, f"DOGFOOD-TIMEOUT-{suffix}",
+        git=git, gh=gh, configured_pool=configured_pool,
     )
 
+    assert orch.attempted == ["agy", "devin_cli"], (
+        "failover did not hop; "
+        f"attempted={orch.attempted}, failure_reason={(rec or {}).get('failure_reason')}"
+    )
     assert ok is True
-    assert orch.attempted == ["agy", "devin_cli"]
     assert rec["provider"] == "devin_cli"
     assert pool.get_status("agy") == ProviderAvailabilityStatus.UNREACHABLE
     assert pool.get_status("devin_cli") == ProviderAvailabilityStatus.AVAILABLE
@@ -791,3 +833,71 @@ def test_local_budget_kill_is_not_transport_unavailable():
     pool.record_result("agy", provider_reported)
     assert pool.get_status("agy") == ProviderAvailabilityStatus.UNREACHABLE
     assert pool.get_resource_status("agy").retry_after is not None
+
+
+def test_each_attempt_gets_a_dispatch_scoped_trajectory_event_id(tmp_path):
+    """Retrying a work item must not derive the trajectory id of an earlier run.
+
+    Trajectory identity falls back to the run directory, and the factory reuses
+    one directory per work item, so a retry produced the id the first attempt
+    had already written. The trajectory store is immutable, so the retry raised
+    "Artifact 'traj-...' already exists with different content_digest" and the
+    tick recorded an orchestrator_exception instead of retrying -- observed on a
+    live canary, where it turned a routine provider failure into a backoff.
+    """
+    script = {
+        "agy": ("unavailable", "Error: timeout waiting for response\n"),
+        "devin_cli": ("unavailable", "Error: credits exhausted\n"),
+    }
+
+    _, _, orch, _ = _run_marathon_harness(
+        tmp_path, script, "ENG-TRAJ-01", "DOGFOOD-TRAJ", dispatch_id="D-42",
+    )
+
+    event_ids = [m.get("trajectory_event_id") for m in orch.seen_metadata]
+    assert event_ids == ["D-42:1", "D-42:2"], (
+        f"attempts are not distinguishable by trajectory identity: {event_ids}"
+    )
+    assert len(set(event_ids)) == len(event_ids)
+
+
+class _StateTrackingOrchestrator(ProviderScriptedOrchestrator):
+    """Scripted orchestrator that also moves the TaskSpec through its lifecycle.
+
+    The plain scripted orchestrator never touches `current_state`, so the
+    marathon failover tests hopped between providers on a TaskSpec frozen in
+    its initial state. The real GovernedTaskOrchestrator transitions the task
+    to `implementing` and, on a failed attempt, to `failed` -- and the
+    lifecycle refuses failed -> implementing. A live canary hit exactly that:
+    failover picked a healthy provider and then could not hand it the task.
+    """
+
+    def run(self, task_spec, planned_actions=None, lock_ownership=None):
+        if task_spec.current_state != "implementing":
+            if task_spec.current_state == "discovered":
+                task_spec.transition_to("planned", reason="test_plan")
+            task_spec.transition_to("implementing", reason="test_impl")
+        result = super().run(task_spec, planned_actions, lock_ownership)
+        if result.final_state == "failed":
+            task_spec.transition_to("failed", reason="test_failed_attempt")
+        return result
+
+
+def test_failover_hop_can_re_enter_implementation_after_a_failed_attempt(tmp_path):
+    """A hop must leave the task in a state the next attempt may start from."""
+    script = {
+        "agy": ("unavailable", "Error: timeout waiting for response\n"),
+        "devin_cli": ("unavailable", "Error: credits exhausted\n"),
+    }
+
+    ok, rec, orch, _ = _run_marathon_harness(
+        tmp_path, script, "ENG-RETRY-STATE", "DOGFOOD-RETRY-STATE",
+        orchestrator_cls=_StateTrackingOrchestrator,
+    )
+
+    assert orch.attempted == ["agy", "devin_cli"], (
+        "the hop never reached the second provider; "
+        f"attempted={orch.attempted}, failure_reason={(rec or {}).get('failure_reason')}"
+    )
+    assert ok is False
+    assert rec["failure_reason"].startswith("NO_ELIGIBLE_PROVIDER_REMAINING")
