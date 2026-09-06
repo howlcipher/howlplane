@@ -115,6 +115,7 @@ func runEngineFallback(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// #nosec G204 -- entrypoint is validated by enginepath.Resolve and args are forwarded operator CLI inputs
 	sub := exec.Command(entrypoint, args...)
 	sub.Stdin = cmd.InOrStdin()
 	sub.Stdout = cmd.OutOrStdout()

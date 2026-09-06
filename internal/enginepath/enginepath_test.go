@@ -3,6 +3,7 @@ package enginepath
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -90,5 +91,86 @@ func TestResolveErrorsWhenNothingFound(t *testing.T) {
 
 	if _, err := Resolve(); err == nil {
 		t.Fatal("expected an actionable error when no engine can be located")
+	}
+}
+
+func TestResolveRejectsRelativeEnvOverride(t *testing.T) {
+	t.Setenv(EngineEnvOverride, filepath.Join("relative", "venv"))
+	_, err := Resolve()
+	if err == nil {
+		t.Fatal("expected an error when the override venv path is relative")
+	}
+	if !strings.Contains(err.Error(), "is not an absolute path") {
+		t.Fatalf("expected error mentioning not an absolute path, got: %v", err)
+	}
+}
+
+func TestResolveRejectsRelativeCheckoutHome(t *testing.T) {
+	t.Setenv(EngineEnvOverride, "")
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("HOWLPLANE_HOME", filepath.Join(".", "relative_checkout"))
+	t.Setenv("HOWLPLANE_DIR", "")
+
+	if _, err := Resolve(); err == nil {
+		t.Fatal("expected an error when candidate checkout paths are relative")
+	}
+}
+
+func TestResolveRejectsWorldWritableExecutable(t *testing.T) {
+	venv := t.TempDir()
+	binDir := filepath.Join(venv, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(binDir, "howlplane")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	// Explicit chmod in case umask cleared world-writable bits
+	if err := os.Chmod(script, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EngineEnvOverride, venv)
+
+	if _, err := Resolve(); err == nil {
+		t.Fatal("expected an error when the executable is world-writable")
+	}
+}
+
+func TestResolveRejectsWorldWritableParentDirectory(t *testing.T) {
+	venv := t.TempDir()
+	binDir := filepath.Join(venv, "bin")
+	if err := os.MkdirAll(binDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	// Explicit chmod in case umask cleared world-writable bits
+	if err := os.Chmod(binDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(binDir, "howlplane")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EngineEnvOverride, venv)
+
+	if _, err := Resolve(); err == nil {
+		t.Fatal("expected an error when the parent directory is world-writable without sticky bit")
+	}
+}
+
+func TestResolveRejectsNonExecutableScript(t *testing.T) {
+	venv := t.TempDir()
+	binDir := filepath.Join(venv, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(binDir, "howlplane")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EngineEnvOverride, venv)
+
+	if _, err := Resolve(); err == nil {
+		t.Fatal("expected an error when the script is not executable")
 	}
 }

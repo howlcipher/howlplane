@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // EngineEnvOverride is the environment variable an operator can set to
@@ -41,7 +42,11 @@ const EngineEnvOverride = "HOWLPLANE_ENGINE_VENV"
 // exist.
 func Resolve() (string, error) {
 	if venv := os.Getenv(EngineEnvOverride); venv != "" {
-		if p := venvConsoleScript(venv, "howlplane"); fileExists(p) {
+		if !filepath.IsAbs(venv) {
+			return "", fmt.Errorf("%s=%s is not an absolute path", EngineEnvOverride, venv)
+		}
+		cleanVenv := filepath.Clean(venv)
+		if p := venvConsoleScript(cleanVenv, "howlplane"); isSecureExecutable(cleanVenv, p) {
 			return p, nil
 		}
 		return "", fmt.Errorf("%s=%s does not contain an installed howlplane console script", EngineEnvOverride, venv)
@@ -65,9 +70,15 @@ func Resolve() (string, error) {
 // "howlplane-engine" component's wrapper script at, if it exists.
 func howlManagedEntrypoint() string {
 	dataHome := xdgDataHome()
-	p := filepath.Join(dataHome, "howl", "components", "howlplane-engine", "current", exeName("howlplane-engine"))
-	if fileExists(p) {
-		return p
+	if dataHome == "" {
+		return ""
+	}
+	componentRoot := filepath.Join(dataHome, "howl", "components", "howlplane-engine")
+	p := filepath.Join(componentRoot, "current", exeName("howlplane-engine"))
+	cleanRoot := filepath.Clean(componentRoot)
+	cleanP := filepath.Clean(p)
+	if isSecureExecutable(cleanRoot, cleanP) {
+		return cleanP
 	}
 	return ""
 }
@@ -77,20 +88,21 @@ func howlManagedEntrypoint() string {
 // Howl-managed install present.
 func devCheckoutLauncher() string {
 	candidates := []string{}
-	if home := os.Getenv("HOWLPLANE_HOME"); home != "" {
-		candidates = append(candidates, home)
+	if home := os.Getenv("HOWLPLANE_HOME"); home != "" && filepath.IsAbs(home) {
+		candidates = append(candidates, filepath.Clean(home))
 	}
-	if dir := os.Getenv("HOWLPLANE_DIR"); dir != "" {
-		candidates = append(candidates, dir)
+	if dir := os.Getenv("HOWLPLANE_DIR"); dir != "" && filepath.IsAbs(dir) {
+		candidates = append(candidates, filepath.Clean(dir))
 	}
-	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Dir(exe))
+	if exe, err := os.Executable(); err == nil && filepath.IsAbs(exe) {
+		candidates = append(candidates, filepath.Clean(filepath.Dir(exe)))
 	}
 
 	for _, dir := range candidates {
 		launcher := filepath.Join(dir, "bin", "howlplane")
-		if fileExists(launcher) {
-			return launcher
+		cleanLauncher := filepath.Clean(launcher)
+		if isSecureExecutable(dir, cleanLauncher) {
+			return cleanLauncher
 		}
 	}
 	return ""
@@ -112,16 +124,62 @@ func exeName(base string) string {
 
 func xdgDataHome() string {
 	if v := os.Getenv("XDG_DATA_HOME"); v != "" && filepath.IsAbs(v) {
-		return v
+		return filepath.Clean(v)
 	}
 	home, err := os.UserHomeDir()
-	if err != nil {
+	if err != nil || !filepath.IsAbs(home) {
 		return ""
 	}
-	return filepath.Join(home, ".local", "share")
+	return filepath.Join(filepath.Clean(home), ".local", "share")
 }
 
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
+// isSecureExecutable verifies that target is an absolute path contained beneath
+// root, exists as a regular executable file, and neither the target nor any
+// directory from target's parent up to root is world-writable without the
+// sticky bit set.
+func isSecureExecutable(root, target string) bool {
+	if !filepath.IsAbs(root) || !filepath.IsAbs(target) {
+		return false
+	}
+	cleanRoot := filepath.Clean(root)
+	cleanTarget := filepath.Clean(target)
+
+	rel, err := filepath.Rel(cleanRoot, cleanTarget)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+
+	info, err := os.Stat(cleanTarget) // #nosec G703 -- cleanTarget is verified absolute and contained beneath cleanRoot
+	if err != nil || info.IsDir() {
+		return false
+	}
+
+	// World-writable executable files can be overwritten by any local user.
+	if info.Mode().Perm()&0o002 != 0 {
+		return false
+	}
+
+	// On non-Windows platforms, ensure the file is executable.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		return false
+	}
+
+	// Verify that neither the file's parent nor any ancestor directory up to
+	// cleanRoot is world-writable unless it has the sticky bit set (like /tmp).
+	dir := filepath.Dir(cleanTarget)
+	for {
+		dirInfo, err := os.Stat(dir) // #nosec G703 -- dir is a parent directory of cleanTarget bounded by cleanRoot
+		if err != nil {
+			return false
+		}
+		if dirInfo.Mode().Perm()&0o002 != 0 && dirInfo.Mode()&os.ModeSticky == 0 {
+			return false
+		}
+		if dir == cleanRoot || dir == filepath.Dir(dir) {
+			break
+		}
+		dir = filepath.Dir(dir)
+	}
+
+	return true
 }
