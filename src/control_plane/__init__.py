@@ -7,6 +7,18 @@ evidence ledgers, transparent performance metrics, project adapters, human autho
 and closed-loop governed task orchestration.
 """
 
+from importlib import metadata as _metadata
+
+try:
+    # The version of the installed "howlplane" wheel -- the source of
+    # truth once packaged, matching pyproject.toml's [project] version at
+    # the point the wheel was built.
+    __version__ = _metadata.version("howlplane")
+except _metadata.PackageNotFoundError:
+    # Not installed as a package (e.g. a source checkout run in place via
+    # PYTHONPATH, as bin/howlplane's developer fallback does).
+    __version__ = "0.1.0+dev"
+
 from src.control_plane.task_spec import (
     TaskSpec,
     InvalidStateTransitionError,
@@ -99,6 +111,7 @@ from src.control_plane.role_binding import (
 )
 
 __all__ = [
+    "__version__",
     "TaskSpec",
     "InvalidStateTransitionError",
     "TaskSpecValidationError",

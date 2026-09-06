@@ -98,6 +98,20 @@ all = [
 ai = "src.control_plane.launcher:legacy_main"
 howlplane = "src.control_plane.launcher:main"
 
+# Every internal and public import in this codebase is rooted at the
+# literal "src" package (e.g. `from src.control_plane import ...`, and the
+# console_scripts above target `src.control_plane.launcher:main`).
+# setuptools' automatic package discovery does not know that and instead
+# flattens src/control_plane, src/core, etc. into top-level packages with
+# no "src" package at all -- a wheel built without this section installs
+# successfully but its own console scripts fail with
+# "ModuleNotFoundError: No module named 'src'". Pin discovery explicitly
+# to "src" and its submodules so the built wheel matches every import in
+# the codebase.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src", "src.*"]
+
 [tool.setuptools.package-data]
 "src.control_plane.reasoning" = ["builtin_strategies.yaml"]
 
