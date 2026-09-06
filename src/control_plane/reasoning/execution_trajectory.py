@@ -162,17 +162,21 @@ class TrajectoryStore(DurableObjectStore):
         """Atomically persists a trajectory; idempotent on repeated calls."""
         target = self._path(trajectory.trajectory_id)
         if target.is_file():
-            existing = self.load(trajectory.trajectory_id)
-            if existing.content_digest == trajectory.content_digest:
-                return target
-            existing_payload = existing.to_dict()
-            incoming_payload = trajectory.to_dict()
-            for payload in (existing_payload, incoming_payload):
-                payload.pop("created_at", None)
-                payload.pop("completed_at", None)
-                payload.pop("content_digest", None)
-            if existing_payload == incoming_payload:
-                return target
+            try:
+                existing = self.load(trajectory.trajectory_id)
+            except Exception:
+                existing = None
+            if existing is not None:
+                if existing.content_digest == trajectory.content_digest:
+                    return target
+                existing_payload = existing.to_dict()
+                incoming_payload = trajectory.to_dict()
+                for payload in (existing_payload, incoming_payload):
+                    payload.pop("created_at", None)
+                    payload.pop("completed_at", None)
+                    payload.pop("content_digest", None)
+                if existing_payload == incoming_payload:
+                    return target
         return super().save(trajectory.trajectory_id, trajectory.to_dict())
 
     def load(self, trajectory_id: str) -> ExecutionTrajectory:
