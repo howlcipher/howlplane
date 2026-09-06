@@ -12,10 +12,12 @@ from src.control_plane.agent_execution import (
     AgentBackend,
     AgentBackendRegistry,
     AgentExecutionResult,
+    BUDGET_DERIVED_KEY,
     LAUNCH_OUTCOME_KEY,
     LAUNCH_OUTCOME_LAUNCHED,
     LAUNCH_OUTCOME_NOT_INSTALLED,
     LAUNCH_OUTCOME_SPAWN_FAILED,
+    TIMEOUT_SOURCE_BUDGET,
     TIMEOUT_SOURCE_HARNESS,
     TIMEOUT_SOURCE_KEY,
     TERMINAL_PROVIDER_ERROR_KEY,
@@ -782,13 +784,18 @@ class ProviderPoolManager:
         launch_outcome = metadata.get(LAUNCH_OUTCOME_KEY)
         if launch_outcome in (LAUNCH_OUTCOME_NOT_INSTALLED, LAUNCH_OUTCOME_SPAWN_FAILED):
             return ProviderFailureClass.MISSING_EXECUTABLE
-        # A harness-sourced timeout is this process killing the provider at our
-        # own budget. Nothing was observed about reachability, so it is an
-        # execution budget result, not a transport failure. Transcript-sourced
-        # timeouts still fall through to the transport branch below, where a
-        # provider genuinely reporting that it could not reach its service is
-        # classified as before (HOWLFRAM-SLOPFIX-05).
-        if metadata.get(TIMEOUT_SOURCE_KEY) == TIMEOUT_SOURCE_HARNESS:
+        # A harness-sourced or budget-derived timeout is this process stopping
+        # the provider at our own budget (either directly via harness kill or
+        # via a harness-derived print timeout). Nothing was observed about
+        # reachability, so it is an execution budget result, not a transport
+        # failure. Transcript-sourced timeouts without budget derivation still
+        # fall through to the transport branch below, where a provider genuinely
+        # reporting that it could not reach its service is classified as
+        # TRANSPORT_UNAVAILABLE and benched (HOWLFRAM-SLOPFIX-05).
+        if (
+            metadata.get(TIMEOUT_SOURCE_KEY) in (TIMEOUT_SOURCE_HARNESS, TIMEOUT_SOURCE_BUDGET)
+            or metadata.get(BUDGET_DERIVED_KEY) is True
+        ):
             return ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED
         if launch_outcome != LAUNCH_OUTCOME_LAUNCHED and result.exit_code == 127:
             return ProviderFailureClass.MISSING_EXECUTABLE

@@ -14,6 +14,11 @@ from src.control_plane.agent_execution import (
     FakeAgentBackend,
     SubprocessAgentBackend,
 )
+from src.control_plane.resource_models import ProviderFailureClass
+from src.control_plane.synthesis.provider_pool import (
+    ProviderAvailabilityStatus,
+    ProviderPoolManager,
+)
 from src.control_plane.task_spec import TaskSpec
 
 
@@ -253,3 +258,74 @@ def test_execute_propagates_timeout_seconds_to_build_command(tmp_path, monkeypat
     monkeypatch.setattr(backend, "is_available", lambda: True)
     backend.execute(spec, tmp_path, timeout_seconds=420)
     assert recorded_timeout.get("val") == 420
+
+
+def test_agy_budget_derived_timeout_does_not_bench_provider(tmp_path, monkeypatch):
+    """Reproduction/regression: an agy run terminated at the harness-derived
+    print-timeout must classify as EXECUTION_BUDGET_EXCEEDED and NOT bench the
+    provider as UNREACHABLE, while preserving diagnostic output.
+    """
+    import subprocess
+
+    spec = TaskSpec(
+        task_id="TASK-AGY-REPRO-001",
+        repository="howlplane",
+        objective="Run agy writer with budget deadline",
+    )
+    backend = AgyBackend()
+    monkeypatch.setattr(backend, "is_available", lambda: True)
+
+    fake_proc = subprocess.CompletedProcess(
+        args=["agy", "-p", "brief", "--mode", "accept-edits", "--print-timeout", "585s"],
+        returncode=1,
+        stdout="Inspected repository structure and drafted edits.\n",
+        stderr="Error: timeout waiting for response\n",
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: fake_proc)
+
+    result = backend.execute(spec, tmp_path, timeout_seconds=600)
+    assert result.timed_out is True
+    assert "Inspected repository structure" in result.stdout
+
+    pool = ProviderPoolManager()
+    failure_class = pool.classify_failure("agy", result)
+    assert failure_class == ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED
+
+    pool.record_result("agy", result)
+    assert pool.get_status("agy") != ProviderAvailabilityStatus.UNREACHABLE
+    assert pool.get_resource_status("agy").retry_after is None
+
+
+def test_agy_genuine_transport_timeout_benches_provider(tmp_path, monkeypatch):
+    """Guard against over-correction: genuine transport errors from agy
+    (gateway timeout, connection refused) remain classified as TRANSPORT_UNAVAILABLE.
+    """
+    import subprocess
+
+    task = TaskSpec(
+        task_id="TASK-AGY-NET-001",
+        repository="howlplane",
+        objective="Verify network outage handling",
+    )
+    agy = AgyBackend()
+    monkeypatch.setattr(agy, "is_available", lambda: True)
+
+    outage_proc = subprocess.CompletedProcess(
+        args=["agy", "-p", "brief", "--print-timeout", "585s"],
+        returncode=1,
+        stdout="",
+        stderr="504 Gateway Timeout: connection refused by remote host\n",
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: outage_proc)
+
+    transport_res = agy.execute(task, tmp_path, timeout_seconds=600)
+    assert transport_res.timed_out is True
+
+    mgr = ProviderPoolManager()
+    assert (
+        mgr.classify_failure("agy", transport_res)
+        == ProviderFailureClass.TRANSPORT_UNAVAILABLE
+    )
+    mgr.record_result("agy", transport_res)
+    assert mgr.get_status("agy") == ProviderAvailabilityStatus.UNREACHABLE
+    assert mgr.get_resource_status("agy").retry_after is not None
