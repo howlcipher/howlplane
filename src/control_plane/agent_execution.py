@@ -48,9 +48,14 @@ LAUNCH_OUTCOME_LAUNCHED = "launched"
 # Where a timeout verdict came from. "harness" means this process enforced the
 # deadline and killed the provider, which is structural fact. "transcript" means
 # the verdict was inferred from provider output and is only as good as that text.
+# "budget" means the provider self-terminated at a deadline derived directly
+# from the harness's timeout_seconds (e.g. agy's --print-timeout), preserving
+# its diagnostic transcript without penalizing reachability as an outage.
 TIMEOUT_SOURCE_KEY = "timeout_source"
 TIMEOUT_SOURCE_HARNESS = "harness"
 TIMEOUT_SOURCE_TRANSCRIPT = "transcript"
+TIMEOUT_SOURCE_BUDGET = "budget"
+BUDGET_DERIVED_KEY = "budget_derived"
 
 # Whether the provider was denied a tool the task required. A provider that
 # exits 0 after reporting "I need approval before I can edit" has not
@@ -284,11 +289,14 @@ class AgentUnavailableError(AgentExecutionError):
 def _launch_metadata(
     launch_outcome: str,
     timeout_source: Optional[str] = None,
+    budget_derived: bool = False,
 ) -> Dict[str, Any]:
     """Builds the structural execution markers classification relies on."""
     metadata: Dict[str, Any] = {LAUNCH_OUTCOME_KEY: launch_outcome}
     if timeout_source:
         metadata[TIMEOUT_SOURCE_KEY] = timeout_source
+    if budget_derived:
+        metadata[BUDGET_DERIVED_KEY] = True
     return metadata
 
 
@@ -731,6 +739,13 @@ class GeminiCLIBackend(SubprocessAgentBackend):
 # normally wins and the run is classified EXECUTION_BUDGET_EXCEEDED (harness)
 # instead of by transport (transcript), nondeterministically and with agy's own
 # diagnostic output discarded by the kill.
+#
+# To satisfy both intents (preserving agy's diagnostic transcript without
+# misclassifying a budget timeout as a transport failure that benches a healthy
+# provider), AgyBackend tags timeouts attributable to this derived print-timeout
+# as budget-derived (EXECUTION_BUDGET_EXCEEDED). Genuine provider-reported
+# transport errors (e.g. gateway timeout, connection refused) remain classified
+# as TRANSPORT_UNAVAILABLE.
 AGY_PRINT_TIMEOUT_HEADROOM_SECONDS = 15
 
 
@@ -745,6 +760,41 @@ class AgyBackend(SubprocessAgentBackend):
                 "--print-timeout", f"{print_timeout}s",
             ]
         super().__init__("agy", "agy", _agy_cmd)
+
+    def execute(
+        self,
+        task: TaskSpec,
+        cwd: Union[str, Path],
+        role: str = "implementation",
+        timeout_seconds: int = 300,
+        env_vars: Optional[Dict[str, str]] = None,
+        prompt_override: Optional[str] = None,
+    ) -> AgentExecutionResult:
+        result = super().execute(
+            task=task,
+            cwd=cwd,
+            role=role,
+            timeout_seconds=timeout_seconds,
+            env_vars=env_vars,
+            prompt_override=prompt_override,
+        )
+        if result.timed_out and result.metadata.get(TIMEOUT_SOURCE_KEY) != TIMEOUT_SOURCE_HARNESS:
+            combined = f"{result.stderr}\n{result.stdout}".lower()
+            genuine_transport_markers = (
+                "connection refused",
+                "transport unavailable",
+                "network unreachable",
+                "gateway timeout",
+                "read timeout",
+                "connection timed out",
+                "connection reset",
+            )
+            if not any(marker in combined for marker in genuine_transport_markers):
+                if result.metadata is None:
+                    result.metadata = {}
+                result.metadata[TIMEOUT_SOURCE_KEY] = TIMEOUT_SOURCE_BUDGET
+                result.metadata[BUDGET_DERIVED_KEY] = True
+        return result
 
 
 class DevinCLIBackend(SubprocessAgentBackend):
