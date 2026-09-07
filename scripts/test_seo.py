@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+"""SEO and GitHub Pages validation tests for HowlPlane."""
 import json
 import os
 import re

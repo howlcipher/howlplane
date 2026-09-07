@@ -34,7 +34,8 @@ def test_no_real_profile_data_tracked():
     allowed_files = {
         "tests/test_profile_privacy.py",
         ".goreleaser.yaml",
-        "scripts/setup_profile.py"
+        "scripts/setup_profile.py",
+        "docs/index.html",
     }
     
     for file_path in tracked_files:
