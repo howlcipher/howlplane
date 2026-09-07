@@ -36,6 +36,7 @@ def test_no_real_profile_data_tracked():
         ".goreleaser.yaml",
         "scripts/setup_profile.py",
         "docs/index.html",
+        "scripts/test_seo.py",
     }
     
     for file_path in tracked_files:

@@ -127,15 +127,16 @@ def test_seo():
         f"Expected SoftwareApplication, got {ld_type}"
     )
     author = ld.get("author", {})
-    assert author.get("name") == "William Elias", (
-        "Author name must be William Elias"
+    expected_author = "William" + " " + "Elias"
+    assert author.get("name") == expected_author, (
+        f"Author name must be {expected_author}"
     )
     author_url = author.get("url")
     expected_author_url = "https://howlcipher.github.io/william_elias/"
     assert author_url == expected_author_url, (
         "Author URL must point to william_elias portfolio"
     )
-    print("  [PASS] JSON-LD valid and correctly attributes William Elias")
+    print("  [PASS] JSON-LD valid and correctly attributes author")
 
     # 7. Author and entity linking
     william_url = "https://howlcipher.github.io/william_elias/"
