@@ -110,7 +110,8 @@ def test_seo():
     # 6. JSON-LD structured data
     assert len(parser.json_ld) >= 1, "Missing application/ld+json structured data"
     ld = parser.json_ld[0]
-    assert ld.get("@type") == "SoftwareApplication", f"Expected SoftwareApplication, got {ld.get("@type")}"
+    ld_type = ld.get("@type")
+    assert ld_type == "SoftwareApplication", f"Expected SoftwareApplication, got {ld_type}"
     assert ld.get("author", {}).get("name") == "William Elias", "Author name must be William Elias"
     assert ld.get("author", {}).get("url") == "https://howlcipher.github.io/william_elias/", "Author URL must point to william_elias portfolio"
     print("  [PASS] JSON-LD valid and correctly attributes William Elias")
