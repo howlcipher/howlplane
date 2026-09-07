@@ -67,6 +67,8 @@ def test_only_hand_authored_frontend_tracked_under_docs():
         "docs/favicon.png",
         "docs/og-image.jpg",
         "docs/social-preview.png",
+        "docs/robots.txt",
+        "docs/sitemap.xml",
     }
     assert tracked_paths == hand_authored_frontend
 
