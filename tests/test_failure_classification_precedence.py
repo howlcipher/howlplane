@@ -164,6 +164,27 @@ def test_authentication_expiration_requires_authentication():
     assert _classify(result) == ProviderFailureClass.AUTHENTICATION_REQUIRED
 
 
+@pytest.mark.parametrize("earlier_denial", [False, True])
+def test_claude_expired_oauth_terminal_error_requires_authentication(earlier_denial):
+    """Reproduce the real factory error, including a prior denied tool."""
+    message = "Failed to authenticate: OAuth session expired and could not be refreshed"
+    metadata = {TERMINAL_PROVIDER_ERROR_KEY: message}
+    if earlier_denial:
+        metadata[TOOL_PERMISSION_KEY] = TOOL_PERMISSION_DENIED
+    result = _failed_result(error_message=message, metadata=metadata)
+
+    assert _classify(result) == ProviderFailureClass.AUTHENTICATION_REQUIRED
+
+
+def test_quoted_oauth_failure_does_not_override_tool_denial():
+    result = _failed_result(
+        stdout="Failed to authenticate: OAuth session expired and could not be refreshed",
+        metadata={TOOL_PERMISSION_KEY: TOOL_PERMISSION_DENIED},
+    )
+
+    assert _classify(result) == ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
+
+
 def test_malformed_and_ambiguous_output_fail_closed():
     malformed = _failed_result(stderr="Invalid JSON in provider response")
     ambiguous = _failed_result(stderr="Provider stopped without a reason")

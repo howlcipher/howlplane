@@ -127,6 +127,11 @@ _TERMINAL_HARD_FAILURE_PATTERNS = (
                 r"(?:\.\s*(?:please\s+)?(?:log|sign) in again\.?)?",
                 re.IGNORECASE,
             ),
+            re.compile(
+                r"(?:error:\s*)?failed to authenticate: OAuth session expired"
+                r" and could not be refreshed[.!]?",
+                re.IGNORECASE,
+            ),
         ),
     ),
     (

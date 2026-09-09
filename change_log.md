@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Fixed
+
+- Classify Claude's terminal OAuth refresh failure as `AUTHENTICATION_REQUIRED`
+  instead of `ENGINEERING_FAILURE`. Reproduced in a real factory dispatch on
+  September 9, 2026; regressions cover terminal-error precedence, persistence,
+  and routing to another eligible worker.
+
 ### Added
 
 **Composable HowlPlane CLI**: added the reusable Go command package
