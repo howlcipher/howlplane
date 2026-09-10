@@ -26,6 +26,7 @@ from src.control_plane.factory.supervisor_state import (
     SupervisorStateStore,
 )
 from src.control_plane.factory.work_item import WorkItem, WorkItemState, WorkItemStore, WorkItemOrigin
+from src.control_plane.factory.work_item import work_item_fingerprint
 
 
 DEFAULT_TICK_INTERVAL_SECONDS = 10.0
@@ -228,6 +229,17 @@ class FactorySupervisor:
             ),
         }
         if not self._is_new_decision(decision):
+            # Older discovery omitted backlog detail. Fill that missing context
+            # without reopening dispositions or changing a running task's scope.
+            if origin == WorkItemOrigin.EXISTING_BACKLOG and evidence.get("description"):
+                item = self.work_item_store.find_by_fingerprint(
+                    work_item_fingerprint(origin, repository, identity_keys)
+                )
+                if (item is not None and not item.description and not item.is_terminal
+                        and item.state not in (WorkItemState.IN_PROGRESS, WorkItemState.VERIFYING)):
+                    item.description = evidence["description"]
+                    item.updated_at = self._now_iso()
+                    self.work_item_store.save_object(item)
             return
         self._state_record.admission_decisions.append(decision)
         self._state_record.admission_decisions = self._state_record.admission_decisions[-1000:]
@@ -235,6 +247,7 @@ class FactorySupervisor:
             origin=origin,
             repository=repository,
             title=evidence.get("title", ""),
+            description=evidence.get("description", ""),
             identity_keys=identity_keys,
             evidence_refs=evidence.get("evidence_refs", []),
             evidence_fingerprints=evidence.get("evidence_fingerprints", []),

@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+- Preserve backlog detail, including acceptance criteria, in factory WorkItems.
+  Repeated discovery fills legacy empty descriptions without reopening items,
+  replacing existing context, or changing active and terminal work.
+
 - Treat AGY's zero-exit print deadline with an unfinished turn as a failed,
   budget-exceeded attempt. Preserve partial output and the actual exit code;
   do not start ordinary review/remediation or mark provider capacity healthy

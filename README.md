@@ -48,6 +48,10 @@ candidate verification or failover path before they can advance.
 
 ### Persistent Linux user service
 
+Factory backlog ingestion retains each item's detailed problem statement and
+acceptance criteria. Repeated discovery fills missing legacy context while
+preserving active tasks, existing descriptions, and lifecycle dispositions.
+
 Install the existing supervisor as a user service using a stable controller
 checkout, a separate target worktree, and one persistent state directory:
 

@@ -1050,7 +1050,8 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
 
     def _discovery():
         try:
-            selection = BacklogSource(target_repo).select()
+            source = BacklogSource(target_repo)
+            selection = source.select()
         except Exception:
             return []
         repo = detect_repo_slug(target_repo) or str(target_repo)
@@ -1059,6 +1060,7 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
                 "origin": "existing_backlog",
                 "repository": repo,
                 "title": item.title,
+                "description": source.item_detail(item),
                 "identity_keys": [item.source_file, item.item_id],
                 "evidence_refs": [f"{item.source_file}#{item.item_id}"],
                 "evidence_fingerprints": [f"backlog:{item.source_file}:{item.item_id}"],
