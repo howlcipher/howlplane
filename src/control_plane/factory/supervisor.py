@@ -80,6 +80,7 @@ class FactorySupervisor:
         self.max_backoff_seconds = max_backoff_seconds
         self._state_dir = Path(state_dir) if state_dir else None
         self._lock = lock
+        self._stop_requested: Optional[str] = None
         self.instance_id: str = self._resolve_instance_id()
         self._state_record = self.state_store.load()
         if self._state_record.created_at is None:
@@ -167,6 +168,10 @@ class FactorySupervisor:
             self._state_record.transition_to(SupervisorState.STOPPED, reason=reason, at=self._now_iso())
             self._state_record.stopped_reason = reason
             self.state_store.save(self._state_record)
+
+    def request_stop(self, reason: str = "operator_stop") -> None:
+        """Defer signal-driven state writes until the current tick settles."""
+        self._stop_requested = reason
 
     def resume(self) -> None:
         self._reload_state()
@@ -556,6 +561,11 @@ class FactorySupervisor:
 
         self._ingest_discovered()
 
+        if self._stop_requested:
+            self._persist()
+            self.stop(self._stop_requested)
+            return TickResult(state=self._state_record.state, reason=self._stop_requested)
+
         work_items = self.work_item_store.list_all()
         selection = select(work_items, self._state_record.dispatch_history, self.policy, now=now)
 
@@ -624,7 +634,15 @@ class FactorySupervisor:
             self._reload_state()
             if self._state_record.state == SupervisorState.STOPPED:
                 break
+            if self._stop_requested:
+                self.stop(self._stop_requested)
+                break
             result = self.tick()
+            self._state_record.last_successful_tick_at = self._now_iso()
+            self._persist()
+            if self._stop_requested:
+                self.stop(self._stop_requested)
+                break
             if self._state_record.state == SupervisorState.STOPPED:
                 break
             now = self._now()
@@ -651,7 +669,7 @@ class FactorySupervisor:
         with lock:
             return self.tick()
 
-    def run(self, until: Optional[datetime] = None) -> None:
+    def run(self, until: Optional[datetime] = None, resume_stopped: bool = False) -> None:
         # The run loop holds a single-supervisor lock for the state directory.
         lock = self._configured_lock()
         if lock is not None:
@@ -659,6 +677,8 @@ class FactorySupervisor:
 
             try:
                 with lock:
+                    if resume_stopped:
+                        self.resume()
                     self._run_loop(until)
             except LockError:
                 # This instance never became the supervisor.  Its cached state
@@ -666,4 +686,6 @@ class FactorySupervisor:
                 # contention result could overwrite the active supervisor.
                 return
             return
+        if resume_stopped:
+            self.resume()
         self._run_loop(until)

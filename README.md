@@ -43,6 +43,40 @@ An expired Claude OAuth session is recorded as `AUTHENTICATION_REQUIRED` in
 durable provider capacity state. Routing can consider another eligible worker;
 authentication repair remains an operator action.
 
+### Persistent Linux user service
+
+Install the existing supervisor as a user service using a stable controller
+checkout, a separate target worktree, and one persistent state directory:
+
+```bash
+python3 scripts/install_factory_service.py --state-dir /absolute/factory-state \
+  --target-repo /absolute/target-worktree --python /absolute/venv/bin/python3
+systemctl --user daemon-reload
+systemctl --user enable --now howlplane-factory
+systemctl --user status howlplane-factory
+journalctl --user -u howlplane-factory -n 50
+howlplane factory status --state-dir /absolute/factory-state --json
+systemctl --user restart howlplane-factory
+systemctl --user stop howlplane-factory
+```
+
+The selected Python environment must have HowlPlane's dependencies installed
+and run on the service host. From a container, validate it on the host first.
+Use `--worker-path` to supply a stable PATH containing installed worker CLIs.
+The installer refuses to overwrite a customized unit. It never binds or renews
+authority; existing campaign envelopes retain their original expiry.
+
+SIGTERM wakes an idle supervisor immediately, or lets the current dispatch
+settle before saving stopped state and releasing its lock. Systemd allows five
+minutes for this, then terminates remaining workers; interrupted work is
+reconciled on restart. Starting the service explicitly resumes stopped state
+under the same supervisor lock. Unexpected failures restart after 30 seconds,
+with a startup rate limit. Output goes to the host's bounded journal with a
+per-service log rate limit. `last_successful_tick_at` records completed loop
+ticks, including idle ticks, and does not imply shipped engineering work.
+Use `systemctl --user stop` for a durable service stop. Starting at boot without
+an interactive login additionally depends on the host's user-lingering policy.
+
 ***
 
 ## Everyday Workflow
