@@ -778,6 +778,20 @@ class AgyBackend(SubprocessAgentBackend):
             env_vars=env_vars,
             prompt_override=prompt_override,
         )
+        # agy can exit zero while its turn is still running. That acknowledges
+        # delivery of partial output, not completion of engineering work. Keep
+        # the actual exit code, but send this result through the existing
+        # timeout salvage/failover path instead of starting review/remediation.
+        partial_timeout = next((line.strip() for line in result.stderr.splitlines()
+                                if re.fullmatch(
+                                    r"\[agy\] print timeout after (?:\d+(?:\.\d+)?(?:ms|h|m|s))+"
+                                    r" with turn in progress; returning partial output",
+                                    line.strip(),
+                                )), None)
+        if partial_timeout:
+            result.success = False
+            result.timed_out = True
+            result.error_message = partial_timeout
         if result.timed_out and result.metadata.get(TIMEOUT_SOURCE_KEY) != TIMEOUT_SOURCE_HARNESS:
             combined = f"{result.stderr}\n{result.stdout}".lower()
             genuine_transport_markers = (

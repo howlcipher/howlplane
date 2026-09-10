@@ -183,6 +183,45 @@ def test_agy_print_timeout_stays_positive_for_a_budget_below_the_headroom(tmp_pa
     assert int(cmd[idx + 1][:-1]) >= 1
 
 
+@pytest.mark.parametrize("role", ["implementation", "remediation", "correctness-reviewer"])
+def test_agy_zero_exit_partial_timeout_is_not_success(tmp_path, monkeypatch, role):
+    """Real factory stderr: exit zero only means partial output was returned."""
+    import subprocess
+
+    message = "[agy] print timeout after 9m45s with turn in progress; returning partial output"
+    backend = AgyBackend()
+    monkeypatch.setattr(backend, "is_available", lambda: True)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(
+        args=["agy"], returncode=0, stdout="", stderr=message + "\n"
+    ))
+    task = TaskSpec(task_id="AGY-PARTIAL", repository="fixture", objective="Bounded repair")
+
+    result = backend.execute(task, tmp_path, role=role, timeout_seconds=600)
+    pool = ProviderPoolManager(probe_on_start=False)
+    before = pool.get_status("agy")
+
+    assert result.success is False
+    assert result.exit_code == 0  # Preserve the provider's observed exit code.
+    assert result.timed_out is True
+    assert result.error_message == message
+    assert pool.record_result("agy", result) == ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED
+    assert pool.get_status("agy") == before
+
+
+def test_agy_quoted_partial_timeout_does_not_reject_completed_work(tmp_path, monkeypatch):
+    import subprocess
+
+    backend = AgyBackend()
+    monkeypatch.setattr(backend, "is_available", lambda: True)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(
+        args=["agy"], returncode=0,
+        stdout="Added regression for [agy] print timeout after 9m45s with turn in progress; returning partial output",
+        stderr="",
+    ))
+    task = TaskSpec(task_id="AGY-COMPLETE", repository="fixture", objective="Bounded repair")
+    assert backend.execute(task, tmp_path).success is True
+
+
 def test_all_registered_backends_support_build_command_with_timeout(tmp_path):
     spec = TaskSpec(
         task_id="TASK-POLYMORPHIC-TIMEOUT-001",

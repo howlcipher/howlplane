@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+- Treat AGY's zero-exit print deadline with an unfinished turn as a failed,
+  budget-exceeded attempt. Preserve partial output and the actual exit code;
+  do not start ordinary review/remediation or mark provider capacity healthy
+  merely because the CLI returned partial output successfully.
+
 - Classify Claude's terminal OAuth refresh failure as `AUTHENTICATION_REQUIRED`
   instead of `ENGINEERING_FAILURE`. Reproduced in a real factory dispatch on
   September 9, 2026; regressions cover terminal-error precedence, persistence,
