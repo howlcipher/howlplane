@@ -42,6 +42,9 @@ bound to a stable, live PR head SHA before it can authorize a merge.
 An expired Claude OAuth session is recorded as `AUTHENTICATION_REQUIRED` in
 durable provider capacity state. Routing can consider another eligible worker;
 authentication repair remains an operator action.
+AGY's explicit print-timeout diagnostic is treated as incomplete work even
+when its process exits zero. Partial changes must pass the existing timeout
+candidate verification or failover path before they can advance.
 
 ### Persistent Linux user service
 
