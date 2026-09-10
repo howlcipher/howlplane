@@ -10,6 +10,12 @@ All notable changes to this project will be documented in this file.
   September 9, 2026; regressions cover terminal-error precedence, persistence,
   and routing to another eligible worker.
 
+- Add cooperative factory SIGTERM/SIGINT shutdown, idle tick health evidence,
+  and resume-under-lock startup. Provide an idempotent Linux user-service
+  installer with bounded restart and journal rates and no authority grant.
+  Real systemd isolation checks exercised graceful stop, fresh start, and
+  automatic recovery from SIGKILL on September 9, 2026.
+
 ### Added
 
 **Composable HowlPlane CLI**: added the reusable Go command package

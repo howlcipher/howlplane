@@ -519,6 +519,8 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_run.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
     p_run.add_argument("--target-repo", default=".", help="Repository to discover work from")
     p_run.add_argument("--until", type=float, help="Run for at most N seconds")
+    p_run.add_argument("--resume-stopped", action="store_true",
+                       help="Resume saved stopped state after acquiring the supervisor lock")
     p_run.add_argument(
         "--authority-profile",
         choices=["strict", "overnight-safe", "howlframe-overnight"],
@@ -1139,11 +1141,30 @@ def cmd_factory_run_once(args: argparse.Namespace) -> int:
 
 def cmd_factory_run(args: argparse.Namespace) -> int:
     from datetime import datetime, timedelta, timezone
-    supervisor = _build_factory_supervisor(args)
+    import signal
+    import threading
+
+    wake = threading.Event()
+    supervisor = _build_factory_supervisor(args, sleep=wake.wait)
+
+    def request_stop(signum, _frame):
+        supervisor.request_stop(f"signal_{signal.Signals(signum).name.lower()}")
+        wake.set()
+
     until = None
     if getattr(args, "until", None):
         until = datetime.now(timezone.utc) + timedelta(seconds=args.until)
-    supervisor.run(until=until)
+    previous = {}
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            previous[sig] = signal.signal(sig, request_stop)
+        if getattr(args, "resume_stopped", False):
+            supervisor.run(until=until, resume_stopped=True)
+        else:
+            supervisor.run(until=until)
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
     status = supervisor.status()
     if getattr(args, "json", False):
         import json
@@ -1709,4 +1730,3 @@ def main(args: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
