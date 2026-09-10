@@ -39,6 +39,10 @@ remote state before replay. Branch-push recovery accepts only the expected
 remote commit and parks mismatches for human reconciliation. CI evidence is
 bound to a stable, live PR head SHA before it can authorize a merge.
 
+An expired Claude OAuth session is recorded as `AUTHENTICATION_REQUIRED` in
+durable provider capacity state. Routing can consider another eligible worker;
+authentication repair remains an operator action.
+
 ***
 
 ## Everyday Workflow
