@@ -659,6 +659,8 @@ def test_explicit_override_bypasses_recommendation_but_not_hard_policy():
         ("usage limit reached", ProviderFailureClass.SESSION_LIMIT),
         ("429 too many requests", ProviderFailureClass.RATE_LIMITED),
         ("authentication required", ProviderFailureClass.AUTHENTICATION_REQUIRED),
+        ("Failed to authenticate: OAuth session expired and could not be refreshed",
+         ProviderFailureClass.AUTHENTICATION_REQUIRED),
         ("provider service unavailable", ProviderFailureClass.PROVIDER_UNAVAILABLE),
         ("command not found", ProviderFailureClass.MISSING_EXECUTABLE),
         ("tests failed: assertion error", ProviderFailureClass.ENGINEERING_FAILURE),
@@ -686,6 +688,22 @@ def test_capacity_state_persists_recovers_and_is_shared(tmp_path):
     assert before.status == ResourceSelectionStatus.BLOCKED
     assert before.exclusion_for("resource").reason == "SESSION_EXHAUSTED"
     assert after.selected.resource_id == "resource"
+
+
+def test_oauth_expiration_persists_and_routes_to_another_worker(tmp_path):
+    path = tmp_path / "capacity.json"
+    profiles = [make_profile("expired"), make_profile("healthy")]
+    pool = make_pool(profiles, state_path=path)
+    pool.record_result("expired", failed_result(
+        "expired", "Failed to authenticate: OAuth session expired and could not be refreshed"
+    ))
+
+    restarted = make_pool(profiles, state_path=path, probe_on_start=False)
+    decision = restarted.select_resource(make_task(), role="implementation")
+
+    assert restarted.get_status("expired") == ProviderAvailabilityStatus.AUTH_REQUIRED
+    assert decision.selected.resource_id == "healthy"
+    assert decision.exclusion_for("expired").reason == "AUTH_REQUIRED"
 
 
 def test_engineering_failure_does_not_exhaust_resource():
