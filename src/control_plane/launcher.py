@@ -42,6 +42,9 @@ from src.control_plane.cli import (
     cmd_authority as cp_cmd_authority,
     cmd_local as cp_cmd_local,
     cmd_factory as cp_cmd_factory,
+    cmd_explore as cp_cmd_explore,
+    cmd_trace as cp_cmd_trace,
+    register_exploration_subparsers,
     register_synthesis_subparsers,
     register_factory_subparsers,
 )
@@ -969,6 +972,20 @@ def cmd_unlock(args: argparse.Namespace) -> int:
     return cp_cmd_unlock(args)
 
 
+def cmd_explore(args: argparse.Namespace) -> int:
+    """Dispatches a governed HowlDream exploration cycle."""
+    target_repo = find_git_repo_root(args.repo)
+    args.repo_dir = str(target_repo)
+    return cp_cmd_explore(args)
+
+
+def cmd_trace(args: argparse.Namespace) -> int:
+    """Traces descent lineage DAG for an exploration run or candidate."""
+    target_repo = find_git_repo_root(args.repo)
+    args.repo_dir = str(target_repo)
+    return cp_cmd_trace(args)
+
+
 # Every subcommand build_parser() registers must appear here. A registered
 # subcommand with no entry does not error -- argparse accepts it, main() finds
 # nothing, and the operator gets top-level help and exit 1, which reads like a
@@ -995,6 +1012,8 @@ ACTIONS = {
     "authority": cp_cmd_authority,
     "local": cp_cmd_local,
     "factory": cp_cmd_factory,
+    "explore": cmd_explore,
+    "trace": cmd_trace,
 }
 
 
@@ -1117,6 +1136,8 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_ha.add_argument("--max-instructions", type=int, default=DEFAULT_INSTRUCTION_BUDGET, help="Instruction budget limit")
     p_ha.add_argument("--task-id", help="Task ID")
     p_ha.add_argument("--json", action="store_true", help="Output JSON result")
+
+    register_exploration_subparsers(subparsers, parents=[common_parser])
 
     # create, run, dogfood (Prompt-to-Product Synthesis)
     register_synthesis_subparsers(subparsers, parents=[common_parser])

@@ -348,6 +348,141 @@ def cmd_howlframe_audit(args: argparse.Namespace) -> int:
         return 2
 
 
+def cmd_explore(args: argparse.Namespace) -> int:
+    """Executes a governed HowlDream exploration cycle."""
+    import json
+    from src.control_plane.howldream_runner import (
+        HowlDreamRunner,
+        ExplorationPolicy,
+        ExplorationBudget,
+    )
+
+    policy_str = getattr(args, "policy", "MANUAL")
+    try:
+        policy = ExplorationPolicy(policy_str)
+    except ValueError:
+        policy = ExplorationPolicy.MANUAL
+
+    budget = ExplorationBudget(
+        max_candidates=getattr(args, "budget_candidates", 5),
+        max_trials=getattr(args, "budget_trials", 3),
+        max_tokens=getattr(args, "budget_tokens", 2048),
+    )
+
+    repo_dir = Path(getattr(args, "repo_dir", None) or ".").resolve()
+    runner = HowlDreamRunner(policy=policy)
+
+    if not getattr(args, "json", False):
+        print(f"Running HowlDream exploration for objective: {args.objective}")
+        print(f"Policy: {policy.value}, Working directory: {repo_dir}")
+
+    res = runner.dispatch_exploration(
+        objective=args.objective,
+        budget=budget,
+        policy=policy,
+        repo_dir=repo_dir,
+    )
+
+    if getattr(args, "json", False):
+        print(json.dumps(res.to_dict(), indent=2))
+    else:
+        print("=" * 60)
+        print("HOWLDREAM EXPLORATION RESULT")
+        print("=" * 60)
+        print(f"Status:             {res.status}")
+        print(f"Policy:             {res.policy}")
+        print(f"Objective:          {res.objective}")
+        print(f"Candidates Found:   {len(res.candidates)}")
+        print(f"Assessments Done:   {len(res.assessments)}")
+        print(f"Developed (Sandbox):{len(res.development_results)}")
+        if res.envelope_path:
+            print(f"Envelope:           {res.envelope_path}")
+        if res.error_message:
+            print(f"Message:            {res.error_message}")
+        print(f"Duration:           {res.duration_seconds}s")
+        print("=" * 60)
+
+    if res.status in ("SUCCESS", "NO_CANDIDATES", "SKIPPED", "UNAVAILABLE"):
+        return 0
+    elif res.status == "REJECTED":
+        return 1
+    else:
+        return 2
+
+
+def cmd_trace(args: argparse.Namespace) -> int:
+    """Traces descent lineage DAG for an exploration run or candidate."""
+    import json
+    repo_dir = Path(getattr(args, "repo_dir", None) or ".").resolve()
+    trace_id = args.trace_id
+
+    try:
+        has_howldream = False
+        try:
+            from howldream.contracts import DescentDAG
+
+            has_howldream = True
+        except ImportError:
+            DescentDAG = None
+
+        found_chain = None
+        for envelope_path in repo_dir.glob("**/exploration_envelope.json"):
+            if envelope_path.is_file():
+                with open(envelope_path, "r", encoding="utf-8") as f:
+                    env_data = json.load(f)
+                dag_data = env_data.get("descent_dag") or env_data.get("lineage_dag")
+                if not dag_data:
+                    continue
+
+                if has_howldream and DescentDAG is not None:
+                    dag = DescentDAG.model_validate(dag_data)
+                    if trace_id in dag.nodes:
+                        chain = dag.trace(trace_id)
+                        found_chain = [node.model_dump() for node in chain]
+                        break
+                else:
+                    nodes = dag_data.get("nodes", {})
+                    if isinstance(nodes, list):
+                        nodes = {n.get("node_id"): n for n in nodes if isinstance(n, dict)}
+                    if trace_id in nodes:
+                        edges = dag_data.get("edges", [])
+                        visited = set()
+                        chain = []
+
+                        def _walk(curr: str):
+                            if curr in visited or curr not in nodes:
+                                return
+                            visited.add(curr)
+                            chain.append(nodes[curr])
+                            for edge in edges:
+                                if isinstance(edge, dict) and edge.get("target") == curr:
+                                    src = edge.get("source")
+                                    if src:
+                                        _walk(src)
+
+                        _walk(trace_id)
+                        found_chain = chain
+                        break
+
+        if found_chain is not None:
+            if getattr(args, "json", False):
+                print(json.dumps(found_chain, indent=2))
+            else:
+                print(f"Lineage trace for '{trace_id}' ({len(found_chain)} nodes):")
+                for node in found_chain:
+                    node_type = node.get("node_type", "unknown")
+                    node_id = node.get("node_id", "")
+                    label = node.get("label", "")
+                    print(f"  - [{node_type}] {node_id}: {label}")
+            return 0
+        else:
+            print(f"Node or candidate '{trace_id}' not found in lineage DAGs.")
+            return 1
+    except Exception as exc:
+        print(f"Error tracing '{trace_id}': {exc}")
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="control_plane",
@@ -486,10 +621,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_can.add_argument("--ledger-file", help="Ledger file path")
     p_can.add_argument("--json", action="store_true", help="Output JSON result")
 
+    register_exploration_subparsers(subparsers)
     register_factory_subparsers(subparsers)
     register_synthesis_subparsers(subparsers)
 
     return parser
+
+
+def register_exploration_subparsers(subparsers: Any, parents: Optional[List[Any]] = None) -> None:
+    kwargs = {"parents": parents} if parents else {}
+    # explore
+    p_exp = subparsers.add_parser("explore", help="Run governed HowlDream exploration", **kwargs)
+    p_exp.add_argument("objective", help="Exploration objective")
+    p_exp.add_argument(
+        "--policy",
+        choices=["NEVER", "MANUAL", "SUGGEST", "ALLOWED", "AUTOMATIC_WITH_BUDGET"],
+        default="MANUAL",
+        help="Exploration governance policy",
+    )
+    p_exp.add_argument("--budget-candidates", type=int, default=5, help="Candidate limit")
+    p_exp.add_argument("--budget-trials", type=int, default=3, help="Trial limit")
+    p_exp.add_argument("--budget-tokens", type=int, default=10000, help="Token budget")
+    p_exp.add_argument("--repo-dir", default=".", help="Target repository directory")
+    p_exp.add_argument("--json", action="store_true", help="Output JSON result")
+
+    # trace
+    p_trc = subparsers.add_parser("trace", help="Trace lineage DAG for a candidate or node", **kwargs)
+    p_trc.add_argument("trace_id", help="Node, candidate, or dream ID to trace")
+    p_trc.add_argument("--repo-dir", default=".", help="Target repository directory")
+    p_trc.add_argument("--json", action="store_true", help="Output JSON result")
 
 
 def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = None) -> None:
@@ -1710,6 +1870,8 @@ HANDLERS = {
     "authority": cmd_authority,
     "local": cmd_local,
     "factory": cmd_factory,
+    "explore": cmd_explore,
+    "trace": cmd_trace,
 }
 
 

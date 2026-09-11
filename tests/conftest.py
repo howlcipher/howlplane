@@ -17,6 +17,7 @@ from src.control_plane.git_env import GIT_REPOSITORY_SELECTION_ENV_VARS
 # unfaked real-integration layer; only unit/control-plane and synthesis tests
 # get the fake compiler injected).
 _REAL_COMPILER_INTEGRATION_MODULES = {
+    "test_howldream_integration.py",
     "test_howlframe_dogfood.py",
     "test_launcher.py",
 }
