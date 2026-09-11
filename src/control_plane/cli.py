@@ -1351,7 +1351,7 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
     from src.control_plane.factory.repo_proposal import RepoProposalStore
     from src.control_plane.factory.work_item import WorkItemState, WorkItemStore
     store = _factory_state_store(args)
-    record = store.load()
+    record = store.load(reconcile_restart=False)
     work_store = WorkItemStore(Path(args.state_dir).resolve() / "work_items")
     proposal_store = RepoProposalStore(Path(args.state_dir).resolve() / "repo_proposals")
     parked = [

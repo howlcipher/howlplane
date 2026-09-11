@@ -86,10 +86,11 @@ def test_unknown_state_is_refused_at_construction():
         ("{not json", "failed to read"),
     ],
 )
-def test_malformed_state_loads_fail_closed(tmp_path, contents, expected_substring):
+@pytest.mark.parametrize("reconcile_restart", [False, True])
+def test_malformed_state_loads_fail_closed(tmp_path, contents, expected_substring, reconcile_restart):
     store = SupervisorStateStore(tmp_path / "supervisor")
     (tmp_path / "supervisor" / "factory_supervisor.json").write_text(contents)
-    record = store.load()
+    record = store.load(reconcile_restart=reconcile_restart)
     assert record.state == SupervisorState.STOPPED
     assert record.stopped_reason == "malformed_state"
     assert expected_substring in (record.last_error or "").lower()

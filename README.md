@@ -48,6 +48,9 @@ candidate verification or failover path before they can advance.
 
 ### Persistent Linux user service
 
+`factory status` reports the persisted supervisor state without treating an
+active dispatch as a process restart. Startup still reconciles interrupted work.
+
 An unsuccessful remediation worker produces durable failure and partial-patch
 evidence. Plane preserves the cumulative task patch, restores the original
 pre-task baseline (including undoing earlier remediation cycles), and returns the failure to the
