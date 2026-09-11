@@ -51,6 +51,10 @@ candidate verification or failover path before they can advance.
 `factory status` reports the persisted supervisor state without treating an
 active dispatch as a process restart. Startup still reconciles interrupted work.
 
+Factory worker deadlines can hand off to another eligible provider through the
+existing bounded retry loop. This requires the failed attempt's baseline to be
+restored and does not mark the timed-out provider globally exhausted.
+
 An unsuccessful remediation worker produces durable failure and partial-patch
 evidence. Plane preserves the cumulative task patch, restores the original
 pre-task baseline (including undoing earlier remediation cycles), and returns the failure to the
