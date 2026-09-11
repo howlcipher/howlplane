@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+- Report active factory dispatches accurately in text and JSON status output,
+  without inventing a restart failure; preserve startup recovery and malformed
+  state validation.
+
 - Stop the governed run on unsuccessful remediation, including zero-exit
   unfinished deadlines. Preserve its partial patch and provider failure,
   restore the original pre-task baseline while retaining the cumulative patch,
