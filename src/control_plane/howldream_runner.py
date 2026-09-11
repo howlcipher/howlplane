@@ -425,13 +425,9 @@ class HowlDreamRunner:
                 assert_no_execution_authority(data)
                 return data
             else:
-                # If execution failed or had non-zero exit code, return REJECT assessment
-                return {
-                    "schema": "howl.assessment/v1",
-                    "disposition": "REJECT",
-                    "authority": {"type": "ADVISORY", "executable": False},
-                    "explanation": f"HowlFrame evaluation error: {res.stderr.strip()}",
-                }
+                return self._fallback_evaluate_candidate(candidate_handoff)
+        except Exception:
+            return self._fallback_evaluate_candidate(candidate_handoff)
         finally:
             if should_cleanup and cand_path.is_file():
                 cand_path.unlink()

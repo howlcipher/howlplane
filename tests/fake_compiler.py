@@ -243,6 +243,31 @@ def run_compiler(args: list[str]) -> int:
         return 0
 
     if "-run-bc" in args:
+        # If running a CLI evaluation (e.g. candidate_evaluator) rather than a persistent web server
+        json_args = [a for a in args if a.endswith(".json") and Path(a).is_file()]
+        bc_args = [a for a in args if "candidate_evaluator" in a or a.endswith(".hfbc")]
+        if json_args and bc_args:
+            cand_data = {}
+            try:
+                cand_data = json.loads(Path(json_args[0]).read_text(encoding="utf-8"))
+            except Exception:
+                pass
+            status = cand_data.get("status", "")
+            disposition = (
+                "ACCEPT_FOR_DEVELOPMENT"
+                if status in ("LOCALLY_VERIFIED", "VERIFIED")
+                else "REJECT"
+            )
+            assessment = {
+                "schema_version": "howl.assessment/v1",
+                "disposition": disposition,
+                "score": 0.85 if disposition == "ACCEPT_FOR_DEVELOPMENT" else 0.2,
+                "reasons": ["Evaluated via fake_compiler fixture"],
+                "authority": {"type": "ADVISORY", "executable": False},
+            }
+            print(json.dumps(assessment))
+            return 0
+
         port = int(os.environ.get("PORT", 8088))
         server = HTTPServer(("127.0.0.1", port), FakeHowlServerHandler)
 
