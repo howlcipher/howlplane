@@ -774,10 +774,18 @@ class ProviderPoolManager:
         agent_id: str,
         result: AgentExecutionResult,
     ) -> ProviderFailureClass:
+        """Retains the pool's instance classification contract."""
+        return ProviderPoolManager.classify_result(self._normalize(agent_id), result)
+
+    @staticmethod
+    def classify_result(
+        agent_id: str,
+        result: AgentExecutionResult,
+    ) -> ProviderFailureClass:
         """Normalizes availability separately from engineering results."""
         if result.success:
             return ProviderFailureClass.UNKNOWN
-        resource_id = self._normalize(agent_id)
+        resource_id = AgentBackendRegistry.normalize_agent_id(agent_id)
         combined = "\n".join(
             [result.error_message or "", result.stderr or "", result.stdout or ""]
         ).lower()
