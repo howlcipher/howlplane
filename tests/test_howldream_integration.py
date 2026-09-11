@@ -28,6 +28,7 @@ from src.control_plane.howldream_runner import (
     CircuitBreakers,
     AuthorityEscalationError,
     assert_no_execution_authority,
+    DeterministicTestExplorationProvider,
 )
 from src.control_plane import launcher
 
@@ -44,7 +45,10 @@ def test_exploration_policy_never_skips_execution(tmp_path: Path):
 def test_circuit_breakers_halt_recursive_dreaming(tmp_path: Path):
     """Proves that max_depth and max_dream_runs circuit breakers trigger fail-closed."""
     breakers = CircuitBreakers(max_depth=1, max_dream_runs=1)
-    runner = HowlDreamRunner(policy=ExplorationPolicy.ALLOWED, breakers=breakers)
+    provider = DeterministicTestExplorationProvider()
+    runner = HowlDreamRunner(
+        policy=ExplorationPolicy.ALLOWED, breakers=breakers, provider=provider
+    )
 
     # Trigger via depth limit
     res_depth = runner.dispatch_exploration(
@@ -58,7 +62,7 @@ def test_circuit_breakers_halt_recursive_dreaming(tmp_path: Path):
     res_first = runner.dispatch_exploration(
         "Explore run 1", repo_dir=tmp_path, current_depth=0
     )
-    assert res_first.status in ("SUCCESS", "NO_CANDIDATES", "UNAVAILABLE")
+    assert res_first.status in ("SUCCESS", "NO_CANDIDATES")
 
     res_second = runner.dispatch_exploration(
         "Explore run 2", repo_dir=tmp_path, current_depth=0
@@ -143,7 +147,8 @@ def test_end_to_end_exploration_howlframe_howlcreate_pipeline(tmp_path: Path):
     Executes an end-to-end exploration dispatch:
     HowlPlane -> HowlDream (explore) -> HowlFrame (assessment) -> HowlCreate (deliberate prototype).
     """
-    runner = HowlDreamRunner(policy=ExplorationPolicy.ALLOWED)
+    provider = DeterministicTestExplorationProvider()
+    runner = HowlDreamRunner(policy=ExplorationPolicy.ALLOWED, provider=provider)
     budget = ExplorationBudget(max_candidates=2, max_trials=1, max_tokens=1000)
 
     res = runner.dispatch_exploration(
@@ -170,8 +175,10 @@ def test_end_to_end_exploration_howlframe_howlcreate_pipeline(tmp_path: Path):
         assert dev.get("authority", {}).get("executable") is False
 
 
-def test_cli_explore_and_trace_subcommands(tmp_path: Path, capsys):
+def test_cli_explore_and_trace_subcommands(tmp_path: Path, capsys, monkeypatch):
     """Proves that explore and trace subcommands function via launcher CLI."""
+    monkeypatch.setenv("HOWLDREAM_PROVIDER", "test")
+
     # Test explore help
     with pytest.raises(SystemExit) as exc:
         launcher.main(["explore", "--help"])
@@ -212,3 +219,93 @@ def test_cli_explore_and_trace_subcommands(tmp_path: Path, capsys):
         assert trace_code == 0, f"trace stdout: {trace_cap.out}\nstderr: {trace_cap.err}"
         trace_data = json.loads(trace_cap.out)
         assert len(trace_data) > 0
+
+
+def test_resolve_candidate_evaluator_bc_no_workstation_paths():
+    """Proves that resolve_candidate_evaluator_bc does not contain workstation paths."""
+    import inspect
+
+    src = inspect.getsource(HowlDreamRunner.resolve_candidate_evaluator_bc)
+    assert "tallgeese" not in src
+    assert "/run/media" not in src
+    assert "/var/home" not in src
+
+
+def test_exploration_policies_suggest_and_automatic(tmp_path: Path):
+    """Proves that SUGGEST and AUTOMATIC_WITH_BUDGET policies operate within bounds."""
+    provider = DeterministicTestExplorationProvider()
+
+    # SUGGEST suggests exploration without automatically dispatching engine
+    runner_suggest = HowlDreamRunner(
+        policy=ExplorationPolicy.SUGGEST, provider=provider
+    )
+    res_suggest = runner_suggest.dispatch_exploration(
+        "Suggest optimizations", repo_dir=tmp_path
+    )
+    assert res_suggest.status == "SKIPPED"
+    assert "SUGGEST" in (res_suggest.error_message or "")
+
+    # AUTOMATIC_WITH_BUDGET executes within bounds
+    runner_auto = HowlDreamRunner(
+        policy=ExplorationPolicy.AUTOMATIC_WITH_BUDGET, provider=provider
+    )
+    budget = ExplorationBudget(max_candidates=1, max_trials=1, max_tokens=500)
+    res_auto = runner_auto.dispatch_exploration(
+        "Auto with budget",
+        budget=budget,
+        repo_dir=tmp_path,
+        run_howlframe=True,
+        run_howlcreate=True,
+    )
+    assert res_auto.status == "SUCCESS"
+    assert len(res_auto.candidates) > 0
+
+    # AUTOMATIC_WITH_BUDGET skips when budget exceeds safe ceiling
+    excessive_budget = ExplorationBudget(
+        max_candidates=15, max_trials=1, max_tokens=5000
+    )
+    res_excessive = runner_auto.dispatch_exploration(
+        "Auto with excessive budget",
+        budget=excessive_budget,
+        repo_dir=tmp_path,
+    )
+    assert res_excessive.status == "SKIPPED"
+    assert "budget ceiling" in (res_excessive.error_message or "")
+
+
+def test_trace_missing_node_and_text_output(tmp_path: Path, capsys, monkeypatch):
+    """Proves that cmd_trace handles missing nodes gracefully and supports text output."""
+    monkeypatch.setenv("HOWLDREAM_PROVIDER", "test")
+    from tests._git_test_helpers import init_git_repo
+
+    init_git_repo(tmp_path, files={"README.md": "# Test\n"})
+
+    launcher.main(
+        [
+            "explore",
+            "Lineage test objective",
+            "-R",
+            str(tmp_path),
+            "--budget-candidates",
+            "1",
+            "--json",
+        ]
+    )
+    capsys.readouterr()
+
+    # Query nonexistent node
+    exit_code = launcher.main(["trace", "nonexistent-node-id", "-R", str(tmp_path)])
+    cap = capsys.readouterr()
+    assert exit_code == 1
+    assert "not found in lineage DAGs" in cap.out
+
+    # Query existing node in text mode
+    for env in tmp_path.glob("**/exploration_envelope.json"):
+        d = json.loads(env.read_text())
+        if d.get("candidates"):
+            cid = d["candidates"][0]["candidate_id"]
+            code = launcher.main(["trace", cid, "-R", str(tmp_path)])
+            out = capsys.readouterr().out
+            assert code == 0
+            assert f"Lineage trace for '{cid}'" in out
+            break

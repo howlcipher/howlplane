@@ -8,7 +8,7 @@ assessments and HowlCreate sandbox prototyping, and enforces strict, fail-closed
 authority boundaries: speculative outputs NEVER possess execution authority.
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
 import json
 import os
@@ -18,7 +18,7 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional, Union
 
-from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, sanitize_value
+from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
 from src.control_plane.project_adapter import ProjectContext
 from src.control_plane.task_spec import DataClassSerializationMixin
 
@@ -121,23 +121,31 @@ def assert_no_execution_authority(payload: Any) -> None:
             assert_no_execution_authority(item)
 
 
-class HowlDreamRunner:
-    """Governance and dispatch adapter for HowlDream within HowlPlane."""
+class ExplorationProvider:
+    """Interface for HowlDream exploration engine providers."""
 
-    def __init__(
+    def is_available(self) -> bool:
+        """Checks if this provider is currently available."""
+        raise NotImplementedError
+
+    def explore(
         self,
-        policy: ExplorationPolicy = DEFAULT_EXPLORATION_POLICY,
-        breakers: Optional[CircuitBreakers] = None,
-        ledger: Optional[EvidenceLedger] = None,
-    ) -> None:
-        self.policy = policy
-        self.breakers = breakers or CircuitBreakers()
-        self.ledger = ledger
-        self._dream_run_count = 0
+        objective: str,
+        budget: ExplorationBudget,
+        work_dir: Path,
+        **kwargs: Any,
+    ) -> tuple[Path, Dict[str, Any]]:
+        """
+        Executes exploration and returns (run_dir, result_envelope_dict).
+        Emitted dictionary must conform to howl.exploration_result/v1 schema.
+        """
+        raise NotImplementedError
 
-    @classmethod
-    def is_howldream_available(cls) -> bool:
-        """Checks whether howldream is importable or installed as a CLI binary."""
+
+class NativeHowlDreamProvider(ExplorationProvider):
+    """Production provider running real HowlDream via import or CLI binary."""
+
+    def is_available(self) -> bool:
         if os.environ.get("HOWLDREAM_BIN"):
             p = Path(os.environ["HOWLDREAM_BIN"]).expanduser().resolve()
             if p.is_file() and os.access(p, os.X_OK):
@@ -149,6 +157,207 @@ class HowlDreamRunner:
             return True
         except ImportError:
             return False
+
+    def explore(
+        self,
+        objective: str,
+        budget: ExplorationBudget,
+        work_dir: Path,
+        **kwargs: Any,
+    ) -> tuple[Path, Dict[str, Any]]:
+        from uuid import uuid4
+
+        try:
+            from howldream.contracts import ExplorationRequest
+            from howldream.engine import explore
+
+            req = ExplorationRequest(
+                request_id=f"req-{uuid4().hex[:12]}",
+                objective=objective,
+                budget={
+                    "max_candidates": budget.max_candidates,
+                    "max_trials": budget.max_trials,
+                    "max_tokens": min(budget.max_tokens, 4096),
+                    "local_only": budget.local_only,
+                },
+                authority={"type": "ADVISORY", "executable": False},
+            )
+            run_dir, result = explore(req, root=work_dir)
+            return run_dir, result.model_dump()
+        except ImportError:
+            bin_path = os.environ.get("HOWLDREAM_BIN") or shutil.which("howldream")
+            if not bin_path:
+                raise RuntimeError("HowlDream engine is not available")
+            req_file = work_dir / f"req_{uuid4().hex[:8]}.json"
+            req_data = {
+                "schema_version": "howl.exploration/v1",
+                "request_id": f"req-{uuid4().hex[:12]}",
+                "objective": objective,
+                "budget": {
+                    "max_candidates": budget.max_candidates,
+                    "max_trials": budget.max_trials,
+                    "max_tokens": min(budget.max_tokens, 4096),
+                    "local_only": budget.local_only,
+                },
+                "authority": {"type": "ADVISORY", "executable": False},
+            }
+            req_file.write_text(json.dumps(req_data), encoding="utf-8")
+            runs_dir = work_dir / ".howldream" / "runs"
+            runs_dir.mkdir(parents=True, exist_ok=True)
+            res = subprocess.run(
+                [str(bin_path), "explore", str(req_file), "--output", str(runs_dir)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            data = json.loads(res.stdout)
+            run_id = data.get("exploration_id", "")
+            return runs_dir / run_id, data
+
+
+# jscpd:ignore-start
+class DeterministicTestExplorationProvider(ExplorationProvider):
+    """Deterministic provider emitting contract-compatible envelopes for testing."""
+
+    def is_available(self) -> bool:
+        return True
+
+    def explore(
+        self,
+        objective: str,
+        budget: ExplorationBudget,
+        work_dir: Path,
+        **kwargs: Any,
+    ) -> tuple[Path, Dict[str, Any]]:
+        from uuid import uuid4
+        from datetime import datetime, timezone
+
+        run_id = f"hd-det-test-{uuid4().hex[:8]}"
+        req_id = f"req-det-{uuid4().hex[:8]}"
+        run_dir = work_dir / ".howldream" / "runs" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        def _make_cand(cid_suffix: str, snippet: str, stat: str, extra_claim: str, issues: List[str]) -> Dict[str, Any]:
+            cid = f"{run_id}/candidates/{cid_suffix}"
+            return {
+                "schema_version": "howl.candidate/v1",
+                "candidate_id": cid,
+                "source_run_id": run_id,
+                "parent_request_id": req_id,
+                "objective": objective,
+                "text": f"IDEA: {snippet} for {objective}",
+                "condition": "dream",
+                "trust": "UNVERIFIED",
+                "status": stat,
+                "authority": {"type": "ADVISORY", "executable": False},
+                "claims": [{"kind": "IDEA", "text": extra_claim}],
+                "evidence_refs": [],
+                "assumptions": issues,
+                "unresolved_issues": issues,
+                "contradictions": [],
+                "verified_constraints": ["local_only"] if not issues else [],
+                "provenance": {"initiator": "test_suite"},
+            }
+
+        num_cands = max(1, min(budget.max_candidates, 2))
+        candidates: List[Dict[str, Any]] = [
+            _make_cand("0", "Diagnostic hook", "LOCALLY_VERIFIED", "Active hook", []),
+        ]
+        if num_cands > 1:
+            candidates.append(
+                _make_cand("1", "Alternative queue", "UNRESOLVED", "Alt queue", ["unbounded memory"])
+            )
+
+        obj_node = f"obj-{req_id}"
+        dream_node = f"{run_id}/dream"
+        dag_dict = {
+            "nodes": {
+                obj_node: {
+                    "node_id": obj_node,
+                    "node_type": "OBJECTIVE",
+                    "label": f"Objective: {objective[:50]}",
+                    "details": {},
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+                dream_node: {
+                    "node_id": dream_node,
+                    "node_type": "DREAM_RUN",
+                    "label": f"Dream Run: {run_id}",
+                    "details": {},
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+            },
+            "edges": [
+                {"source": obj_node, "target": dream_node, "relation": "explores"},
+            ],
+        }
+        for cand in candidates:
+            c_id = cand["candidate_id"]
+            dag_dict["nodes"][c_id] = {
+                "node_id": c_id,
+                "node_type": "CANDIDATE",
+                "label": f"Candidate: {c_id}",
+                "details": {},
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            dag_dict["edges"].append(
+                {"source": dream_node, "target": c_id, "relation": "generates"}
+            )
+
+        envelope = {
+            "schema_version": "howl.exploration_result/v1",
+            "exploration_id": run_id,
+            "parent_request_id": req_id,
+            "objective": objective,
+            "originating_component": "howlplane",
+            "authority": {"type": "ADVISORY", "executable": False},
+            "candidates": candidates,
+            "claims": [],
+            "evidence": [],
+            "unresolved_assumptions": ["network telemetry available"],
+            "contradictions": [],
+            "scores": [],
+            "verification_status": "LOCALLY_VERIFIED",
+            "recommended_disposition": "INVESTIGATE",
+            "provenance": {"system": "howlplane-test-provider"},
+            "descent_dag": dag_dict,
+        }
+
+        envelope_file = run_dir / "exploration_envelope.json"
+        envelope_file.write_text(json.dumps(envelope, indent=2), encoding="utf-8")
+        return run_dir, envelope
+# jscpd:ignore-end
+
+
+class HowlDreamRunner:
+    """Governance and dispatch adapter for HowlDream within HowlPlane."""
+
+    def __init__(
+        self,
+        policy: ExplorationPolicy = DEFAULT_EXPLORATION_POLICY,
+        breakers: Optional[CircuitBreakers] = None,
+        ledger: Optional[EvidenceLedger] = None,
+        provider: Optional[ExplorationProvider] = None,
+    ) -> None:
+        self.policy = policy
+        self.breakers = breakers or CircuitBreakers()
+        self.ledger = ledger
+        self._dream_run_count = 0
+        if provider is not None:
+            self.provider = provider
+        elif os.environ.get("HOWLDREAM_PROVIDER") in ("test", "deterministic", "deterministic_test"):
+            self.provider = DeterministicTestExplorationProvider()
+        else:
+            self.provider = NativeHowlDreamProvider()
+
+    def is_howldream_available(self) -> bool:
+        """Checks whether howldream is available via the configured provider."""
+        return self.provider.is_available()
+
+    @classmethod
+    def is_system_howldream_available(cls) -> bool:
+        """Checks whether howldream is installed on the host system."""
+        return NativeHowlDreamProvider().is_available()
 
     @classmethod
     def resolve_candidate_evaluator_bc(cls) -> Optional[Path]:
@@ -163,21 +372,6 @@ class HowlDreamRunner:
         local_bc = repo_root / "integrations" / "howlframe" / "candidate_evaluator.hfbc"
         if local_bc.is_file():
             return local_bc
-
-        # Check dev sibling locations
-        dev_worktree_bc = Path(
-            "/run/media/system/tallgeese/dev/worktrees/howlframe-milestone-four"
-            "/apps/candidate_evaluator/candidate_evaluator.hfbc"
-        )
-        if dev_worktree_bc.is_file():
-            return dev_worktree_bc
-
-        dev_bc = Path(
-            "/run/media/system/tallgeese/dev/howlframe"
-            "/apps/candidate_evaluator/candidate_evaluator.hfbc"
-        )
-        if dev_bc.is_file():
-            return dev_bc
 
         return None
 
@@ -323,7 +517,7 @@ class HowlDreamRunner:
                 raise ValueError("Cannot promote candidate not ACCEPT_FOR_DEVELOPMENT")
 
             return {
-                "schema": "howl.development_result/v1",
+                "schema_version": "howl.development_result/v1",
                 "disposition": "ACCEPTED",
                 "execution_authority": "NONE",
                 "prototype_plan": "Fallback sandbox prototype plan",
@@ -358,6 +552,27 @@ class HowlDreamRunner:
                 error_message="Exploration policy NEVER disallows running HowlDream.",
                 duration_seconds=round(time.time() - t0, 3),
             )
+        elif active_policy == ExplorationPolicy.SUGGEST:
+            return ExplorationRunResult(
+                status="SKIPPED",
+                policy=active_policy.value,
+                objective=objective,
+                error_message="Exploration policy SUGGEST: exploration suggested but not executed.",
+                duration_seconds=round(time.time() - t0, 3),
+            )
+        elif active_policy == ExplorationPolicy.AUTOMATIC_WITH_BUDGET:
+            if active_budget.max_candidates > 10 or active_budget.max_tokens > 4096:
+                return ExplorationRunResult(
+                    status="SKIPPED",
+                    policy=active_policy.value,
+                    objective=objective,
+                    error_message=(
+                        f"Exploration policy AUTOMATIC_WITH_BUDGET exceeded budget ceiling: "
+                        f"candidates={active_budget.max_candidates} (max 10), "
+                        f"tokens={active_budget.max_tokens} (max 4096)"
+                    ),
+                    duration_seconds=round(time.time() - t0, 3),
+                )
 
         # 2. Circuit Breaker Gate
         if current_depth >= self.breakers.max_depth:
@@ -400,27 +615,17 @@ class HowlDreamRunner:
         work_dir = repo_dir or Path.cwd()
 
         try:
-            from uuid import uuid4
-            from howldream.contracts import ExplorationRequest
-            from howldream.engine import explore
-
-            req = ExplorationRequest(
-                request_id=f"req-{uuid4().hex[:12]}",
+            run_dir, raw_envelope = self.provider.explore(
                 objective=objective,
-                budget={
-                    "max_candidates": active_budget.max_candidates,
-                    "max_trials": active_budget.max_trials,
-                    "max_tokens": min(active_budget.max_tokens, 4096),
-                    "local_only": active_budget.local_only,
-                },
-                authority={"type": "ADVISORY", "executable": False},
+                budget=active_budget,
+                work_dir=work_dir,
             )
-
-            run_dir, result = explore(req, root=work_dir)
+            assert_no_execution_authority(raw_envelope)
             envelope_path = run_dir / "exploration_envelope.json"
-            assert_no_execution_authority(result.model_dump())
+            if not envelope_path.is_file():
+                envelope_path.write_text(json.dumps(raw_envelope, indent=2), encoding="utf-8")
 
-            candidates = [c.model_dump() for c in result.candidates]
+            candidates = raw_envelope.get("candidates", [])
             assessments: List[Dict[str, Any]] = []
             development_results: List[Dict[str, Any]] = []
 
@@ -440,8 +645,7 @@ class HowlDreamRunner:
                         assert_no_execution_authority(dev_res)
                         development_results.append(dev_res)
 
-            dag_obj = getattr(result, "descent_dag", getattr(result, "lineage_dag", None))
-            dag_dict = dag_obj.model_dump() if dag_obj else None
+            dag_dict = raw_envelope.get("descent_dag") or raw_envelope.get("lineage_dag")
 
             # Record to EvidenceLedger if configured
             if self.ledger:

@@ -417,29 +417,63 @@ def cmd_trace(args: argparse.Namespace) -> int:
     trace_id = args.trace_id
 
     try:
-        from howldream.contracts import DescentDAG
+        has_howldream = False
+        try:
+            from howldream.contracts import DescentDAG
 
-        found_dag = None
+            has_howldream = True
+        except ImportError:
+            DescentDAG = None
+
+        found_chain = None
         for envelope_path in repo_dir.glob("**/exploration_envelope.json"):
             if envelope_path.is_file():
                 with open(envelope_path, "r", encoding="utf-8") as f:
                     env_data = json.load(f)
                 dag_data = env_data.get("descent_dag") or env_data.get("lineage_dag")
-                if dag_data:
+                if not dag_data:
+                    continue
+
+                if has_howldream and DescentDAG is not None:
                     dag = DescentDAG.model_validate(dag_data)
                     if trace_id in dag.nodes:
-                        found_dag = dag
+                        chain = dag.trace(trace_id)
+                        found_chain = [node.model_dump() for node in chain]
+                        break
+                else:
+                    nodes = dag_data.get("nodes", {})
+                    if isinstance(nodes, list):
+                        nodes = {n.get("node_id"): n for n in nodes if isinstance(n, dict)}
+                    if trace_id in nodes:
+                        edges = dag_data.get("edges", [])
+                        visited = set()
+                        chain = []
+
+                        def _walk(curr: str):
+                            if curr in visited or curr not in nodes:
+                                return
+                            visited.add(curr)
+                            chain.append(nodes[curr])
+                            for edge in edges:
+                                if isinstance(edge, dict) and edge.get("target") == curr:
+                                    src = edge.get("source")
+                                    if src:
+                                        _walk(src)
+
+                        _walk(trace_id)
+                        found_chain = chain
                         break
 
-        if found_dag:
-            chain = found_dag.trace(trace_id)
-            trace_result = [node.model_dump() for node in chain]
+        if found_chain is not None:
             if getattr(args, "json", False):
-                print(json.dumps(trace_result, indent=2))
+                print(json.dumps(found_chain, indent=2))
             else:
-                print(f"Lineage trace for '{trace_id}' ({len(chain)} nodes):")
-                for node in chain:
-                    print(f"  - [{node.node_type}] {node.node_id}: {node.label}")
+                print(f"Lineage trace for '{trace_id}' ({len(found_chain)} nodes):")
+                for node in found_chain:
+                    node_type = node.get("node_type", "unknown")
+                    node_id = node.get("node_id", "")
+                    label = node.get("label", "")
+                    print(f"  - [{node_type}] {node_id}: {label}")
             return 0
         else:
             print(f"Node or candidate '{trace_id}' not found in lineage DAGs.")
