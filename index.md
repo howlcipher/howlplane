@@ -48,6 +48,11 @@ candidate verification or failover path before they can advance.
 
 ### Persistent Linux user service
 
+An unsuccessful remediation worker produces durable failure and partial-patch
+evidence. Plane preserves the cumulative task patch, restores the original
+pre-task baseline (including undoing earlier remediation cycles), and returns the failure to the
+existing retry policy; it does not report that remediation as complete.
+
 Factory backlog ingestion retains each item's detailed problem statement and
 acceptance criteria. Repeated discovery fills missing legacy context while
 preserving active tasks, existing descriptions, and lifecycle dispositions.
