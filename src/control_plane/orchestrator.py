@@ -3239,6 +3239,8 @@ class GovernedTaskOrchestrator:
             )
             rem_backend = self._resolve_backend(rem_resource_id)
             rem_agent_id = getattr(rem_backend, "agent_id", None) or rem_resource_id
+            rem_res = None
+            rem_failure = None
             with progress.operation(
                 phase=TaskPhase.REMEDIATING,
                 resource_id=rem_agent_id,
@@ -3258,11 +3260,53 @@ class GovernedTaskOrchestrator:
                         timeout_seconds=self.config.timeout_seconds,
                     )
                     (rem_cycle_dir / "result.json").write_text(rem_res.to_json(), encoding="utf-8")
+                    if self.config.provider_pool is not None:
+                        rem_failure = self.config.provider_pool.record_result(
+                            rem_resource_id, rem_res, task_id=task_spec.task_id,
+                        )
+                    else:
+                        from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+
+                        rem_failure = ProviderPoolManager.classify_result(rem_resource_id, rem_res)
 
             current_delta = self._capture_scoped_delta(
                 task_spec, baseline, routing.selected_agent_id, stage="remediation"
             )
             self._write_delta_patch(current_delta, rem_cycle_dir, run_dir)
+
+            if rem_res is not None and not rem_res.success:
+                # Evidence must survive, but incomplete remediation must not be
+                # recorded as completed or leak into a later task's baseline.
+                # Restore the whole task, including earlier remediation cycles;
+                # the cumulative patch above preserves all of that work.
+                restored, restore_error = restore_repository_to_baseline(
+                    self.target_repo, baseline, current_delta,
+                )
+                failure_class = self._map_failure_class_to_orchestrator_class(rem_failure)
+                error = rem_res.error_message or rem_res.stderr or "Remediation worker failed"
+                if not restored:
+                    error += f"; baseline restore failed: {restore_error}"
+                disposition = {
+                    "resource_id": rem_resource_id,
+                    "failure_class": failure_class,
+                    "provider_failure_class": getattr(rem_failure, "value", None),
+                    "rollback": {"restored": restored, "error": restore_error},
+                }
+                (rem_cycle_dir / "failure.json").write_text(
+                    json.dumps(disposition, indent=2), encoding="utf-8",
+                )
+                self._record_event(
+                    task_id=task_spec.task_id, agent_id=rem_resource_id,
+                    action="remediation_failed", spec=task_spec, metadata=disposition,
+                )
+                return self._fail_task(
+                    task_spec, run_dir, error, start_time,
+                    exit_code=rem_res.exit_code or 1, progress_tracker=progress,
+                    stage="remediating", routing=routing, current_delta=current_delta,
+                    review_cycles=review_cycles, verif_plan=verif_plan,
+                    remediation_count=remediation_count, provider_execution=rem_res,
+                    failure_class=failure_class, implementation_attempts=implementation_attempts,
+                )
 
             self._record_event(
                 task_id=task_spec.task_id,
