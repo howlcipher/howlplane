@@ -2,9 +2,45 @@
 """Tests for the factory CLI subcommands."""
 
 from datetime import datetime, timezone
+import json
+
+import pytest
 
 from src.control_plane.cli import main
 from src.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_status_observes_active_dispatch_without_restarting(tmp_path, capsys, json_output):
+    store = SupervisorStateStore(tmp_path / "supervisor")
+    record = store.load()
+    record.transition_to(SupervisorState.DISPATCHING, reason="item_selected")
+    record.record_dispatch("D-live", "WI-live", "TASK-live", record.created_at)
+    record.failure_count = 4
+    store.save(record)
+    state_path = tmp_path / "supervisor" / "factory_supervisor.json"
+    original = state_path.read_bytes()
+
+    args = ["factory", "status", "--state-dir", str(tmp_path)]
+    assert main(args + (["--json"] if json_output else [])) == 0
+    output = capsys.readouterr().out
+    if json_output:
+        status = json.loads(output)
+        assert status["state"] == "dispatching"
+        assert status["failure_count"] == 4
+        assert status["current_dispatch_id"] == "D-live"
+        assert status["last_error"] is None
+    else:
+        assert "State: dispatching" in output
+        assert "Failures: 4" in output
+        assert "Current dispatch: D-live" in output
+        assert "Restart during dispatch" not in output
+    assert state_path.read_bytes() == original
+    # A genuine startup still reconciles interrupted work, retaining identity.
+    recovered = store.load()
+    assert recovered.state == SupervisorState.BACKOFF_AFTER_FAILURE
+    assert recovered.failure_count == 5
+    assert recovered.current_dispatch_id == "D-live"
 
 
 class FakeSupervisor:

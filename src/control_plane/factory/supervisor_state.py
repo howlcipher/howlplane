@@ -225,7 +225,8 @@ class SupervisorStateStore(DurableObjectStore):
             id_attr=None,
         )
 
-    def load(self) -> SupervisorStateRecord:
+    def load(self, *, reconcile_restart: bool = True) -> SupervisorStateRecord:
+        """Load validated state; observers can opt out of startup reconciliation."""
         if not self.exists(SUPERVISOR_STATE_ID):
             record = SupervisorStateRecord(created_at=_utc_now_iso())
             self.save(record)
@@ -252,7 +253,8 @@ class SupervisorStateStore(DurableObjectStore):
                 f"Unknown supervisor state: {record.state!r}"
             )
 
-        record.reconcile_on_load()
+        if reconcile_restart:
+            record.reconcile_on_load()
         return record
 
     @staticmethod
