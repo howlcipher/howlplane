@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+- Route unsuccessful factory execution-budget attempts to another eligible
+  worker without treating the factory's initial selection as an owner pin or
+  exhausting the provider globally. Refuse handoff if the baseline is not clean.
+
 - Report active factory dispatches accurately in text and JSON status output,
   without inventing a restart failure; preserve startup recovery and malformed
   state validation.

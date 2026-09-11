@@ -883,6 +883,104 @@ class _StateTrackingOrchestrator(ProviderScriptedOrchestrator):
         return result
 
 
+class _BudgetTrackingOrchestrator(_StateTrackingOrchestrator):
+    def run(self, task_spec, planned_actions=None, lock_ownership=None):
+        evidence = Path(self.run_dir).parent / ".task_runs" / task_spec.task_id
+        evidence.mkdir(parents=True, exist_ok=True)
+        (evidence / "execution.txt").write_text("retained attempt evidence\n")
+        result = super().run(task_spec, planned_actions, lock_ownership)
+        outcome = self.script[task_spec.preferred_agent][0]
+        if outcome.startswith("budget"):
+            result.provider_execution = _execution_result(
+                agent_id=task_spec.preferred_agent, exit_code=0, timed_out=True,
+                metadata={LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_LAUNCHED,
+                          TIMEOUT_SOURCE_KEY: TIMEOUT_SOURCE_HARNESS},
+            )
+            # Actual inner loop cannot select past its factory-owned pin.
+            result.failure_class = FAILURE_CLASS_PROVIDER_EXHAUSTED
+            if outcome == "budget_verification_failed":
+                result.failure_class = FAILURE_CLASS_VERIFICATION
+            if outcome == "budget_dirty":
+                (Path(self.run_dir).parent / "unfinished.py").write_text("partial = True\n")
+            if outcome == "budget_head_drift":
+                subprocess.run(
+                    ["git", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "worker commit"],
+                    cwd=Path(self.run_dir).parent, check=True, capture_output=True,
+                )
+        return result
+
+
+@pytest.mark.parametrize("second_outcome", ["complete", "budget", "blocked", "engineering"])
+def test_factory_budget_failure_reaches_alternate_without_exhausting_provider(tmp_path, second_outcome):
+    git, gh = ScriptedRunner(), ScriptedRunner()
+    build_full_merge_flow(
+        git, gh, task_id="ENG-BUDGET", repo_slug="howlcipher/howlplane", pr_number=10,
+        commit_message="fix: budget", pr_title="fix: budget", pr_body="Automated fix",
+        merge_sha="budget-merge", ci_green=True,
+    )
+    ok, rec, orch, pool = _run_marathon_harness(
+        tmp_path, {"agy": ("budget", ""), "devin_cli": (second_outcome, "")},
+        "ENG-BUDGET", "DOGFOOD-BUDGET", git=git, gh=gh, configured_pool=True,
+        orchestrator_cls=_BudgetTrackingOrchestrator,
+    )
+    assert orch.attempted == ["agy", "devin_cli"]
+    assert ok is (second_outcome == "complete")
+    assert pool.get_status("agy") == ProviderAvailabilityStatus.AVAILABLE
+    assert pool.get_resource_status("agy").exhaustion_event is None
+    assert pool.get_status("devin_cli") == ProviderAvailabilityStatus.AVAILABLE
+    state = DurableCampaignState.load(tmp_path / "campaigns" / "DOGFOOD-BUDGET")
+    first = state.engineering_attempts[0]
+    assert first["result"] == first["failure_class"] == "EXECUTION_BUDGET_EXCEEDED"
+    assert first["exit_code"] == 0
+    assert first["delta_reconciled"] is True
+    if second_outcome == "complete":
+        assert rec["provider"] == "devin_cli"
+    elif second_outcome == "budget":
+        assert rec["failure_reason"].startswith("NO_ELIGIBLE_PROVIDER_REMAINING")
+
+
+@pytest.mark.parametrize("outcome", ["budget_dirty", "budget_head_drift"])
+def test_factory_budget_failure_does_not_handoff_dirty_baseline(tmp_path, outcome):
+    ok, rec, orch, _ = _run_marathon_harness(
+        tmp_path, {"agy": (outcome, ""), "devin_cli": ("complete", "")},
+        "ENG-BUDGET-DIRTY", "DOGFOOD-BUDGET-DIRTY", configured_pool=True,
+        orchestrator_cls=_BudgetTrackingOrchestrator,
+    )
+    assert not ok
+    assert orch.attempted == ["agy"]
+    assert rec["failure_code"] == "budget_retry_baseline_not_restored"
+    assert rec["failure_class"] == FAILURE_CLASS_ENGINEERING
+    if outcome == "budget_dirty":
+        assert (tmp_path / "repo" / "unfinished.py").read_text() == "partial = True\n"
+
+
+def test_factory_salvaged_budget_candidate_verification_failure_is_not_capacity(tmp_path):
+    ok, rec, orch, pool = _run_marathon_harness(
+        tmp_path, {"agy": ("budget_verification_failed", ""), "devin_cli": ("complete", "")},
+        "ENG-BUDGET-VERIFY", "DOGFOOD-BUDGET-VERIFY", configured_pool=True,
+        orchestrator_cls=_BudgetTrackingOrchestrator,
+    )
+    assert not ok
+    assert orch.attempted == ["agy"]
+    assert rec["failure_class"] == FAILURE_CLASS_VERIFICATION
+    assert pool.get_status("agy") == ProviderAvailabilityStatus.AVAILABLE
+
+
+def test_factory_budget_retry_refuses_unknown_git_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "src.control_plane.synthesis.marathon.run_git",
+        lambda repo, args, timeout: subprocess.CompletedProcess(args, 128, "", "status unavailable"),
+    )
+    ok, rec, orch, _ = _run_marathon_harness(
+        tmp_path, {"agy": ("budget", ""), "devin_cli": ("complete", "")},
+        "ENG-BUDGET-STATUS", "DOGFOOD-BUDGET-STATUS", configured_pool=True,
+        orchestrator_cls=_BudgetTrackingOrchestrator,
+    )
+    assert not ok
+    assert orch.attempted == ["agy"]
+    assert rec["failure_code"] == "budget_retry_baseline_not_restored"
+
+
 def test_failover_hop_can_re_enter_implementation_after_a_failed_attempt(tmp_path):
     """A hop must leave the task in a state the next attempt may start from."""
     script = {

@@ -44,6 +44,7 @@ from src.control_plane.human_boundary import HumanBoundaryGate
 from src.control_plane.orchestrator import (
     FAILURE_CLASS_AUTHORITY_BLOCKED,
     FAILURE_CLASS_ENGINEERING,
+    FAILURE_CLASS_EXECUTION_BUDGET_EXCEEDED,
     FAILURE_CLASS_PROVIDER_EXHAUSTED,
     FAILURE_CLASS_PROVIDER_UNAVAILABLE,
     GovernedTaskOrchestrator,
@@ -1802,9 +1803,47 @@ class MarathonDogfoodEngine:
                     )
             attempt_result, failure_class = self._attempt_result_for(event, result.final_state)
 
+            # The factory pin steers one governed attempt; it is not an owner
+            # restriction on later workers. A local deadline creates no global
+            # exhaustion event, but can still use this finite provider loop.
+            budget_retry = (
+                event is None and exec_res is not None and not exec_res.success
+                and result.final_state == "failed"
+                and result.failure_class in {
+                    FAILURE_CLASS_PROVIDER_EXHAUSTED,
+                    FAILURE_CLASS_EXECUTION_BUDGET_EXCEEDED,
+                }
+                and ProviderPoolManager.classify_result(provider, exec_res).value
+                == FAILURE_CLASS_EXECUTION_BUDGET_EXCEEDED
+            )
+            if budget_retry:
+                attempt_result = failure_class = FAILURE_CLASS_EXECUTION_BUDGET_EXCEEDED
+
             reconciled = False
             if event is not None and attempt_baseline is not None:
                 reconciled = self._reconcile_attempt_state(attempt_baseline, task_id, attempt_index)
+            if budget_retry:
+                # Governed failure should already have preserved its evidence
+                # and restored the attempt baseline. Never assume it did.
+                try:
+                    status_check = self._git_runner(self.target_repo, ["status", "--porcelain"], 30)
+                    current_baseline = capture_baseline(self.target_repo)
+                    reconciled = (
+                        attempt_baseline is not None
+                        and status_check.returncode == 0
+                        and current_baseline.status_porcelain == (status_check.stdout or "")
+                        and current_baseline.initial_commit_sha != "HEAD_UNKNOWN"
+                        and current_baseline.initial_commit_sha == attempt_baseline.initial_commit_sha
+                        and current_baseline.pre_existing_modified == attempt_baseline.pre_existing_modified
+                        and current_baseline.pre_existing_untracked == attempt_baseline.pre_existing_untracked
+                        and current_baseline.pre_existing_snapshots == attempt_baseline.pre_existing_snapshots
+                        and set(attempt_baseline.pre_existing_snapshots) == set(
+                            attempt_baseline.pre_existing_modified + attempt_baseline.pre_existing_untracked
+                        )
+                        and capture_delta(self.target_repo, attempt_baseline).is_empty
+                    )
+                except Exception:  # noqa: BLE001 - unknown state cannot be handed off
+                    reconciled = False
 
             self._record_attempt(
                 campaign_state, state_dir, task_id, provider, attempt_index,
@@ -1820,7 +1859,15 @@ class MarathonDogfoodEngine:
             # Blocker 5).
             self._persist_provider_states(campaign_state, state_dir)
 
-            if event is None:
+            if budget_retry and not reconciled:
+                git_rec.failure_reason = "STATE_FAILURE: budget retry baseline not restored"
+                self._persist_git_record(git_rec, campaign_state, state_dir)
+                record = git_rec.to_dict()
+                record["failure_class"] = FAILURE_CLASS_ENGINEERING
+                record["failure_code"] = "budget_retry_baseline_not_restored"
+                return False, record
+
+            if event is None and not budget_retry:
                 # Engineering failure or authority block: do not fail over.
                 git_rec.failure_reason = f"orchestrator_final_state:{result.final_state}"
                 self._persist_git_record(git_rec, campaign_state, state_dir)
