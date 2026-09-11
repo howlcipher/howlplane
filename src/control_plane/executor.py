@@ -483,6 +483,12 @@ class HowlChangeOpsExecutor(AuthorityExecutor):
         if receipt.schema != EXECUTION_RECEIPT_SCHEMA_VERSION:
             return False, f"Invalid receipt schema '{receipt.schema}', expected '{EXECUTION_RECEIPT_SCHEMA_VERSION}'"
 
+        if receipt.executor.lower() in ("howldream", "howlcreate", "dream"):
+            return False, (
+                f"Receipt rejected: '{receipt.executor}' is a speculative exploration system "
+                "with zero execution authority and cannot issue execution receipts"
+            )
+
         if receipt.status != "success":
             return False, f"Receipt status is '{receipt.status}', expected 'success'"
 
@@ -598,6 +604,10 @@ class ExecutorRegistry:
 
     @classmethod
     def register(cls, executor: AuthorityExecutor) -> None:
+        if executor.name.lower() in ("howldream", "howlcreate", "dream"):
+            raise ExecutorError(
+                f"Speculative exploration system '{executor.name}' cannot be registered as an executor"
+            )
         cls._executors[executor.name] = executor
 
     @classmethod
