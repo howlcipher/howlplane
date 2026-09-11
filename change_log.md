@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+- Stop the governed run on unsuccessful remediation, including zero-exit
+  unfinished deadlines. Preserve its partial patch and provider failure,
+  restore the original pre-task baseline while retaining the cumulative patch,
+  and fail the active checkpoint instead of
+  emitting remediation completion and starting another review.
+
 - Preserve backlog detail, including acceptance criteria, in factory WorkItems.
   Repeated discovery fills legacy empty descriptions without reopening items,
   replacing existing context, or changing active and terminal work.
