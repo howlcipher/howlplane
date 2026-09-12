@@ -123,9 +123,25 @@ jobs:
       # provider even though it names no marker expression.
       - name: Run full, slow, and acceptance coverage
         run: PYTHONPATH=. python -m pytest tests/ -v --durations=25
-      # Exit code 5 is "no tests collected". There are deliberately no `live`
-      # tests yet, so without this the gate would fail the moment it is switched
-      # on -- a gate that fails on activation is not a gate.
+      # Installs howldream ONLY here, pinned to an exact commit -- never as a
+      # pyproject.toml dependency. HowlPlane's native provider (see
+      # src/control_plane/howldream_runner.py) treats howldream as an optional
+      # runtime it degrades gracefully without; it must not become a hard
+      # package dependency just to prove the real import path still works.
+      # Bump the pin deliberately (a visible diff), not to a moving @main, so
+      # a passing run here always means the same howldream code was tested.
+      - name: Install pinned howldream (live tests only)
+        if: ${{ vars.HOWLPLANE_RUN_LIVE_TESTS == 'true' }}
+        run: pip install "git+https://github.com/howlcipher/howldream.git@bd10b18b7182e5216b494d728d015dbbba9b32d0"
+      # tests/test_howldream_live_integration.py exercises
+      # NativeHowlDreamProvider against this real, pinned howldream install --
+      # not DeterministicTestExplorationProvider -- closing the gap where
+      # every other HowlDream test here substitutes the fake provider before
+      # reaching the real import boundary.
+      # Exit code 5 is "no tests collected" -- kept as a defensive fallback so
+      # a gate that later loses its only live test doesn't fail on that alone;
+      # it does not mask an actual test failure (nonzero, non-5 exit codes
+      # still fail this step).
       - name: Run live tests only when explicitly enabled
         if: ${{ vars.HOWLPLANE_RUN_LIVE_TESTS == 'true' }}
         shell: bash

@@ -1,0 +1,467 @@
+{
+  "$defs": {
+    "CandidateHandoff": {
+      "additionalProperties": false,
+      "description": "Speculative candidate for cross-component evaluation: howl.candidate/v1.",
+      "properties": {
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assumptions",
+          "type": "array"
+        },
+        "authority": {
+          "$ref": "#/$defs/ExplorationAuthority"
+        },
+        "candidate_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "claims": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Claims",
+          "type": "array"
+        },
+        "condition": {
+          "default": "dream",
+          "title": "Condition",
+          "type": "string"
+        },
+        "contradictions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Contradictions",
+          "type": "array"
+        },
+        "evidence_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "objective": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Objective",
+          "type": "string"
+        },
+        "parent_request_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Parent Request Id",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": "howl.candidate/v1",
+          "default": "howl.candidate/v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_run_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Source Run Id",
+          "type": "string"
+        },
+        "status": {
+          "default": "GENERATED",
+          "enum": [
+            "GENERATED",
+            "CHALLENGED",
+            "LOCALLY_VERIFIED",
+            "FRAME_REVIEWED",
+            "UNRESOLVED",
+            "REJECTED"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 50000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "trust": {
+          "const": "UNVERIFIED",
+          "default": "UNVERIFIED",
+          "title": "Trust",
+          "type": "string"
+        },
+        "unresolved_issues": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved Issues",
+          "type": "array"
+        },
+        "verified_constraints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Verified Constraints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "source_run_id",
+        "parent_request_id",
+        "objective",
+        "text"
+      ],
+      "title": "CandidateHandoff",
+      "type": "object"
+    },
+    "DescentDAG": {
+      "additionalProperties": false,
+      "description": "Durable lineage DAG recording exploration descent and surviving handoffs.",
+      "properties": {
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/DescentEdge"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "max_branching_factor": {
+          "default": 50,
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Max Branching Factor",
+          "type": "integer"
+        },
+        "max_depth": {
+          "default": 20,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Max Depth",
+          "type": "integer"
+        },
+        "nodes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DescentNode"
+          },
+          "title": "Nodes",
+          "type": "object"
+        }
+      },
+      "title": "DescentDAG",
+      "type": "object"
+    },
+    "DescentEdge": {
+      "additionalProperties": false,
+      "description": "Directed derivation edge in the descent DAG.",
+      "properties": {
+        "relation": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Relation",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "relation"
+      ],
+      "title": "DescentEdge",
+      "type": "object"
+    },
+    "DescentNode": {
+      "additionalProperties": false,
+      "description": "Single node in the durable descent DAG.",
+      "properties": {
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        },
+        "label": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "node_type": {
+          "enum": [
+            "OBJECTIVE",
+            "BASELINE",
+            "DREAM_RUN",
+            "CANDIDATE",
+            "NIGHTMARE_CHALLENGE",
+            "WAKE_VERIFICATION",
+            "FRAME_ASSESSMENT",
+            "CREATE_PROJECT"
+          ],
+          "title": "Node Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "node_type",
+        "label"
+      ],
+      "title": "DescentNode",
+      "type": "object"
+    },
+    "ExplorationAuthority": {
+      "additionalProperties": false,
+      "description": "Explicit authority boundary. HowlDream artifacts cannot authorize execution.",
+      "properties": {
+        "executable": {
+          "const": false,
+          "default": false,
+          "title": "Executable",
+          "type": "boolean"
+        },
+        "type": {
+          "const": "ADVISORY",
+          "default": "ADVISORY",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "ExplorationAuthority",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": true,
+      "description": "Shared audit-trail metadata attached to every howl.* envelope.\n\nDeliberately open (extra=\"allow\"), unlike StrictModel: provenance is\ndescriptive audit metadata, not an authority or structural boundary, and\nproducers have historically attached ad hoc extra keys (e.g. request-\nspecific hashes). The named fields below are the canonical, cross-cutting\nconcepts every producer should populate; anything else stays as an\nunvalidated extra key rather than failing validation.\n\nConcepts deliberately NOT duplicated here because a dedicated top-level\nfield already covers them on the envelopes that need them: authority\nstate (`authority`), schema identity (`schema_version`), candidate/run\nlineage (`parent_request_id`, `source_run_id`, `candidate_id`,\n`descent_dag`), and per-envelope evaluation/verification state\n(`CandidateHandoff.status`, `CandidateAssessment.disposition`,\n`ExplorationResult.verification_status`).",
+      "properties": {
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "model_or_provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Or Provider"
+        },
+        "observation_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "SIMULATED",
+                "DETERMINISTIC",
+                "LIVE",
+                "EXTERNALLY_OBSERVED"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observation Kind"
+        },
+        "producer_component": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Producer Component"
+        },
+        "producer_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Producer Version"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "transformations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Transformations",
+          "type": "array"
+        }
+      },
+      "title": "Provenance",
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/howlcipher/howldream/main/schemas/howl.exploration_result.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Complete machine-readable outcome returned by HowlDream: howl.exploration_result/v1.",
+  "properties": {
+    "authority": {
+      "$ref": "#/$defs/ExplorationAuthority"
+    },
+    "candidates": {
+      "items": {
+        "$ref": "#/$defs/CandidateHandoff"
+      },
+      "title": "Candidates",
+      "type": "array"
+    },
+    "claims": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Claims",
+      "type": "array"
+    },
+    "contradictions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Contradictions",
+      "type": "array"
+    },
+    "descent_dag": {
+      "$ref": "#/$defs/DescentDAG"
+    },
+    "evidence": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "exploration_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Exploration Id",
+      "type": "string"
+    },
+    "objective": {
+      "maxLength": 10000,
+      "minLength": 1,
+      "title": "Objective",
+      "type": "string"
+    },
+    "originating_component": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Originating Component",
+      "type": "string"
+    },
+    "parent_request_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Parent Request Id",
+      "type": "string"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    },
+    "recommended_disposition": {
+      "default": "DEFER",
+      "enum": [
+        "INVESTIGATE",
+        "REJECT",
+        "DEFER",
+        "ACCEPT_FOR_DEVELOPMENT"
+      ],
+      "title": "Recommended Disposition",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "howl.exploration_result/v1",
+      "default": "howl.exploration_result/v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scores": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Scores",
+      "type": "array"
+    },
+    "unresolved_assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unresolved Assumptions",
+      "type": "array"
+    },
+    "verification_status": {
+      "default": "UNVERIFIED",
+      "enum": [
+        "UNVERIFIED",
+        "REQUIRES_DOWNSTREAM_REVIEW",
+        "LOCALLY_VERIFIED"
+      ],
+      "title": "Verification Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "exploration_id",
+    "parent_request_id",
+    "objective",
+    "originating_component"
+  ],
+  "title": "HowlDream Exploration Result (howl.exploration_result/v1)",
+  "type": "object"
+}
