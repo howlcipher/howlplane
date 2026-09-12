@@ -56,7 +56,7 @@ jobs:
           /tmp/verify-venv/bin/python -c "import src.control_plane"
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: control-plane-wheel
           path: |
