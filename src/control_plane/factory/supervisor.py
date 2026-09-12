@@ -326,9 +326,12 @@ class FactorySupervisor:
         return True
 
     def _next_provider_retry_after(self) -> Optional[Tuple[datetime, Optional[str]]]:
-        """Return the soonest (retry_after, resource_id) from provider inventory."""
+        """Return the soonest (retry_after, resource_id) from provider inventory in the future."""
         soonest: Optional[datetime] = None
         soonest_id: Optional[str] = None
+        now = self._now()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
         try:
             rows = self.provider_pool.inventory()
         except Exception:
@@ -342,6 +345,8 @@ class FactorySupervisor:
                 if when.tzinfo is None:
                     when = when.replace(tzinfo=timezone.utc)
             except ValueError:
+                continue
+            if when <= now:
                 continue
             if soonest is None or when < soonest:
                 soonest = when
@@ -358,6 +363,8 @@ class FactorySupervisor:
     def _provider_retry_after(self) -> Optional[datetime]:
         result = self._next_provider_retry_after()
         if result is None:
+            if self._state_record.provider_wake_conditions:
+                self._state_record.provider_wake_conditions = {}
             return None
         soonest, soonest_id = result
         self._state_record.provider_wake_conditions = {
@@ -435,9 +442,23 @@ class FactorySupervisor:
                 if blocker_id not in item.blocked_by:
                     item.blocked_by.append(blocker_id)
         if dispatch_result.next_work_item_state == WorkItemState.DEFERRED:
+            wake_retry = self._state_record.provider_wake_conditions.get("retry_after")
+            if wake_retry:
+                try:
+                    wake_dt = datetime.fromisoformat(wake_retry)
+                    if wake_dt.tzinfo is None:
+                        wake_dt = wake_dt.replace(tzinfo=timezone.utc)
+                    now_dt = self._now()
+                    if now_dt.tzinfo is None:
+                        now_dt = now_dt.replace(tzinfo=timezone.utc)
+                    if wake_dt <= now_dt:
+                        wake_retry = None
+                except (ValueError, TypeError):
+                    wake_retry = None
+
             item.retry_after = (
                 dispatch_result.retry_after
-                or self._state_record.provider_wake_conditions.get("retry_after")
+                or wake_retry
                 or (self._provider_retry_after_dt().isoformat() if self._provider_retry_after_dt() else None)
             )
         self.work_item_store.save_object(item)

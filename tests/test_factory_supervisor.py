@@ -261,6 +261,41 @@ def test_no_spin_wait_uses_exact_retry_after(tmp_path):
     assert supervisor.state_record.provider_wake_conditions["retry_after"] == retry_after
 
 
+def test_expired_provider_retry_after_is_ignored_and_cleared(tmp_path):
+    past_retry_after = (START - timedelta(seconds=120)).isoformat()
+    supervisor, now, sleeps = _make_supervisor(
+        tmp_path,
+        pool=FakeProviderPool(has_capacity=False, retry_after=past_retry_after),
+    )
+    supervisor.state_record.provider_wake_conditions = {
+        "resource_id": "test_provider",
+        "retry_after": past_retry_after,
+        "reason": "provider_retry_after",
+    }
+
+    result = supervisor.tick()
+    assert supervisor.state_record.provider_wake_conditions == {}
+    assert result.next_wake_at > START
+
+
+def test_deferred_work_item_does_not_inherit_expired_wake_retry(tmp_path):
+    past_retry_after = (START - timedelta(seconds=300)).isoformat()
+    supervisor, now, sleeps = _make_supervisor(
+        tmp_path,
+        dispatcher=MarathonDispatcherAdapter(lambda: _ProviderExhaustedEngine()),
+    )
+    supervisor.state_record.provider_wake_conditions = {
+        "resource_id": "stale_provider",
+        "retry_after": past_retry_after,
+        "reason": "provider_retry_after",
+    }
+    item = _ready_work_item(supervisor.work_item_store, key="item_1")
+
+    result = supervisor.tick()
+    reloaded_item = supervisor.work_item_store.load(item.work_item_id)
+    assert reloaded_item.retry_after != past_retry_after
+
+
 def test_run_loop_stops_on_stop(tmp_path):
     supervisor, now, sleeps = _make_supervisor(tmp_path)
 
