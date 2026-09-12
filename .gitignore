@@ -11,6 +11,7 @@ client_secret.json
 # Tracked JSON schemas are not credentials
 !config/schemas/*.schema.json
 !schemas/*.schema.json
+!contracts/howl/*.schema.json
 
 # Tracked run-artifact example fixtures are not credentials
 !examples/runs/*.json
