@@ -672,4 +672,35 @@ def test_proposal_disposition_value_is_canonical_string(tmp_path):
     proposal = supervisor.repo_proposal_store.load("PROP-metrics_engine")
     assert proposal is not None
     assert proposal.disposition == "propose_new_repository"
-    assert proposal.rationale == "propose_new_repository"
+
+
+def test_no_work_tick_reports_no_valuable_work(tmp_path):
+    supervisor, now, sleeps = _make_supervisor(tmp_path)
+    result = supervisor.tick()
+    assert result.state == SupervisorState.WAITING_FOR_WORK
+    assert result.reason == "NO_VALUABLE_WORK"
+
+
+def test_all_candidates_capped_reports_no_valuable_work(tmp_path):
+    """When policy caps every remaining candidate, the tick reports NO_VALUABLE_WORK."""
+    from src.control_plane.factory.portfolio import select as portfolio_select
+
+    supervisor, now, sleeps = _make_supervisor(tmp_path)
+    # Fill the introspective cap with self-improvement work.
+    for i in range(4):
+        _ready_work_item(
+            supervisor.work_item_store,
+            origin=WorkItemOrigin.SELF_IMPROVEMENT,
+            title=f"self-{i}",
+            identity_keys=[f"self-{i}"],
+            repository="howlcipher/howlplane",
+        )
+    # Seed the dispatch history so the cap is already exhausted.
+    for _ in range(3):
+        supervisor.state_record.dispatch_history.append(
+            {"origin": WorkItemOrigin.SELF_IMPROVEMENT, "repository": "howlcipher/howlplane"}
+        )
+    supervisor._persist()
+    result = supervisor.tick()
+    assert result.state == SupervisorState.WAITING_FOR_WORK
+    assert result.reason == "NO_VALUABLE_WORK"

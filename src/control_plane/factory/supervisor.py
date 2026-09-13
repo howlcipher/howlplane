@@ -137,6 +137,10 @@ class FactorySupervisor:
             "supervisor_id": self._state_record.supervisor_id,
             "instance_id": self.instance_id,
             "state": self._state_record.state,
+            "objective": self._state_record.objective,
+            "target_mode": self._state_record.target_mode,
+            "target_repository": self._state_record.target_repository,
+            "workspace_file": self._state_record.workspace_file,
             "created_at": self._state_record.created_at,
             "last_tick_at": self._state_record.last_tick_at,
             "last_successful_tick_at": self._state_record.last_successful_tick_at,
@@ -641,9 +645,9 @@ class FactorySupervisor:
         if not self._provider_has_capacity():
             next_state = SupervisorState.WAITING_FOR_PROVIDER
             reason = "no_provider_capacity"
-        elif selection.reason == "all_candidates_capped":
+        elif selection.no_valuable_work:
             next_state = SupervisorState.WAITING_FOR_WORK
-            reason = "all_candidates_capped"
+            reason = "NO_VALUABLE_WORK"
         else:
             next_state = SupervisorState.WAITING_FOR_WORK
             reason = "no_dispatchable_work"

@@ -42,12 +42,18 @@ class WorkItemOrigin(str, Enum):
     """Where the work came from. Recorded, never inferred after the fact."""
 
     OWNER_DIRECTION = "owner_direction"
-    EXISTING_BACKLOG = "existing_backlog"
-    DISCOVERED_PROBLEM = "discovered_problem"
-    INFERRED_NEED = "inferred_need"
-    SELF_IMPROVEMENT = "self_improvement"
+    VERIFIED_BACKLOG = "verified_backlog"
+    EXISTING_BACKLOG = "existing_backlog"  # historical alias for VERIFIED_BACKLOG
+    OBSERVED_DEFECT = "observed_defect"
+    DISCOVERED_PROBLEM = "discovered_problem"  # historical alias for OBSERVED_DEFECT
+    MEASURED_REGRESSION = "measured_regression"
+    PROOF_FINDING = "proof_finding"
+    INFERRED_IMPROVEMENT = "inferred_improvement"
+    INFERRED_NEED = "inferred_need"  # historical alias for INFERRED_IMPROVEMENT
     MAINTENANCE = "maintenance"
+    SELF_IMPROVEMENT = "self_improvement"
     CREATIVE_EXPERIMENT = "creative_experiment"
+    SPECULATIVE_IDEA = "speculative_idea"
 
 
 class WorkItemState(str, Enum):
@@ -316,8 +322,10 @@ class WorkItemStore(DurableObjectStore):
         # without owner confirmation. Ambiguity only matters for speculative
         # origins (inferred/creative), which always await owner review.
         owner_review_origins = {
+            WorkItemOrigin.INFERRED_IMPROVEMENT,
             WorkItemOrigin.INFERRED_NEED,
             WorkItemOrigin.CREATIVE_EXPERIMENT,
+            WorkItemOrigin.SPECULATIVE_IDEA,
         }
         if origin in owner_review_origins:
             return WorkItemState.AWAITING_OWNER
@@ -325,8 +333,12 @@ class WorkItemStore(DurableObjectStore):
             return WorkItemState.AWAITING_OWNER
         auto_ready_origins = {
             WorkItemOrigin.OWNER_DIRECTION,
+            WorkItemOrigin.VERIFIED_BACKLOG,
             WorkItemOrigin.EXISTING_BACKLOG,
+            WorkItemOrigin.OBSERVED_DEFECT,
             WorkItemOrigin.DISCOVERED_PROBLEM,
+            WorkItemOrigin.MEASURED_REGRESSION,
+            WorkItemOrigin.PROOF_FINDING,
             WorkItemOrigin.SELF_IMPROVEMENT,
             WorkItemOrigin.MAINTENANCE,
         }

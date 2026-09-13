@@ -115,6 +115,11 @@ class SupervisorStateRecord(DataClassSerializationMixin):
     last_error: Optional[str] = None
     failure_count: int = 0
     stopped_reason: Optional[str] = None
+    # Campaign-level durable intent. Survives restart and provider replacement.
+    objective: Optional[str] = None
+    target_mode: Optional[str] = None
+    target_repository: Optional[str] = None
+    workspace_file: Optional[str] = None
     transition_history: List[Dict[str, Any]] = field(default_factory=list)
     dispatch_history: List[Dict[str, Any]] = field(default_factory=list)
 

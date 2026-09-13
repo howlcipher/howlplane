@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 import hashlib, json, os, shutil, sys, time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 import yaml
 
 from src.control_plane.agent_execution import (
@@ -193,6 +193,13 @@ class OrchestrationConfig:
     max_remediation_cycles: int = 3
     max_review_cycles: int = 4
     timeout_seconds: int = 600
+    # Remediation budget policy. When None, a bounded dynamic budget is derived
+    # from the number/severity of review findings and affected files. Explicit
+    # values are honored up to the configured multiplier ceiling.
+    remediation_timeout_seconds: Optional[int] = None
+    remediation_timeout_max_multiplier: float = 3.0
+    remediation_timeout_per_finding_seconds: int = 60
+    remediation_timeout_per_affected_file_seconds: int = 30
     dogfood_mode: str = "shadow"
     enable_howlframe_audit: bool = True
     record_evidence: bool = True
@@ -233,6 +240,44 @@ class OrchestrationConfig:
     # instead of the live checkout, so untracked control plane evidence cannot
     # change a verification result (HOWLFRAM-SLOPFIX-07S).
     verification_isolation: bool = True
+
+
+def compute_remediation_timeout(
+    config: OrchestrationConfig,
+    findings: Optional[List[ReviewFinding]] = None,
+    affected_files: Optional[Iterable[str]] = None,
+) -> int:
+    """Returns a bounded execution budget for a remediation cycle.
+
+    The default policy is explicit, simple, and capped:
+    - Start from the implementation timeout.
+    - Add time per review finding weighted by severity.
+    - Add time per affected file.
+    - Never exceed max_multiplier * base timeout.
+
+    An explicit ``remediation_timeout_seconds`` is honored up to the same max.
+    """
+    base = config.timeout_seconds
+    max_total = int(base * max(1.0, config.remediation_timeout_max_multiplier))
+
+    if config.remediation_timeout_seconds is not None:
+        return min(config.remediation_timeout_seconds, max_total)
+
+    severity_seconds = {
+        "blocker": 120,
+        "high": 90,
+        "medium": 60,
+        "low": 30,
+        "informational": 15,
+    }
+
+    finding_overhead = 0
+    for finding in findings or []:
+        finding_overhead += severity_seconds.get(finding.severity, 60)
+
+    file_overhead = (len(set(affected_files or []))) * config.remediation_timeout_per_affected_file_seconds
+
+    return max(base, min(base + finding_overhead + file_overhead, max_total))
 
 
 # A verification plan that has actually run reports one of these. Anything
@@ -3252,12 +3297,28 @@ class GovernedTaskOrchestrator:
                     self.config.custom_remediation_fn(task_spec, self.target_repo, cycle_res.all_findings)
                 else:
                     rem_prompt = self._build_remediation_prompt(task_spec, current_delta.diff_content, cycle_res.all_findings)
+                    affected_files = set(current_delta.files_modified + current_delta.files_added)
+                    remediation_timeout = compute_remediation_timeout(
+                        self.config, cycle_res.all_findings, affected_files
+                    )
+                    self._record_event(
+                        task_id=task_spec.task_id,
+                        agent_id=rem_agent_id,
+                        action="remediation_timeout_derived",
+                        spec=task_spec,
+                        metadata={
+                            "cycle": remediation_count,
+                            "timeout_seconds": remediation_timeout,
+                            "findings_count": len(cycle_res.all_findings),
+                            "affected_files_count": len(affected_files),
+                        },
+                    )
                     rem_res = rem_backend.execute(
                         task=task_spec,
                         cwd=self.target_repo,
                         role="remediation",
                         prompt_override=rem_prompt,
-                        timeout_seconds=self.config.timeout_seconds,
+                        timeout_seconds=remediation_timeout,
                     )
                     (rem_cycle_dir / "result.json").write_text(rem_res.to_json(), encoding="utf-8")
                     if self.config.provider_pool is not None:

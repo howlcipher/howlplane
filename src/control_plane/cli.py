@@ -662,8 +662,26 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_run_once = factory_sub.add_parser(
         "run-once", help="Execute a single factory supervisor tick", **kwargs
     )
-    p_run_once.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
-    p_run_once.add_argument("--target-repo", default=".", help="Repository to discover work from")
+    p_run_once.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_run_once.add_argument("--target-repo", help="Repository to discover work from (advanced)")
+    p_run_once.add_argument(
+        "--target",
+        choices=["repo", "self", "ecosystem"],
+        default="repo",
+        help="What the factory is improving: repo (default), self, or ecosystem.",
+    )
+    p_run_once.add_argument("--authority", choices=["safe", "standard", "autonomous"],
+                            help="Named first-run authority choice")
+    p_run_once.add_argument(
+        "--objective",
+        default=None,
+        help="Persistent campaign objective. Becomes durable supervisor state.",
+    )
+    p_run_once.add_argument(
+        "--workspace",
+        default=None,
+        help="Workspace YAML for ecosystem mode.",
+    )
     p_run_once.add_argument(
         "--authority-profile",
         choices=["strict", "overnight-safe", "howlframe-overnight"],
@@ -676,8 +694,24 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_run = factory_sub.add_parser(
         "run", help="Run the factory supervisor loop until stopped", **kwargs
     )
-    p_run.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
-    p_run.add_argument("--target-repo", default=".", help="Repository to discover work from")
+    p_run.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_run.add_argument("--target-repo", help="Repository to discover work from (advanced)")
+    p_run.add_argument(
+        "--target",
+        choices=["repo", "self", "ecosystem"],
+        default="repo",
+        help="What the factory is improving: repo (default), self, or ecosystem.",
+    )
+    p_run.add_argument(
+        "--objective",
+        default=None,
+        help="Persistent campaign objective. Becomes durable supervisor state.",
+    )
+    p_run.add_argument(
+        "--workspace",
+        default=None,
+        help="Workspace YAML for ecosystem mode.",
+    )
     p_run.add_argument("--until", type=float, help="Run for at most N seconds")
     p_run.add_argument("--resume-stopped", action="store_true",
                        help="Resume saved stopped state after acquiring the supervisor lock")
@@ -693,20 +727,45 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_status = factory_sub.add_parser(
         "status", help="Show factory supervisor state", **kwargs
     )
-    p_status.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
+    p_status.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_status.add_argument("--target-repo", help="Repository to resolve (advanced)")
     p_status.add_argument("--json", action="store_true", help="Output JSON result")
 
     p_stop = factory_sub.add_parser(
         "stop", help="Stop the factory supervisor loop", **kwargs
     )
-    p_stop.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
+    p_stop.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_stop.add_argument("--target-repo", help="Repository to resolve (advanced)")
     p_stop.add_argument("--json", action="store_true", help="Output JSON result")
 
     p_resume = factory_sub.add_parser(
         "resume", help="Resume a stopped factory supervisor", **kwargs
     )
-    p_resume.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
+    p_resume.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_resume.add_argument("--target-repo", help="Repository to resolve (advanced)")
     p_resume.add_argument("--json", action="store_true", help="Output JSON result")
+
+    p_start = factory_sub.add_parser("start", help="Start a persistent Factory campaign for this repository", **kwargs)
+    p_start.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_start.add_argument("--target-repo", help="Factory target worktree (advanced)")
+    p_start.add_argument("--target", choices=["repo", "self", "ecosystem"], default="repo")
+    p_start.add_argument("--workspace", help="Workspace YAML for ecosystem mode")
+    p_start.add_argument("--objective", help="Durable campaign objective")
+    p_start.add_argument("--authority", choices=["safe", "standard", "autonomous"],
+                         help="Named first-run authority choice")
+    p_start.add_argument("--authority-profile", choices=["strict", "overnight-safe", "howlframe-overnight"],
+                         help="Existing authority profile id (advanced)")
+    p_start.add_argument("--json", action="store_true", help="Output JSON result")
+
+    p_logs = factory_sub.add_parser("logs", help="Show recent Factory logs for this repository", **kwargs)
+    p_logs.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_logs.add_argument("--target-repo", help="Repository to resolve (advanced)")
+    p_logs.add_argument("--follow", action="store_true", help="Stream new log output")
+    p_logs.add_argument("--lines", type=int, default=80, help="Number of recent lines")
+
+    p_factory_doctor = factory_sub.add_parser("doctor", help="Check whether Factory can start safely", **kwargs)
+    p_factory_doctor.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_factory_doctor.add_argument("--target-repo", help="Repository to resolve (advanced)")
 
 
 def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] = None) -> None:
@@ -1171,6 +1230,77 @@ def cmd_unlock(args: argparse.Namespace) -> int:
     return 1 if refusals else 0
 
 
+def _resolve_factory_campaign(
+    args: argparse.Namespace, *, prepare: bool = False, force_resolve: bool = False
+):
+    """Resolve the zero-configuration campaign and attach its paths to args."""
+    from src.control_plane.factory.campaign import prepare_campaign, resolve_campaign
+
+    # Preserve the established explicit interface exactly. It can point at a
+    # deliberately prepared target unrelated to the caller's current checkout.
+    if (not force_resolve and getattr(args, "state_dir", None)
+            and getattr(args, "target_repo", None)):
+        return None
+    if not force_resolve and getattr(args, "state_dir", None):
+        # Historical commands accepted only --state-dir and used the caller's
+        # checkout. Keep that advanced/debug contract intact.
+        args.target_repo = "."
+        return None
+    campaign = resolve_campaign(
+        state_dir=getattr(args, "state_dir", None),
+        target_repo=getattr(args, "target_repo", None),
+    )
+    if prepare:
+        campaign = prepare_campaign(campaign)
+    args.state_dir = str(campaign.state_dir)
+    # The supervisor must always operate on the isolated target for convenience
+    # commands. Explicit target-repo remains an advanced override, validated by
+    # prepare_campaign against the discovered source repository.
+    args.target_repo = str(campaign.target_dir)
+    return campaign
+
+
+def _select_factory_authority(args: argparse.Namespace, campaign: Any) -> Optional[str]:
+    """Obtain explicit first-run authority without inventing a new policy model."""
+    from src.control_plane.authority_envelope import ENVELOPE_FILENAME, load_envelope
+
+    envelope_dir = campaign.state_dir / "campaign"
+    if (envelope_dir / ENVELOPE_FILENAME).is_file():
+        return load_envelope(envelope_dir).profile_id
+    requested = getattr(args, "authority_profile", None)
+    choice = getattr(args, "authority", None)
+    if choice:
+        remote = campaign.repository.remote
+        mappings = {
+            "safe": "strict",
+            "standard": "howlframe-overnight" if remote.endswith("howlcipher/howlframe") else "overnight-safe",
+            "autonomous": "overnight-safe",
+        }
+        requested = mappings[choice]
+        if choice != "safe" and not remote.endswith("howlcipher/howlframe") and not remote.endswith("howlcipher/howlplane"):
+            raise ValueError(
+                "No existing delegated authority profile is compatible with this repository. "
+                "Use --authority safe, or configure an approved --authority-profile."
+            )
+    if requested:
+        args.authority_profile = requested
+        return requested
+    if not sys.stdin.isatty():
+        raise ValueError(
+            "Factory needs an explicit authority choice in a non-interactive environment. "
+            "Use --authority safe or --authority-profile strict."
+        )
+    print("Choose Factory authority:\n  1. Safe: no consequential Git or GitHub actions.\n"
+          "  2. Standard: use an existing repository-compatible delegated profile.\n"
+          "  3. Autonomous: use the most permissive existing compatible profile.\n")
+    answer = input("Choice [1]: ").strip() or "1"
+    choices = {"1": "safe", "2": "standard", "3": "autonomous"}
+    if answer not in choices:
+        raise ValueError("Authority choice must be 1, 2, or 3")
+    args.authority = choices[answer]
+    return _select_factory_authority(args, campaign)
+
+
 def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
     from datetime import datetime, timezone
     from pathlib import Path
@@ -1189,7 +1319,8 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
     from src.control_plane.factory.dispatcher import MarathonDispatcherAdapter
     from src.control_plane.factory.repo_proposal import CapabilityStore, RepoProposalStore
     from src.control_plane.factory.supervisor import FactorySupervisor
-    from src.control_plane.factory.supervisor_state import SupervisorStateStore
+    from src.control_plane.factory.supervisor_state import SupervisorStateRecord, SupervisorStateStore
+    from src.control_plane.factory.target import FactoryTarget, FactoryTargetMode, Workspace
     from src.control_plane.factory.work_item import WorkItemStore
     from src.control_plane.git_integration import detect_repo_slug
     from src.control_plane.synthesis import MarathonDogfoodEngine
@@ -1201,6 +1332,27 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
     repo_proposal_store = RepoProposalStore(state_dir / "repo_proposals")
     capability_store = CapabilityStore(state_dir / "capabilities")
     target_repo = Path(getattr(args, "target_repo", None) or ".").resolve()
+    target_mode = getattr(args, "target", "repo")
+    workspace_path = getattr(args, "workspace", None)
+    objective = getattr(args, "objective", None)
+
+    target = FactoryTarget(
+        mode=FactoryTargetMode(target_mode),
+        target_repo=target_repo,
+        workspace=Workspace.from_file(workspace_path) if workspace_path else None,
+        controller_checkout=Path.cwd().resolve(),
+    )
+    if target.mode == FactoryTargetMode.SELF:
+        target.ensure_isolated_self_target()
+
+    # Persist campaign objective and target metadata so they survive restart.
+    state_record = state_store.load()
+    if objective is not None:
+        state_record.objective = objective
+    state_record.target_mode = target_mode
+    state_record.target_repository = str(target_repo)
+    state_record.workspace_file = str(Path(workspace_path).resolve()) if workspace_path else None
+    state_store.save(state_record)
 
     def _backlog_rank(value: Any) -> int:
         try:
@@ -1208,17 +1360,16 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
         except (TypeError, ValueError):
             return 0
 
-    def _discovery():
+    def _discover_repo(repo_path: Path, repo_name: str):
         try:
-            source = BacklogSource(target_repo)
+            source = BacklogSource(repo_path)
             selection = source.select()
         except Exception:
             return []
-        repo = detect_repo_slug(target_repo) or str(target_repo)
         return [
             {
                 "origin": "existing_backlog",
-                "repository": repo,
+                "repository": repo_name,
                 "title": item.title,
                 "description": source.item_detail(item),
                 "identity_keys": [item.source_file, item.item_id],
@@ -1230,6 +1381,19 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
             }
             for item in selection.eligible
         ]
+
+    def _discovery():
+        if target.mode == FactoryTargetMode.ECOSYSTEM:
+            if target.workspace is None:
+                return []
+            evidence: List[Dict[str, Any]] = []
+            for repo in target.workspace.repositories:
+                repo_name = repo.repository or detect_repo_slug(repo.path) or str(repo.path)
+                evidence.extend(_discover_repo(repo.path, repo_name))
+            return evidence
+
+        repo = detect_repo_slug(target_repo) or str(target_repo)
+        return _discover_repo(target_repo, repo)
 
     provider_pool = ProviderPoolManager.from_config(probe_on_start=False)
 
@@ -1285,6 +1449,9 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
 
 
 def cmd_factory_run_once(args: argparse.Namespace) -> int:
+    campaign = _resolve_factory_campaign(args, prepare=True)
+    if campaign is not None:
+        _select_factory_authority(args, campaign)
     supervisor = _build_factory_supervisor(args)
     result = supervisor.run_once()
     status = supervisor.status()
@@ -1306,6 +1473,9 @@ def cmd_factory_run(args: argparse.Namespace) -> int:
     import signal
     import threading
 
+    campaign = _resolve_factory_campaign(args, prepare=True)
+    if campaign is not None:
+        _select_factory_authority(args, campaign)
     wake = threading.Event()
     supervisor = _build_factory_supervisor(args, sleep=wake.wait)
 
@@ -1350,6 +1520,7 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
     from pathlib import Path
     from src.control_plane.factory.repo_proposal import RepoProposalStore
     from src.control_plane.factory.work_item import WorkItemState, WorkItemStore
+    campaign = _resolve_factory_campaign(args)
     store = _factory_state_store(args)
     record = store.load(reconcile_restart=False)
     work_store = WorkItemStore(Path(args.state_dir).resolve() / "work_items")
@@ -1366,6 +1537,10 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
     status = {
         "supervisor_id": record.supervisor_id,
         "state": record.state,
+        "objective": record.objective,
+        "target_mode": record.target_mode,
+        "target_repository": record.target_repository,
+        "workspace_file": record.workspace_file,
         "created_at": record.created_at,
         "last_tick_at": record.last_tick_at,
         "last_successful_tick_at": record.last_successful_tick_at,
@@ -1385,11 +1560,37 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         "parked_items": parked,
         "proposals_awaiting_authority": proposals,
     }
+    if campaign is not None:
+        from src.control_plane.factory.service import process_status
+        from src.control_plane.authority_envelope import ENVELOPE_FILENAME, load_envelope
+        profile = None
+        envelope_dir = campaign.state_dir / "campaign"
+        if (envelope_dir / ENVELOPE_FILENAME).is_file():
+            profile = load_envelope(envelope_dir).profile_id
+        status.update({
+            "campaign_id": campaign.repository.campaign_id,
+            "project": campaign.repository.remote or campaign.repository.root.name,
+            "worktree": str(campaign.target_dir),
+            "authority": profile or "not configured",
+            "process": process_status(campaign),
+        })
     if getattr(args, "json", False):
         import json
         print(json.dumps(status, indent=2, default=str))
     else:
+        print("HowlPlane Factory\n")
+        if campaign is not None:
+            print(f"Project: {status['project']}")
+            print(f"Process: {status['process']}")
+            print(f"Target: isolated worktree ({status['worktree']})")
+            print(f"Authority: {status['authority']}")
         print(f"State: {status['state']}")
+        if record.objective:
+            print(f"Objective: {record.objective}")
+        if record.target_mode:
+            print(f"Target mode: {record.target_mode}")
+        if record.target_repository:
+            print(f"Target repository: {record.target_repository}")
         print(f"Created: {status['created_at']}")
         print(f"Last tick: {status['last_tick_at']}")
         print(f"Last successful tick: {status['last_successful_tick_at']}")
@@ -1416,6 +1617,19 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
 
 def cmd_factory_stop(args: argparse.Namespace) -> int:
     from src.control_plane.factory.supervisor_state import SupervisorState
+    campaign = _resolve_factory_campaign(args)
+    if campaign is not None:
+        from src.control_plane.factory.service import stop_process
+        # Persisting STOPPED first makes a crash during backend shutdown fail
+        # closed. The run loop receives SIGTERM and reconciles its active tick.
+        store = _factory_state_store(args)
+        record = store.load(reconcile_restart=False)
+        if record.state != SupervisorState.STOPPED:
+            record.transition_to(SupervisorState.STOPPED, reason="operator_stop")
+            record.stopped_reason = "operator_stop"
+            store.save(record)
+        print(stop_process(campaign))
+        return 0
     store = _factory_state_store(args)
     record = store.load()
     if record.state == SupervisorState.STOPPED:
@@ -1442,20 +1656,101 @@ def cmd_factory_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_factory_start(args: argparse.Namespace) -> int:
+    """Normal persistent Factory entrypoint over the existing run loop."""
+    from src.control_plane.factory.service import start_process
+
+    campaign = _resolve_factory_campaign(args, prepare=True, force_resolve=True)
+    profile = _select_factory_authority(args, campaign)
+    # Bind the selected existing envelope before detaching. This keeps the
+    # operator choice durable even if the new backend exits before its first
+    # tick, while still using the same supervisor builder and authority path.
+    _build_factory_supervisor(args)
+    started, record = start_process(campaign, profile, getattr(args, "objective", None))
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps({"started": started, "campaign_id": campaign.repository.campaign_id,
+                          "state_dir": str(campaign.state_dir), "target_repo": str(campaign.target_dir),
+                          "backend": record.backend, "authority": profile}, indent=2))
+        return 0
+    if not started:
+        print("Factory is already running.\n")
+        print(f"Project: {campaign.repository.remote or campaign.repository.root.name}")
+        print("Use `howlplane factory status` for details.")
+        return 0
+    print("HowlPlane Factory\n")
+    print(f"Project: {campaign.repository.remote or campaign.repository.root.name}")
+    if campaign.repository.dirty:
+        print("Working tree contains local changes. Your checkout will not be modified.")
+    print(f"Factory target: {campaign.target_dir}")
+    print(f"Authority: {profile}")
+    print(f"Backend: {record.backend}")
+    print("\nFactory started.\n\nUse:\n  howlplane factory status\n  howlplane factory logs --follow\n  howlplane factory stop")
+    return 0
+
+
+def cmd_factory_logs(args: argparse.Namespace) -> int:
+    from src.control_plane.factory.service import recent_logs
+    campaign = _resolve_factory_campaign(args)
+    if campaign is None:
+        raise ValueError("factory logs without campaign resolution requires a repository working directory")
+    return recent_logs(campaign, follow=getattr(args, "follow", False), lines=getattr(args, "lines", 80))
+
+
+def cmd_factory_doctor(args: argparse.Namespace) -> int:
+    from src.control_plane.factory.campaign import CampaignError
+    from src.control_plane.factory.service import _systemd_available, process_status
+    try:
+        campaign = _resolve_factory_campaign(args)
+        if campaign is None:
+            print("Factory doctor: explicit state and target configuration accepted.")
+            return 0
+        target_state = "missing"
+        if campaign.target_dir.exists():
+            try:
+                from src.control_plane.factory.campaign import _validate_target
+                _validate_target(campaign)
+                target_state = "healthy"
+            except CampaignError as exc:
+                target_state = f"unhealthy: {exc}"
+        print("HowlPlane Factory doctor")
+        print(f"Repository: healthy ({campaign.repository.root})")
+        print(f"Campaign: {campaign.repository.campaign_id}")
+        print(f"Worktree: {target_state}")
+        print(f"State directory: {campaign.state_dir}")
+        print(f"Process: {process_status(campaign)}")
+        print(f"Backend: {'systemd user service' if _systemd_available() else 'portable detached process'}")
+        print("Provider readiness: deferred to supervisor startup")
+        return 0
+    except CampaignError as exc:
+        print(f"Factory doctor: cannot start safely: {exc}")
+        return 1
+
+
 def cmd_factory(args: argparse.Namespace) -> int:
-    action = getattr(args, "factory_action", None)
-    if action == "run-once":
-        return cmd_factory_run_once(args)
-    if action == "run":
-        return cmd_factory_run(args)
-    if action == "status":
-        return cmd_factory_status(args)
-    if action == "stop":
-        return cmd_factory_stop(args)
-    if action == "resume":
-        return cmd_factory_resume(args)
-    print("Unknown factory action.")
-    return 1
+    try:
+        action = getattr(args, "factory_action", None)
+        if action == "run-once":
+            return cmd_factory_run_once(args)
+        if action == "run":
+            return cmd_factory_run(args)
+        if action == "status":
+            return cmd_factory_status(args)
+        if action == "stop":
+            return cmd_factory_stop(args)
+        if action == "resume":
+            return cmd_factory_resume(args)
+        if action == "start":
+            return cmd_factory_start(args)
+        if action == "logs":
+            return cmd_factory_logs(args)
+        if action == "doctor":
+            return cmd_factory_doctor(args)
+        print("Unknown factory action.")
+        return 1
+    except (OSError, ValueError) as exc:
+        print(f"Factory: {exc}", file=sys.stderr)
+        return 1
 
 
 def cmd_create(args: argparse.Namespace) -> int:

@@ -2,6 +2,8 @@
 """Shared helpers for factory supervisor tests to avoid duplication across files."""
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import subprocess
 
 from src.control_plane.factory.dispatcher import MarathonDispatcherAdapter
 from src.control_plane.factory.portfolio import FactoryPolicy
@@ -114,6 +116,25 @@ def unavailable_supervisor(tmp_path, *, wait_seconds):
         pool=FakeProviderPool(has_capacity=False, retry_after=retry_after),
     )
     return supervisor, now, sleeps, retry_after
+
+
+def make_git_repo(path: Path, name: str = "project", readme_text: str = "initial\n") -> Path:
+    """Create a small committed Git repository for Factory campaign tests."""
+    repo = path / name
+    repo.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "factory@example.test"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Factory Test"], cwd=repo, check=True)
+    (repo / "README.md").write_text(readme_text, encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "initial"], cwd=repo, check=True)
+    return repo
+
+
+def set_xdg_paths(monkeypatch, tmp_path: Path) -> None:
+    """Point XDG data/state homes under tmp_path for isolated campaign tests."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
 
 
 def ready_work_item(

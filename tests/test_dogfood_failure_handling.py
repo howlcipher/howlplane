@@ -967,9 +967,12 @@ def test_factory_salvaged_budget_candidate_verification_failure_is_not_capacity(
 
 
 def test_factory_budget_retry_refuses_unknown_git_status(tmp_path, monkeypatch):
+    # The reconciliation now asks git_baseline whether the repository is
+    # actually restored, so the failure injection must target the git runner it
+    # uses rather than marathon's wrapper.
     monkeypatch.setattr(
-        "src.control_plane.synthesis.marathon.run_git",
-        lambda repo, args, timeout: subprocess.CompletedProcess(args, 128, "", "status unavailable"),
+        "src.control_plane.git_baseline._run_git_cmd",
+        lambda repo, args: subprocess.CompletedProcess(args, 128, "", "status unavailable"),
     )
     ok, rec, orch, _ = _run_marathon_harness(
         tmp_path, {"agy": ("budget", ""), "devin_cli": ("complete", "")},
