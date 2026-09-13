@@ -121,7 +121,7 @@ def test_factory_run_once_invokes_tick(tmp_path, monkeypatch):
         "src.control_plane.cli._build_factory_supervisor",
         lambda args, sleep=None: supervisor,
     )
-    code = main(["factory", "run-once", "--state-dir", str(tmp_path / "state")])
+    code = main(["factory", "run-once", "--state-dir", str(tmp_path / "state"), "--authority", "safe"])
     assert code == 0
     assert supervisor.state == SupervisorState.WAITING_FOR_WORK
 
@@ -199,3 +199,36 @@ def test_build_factory_supervisor_self_target_rejects_controller_checkout(tmp_pa
     with pytest.raises(ValueError) as exc:
         _build_factory_supervisor(args)
     assert "refuses to run against the controller checkout" in str(exc.value)
+
+
+def test_factory_start_uses_zero_config_campaign_and_is_idempotent(tmp_path, monkeypatch, capsys):
+    """The product command resolves state/worktree, then reuses an active process."""
+    from types import SimpleNamespace
+
+    from tests._factory_test_helpers import make_git_repo, set_xdg_paths
+
+    repo = make_git_repo(tmp_path, readme_text="# Bugs\n")
+    monkeypatch.chdir(repo)
+    set_xdg_paths(monkeypatch, tmp_path)
+    calls = []
+
+    def fake_start(campaign, authority, objective):
+        calls.append((campaign, authority, objective))
+        return len(calls) == 1, SimpleNamespace(backend="process")
+
+    monkeypatch.setattr("src.control_plane.factory.service.start_process", fake_start)
+    assert main(["factory", "start", "--authority", "safe"]) == 0
+    assert main(["factory", "start", "--authority", "safe"]) == 0
+    assert len(calls) == 2
+    assert calls[0][0].target_dir != repo
+    assert calls[0][1] == "strict"
+    assert "already running" in capsys.readouterr().out
+
+
+def test_factory_run_once_requires_explicit_noninteractive_authority(tmp_path, monkeypatch):
+    from tests._factory_test_helpers import make_git_repo, set_xdg_paths
+
+    repo = make_git_repo(tmp_path, readme_text="# Bugs\n")
+    monkeypatch.chdir(repo)
+    set_xdg_paths(monkeypatch, tmp_path)
+    assert main(["factory", "run-once"]) == 1
