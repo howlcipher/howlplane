@@ -145,6 +145,9 @@ def test_build_factory_supervisor_binds_authority_envelope_once(tmp_path):
     args = SimpleNamespace(
         state_dir=str(tmp_path / "state"),
         target_repo=".",
+        target="repo",
+        objective=None,
+        workspace=None,
         authority_profile="strict",
     )
     supervisor = _build_factory_supervisor(args)
@@ -156,3 +159,43 @@ def test_build_factory_supervisor_binds_authority_envelope_once(tmp_path):
     engine2 = supervisor.dispatcher._engine_factory()
     assert engine2 is engine
     assert engine2.authority_envelope is engine.authority_envelope
+
+
+def test_build_factory_supervisor_persists_objective(tmp_path):
+    from types import SimpleNamespace
+
+    from src.control_plane.cli import _build_factory_supervisor
+    from src.control_plane.factory.supervisor_state import SupervisorStateStore
+
+    args = SimpleNamespace(
+        state_dir=str(tmp_path / "state"),
+        target_repo=".",
+        target="repo",
+        objective="Improve reliability",
+        workspace=None,
+        authority_profile=None,
+    )
+    _build_factory_supervisor(args)
+    record = SupervisorStateStore(tmp_path / "state" / "supervisor").load()
+    assert record.objective == "Improve reliability"
+    assert record.target_mode == "repo"
+
+
+def test_build_factory_supervisor_self_target_rejects_controller_checkout(tmp_path):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from src.control_plane.cli import _build_factory_supervisor
+
+    # The controller checkout is Path.cwd(); pointing target-repo at cwd must fail.
+    args = SimpleNamespace(
+        state_dir=str(tmp_path / "state"),
+        target_repo=str(Path.cwd()),
+        target="self",
+        objective=None,
+        workspace=None,
+        authority_profile=None,
+    )
+    with pytest.raises(ValueError) as exc:
+        _build_factory_supervisor(args)
+    assert "refuses to run against the controller checkout" in str(exc.value)

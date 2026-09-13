@@ -665,6 +665,22 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_run_once.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
     p_run_once.add_argument("--target-repo", default=".", help="Repository to discover work from")
     p_run_once.add_argument(
+        "--target",
+        choices=["repo", "self", "ecosystem"],
+        default="repo",
+        help="What the factory is improving: repo (default), self, or ecosystem.",
+    )
+    p_run_once.add_argument(
+        "--objective",
+        default=None,
+        help="Persistent campaign objective. Becomes durable supervisor state.",
+    )
+    p_run_once.add_argument(
+        "--workspace",
+        default=None,
+        help="Workspace YAML for ecosystem mode.",
+    )
+    p_run_once.add_argument(
         "--authority-profile",
         choices=["strict", "overnight-safe", "howlframe-overnight"],
         default=None,
@@ -678,6 +694,22 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     )
     p_run.add_argument("--state-dir", default=".factory_state", help="Factory state directory")
     p_run.add_argument("--target-repo", default=".", help="Repository to discover work from")
+    p_run.add_argument(
+        "--target",
+        choices=["repo", "self", "ecosystem"],
+        default="repo",
+        help="What the factory is improving: repo (default), self, or ecosystem.",
+    )
+    p_run.add_argument(
+        "--objective",
+        default=None,
+        help="Persistent campaign objective. Becomes durable supervisor state.",
+    )
+    p_run.add_argument(
+        "--workspace",
+        default=None,
+        help="Workspace YAML for ecosystem mode.",
+    )
     p_run.add_argument("--until", type=float, help="Run for at most N seconds")
     p_run.add_argument("--resume-stopped", action="store_true",
                        help="Resume saved stopped state after acquiring the supervisor lock")
@@ -1189,7 +1221,8 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
     from src.control_plane.factory.dispatcher import MarathonDispatcherAdapter
     from src.control_plane.factory.repo_proposal import CapabilityStore, RepoProposalStore
     from src.control_plane.factory.supervisor import FactorySupervisor
-    from src.control_plane.factory.supervisor_state import SupervisorStateStore
+    from src.control_plane.factory.supervisor_state import SupervisorStateRecord, SupervisorStateStore
+    from src.control_plane.factory.target import FactoryTarget, FactoryTargetMode, Workspace
     from src.control_plane.factory.work_item import WorkItemStore
     from src.control_plane.git_integration import detect_repo_slug
     from src.control_plane.synthesis import MarathonDogfoodEngine
@@ -1201,6 +1234,27 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
     repo_proposal_store = RepoProposalStore(state_dir / "repo_proposals")
     capability_store = CapabilityStore(state_dir / "capabilities")
     target_repo = Path(getattr(args, "target_repo", None) or ".").resolve()
+    target_mode = getattr(args, "target", "repo")
+    workspace_path = getattr(args, "workspace", None)
+    objective = getattr(args, "objective", None)
+
+    target = FactoryTarget(
+        mode=FactoryTargetMode(target_mode),
+        target_repo=target_repo,
+        workspace=Workspace.from_file(workspace_path) if workspace_path else None,
+        controller_checkout=Path.cwd().resolve(),
+    )
+    if target.mode == FactoryTargetMode.SELF:
+        target.ensure_isolated_self_target()
+
+    # Persist campaign objective and target metadata so they survive restart.
+    state_record = state_store.load()
+    if objective is not None:
+        state_record.objective = objective
+    state_record.target_mode = target_mode
+    state_record.target_repository = str(target_repo)
+    state_record.workspace_file = str(Path(workspace_path).resolve()) if workspace_path else None
+    state_store.save(state_record)
 
     def _backlog_rank(value: Any) -> int:
         try:
@@ -1208,17 +1262,16 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
         except (TypeError, ValueError):
             return 0
 
-    def _discovery():
+    def _discover_repo(repo_path: Path, repo_name: str):
         try:
-            source = BacklogSource(target_repo)
+            source = BacklogSource(repo_path)
             selection = source.select()
         except Exception:
             return []
-        repo = detect_repo_slug(target_repo) or str(target_repo)
         return [
             {
                 "origin": "existing_backlog",
-                "repository": repo,
+                "repository": repo_name,
                 "title": item.title,
                 "description": source.item_detail(item),
                 "identity_keys": [item.source_file, item.item_id],
@@ -1230,6 +1283,19 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
             }
             for item in selection.eligible
         ]
+
+    def _discovery():
+        if target.mode == FactoryTargetMode.ECOSYSTEM:
+            if target.workspace is None:
+                return []
+            evidence: List[Dict[str, Any]] = []
+            for repo in target.workspace.repositories:
+                repo_name = repo.repository or detect_repo_slug(repo.path) or str(repo.path)
+                evidence.extend(_discover_repo(repo.path, repo_name))
+            return evidence
+
+        repo = detect_repo_slug(target_repo) or str(target_repo)
+        return _discover_repo(target_repo, repo)
 
     provider_pool = ProviderPoolManager.from_config(probe_on_start=False)
 
@@ -1366,6 +1432,10 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
     status = {
         "supervisor_id": record.supervisor_id,
         "state": record.state,
+        "objective": record.objective,
+        "target_mode": record.target_mode,
+        "target_repository": record.target_repository,
+        "workspace_file": record.workspace_file,
         "created_at": record.created_at,
         "last_tick_at": record.last_tick_at,
         "last_successful_tick_at": record.last_successful_tick_at,
@@ -1390,6 +1460,12 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         print(json.dumps(status, indent=2, default=str))
     else:
         print(f"State: {status['state']}")
+        if record.objective:
+            print(f"Objective: {record.objective}")
+        if record.target_mode:
+            print(f"Target mode: {record.target_mode}")
+        if record.target_repository:
+            print(f"Target repository: {record.target_repository}")
         print(f"Created: {status['created_at']}")
         print(f"Last tick: {status['last_tick_at']}")
         print(f"Last successful tick: {status['last_successful_tick_at']}")

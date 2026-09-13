@@ -641,9 +641,9 @@ class FactorySupervisor:
         if not self._provider_has_capacity():
             next_state = SupervisorState.WAITING_FOR_PROVIDER
             reason = "no_provider_capacity"
-        elif selection.reason == "all_candidates_capped":
+        elif selection.no_valuable_work:
             next_state = SupervisorState.WAITING_FOR_WORK
-            reason = "all_candidates_capped"
+            reason = "NO_VALUABLE_WORK"
         else:
             next_state = SupervisorState.WAITING_FOR_WORK
             reason = "no_dispatchable_work"

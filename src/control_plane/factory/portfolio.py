@@ -28,16 +28,24 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from src.control_plane.factory.work_item import WorkItem, WorkItemOrigin
 
-# Lower sorts first. Owner direction always wins; a bug outranks a feature of
-# similar standing; the factory's opinions about itself come last.
+# Lower sorts first. Owner direction always wins; deterministic evidence
+# outranks inference; the factory's opinions about itself come last.
+# Aliases carry distinct priorities so the total ordering is unambiguous while
+# still sorting adjacent to their canonical class.
 ORIGIN_PRIORITY: Dict[str, int] = {
     WorkItemOrigin.OWNER_DIRECTION: 0,
-    WorkItemOrigin.EXISTING_BACKLOG: 1,
+    WorkItemOrigin.OBSERVED_DEFECT: 1,
     WorkItemOrigin.DISCOVERED_PROBLEM: 2,
-    WorkItemOrigin.INFERRED_NEED: 3,
-    WorkItemOrigin.MAINTENANCE: 4,
-    WorkItemOrigin.SELF_IMPROVEMENT: 5,
-    WorkItemOrigin.CREATIVE_EXPERIMENT: 6,
+    WorkItemOrigin.MEASURED_REGRESSION: 3,
+    WorkItemOrigin.PROOF_FINDING: 4,
+    WorkItemOrigin.VERIFIED_BACKLOG: 5,
+    WorkItemOrigin.EXISTING_BACKLOG: 6,
+    WorkItemOrigin.INFERRED_IMPROVEMENT: 7,
+    WorkItemOrigin.INFERRED_NEED: 8,
+    WorkItemOrigin.MAINTENANCE: 9,
+    WorkItemOrigin.SELF_IMPROVEMENT: 10,
+    WorkItemOrigin.CREATIVE_EXPERIMENT: 11,
+    WorkItemOrigin.SPECULATIVE_IDEA: 12,
 }
 
 # Origins that count against the "do not grind on yourself" budget.
@@ -74,7 +82,7 @@ class FactoryPolicy:
             "creative": sum(
                 1
                 for d in recent
-                if d.get("origin") == WorkItemOrigin.CREATIVE_EXPERIMENT
+                if d.get("origin") in {WorkItemOrigin.CREATIVE_EXPERIMENT, WorkItemOrigin.SPECULATIVE_IDEA}
             ),
         }
 
@@ -85,6 +93,10 @@ class SelectionOutcome:
 
     item: Optional[WorkItem] = None
     reason: str = "no_dispatchable_work"
+    # True when the factory evaluated all candidates and chose none because no
+    # justified work exceeded the policy threshold. This is an explicit idle
+    # outcome, not a failure.
+    no_valuable_work: bool = False
     withheld: List[Dict[str, str]] = field(default_factory=list)
 
 
@@ -124,7 +136,7 @@ def _cap_blocking(
         # not the factory over-serving a category.
         return None
     if (
-        item.origin == WorkItemOrigin.CREATIVE_EXPERIMENT
+        item.origin in {WorkItemOrigin.CREATIVE_EXPERIMENT, WorkItemOrigin.SPECULATIVE_IDEA}
         and counts["creative"] >= policy.max_creative_in_window
     ):
         return "creative_experiment_cap"
@@ -160,7 +172,7 @@ def select(
         key=lambda i: _sort_key(i, now, policy),
     )
     if not candidates:
-        return SelectionOutcome(reason="no_dispatchable_work")
+        return SelectionOutcome(reason="no_dispatchable_work", no_valuable_work=True)
 
     # Every candidate is evaluated, not just those ahead of the winner. The
     # owner asking "why is my self-improvement work not running" needs the
@@ -188,4 +200,4 @@ def select(
 
     # Everything ready would over-serve a category. Idling here is the point:
     # the alternative is grinding on whatever is left regardless of balance.
-    return SelectionOutcome(reason="all_candidates_capped", withheld=withheld)
+    return SelectionOutcome(reason="all_candidates_capped", no_valuable_work=True, withheld=withheld)
