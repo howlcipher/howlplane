@@ -38,7 +38,7 @@ from src.control_plane.decision_queue import (
     compute_blocks_other_work,
 )
 from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
-from src.control_plane.git_baseline import capture_baseline, capture_delta, describe_working_tree
+from src.control_plane.git_baseline import capture_baseline, capture_delta, describe_working_tree, is_baseline_restored
 from src.control_plane.git_integration import GitIntegrationExecutor, detect_repo_slug, run_git
 from src.control_plane.human_boundary import HumanBoundaryGate
 from src.control_plane.orchestrator import (
@@ -1825,23 +1825,13 @@ class MarathonDogfoodEngine:
             if budget_retry:
                 # Governed failure should already have preserved its evidence
                 # and restored the attempt baseline. Never assume it did.
+                # The check is: "has the repository actually returned to the
+                # captured pre-attempt baseline?" -- not "do two baseline objects
+                # contain identical metadata". Snapshot-by-snapshot content
+                # verification is used only for the pre-existing files we
+                # retained, and a non-empty task delta is a hard failure.
                 try:
-                    status_check = self._git_runner(self.target_repo, ["status", "--porcelain"], 30)
-                    current_baseline = capture_baseline(self.target_repo)
-                    reconciled = (
-                        attempt_baseline is not None
-                        and status_check.returncode == 0
-                        and current_baseline.status_porcelain == (status_check.stdout or "")
-                        and current_baseline.initial_commit_sha != "HEAD_UNKNOWN"
-                        and current_baseline.initial_commit_sha == attempt_baseline.initial_commit_sha
-                        and current_baseline.pre_existing_modified == attempt_baseline.pre_existing_modified
-                        and current_baseline.pre_existing_untracked == attempt_baseline.pre_existing_untracked
-                        and current_baseline.pre_existing_snapshots == attempt_baseline.pre_existing_snapshots
-                        and set(attempt_baseline.pre_existing_snapshots) == set(
-                            attempt_baseline.pre_existing_modified + attempt_baseline.pre_existing_untracked
-                        )
-                        and capture_delta(self.target_repo, attempt_baseline).is_empty
-                    )
+                    reconciled, _ = is_baseline_restored(self.target_repo, attempt_baseline)
                 except Exception:  # noqa: BLE001 - unknown state cannot be handed off
                     reconciled = False
 
