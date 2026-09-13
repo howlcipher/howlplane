@@ -1,10 +1,14 @@
 import os
+import sys
 import importlib.util
 
 
 def load_module(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
+    # Register the module before executing it so that dataclass string
+    # annotations (from __future__ import annotations) can resolve their module.
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
