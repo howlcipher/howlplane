@@ -46,7 +46,33 @@ AGY's explicit print-timeout diagnostic is treated as incomplete work even
 when its process exits zero. Partial changes must pass the existing timeout
 candidate verification or failover path before they can advance.
 
-### Persistent Linux user service
+### Factory: the everyday engineering command
+
+From any ordinary Git repository, start a safe persistent engineering Factory
+without supplying a state directory, worktree, PID, or service name:
+
+```bash
+cd /path/to/project
+howlplane factory start
+howlplane factory status
+howlplane factory logs --follow
+howlplane factory stop
+```
+
+On its first interactive start, Factory asks for an explicit authority choice.
+The safe default uses the existing `strict` authority profile. In automation,
+pass `--authority safe` or an approved `--authority-profile`; Factory never
+infers expanded authority. It derives a stable campaign identity from the
+canonical repository root and remote identity, stores durable state below the
+XDG state home, and creates a separate managed worktree below the XDG data
+home. A dirty user checkout is left untouched.
+
+`factory start` is the background normal workflow. `factory run` remains the
+foreground advanced/debug command, and explicit `--state-dir` and
+`--target-repo` overrides remain available. `factory run-once` also uses the
+zero-config resolver when those overrides are omitted.
+
+### Advanced persistent Linux user service
 
 `factory status` reports the persisted supervisor state without treating an
 active dispatch as a process restart. Startup still reconciles interrupted work.
