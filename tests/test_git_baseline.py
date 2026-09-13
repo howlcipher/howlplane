@@ -7,6 +7,7 @@ Unit tests for Git baseline capture and task-scoped repository delta isolation.
 import os
 from pathlib import Path
 import subprocess
+from typing import Optional
 
 from src.control_plane.git_baseline import (
     GitBaseline,
