@@ -53,7 +53,7 @@ from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
 )
-from src.infrastructure.config_loader import ProviderResourceSettings
+from howlplane.control_plane.config_loader import ProviderResourceSettings
 from howlplane.control_plane.task_spec import TaskSpec
 from tests._dogfood_test_helpers import init_minimal_python_repo
 from tests._git_test_helpers import commit_all, git_in_repo

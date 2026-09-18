@@ -21,7 +21,7 @@ from typing import Callable, List, Optional, Tuple
 
 import yaml
 
-from src.infrastructure.config_loader import default_loader, load_config
+from howlplane.control_plane.config_loader import default_loader, load_config
 
 FRONTMATTER_PATTERN = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 

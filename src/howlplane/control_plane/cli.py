@@ -272,7 +272,7 @@ def cmd_boundary(args: argparse.Namespace) -> int:
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Executes workspace health diagnostics."""
-    from src.infrastructure.doctor import run_diagnostics
+    from howlplane.control_plane.doctor import run_diagnostics
     repo_dir = Path(args.repo_dir) if getattr(args, "repo_dir", None) else None
     results = run_diagnostics(repo_root=repo_dir)
 

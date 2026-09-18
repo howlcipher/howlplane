@@ -8,7 +8,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from src.infrastructure.secret_manager import SecretManager
+from howlplane.control_plane.secret_manager import SecretManager
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -155,14 +155,6 @@ class ProviderPolicySettings(BaseModel):
     preferred_external: List[str] = Field(default_factory=list)
     preferred_local: List[str] = Field(default_factory=list)
     cooldown_seconds: int = Field(default=300, ge=0, le=86400)
-    # A capacity stop outlives a transient one. A session or rate limit clears
-    # in minutes, but a quota is billed over a day or a week, so re-probing it
-    # on the 300s transient cooldown would spend attempts proving something
-    # already known. It must still expire: one historical quota event must not
-    # blacklist a provider forever, which is what happens when nothing ever
-    # clears the state (issues.md #15). Six hours is short enough that a daily
-    # quota is reconsidered within the same day and long enough that an
-    # overnight run does not keep asking.
     quota_cooldown_seconds: int = Field(default=21600, ge=0, le=604800)
     session_cooldown_seconds: int = Field(default=14400, ge=0, le=604800)
     max_metered_invocations: Optional[int] = Field(default=None, ge=0)
@@ -233,8 +225,8 @@ class ConfigLoader:
         """
         Initializes the ConfigLoader and calculates common paths.
         """
-        self.script_dir = os.path.dirname(os.path.abspath(__file__))
-        self.repo_root = os.path.dirname(os.path.dirname(self.script_dir))
+        self.script_dir = str(Path(__file__).resolve().parent)
+        self.repo_root = str(Path(__file__).resolve().parents[3])
 
         if config_path is None:
             self.config_path = os.path.join(self.repo_root, "config", "settings.yaml")

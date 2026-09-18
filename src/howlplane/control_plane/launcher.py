@@ -496,7 +496,7 @@ def cmd_work(args: argparse.Namespace) -> int:
     cp_root = find_control_plane_root(args.control_plane_dir)
 
     if not getattr(args, "skip_doctor", False):
-        from src.infrastructure.doctor import check_dependencies, check_git_status
+        from howlplane.control_plane.doctor import check_dependencies, check_git_status
         dep_res = check_dependencies()
         if dep_res.status == "error" and not getattr(args, "force", False):
             print(f"ERROR: control-plane preflight failed: {dep_res.message}", file=sys.stderr)

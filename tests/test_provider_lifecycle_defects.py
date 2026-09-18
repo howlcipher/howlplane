@@ -34,7 +34,7 @@ from howlplane.control_plane.synthesis.provider_pool import (
     ProviderPoolManager,
 )
 from howlplane.control_plane.task_spec import TaskSpec
-from src.infrastructure.config_loader import ProviderPolicySettings, ProviderResourceSettings
+from howlplane.control_plane.config_loader import ProviderPolicySettings, ProviderResourceSettings
 from tests._dogfood_test_helpers import init_minimal_python_repo
 from tests.test_provider_failover import _FakeBackendResolver, _profile
 

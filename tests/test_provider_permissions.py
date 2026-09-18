@@ -33,7 +33,7 @@ from howlplane.control_plane.synthesis.provider_pool import (
     TASK_SUITABILITY_PREFERENCES,
 )
 from howlplane.control_plane.task_spec import TaskSpec
-from src.infrastructure.config_loader import (
+from howlplane.control_plane.config_loader import (
     ProviderExecutionProfileSettings,
     ProviderResourceSettings,
 )

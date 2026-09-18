@@ -73,7 +73,7 @@ def _profile(agent_id: str, provider: str, **overrides: Any) -> AgentProfile:
 
 def _make_pool(tmp_path: Path) -> ProviderPoolManager:
     """Three-provider pool mirroring the live incident resources."""
-    from src.infrastructure.config_loader import ProviderPolicySettings, ProviderResourceSettings
+    from howlplane.control_plane.config_loader import ProviderPolicySettings, ProviderResourceSettings
 
     registry = AgentRegistry([
         _profile("agy", "agy"),

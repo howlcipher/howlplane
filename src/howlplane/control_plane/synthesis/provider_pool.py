@@ -43,7 +43,7 @@ from howlplane.control_plane.resource_models import (
     ResourceSelectionStatus,
 )
 from howlplane.control_plane.task_spec import DataClassSerializationMixin, TaskSpec
-from src.infrastructure.config_loader import (
+from howlplane.control_plane.config_loader import (
     ProviderPolicySettings,
     ProviderResourceSettings,
 )
@@ -492,7 +492,7 @@ class ProviderPoolManager:
         probe_on_start: bool = True,
     ) -> "ProviderPoolManager":
         """Builds a pool from canonical plus operator-local configuration."""
-        from src.infrastructure.config_loader import default_loader
+        from howlplane.control_plane.config_loader import default_loader
 
         capacity_path = Path.home() / ".config" / "howlplane" / "provider_capacity.json"
         return cls.from_settings(

@@ -26,10 +26,12 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _root)
+sys.path.insert(0, os.path.join(_root, "src"))
 
-from src.core.skill_router import SkillRouter  # noqa: E402
-from src.infrastructure.config_loader import default_loader  # noqa: E402
+from howlplane.control_plane.skill_router import SkillRouter  # noqa: E402
+from howlplane.control_plane.config_loader import default_loader  # noqa: E402
 
 MANIFEST_START = "<!-- SKILLS_MANIFEST_START -->"
 MANIFEST_END = "<!-- SKILLS_MANIFEST_END -->"

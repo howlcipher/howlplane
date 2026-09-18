@@ -4,7 +4,7 @@ import os
 import sys
 import urllib.request
 
-from src.infrastructure.config_loader import ConfigLoader
+from howlplane.control_plane.config_loader import ConfigLoader
 
 
 class GitHubProfileSyncer:

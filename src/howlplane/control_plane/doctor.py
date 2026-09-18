@@ -212,7 +212,7 @@ def check_control_plane_ledger(repo_root: Path) -> DiagnosticCheck:
 
 def check_operating_mode(cfg: Optional[Dict] = None) -> DiagnosticCheck:
     try:
-        from src.infrastructure.config_loader import default_loader
+        from howlplane.control_plane.config_loader import default_loader
 
         config_data = cfg if cfg is not None else default_loader.config
         mode = config_data.get("operating_mode", "local_only")
@@ -246,8 +246,8 @@ def check_operating_mode(cfg: Optional[Dict] = None) -> DiagnosticCheck:
 def check_ai_resources(provider_pool: Optional[Any] = None) -> List[DiagnosticCheck]:
     """Reports configured resource readiness without consuming generation."""
     try:
-        from src.control_plane.resource_cli import resource_diagnostic_rows
-        from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+        from howlplane.control_plane.resource_cli import resource_diagnostic_rows
+        from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 
         pool = provider_pool or ProviderPoolManager.from_config(
             read_only=True, probe_on_start=True
@@ -260,11 +260,12 @@ def check_ai_resources(provider_pool: Optional[Any] = None) -> List[DiagnosticCh
             message=f"Invalid AI resource configuration: {exc}",
         )]
 
+
 def run_diagnostics(
     repo_root: Optional[Path] = None,
     provider_pool: Optional[Any] = None,
 ) -> List[DiagnosticCheck]:
-    root = repo_root or Path(__file__).resolve().parent.parent.parent
+    root = repo_root or Path(__file__).resolve().parents[3]
     checks = [
         check_python_environment(),
         check_dependencies(),

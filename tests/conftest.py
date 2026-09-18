@@ -46,7 +46,7 @@ _INTEGRATION_MODULES = {
     "test_interrupted_governance_recovery.py", "test_local_ollama_provider.py",
     "test_operational_resilience.py", "test_provider_failover.py",
     "test_provider_permissions.py", "test_provider_pool.py",
-    "test_provider_preflight.py", "test_progress.py",
+    "test_progress.py",
     "test_review_integrity.py", "test_review_runner.py",
     "test_reviewer_pool_traversal.py", "test_scratch_isolation.py",
     "test_verification_view.py",
@@ -74,25 +74,12 @@ _SLOW_MODULES = {
 # of _SLOW_MODULES returns ~148 tests to the fast gate for ~9s.
 _SLOW_TESTS = {
     "test_docs.py::test_pdoc_api_generation",                                      # 19.48s
-    "test_langchain_compat.py::test_langchain_pydantic_warning_is_isolated",       # 8.12s
     "test_hygiene_policy.py::test_verification_plan_executes_with_hygiene_integrity_checks",  # 6.30s
     "test_install_global_codex.py::test_posix_installer_registers_codex_globally",  # 4.26s
-    "test_provider_preflight.py::test_payload_loop_skips_preflight_when_disabled",  # 3.78s
-    "test_provider_preflight.py::test_payload_loop_aborts_on_failed_preflight",     # 2.77s
     "test_operational_resilience.py::test_cancel_running_process_terminates_and_preserves_code",  # 3.14s
     "test_doctor.py::test_doctor_main",                                            # 2.02s
     "test_doctor.py::test_run_diagnostics",                                         # 2.01s
     "test_git_env_isolation.py::test_suite_passes_under_a_hook_shaped_environment",  # 1.71s
-    # Legacy orchestrator: the LangGraph run_loop tests dominate the module; the
-    # human_proxy_intercept authority tests beside them are effectively free.
-    "test_orchestrator.py::test_orchestrator_run_loop_approved_immediately",
-    "test_orchestrator.py::test_orchestrator_run_loop_humanize_neutral_by_default",
-    "test_orchestrator.py::test_orchestrator_run_loop_exhausts_max_iterations",
-    "test_orchestrator.py::test_orchestrator_run_loop_approved_no_exhaustion_marker",
-    "test_orchestrator.py::test_orchestrator_run_loop_rejected_then_approved",
-    "test_orchestrator.py::test_orchestrator_run_loop_humanize_stealth_with_command",
-    "test_orchestrator.py::test_orchestrator_run_loop_humanize_disabled_via_config",
-    "test_orchestrator.py::test_orchestrator_run_loop_rejected_with_approved_substring",
     # Governance recovery: 8 of 41 tests carry ~15s of the module's ~16s.
     "test_interrupted_governance_recovery.py::test_resume_does_not_credit_a_producer_for_another_resources_work",
     "test_interrupted_governance_recovery.py::test_interrupted_candidate_review_resumes_and_completes",
@@ -227,37 +214,3 @@ def setup_test_environment(request, monkeypatch):
         monkeypatch.setenv("HOWLPLANE_SYNTHESIS_MODE", "deterministic_baseline")
 
 
-@pytest.fixture
-def orchestrator_factory():
-    """Factory fixture providing isolated Orchestrator instances.
-
-    Each test can call ``orchestrator_factory()`` to create a new ``Orchestrator``.
-    The legacy orchestrator's MCP configuration is a real process boundary, not
-    part of its unit-level approval-loop contract.  The factory therefore
-    retains the normal configuration while removing MCP servers. Tests that
-    verify MCP integration construct an orchestrator with an explicit fake or
-    patch the client seam themselves. All created instances are shut down after
-    the test completes.
-    """
-    from src.core.orchestrator import Orchestrator, load_config
-    created = []
-
-    def _make(*args, **kwargs):
-        config = dict(load_config())
-        config["active_mcps"] = []
-        config["mcp_servers"] = {}
-        with pytest.MonkeyPatch.context() as isolated:
-            isolated.setattr("src.core.orchestrator.load_config", lambda: config)
-            instance = Orchestrator(*args, **kwargs)
-        created.append(instance)
-        return instance
-
-    yield _make
-
-    # Teardown: shut down all created orchestrators
-    for orchestrator in created:
-        try:
-            orchestrator.shutdown()
-        except Exception:
-            # Suppress shutdown errors to avoid test failures
-            pass

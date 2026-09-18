@@ -9,7 +9,7 @@ It reads retention policies and log directories from the centralized configurati
 import os
 import time
 
-from src.infrastructure.config_loader import load_config
+from howlplane.control_plane.config_loader import load_config
 
 
 class LogCleaner:
@@ -21,7 +21,7 @@ class LogCleaner:
         """
         Initializes the LogCleaner and loads configuration.
         """
-        from src.infrastructure.config_loader import ConfigLoader
+        from howlplane.control_plane.config_loader import ConfigLoader
         self.repo_root = ConfigLoader().get_repo_root()
         self.config = load_config().get("logs", {})
 

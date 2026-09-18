@@ -48,7 +48,7 @@ from howlplane.control_plane.synthesis.provider_pool import (
     ProviderPoolManager,
 )
 from howlplane.control_plane.task_spec import TaskSpec
-from src.infrastructure.config_loader import (
+from howlplane.control_plane.config_loader import (
     AppSettings,
     ProviderPolicySettings,
     ProviderResourceSettings,
