@@ -27,6 +27,7 @@ import pytest
 
 from src.control_plane.agent_execution import (
     AgentExecutionResult,
+    FakeAgentBackend,
     LAUNCH_OUTCOME_KEY,
     LAUNCH_OUTCOME_LAUNCHED,
     TIMEOUT_SOURCE_HARNESS,
@@ -86,7 +87,7 @@ def _make_pool(tmp_path: Path) -> ProviderPoolManager:
     policy = ProviderPolicySettings(cooldown_seconds=300, quota_cooldown_seconds=21600)
     return ProviderPoolManager(
         registry=registry,
-        backend_resolver=None,
+        backend_resolver=lambda aid: FakeAgentBackend(agent_id=aid),
         probe_on_start=False,
         policy=policy,
         resources=resources,
