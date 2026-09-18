@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Deterministic factory supervisor tick/run loop."""
 
+import logging
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+logger = logging.getLogger("howlplane.factory.supervisor")
 
 from src.control_plane.atomic_io import atomic_write_json, atomic_write_text, safe_load_json
 from src.control_plane.factory.dispatcher import DispatchOutcome, MarathonDispatcherAdapter
@@ -41,6 +44,7 @@ class TickResult:
     selected_work_item_id: Optional[str] = None
     next_wake_at: Optional[datetime] = None
     reason: str = ""
+    alert: Optional[str] = None
 
 
 class FactorySupervisor:
@@ -56,6 +60,7 @@ class FactorySupervisor:
         discovery: Callable[[], List[Dict[str, Any]]],
         provider_pool: Any,
         policy: Optional[FactoryPolicy] = None,
+        product_repo: Optional[str] = None,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         sleep: Callable[[float], None] = time.sleep,
         tick_interval_seconds: float = DEFAULT_TICK_INTERVAL_SECONDS,
@@ -73,7 +78,6 @@ class FactorySupervisor:
         self.dispatcher = dispatcher
         self.discovery = discovery
         self.provider_pool = provider_pool
-        self.policy = policy or FactoryPolicy()
         self._clock = clock
         self._sleep = sleep
         self.tick_interval_seconds = tick_interval_seconds
@@ -85,6 +89,41 @@ class FactorySupervisor:
         self._stop_requested: Optional[str] = None
         self.instance_id: str = self._resolve_instance_id()
         self._state_record = self.state_store.load()
+
+        # Dynamically parameterize policy product_repository
+        def _resolve_repo_slug(val: Optional[Union[str, Path]]) -> Optional[str]:
+            if not val:
+                return None
+            s = str(val).strip()
+            if not s:
+                return None
+            if "/" in s and not Path(s).exists():
+                return s
+            try:
+                from src.control_plane.git_integration import detect_repo_slug
+                slug = detect_repo_slug(s)
+                if slug:
+                    return slug
+            except Exception:
+                pass
+            return s
+
+        target_product = None
+        if product_repo:
+            target_product = _resolve_repo_slug(product_repo)
+        elif self._state_record.target_repository:
+            target_product = _resolve_repo_slug(self._state_record.target_repository)
+        elif policy is not None and policy.product_repository != "howlcipher/howlframe":
+            target_product = policy.product_repository
+
+        if target_product:
+            base_policy = policy or FactoryPolicy()
+            self.policy = replace(base_policy, product_repository=target_product)
+        else:
+            self.policy = policy or FactoryPolicy()
+
+        self._consecutive_capped_ticks: int = getattr(self._state_record, "consecutive_capped_ticks", 0)
+
         # Apply bounded execution policy from constructor (CLI/service args).
         if max_work_items is not None:
             self._state_record.run_mode = "bounded"
@@ -631,6 +670,8 @@ class FactorySupervisor:
             "proposals_awaiting_authority": [
                 p.proposal_id for p in self.repo_proposal_store.list_awaiting_authority()
             ],
+            "consecutive_capped_ticks": getattr(self._state_record, "consecutive_capped_ticks", 0),
+            "alerts": list(getattr(self._state_record, "alerts", [])),
         }
 
     def stop(self, reason: str = "operator_stop") -> None:
@@ -1090,6 +1131,8 @@ class FactorySupervisor:
         selection = select(work_items, self._state_record.dispatch_history, self.policy, now=now)
 
         if selection.item is not None:
+            self._consecutive_capped_ticks = 0
+            self._state_record.consecutive_capped_ticks = 0
             dispatch_result = self._dispatch(selection.item, now_iso)
             if dispatch_result is None:
                 # Missing item: retain evidence and stop/park.
@@ -1145,15 +1188,45 @@ class FactorySupervisor:
                 reason=reason,
             )
 
+        capped_alert: Optional[str] = None
         if not self._provider_has_capacity():
             next_state = SupervisorState.WAITING_FOR_PROVIDER
             reason = "no_provider_capacity"
+            self._consecutive_capped_ticks = 0
+            self._state_record.consecutive_capped_ticks = 0
         elif selection.no_valuable_work:
             next_state = SupervisorState.WAITING_FOR_WORK
             reason = "NO_VALUABLE_WORK"
+            if selection.reason == "all_candidates_capped" and len(selection.withheld) > 0:
+                self._consecutive_capped_ticks += 1
+                self._state_record.consecutive_capped_ticks = self._consecutive_capped_ticks
+                if self._consecutive_capped_ticks > 3:
+                    reasons = sorted(set(w.get("reason", "") for w in selection.withheld))
+                    capped_alert = (
+                        f"CAP_DEADLOCK_ALERT: Supervisor entered WAITING_FOR_WORK with "
+                        f"{len(selection.withheld)} ready candidate(s) capped for "
+                        f"{self._consecutive_capped_ticks} consecutive ticks. "
+                        f"Reasons: {reasons}"
+                    )
+                    logger.warning(capped_alert)
+                    self._state_record.record_alert(
+                        alert_type="capped_candidates_deadlock",
+                        message=capped_alert,
+                        now_iso=now_iso,
+                        details={
+                            "consecutive_ticks": self._consecutive_capped_ticks,
+                            "withheld_count": len(selection.withheld),
+                            "reasons": reasons,
+                        },
+                    )
+            else:
+                self._consecutive_capped_ticks = 0
+                self._state_record.consecutive_capped_ticks = 0
         else:
             next_state = SupervisorState.WAITING_FOR_WORK
             reason = "no_dispatchable_work"
+            self._consecutive_capped_ticks = 0
+            self._state_record.consecutive_capped_ticks = 0
 
         if self._state_record.state != next_state:
             try:
@@ -1168,6 +1241,7 @@ class FactorySupervisor:
             state=self._state_record.state,
             next_wake_at=next_wake,
             reason=reason,
+            alert=capped_alert,
         )
 
     def _run_loop(self, until: Optional[datetime] = None) -> None:

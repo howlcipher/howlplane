@@ -664,6 +664,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     )
     p_run_once.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_run_once.add_argument("--target-repo", help="Repository to discover work from (advanced)")
+    p_run_once.add_argument("--product-repo", help="Product repository slug to weight portfolio shares toward")
     p_run_once.add_argument(
         "--target",
         choices=["repo", "self", "ecosystem"],
@@ -696,6 +697,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     )
     p_run.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_run.add_argument("--target-repo", help="Repository to discover work from (advanced)")
+    p_run.add_argument("--product-repo", help="Product repository slug to weight portfolio shares toward")
     p_run.add_argument(
         "--target",
         choices=["repo", "self", "ecosystem"],
@@ -757,6 +759,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_start = factory_sub.add_parser("start", help="Start a persistent Factory campaign for this repository", **kwargs)
     p_start.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_start.add_argument("--target-repo", help="Factory target worktree (advanced)")
+    p_start.add_argument("--product-repo", help="Product repository slug to weight portfolio shares toward")
     p_start.add_argument("--target", choices=["repo", "self", "ecosystem"], default="repo")
     p_start.add_argument("--workspace", help="Workspace YAML for ecosystem mode")
     p_start.add_argument("--objective", help="Durable campaign objective")
@@ -784,6 +787,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     )
     p_canary.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_canary.add_argument("--target-repo", help="Repository to discover work from (advanced)")
+    p_canary.add_argument("--product-repo", help="Product repository slug to weight portfolio shares toward")
     p_canary.add_argument(
         "--target",
         choices=["repo", "self", "ecosystem"],
@@ -1526,6 +1530,7 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
         discovery=_discovery,
         provider_pool=provider_pool,
         policy=None,
+        product_repo=getattr(args, "product_repo", None),
         clock=lambda: datetime.now(timezone.utc),
         sleep=sleep or time.sleep,
         state_dir=state_dir,
@@ -1661,6 +1666,8 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         "bounded_dispatched_ids": list(getattr(record, "bounded_dispatched_ids", [])),
         "parked_items": parked,
         "proposals_awaiting_authority": proposals,
+        "consecutive_capped_ticks": getattr(record, "consecutive_capped_ticks", 0),
+        "alerts": list(getattr(record, "alerts", [])),
     }
     if campaign is not None:
         from src.control_plane.factory.service import process_status
@@ -1724,6 +1731,11 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
             print("Proposals awaiting authority:")
             for p in proposals:
                 print(f"  - {p['proposal_id']}: {p['repository_name']} ({p['disposition']})")
+        alerts = status.get("alerts", [])
+        if alerts:
+            print("Active alerts:")
+            for a in alerts[-5:]:
+                print(f"  - [{a.get('type')}] {a.get('message')}")
     return 0
 
 

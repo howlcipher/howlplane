@@ -133,6 +133,8 @@ class SupervisorStateRecord(DataClassSerializationMixin):
     bounded_run_completed_at: Optional[str] = None
     bounded_run_stop_reason: Optional[str] = None
     bounded_dispatched_ids: List[str] = field(default_factory=list)
+    consecutive_capped_ticks: int = 0
+    alerts: List[Dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self):
         self.state = _plain(self.state)
@@ -204,6 +206,22 @@ class SupervisorStateRecord(DataClassSerializationMixin):
         }
         self.recent_parked.append(entry)
         self.recent_parked = self.recent_parked[-50:]
+
+    def record_alert(
+        self,
+        alert_type: str,
+        message: str,
+        now_iso: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Record an operator-visible alert for abnormal conditions."""
+        self.alerts.append({
+            "type": alert_type,
+            "message": message,
+            "at": now_iso,
+            "details": details or {},
+        })
+        self.alerts = self.alerts[-50:]
 
     def clear_current_dispatch(self) -> None:
         self.current_work_item_id = None

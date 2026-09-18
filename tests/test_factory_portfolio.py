@@ -252,3 +252,19 @@ def test_an_item_awaiting_a_blocker_is_not_selected():
     item.blocked_by = ["WI-howlframe-0000000000000000"]
 
     assert select([item], [], FactoryPolicy(), now=NOW).item is None
+
+
+def test_target_repository_parameterized_policy_dispatches_beyond_window_cap():
+    """HOWL-CANON-003: When product_repository is parameterized for a non-HowlFrame target,
+    work items for that target repository are treated as product work and not capped.
+    """
+    policy = FactoryPolicy(product_repository=SELF)
+    # 6 prior dispatches against SELF in recent window (exceeds max_non_product_in_window of 4)
+    recent = window(*[(SELF, "existing_backlog")] * 6)
+    item = ready(WorkItemOrigin.EXISTING_BACKLOG, repository=SELF)
+
+    outcome = select([item], recent, policy, now=NOW)
+    assert outcome.item is not None
+    assert outcome.reason == "selected"
+    assert len(outcome.withheld) == 0
+

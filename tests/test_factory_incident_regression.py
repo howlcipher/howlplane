@@ -247,3 +247,80 @@ def test_failed_implementation_attempt_does_not_advance_lifecycle(tmp_path: Path
     assert fresh.state == WorkItemState.FAILED
     assert fresh.attempts == 1
     assert fresh.is_terminal is False
+
+
+def test_deadlock_reproduction_alert_and_dynamic_resolution(tmp_path: Path):
+    """HOWL-CANON-003: Reproduce 4-dispatch non-product cap deadlock, verify operator alert
+
+    after >3 consecutive capped ticks, and verify dynamic target_repo parameterization resolves it.
+    """
+    from tests._factory_test_helpers import RecordingDispatcher, SuccessEngine
+
+    # 1. Reproduce prior incident condition:
+    # Campaign targets howlplane, but supervisor uses default policy (howlframe product repo).
+    supervisor, _clock, _sleeps = make_supervisor(tmp_path)
+    # Simulate 4 prior dispatches on howlplane in dispatch history
+    for i in range(4):
+        supervisor.state_record.record_dispatch(
+            dispatch_id=f"disp-{i}",
+            work_item_id=f"WI-{i}",
+            task_id=f"task-{i}",
+            now_iso=datetime.now(timezone.utc).isoformat(),
+            origin="existing_backlog",
+            repository="howlcipher/howlplane",
+        )
+    supervisor._persist()
+
+    # Add ready work items for howlplane
+    for i in range(5):
+        item = WorkItem.create(
+            origin=WorkItemOrigin.EXISTING_BACKLOG,
+            repository="howlcipher/howlplane",
+            title=f"Howlplane Task {i}",
+            identity_keys=[f"howlplane-task-{i}"],
+        )
+        item.transition_to(WorkItemState.ADMITTED)
+        item.transition_to(WorkItemState.READY)
+        supervisor.work_item_store.save_object(item)
+
+    # Ticks 1, 2, 3: Capped by non_product_repository_cap, no alert yet (< 4 ticks)
+    for tick_num in range(1, 4):
+        res = supervisor.tick()
+        assert res.state == SupervisorState.WAITING_FOR_WORK
+        assert res.selected_work_item_id is None
+        assert res.alert is None
+        assert supervisor.state_record.consecutive_capped_ticks == tick_num
+        assert len(supervisor.state_record.alerts) == 0
+
+    # Tick 4: 4th consecutive tick with ready candidates capped (> 3 ticks) -> Alert fires!
+    res4 = supervisor.tick()
+    assert res4.state == SupervisorState.WAITING_FOR_WORK
+    assert res4.selected_work_item_id is None
+    assert res4.alert is not None
+    assert "CAP_DEADLOCK_ALERT" in res4.alert
+    assert "non_product_repository_cap" in res4.alert
+    assert supervisor.state_record.consecutive_capped_ticks == 4
+    assert len(supervisor.state_record.alerts) >= 1
+    latest_alert = supervisor.state_record.alerts[-1]
+    assert latest_alert["type"] == "capped_candidates_deadlock"
+    assert "non_product_repository_cap" in latest_alert["details"]["reasons"]
+
+    # 2. Resolution: Parameterize product_repository with campaign target repository
+    # Either via product_repo or state_record.target_repository
+    supervisor.policy = supervisor.policy.__class__(product_repository="howlcipher/howlplane")
+    supervisor.dispatcher = RecordingDispatcher([
+        DispatchOutcome(
+            success=True,
+            work_item_id="placeholder",
+            next_work_item_state=WorkItemState.SHIPPED,
+            reason="completed",
+        ),
+    ])
+
+    # Tick 5: Progress is made! Work item is selected and dispatched beyond 4 items
+    res5 = supervisor.tick()
+    assert res5.selected_work_item_id is not None
+    assert supervisor.state_record.consecutive_capped_ticks == 0
+    assert len(supervisor.dispatcher.calls) == 1
+
+
