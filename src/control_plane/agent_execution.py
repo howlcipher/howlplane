@@ -8,13 +8,14 @@ and deterministic mock/fake backends for testing and CI.
 """
 
 from abc import ABC, abstractmethod
+from collections import deque
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-import hashlib, inspect, json, os, re, shlex, shutil, subprocess, time
+import hashlib, inspect, json, os, re, selectors, shlex, shutil, subprocess, time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Deque, Dict, List, Optional, Union
 
 from src.control_plane.locking import LocalInferenceLock, LockError
 from src.control_plane.provider_execution_profile import (
@@ -69,6 +70,114 @@ TOOL_PERMISSION_DENIED = "denied"
 # Keeping this separate from the transcript lets classification distinguish a
 # current provider stop from similar words quoted during ordinary reasoning.
 TERMINAL_PROVIDER_ERROR_KEY = "terminal_provider_error"
+WATCHDOG_TERMINATION_KEY = "watchdog_termination"
+WATCHDOG_TERMINATION_EXHAUSTION = "terminal_exhaustion"
+WATCHDOG_TERMINATION_STALL = "stall"
+PROVIDER_RETRY_AFTER_SECONDS_KEY = "provider_retry_after_seconds"
+
+# These expressions intentionally match a complete provider control line, not
+# arbitrary model prose.  The streamed watchdog only reads CLI stdout/stderr,
+# never task files or a provider's generated answer as a semantic signal.
+_TRUSTED_TERMINAL_CONTROL_LINES = (
+    re.compile(r"(?:error:\s*)?(?:you(?:'|’)ve hit your )?session limit(?: reached)?(?:\s*(?:[·.]\s*)?(?:resets?|retry\s+(?:in|after))\s+(?:.+|<elapsed>))?[.!]?", re.I),
+    re.compile(r"(?:error:\s*)?(?:usage limit reached|quota (?:exceeded|exhausted)|credits exhausted|resource exhausted|capacity unavailable|provider unavailable|account limit reached|rate limit(?: exceeded)?|rate limited)[.!?]?", re.I),
+    re.compile(r"(?:error:\s*)?(?:authentication required|not authenticated|login required|authorization required|credentials? (?:missing|expired))[.!]?", re.I),
+)
+_TRUSTED_ERROR_KIND = re.compile(
+    r'"[A-Za-z0-9_.\-/]*error[_ ]?kind"\s*:\s*"(?:resource_exhausted|quota_exhausted|rate_limited|rate_limit_exceeded|session_limit|unauthenticated|unavailable|service_unavailable)"', re.I,
+)
+_RETRY_AFTER_SECONDS = re.compile(r"\bretry[- ]after\s*[:=]?\s*(\d+)\s*(?:seconds?|s)?\b", re.I)
+
+_TIMEOUT_MARKERS = (
+    "error: timeout waiting for response",
+    "timeout waiting for response",
+    "timed out",
+    "request timed out",
+    "connection timed out",
+    "gateway timeout",
+    "operation timed out",
+    "deadline exceeded",
+    "timeout after",
+)
+
+
+def trusted_terminal_provider_signal(stdout: str, stderr: str) -> Optional[Dict[str, Any]]:
+    """Return only deterministic terminal provider-control evidence.
+
+    Complete stderr lines and machine error envelopes are provider control
+    surfaces.  stdout is accepted only for a complete exact control line,
+    which supports terminal-oriented adapters without treating ordinary prose
+    as authority.  A partial or embedded phrase is deliberately ignored.
+    """
+    # PTY applications redraw a control screen with cursor escapes and a
+    # changing timer.  Collapse only terminal presentation noise before the
+    # narrow control-line match; raw output remains retained by the caller.
+    combined = normalize_terminal_text("\n".join((stderr or "", stdout or "")))
+    retry = _RETRY_AFTER_SECONDS.search(combined)
+    retry_payload = (
+        {PROVIDER_RETRY_AFTER_SECONDS_KEY: int(retry.group(1))}
+        if retry else {}
+    )
+    if _TRUSTED_ERROR_KIND.search(combined):
+        return {"reason": WATCHDOG_TERMINATION_EXHAUSTION, **retry_payload}
+    for line in combined.splitlines():
+        normalized = " ".join(line.strip().split())
+        if normalized and any(pattern.fullmatch(normalized) for pattern in _TRUSTED_TERMINAL_CONTROL_LINES):
+            result: Dict[str, Any] = {"reason": WATCHDOG_TERMINATION_EXHAUSTION}
+            result.update(retry_payload)
+            return result
+    return None
+
+
+_ANSI = re.compile(r"(?:\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_])")
+_SPINNER = re.compile(r"[⠁⠂⠄⡀⢀⠠⠐⠈⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
+_ELAPSED = re.compile(r"\b(?:\d{1,2}:){1,2}\d{2}\b")
+_TOOL_EVENT = re.compile(r"(?:tool(?:\s+(?:invocation|call|completion|result))?|(?:writing|wrote|edited|updated|created|modified)\s+(?:file|source)|checkpoint|apply[_ ]patch|running\s+(?:tests?|build)|tests?\s+passed)", re.I)
+
+
+def normalize_terminal_text(text: str) -> str:
+    """Reduce redraw and countdown noise to a stable terminal representation."""
+    reduced = _ANSI.sub("", text or "").replace("\b", "").replace("\r", "\n")
+    reduced = _SPINNER.sub("", reduced)
+    reduced = _ELAPSED.sub("<elapsed>", reduced)
+    return "\n".join(" ".join(line.split()) for line in reduced.splitlines() if line.strip())
+
+
+class ProviderStreamObserver:
+    """Separates process and output liveness from engineering progress."""
+    def __init__(self, provider_id: str, stall_timeout_seconds: float,
+                 repository_fingerprint: Callable[[], str], clock: Callable[[], float] = time.monotonic) -> None:
+        self.provider_id, self.stall_timeout_seconds, self.repository_fingerprint, self.clock = provider_id, stall_timeout_seconds, repository_fingerprint, clock
+        now = clock()
+        self.last_process_activity_at = self.last_output_activity_at = self.last_meaningful_progress_at = now
+        self.last_semantic_event, self._stdout_length, self._stderr_length = "provider_started", 0, 0
+        self._repository_state = repository_fingerprint()
+        self._semantic_fingerprints: Deque[str] = deque(maxlen=32)
+        self._terminal_buffer: Deque[str] = deque(maxlen=32)
+
+    def _diagnostics(self, now: float) -> Dict[str, Any]:
+        return {"last_process_activity_at": self.last_process_activity_at, "last_output_activity_at": self.last_output_activity_at, "last_meaningful_progress_at": self.last_meaningful_progress_at, "semantic_stall_age_seconds": round(now - self.last_meaningful_progress_at, 3), "last_semantic_event": self.last_semantic_event, "raw_output_activity": self.last_output_activity_at > self.last_meaningful_progress_at}
+
+    def __call__(self, stdout: str, stderr: str, _elapsed: float) -> Optional[Dict[str, Any]]:
+        now = self.clock(); self.last_process_activity_at = now
+        new_text = stdout[self._stdout_length:] + "\n" + stderr[self._stderr_length:]
+        self._stdout_length, self._stderr_length = len(stdout), len(stderr)
+        if new_text:
+            self.last_output_activity_at = now
+            normalized = normalize_terminal_text(new_text)
+            self._terminal_buffer.extend(normalized.splitlines())
+            terminal = trusted_terminal_provider_signal("\n".join(self._terminal_buffer), "")
+            if terminal is not None:
+                terminal["diagnostics"] = self._diagnostics(now); return terminal
+            semantic = next((f"{self.provider_id}_semantic_output:{line[:160]}" for line in normalized.splitlines() if _TOOL_EVENT.search(line)), None)
+            if semantic and semantic not in self._semantic_fingerprints:
+                self._semantic_fingerprints.append(semantic); self.last_meaningful_progress_at = now; self.last_semantic_event = semantic
+        repository_state = self.repository_fingerprint()
+        if repository_state != self._repository_state:
+            self._repository_state = repository_state; self.last_meaningful_progress_at = now; self.last_semantic_event = "source_delta_changed"
+        if now - self.last_meaningful_progress_at >= self.stall_timeout_seconds:
+            return {"reason": WATCHDOG_TERMINATION_STALL, "diagnostics": self._diagnostics(now)}
+        return None
 
 # Fallback phrases for a provider that reports an approval block in prose
 # without populating a structured denial record. Deliberately narrow: this can
@@ -364,6 +473,70 @@ class SubprocessAgentBackend(AgentBackend):
         self.binary_name = binary_name
         self._builder = cmd_builder
 
+
+    def _build_result(
+        self,
+        cmd_str: str,
+        role: str,
+        exit_code: int,
+        stdout: str,
+        stderr: str,
+        elapsed: float,
+        *,
+        timeout_source: Optional[str] = None,
+    ) -> AgentExecutionResult:
+        """Normalize a completed subprocess result into a provider execution record."""
+        combined_err = f"{stderr}\n{stdout}".lower()
+        is_timeout = any(marker in combined_err for marker in _TIMEOUT_MARKERS)
+        error_message = None
+        if exit_code != 0:
+            error_message = (
+                stderr.strip()
+                if is_timeout and stderr.strip()
+                else "Error: timeout waiting for response"
+                if is_timeout
+                else f"Process exited with code {exit_code}"
+            )
+        return AgentExecutionResult(
+            agent_id=self.agent_id,
+            role=role,
+            command=cmd_str,
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            duration_seconds=elapsed,
+            success=exit_code == 0,
+            timed_out=is_timeout,
+            error_message=error_message,
+            metadata=_launch_metadata(
+                LAUNCH_OUTCOME_LAUNCHED,
+                timeout_source if is_timeout else None,
+            ),
+        )
+
+    def _build_timeout_result(
+        self,
+        cmd_str: str,
+        role: str,
+        timeout_seconds: int,
+        start_t: float,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+    ) -> AgentExecutionResult:
+        """Build a harness-timeout execution record from captured byte buffers."""
+        return AgentExecutionResult(
+            agent_id=self.agent_id,
+            role=role,
+            command=cmd_str,
+            exit_code=-1,
+            stdout=stdout.decode("utf-8", errors="replace") if stdout else "",
+            stderr=stderr.decode("utf-8", errors="replace") + f"\nTimeout after {timeout_seconds}s." if stderr else f"Timeout after {timeout_seconds}s.",
+            duration_seconds=round(time.time() - start_t, 3),
+            success=False,
+            timed_out=True,
+            error_message=f"Timeout after {timeout_seconds}s",
+            metadata=_launch_metadata(LAUNCH_OUTCOME_LAUNCHED, TIMEOUT_SOURCE_HARNESS),
+        )
     def is_available(self) -> bool:
         return shutil.which(self.binary_name) is not None
 
@@ -446,75 +619,102 @@ class SubprocessAgentBackend(AgentBackend):
             env.update(env_vars)
 
         start_t = time.time()
+        watchdog_callback = kwargs.get("watchdog_callback")
+        watchdog_interval = max(0.05, float(kwargs.get("watchdog_interval_seconds", 0.25)))
+        # Preserve the established blocking path for callers that do not opt
+        # into observation (including adapter-level structured-envelope tests).
+        # Factory implementation attempts pass a watchdog callback below.
+        if watchdog_callback is None:
+            try:
+                completed = subprocess.run(
+                    args=cmd_args, cwd=str(target_cwd), capture_output=True,
+                    text=True, env=env, timeout=timeout_seconds,
+                )
+                elapsed = round(time.time() - start_t, 3)
+                return self._build_result(
+                    cmd_str, role, completed.returncode,
+                    completed.stdout, completed.stderr, elapsed,
+                    timeout_source=TIMEOUT_SOURCE_TRANSCRIPT,
+                )
+            except subprocess.TimeoutExpired as exc:
+                return self._build_timeout_result(
+                    cmd_str, role, timeout_seconds, start_t,
+                    exc.stdout, exc.stderr,
+                )
         try:
-            completed = subprocess.run(
-                args=cmd_args,
-                cwd=str(target_cwd),
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=timeout_seconds,
+            # `communicate(timeout=...)` cannot expose a terminal quota screen
+            # until the process exits.  Polling pipes lets a trusted watchdog
+            # terminate a known-dead session promptly while retaining exactly
+            # the output used to make that decision.
+            process = subprocess.Popen(
+                args=cmd_args, cwd=str(target_cwd), stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, env=env,
             )
+            selector = selectors.DefaultSelector()
+            assert process.stdout is not None and process.stderr is not None
+            selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+            selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+            output = {"stdout": bytearray(), "stderr": bytearray()}
+            watchdog_result: Optional[Dict[str, Any]] = None
+            while process.poll() is None:
+                for key, _ in selector.select(timeout=watchdog_interval):
+                    data = os.read(key.fileobj.fileno(), 65536)
+                    if data:
+                        output[key.data].extend(data)
+                    else:
+                        selector.unregister(key.fileobj)
+                if watchdog_callback is not None:
+                    observed = watchdog_callback(
+                        output["stdout"].decode("utf-8", errors="replace"),
+                        output["stderr"].decode("utf-8", errors="replace"),
+                        time.time() - start_t,
+                    )
+                    if observed:
+                        watchdog_result = dict(observed)
+                        process.terminate()
+                        try:
+                            process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+                        break
+                if time.time() - start_t >= timeout_seconds:
+                    process.kill()
+                    raise subprocess.TimeoutExpired(cmd_args, timeout_seconds,
+                                                    output=bytes(output["stdout"]),
+                                                    stderr=bytes(output["stderr"]))
+            # Drain residual bytes after normal or watchdog termination.
+            for key, _ in selector.select(timeout=0):
+                data = os.read(key.fileobj.fileno(), 65536)
+                if data:
+                    output[key.data].extend(data)
+            selector.close()
+            completed_stdout = output["stdout"].decode("utf-8", errors="replace")
+            completed_stderr = output["stderr"].decode("utf-8", errors="replace")
             elapsed = round(time.time() - start_t, 3)
-            is_timeout = False
-            combined_err = f"{completed.stderr}\n{completed.stdout}".lower()
-            timeout_markers = (
-                "error: timeout waiting for response",
-                "timeout waiting for response",
-                "timed out",
-                "request timed out",
-                "connection timed out",
-                "gateway timeout",
-                "operation timed out",
-                "deadline exceeded",
-                "timeout after",
-            )
-            if any(marker in combined_err for marker in timeout_markers):
-                is_timeout = True
-
-            err_msg = None
-            if completed.returncode != 0:
-                if is_timeout and completed.stderr and completed.stderr.strip():
-                    err_msg = completed.stderr.strip()
-                elif is_timeout:
-                    err_msg = "Error: timeout waiting for response"
-                else:
-                    err_msg = f"Process exited with code {completed.returncode}"
-
-            return AgentExecutionResult(
-                agent_id=self.agent_id,
-                role=role,
-                command=cmd_str,
-                exit_code=completed.returncode,
-                stdout=completed.stdout,
-                stderr=completed.stderr,
-                duration_seconds=elapsed,
-                success=(completed.returncode == 0),
-                timed_out=is_timeout,
-                error_message=err_msg,
-                metadata=_launch_metadata(
-                    LAUNCH_OUTCOME_LAUNCHED,
-                    TIMEOUT_SOURCE_TRANSCRIPT if is_timeout else None,
-                ),
+            if watchdog_result is not None:
+                metadata = _launch_metadata(LAUNCH_OUTCOME_LAUNCHED)
+                metadata[WATCHDOG_TERMINATION_KEY] = watchdog_result["reason"]
+                if PROVIDER_RETRY_AFTER_SECONDS_KEY in watchdog_result:
+                    metadata[PROVIDER_RETRY_AFTER_SECONDS_KEY] = watchdog_result[PROVIDER_RETRY_AFTER_SECONDS_KEY]
+                if isinstance(watchdog_result.get("diagnostics"), dict):
+                    metadata["watchdog_diagnostics"] = watchdog_result["diagnostics"]
+                return AgentExecutionResult(
+                    agent_id=self.agent_id, role=role, command=cmd_str,
+                    exit_code=-1, stdout=completed_stdout, stderr=completed_stderr,
+                    duration_seconds=elapsed, success=False,
+                    error_message=f"Provider watchdog terminated attempt: {watchdog_result['reason']}",
+                    metadata=metadata,
+                )
+            return self._build_result(
+                cmd_str, role, process.returncode,
+                completed_stdout, completed_stderr, elapsed,
+                timeout_source=TIMEOUT_SOURCE_TRANSCRIPT,
             )
         except subprocess.TimeoutExpired as exc:
-            dur = round(time.time() - start_t, 3)
-            out = exc.stdout.decode("utf-8", errors="replace") if exc.stdout else ""
-            err = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
-            return AgentExecutionResult(
-                agent_id=self.agent_id,
-                role=role,
-                command=cmd_str,
-                exit_code=-1,
-                stdout=out,
-                stderr=err + f"\nTimeout after {timeout_seconds}s.",
-                duration_seconds=dur,
-                success=False,
-                timed_out=True,
-                error_message=f"Timeout after {timeout_seconds}s",
-                metadata=_launch_metadata(
-                    LAUNCH_OUTCOME_LAUNCHED, TIMEOUT_SOURCE_HARNESS
-                ),
+            return self._build_timeout_result(
+                cmd_str, role, timeout_seconds, start_t,
+                exc.stdout, exc.stderr,
             )
         except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
             # The OS refused the spawn, so the executable really is missing or

@@ -241,3 +241,13 @@ If an artifact is truncated (0-byte) or unparseable, loaders fail closed with `C
 | `howlplane reject` | `howlplane reject <task_id> [--reason <msg>]` | Records human rejection and transitions task to `failed` |
 | `howlplane resume` | `howlplane resume <task_id>` | Recovers interrupted tasks, checks drift, executes authorized bounded actions, and advances to `complete` |
 | `howlplane work` | `howlplane work <task_id>` | Runs governed task orchestrator with automatic `RepoLock` acquisition and stage checkpoints |
+
+---
+
+## 9. Factory Process Liveness & Bounded Execution
+
+Factory process lifecycle and bounded run diagnostics:
+1. **Accurate Process Status:** An inactive supervisor process whose persisted state record is `STOPPED` (clean bounded execution stop or operator stop) reports `stopped`. Truly crashed or missing processes whose supervisor state remains active report `stale`.
+2. **Post-Dispatch Bounded Timestamps & Duration:** Bounded run reports record the true completion timestamp sampled after provider dispatch completes, guaranteeing `started_at < attempt_ended_at <= completed_at`. Reports compute duration in seconds and formatted elapsed time.
+3. **Durable Provider Attempt Chains:** Bounded run artifacts surface the structured attempt history across roles (`implementation`, `review`, `remediation`, `verification`) extracted from `.task_runs` evidence, preserving provider identities, outcomes, duration, provider state after attempt, and failure reasons.
+

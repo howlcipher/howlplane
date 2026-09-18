@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 from typing import Optional
 import pytest
 
@@ -30,6 +31,7 @@ from src.control_plane.launcher import (
     TargetRepositoryNotFoundError,
     ControlPlaneNotFoundError,
 )
+from src.control_plane.cli import _select_factory_authority
 from src.control_plane.task_spec import TaskSpec
 
 
@@ -215,6 +217,18 @@ def test_ai_route_subcommand(tmp_path, monkeypatch, capsys):
 def test_howlplane_parser_uses_canonical_program_name():
     parser = launcher_module.build_parser()
     assert parser.prog == "howlplane"
+
+
+def test_factory_autonomous_uses_howlframe_compatible_existing_profile(tmp_path):
+    """Choice 3 must not leak the HowlPlane-only overnight grant."""
+    campaign = SimpleNamespace(
+        state_dir=tmp_path / "state",
+        repository=SimpleNamespace(remote="github.com/howlcipher/howlframe"),
+    )
+    args = SimpleNamespace(authority="autonomous", authority_profile=None)
+
+    assert _select_factory_authority(args, campaign) == "howlframe-overnight"
+    assert args.authority_profile == "howlframe-overnight"
 
 
 def test_legacy_ai_warning_does_not_contaminate_stdout(monkeypatch, capsys):

@@ -3,6 +3,8 @@
 
 from datetime import datetime, timezone
 import json
+from pathlib import Path
+import socket
 
 import pytest
 
@@ -225,6 +227,157 @@ def test_factory_start_uses_zero_config_campaign_and_is_idempotent(tmp_path, mon
     assert "already running" in capsys.readouterr().out
 
 
+def test_factory_status_prefers_active_campaign_over_stopped_historical(tmp_path, monkeypatch, capsys):
+    """Default status must report the active campaign, not an older stopped one."""
+    from types import SimpleNamespace
+    from src.control_plane.factory.campaign import resolve_campaign, prepare_campaign, _is_process_active_for_state_dir
+    from src.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
+    from tests._factory_test_helpers import make_git_repo, set_xdg_paths
+
+    repo = make_git_repo(tmp_path, readme_text="# Active\n")
+    monkeypatch.chdir(repo)
+    set_xdg_paths(monkeypatch, tmp_path)
+
+    # Historical campaign: stopped.
+    old = resolve_campaign(prefer_active=True)
+    old_store = SupervisorStateStore(old.state_dir / "supervisor")
+    old_rec = old_store.load()
+    old_rec.transition_to(SupervisorState.STOPPED, reason="old_stop")
+    old_store.save(old_rec)
+
+    # New explicit campaign for the same repository: running.
+    new_state = tmp_path / "state" / "howlplane" / "factory" / "howlframe-safe-20260915-144921"
+    new_state.mkdir(parents=True, exist_ok=True)
+    new_target = tmp_path / "data" / "howlplane" / "worktrees" / "howlframe-safe-20260915-144921" / "target"
+    new_target.mkdir(parents=True, exist_ok=True)
+    (new_target / "README.md").write_text("# New target\n", encoding="utf-8")
+
+    metadata = {
+        "schema": "howlplane.factory.campaign/v1",
+        "campaign_id": old.repository.campaign_id,
+        "repository_root": str(repo),
+        "remote": old.repository.remote,
+        "default_branch": "main",
+        "source_common_git_dir": str(repo / ".git"),
+        "target_repo": str(new_target),
+    }
+    (new_state / "campaign.json").write_text(json.dumps(metadata), encoding="utf-8")
+    new_store = SupervisorStateStore(new_state / "supervisor")
+    new_rec = new_store.load()
+    # A freshly-created supervisor record is already idle.
+    new_store.save(new_rec)
+
+    # Simulate an active process record for the new campaign.
+    process_record = {
+        "pid": 123456,
+        "hostname": socket.gethostname(),
+        "process_create_time": 1.0,
+        "backend": "process",
+        "command": [],
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "log_path": str(new_state / "campaign.log"),
+    }
+    (new_state / "campaign").mkdir(parents=True, exist_ok=True)
+    (new_state / "campaign" / "process.json").write_text(json.dumps(process_record), encoding="utf-8")
+
+    def fake_active(state_dir):
+        return str(Path(state_dir).resolve()) == str(new_state.resolve())
+    monkeypatch.setattr("src.control_plane.factory.campaign._is_process_active_for_state_dir", fake_active)
+
+    # Default status from the repository should resolve to the new campaign.
+    resolved = resolve_campaign(prefer_active=True)
+    assert resolved.state_dir == new_state
+    assert resolved.target_dir == new_target
+
+
+def test_factory_status_rejects_multiple_active_campaigns(tmp_path, monkeypatch):
+    """Multiple active campaigns for the same repo must be reported, not guessed."""
+    from src.control_plane.factory.campaign import resolve_campaign, CampaignError, discover_repository
+    from src.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
+    from tests._factory_test_helpers import make_git_repo, set_xdg_paths
+
+    repo = make_git_repo(tmp_path, readme_text="# Ambiguous\n")
+    monkeypatch.chdir(repo)
+    set_xdg_paths(monkeypatch, tmp_path)
+    repo_identity = discover_repository()
+
+    base = tmp_path / "state" / "howlplane" / "factory"
+    active_dirs = ["active-a", "active-b"]
+    for name in active_dirs:
+        state_dir = base / name
+        state_dir.mkdir(parents=True, exist_ok=True)
+        target = tmp_path / "data" / "howlplane" / "worktrees" / name / "target"
+        target.mkdir(parents=True, exist_ok=True)
+        (state_dir / "campaign.json").write_text(json.dumps({
+            "schema": "howlplane.factory.campaign/v1",
+            "campaign_id": repo_identity.campaign_id,
+            "repository_root": str(repo_identity.root),
+            "remote": repo_identity.remote,
+            "default_branch": repo_identity.default_branch,
+            "source_common_git_dir": str(repo_identity.common_git_dir),
+            "target_repo": str(target),
+        }), encoding="utf-8")
+        store = SupervisorStateStore(state_dir / "supervisor")
+        rec = store.load()
+        # A freshly-created supervisor record starts as idle.
+        store.save(rec)
+
+    monkeypatch.setattr("src.control_plane.factory.campaign._is_process_active_for_state_dir", lambda _s: True)
+    with pytest.raises(CampaignError) as exc:
+        resolve_campaign(prefer_active=True)
+    assert "Multiple active Factory campaigns" in str(exc.value)
+    assert "active-a" in str(exc.value)
+    assert "active-b" in str(exc.value)
+
+
+def test_factory_service_unit_name_reflects_explicit_state_dir(tmp_path):
+    """A non-default state directory gets its own systemd unit name."""
+    from types import SimpleNamespace
+    from src.control_plane.factory.service import _unit_name
+    from src.control_plane.factory.campaign import FactoryCampaign, RepositoryIdentity
+
+    repo = RepositoryIdentity(
+        root=tmp_path,
+        remote="https://github.com/owner/repo.git",
+        default_branch="main",
+        commit="abc",
+        dirty=False,
+        common_git_dir=tmp_path,
+        campaign_id="abc123",
+    )
+    default_campaign = FactoryCampaign(repo, tmp_path / "abc123", tmp_path / "target")
+    explicit_campaign = FactoryCampaign(repo, tmp_path / "repo-safe-20260915-144921", tmp_path / "target")
+
+    assert _unit_name(default_campaign) == "howlplane-factory-abc123"
+    assert _unit_name(explicit_campaign) == "howlplane-factory-repo-safe-20260915-144921"
+
+
+def test_factory_status_explicit_state_dir_wins_without_repository(tmp_path, monkeypatch):
+    """--state-dir alone resolves the campaign from saved metadata."""
+    from src.control_plane.factory.campaign import campaign_from_state_dir
+    from tests._factory_test_helpers import make_git_repo
+
+    repo = make_git_repo(tmp_path)
+    state_dir = tmp_path / "explicit-state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    target = tmp_path / "target"
+    target.mkdir(parents=True, exist_ok=True)
+    (state_dir / "campaign.json").write_text(json.dumps({
+        "schema": "howlplane.factory.campaign/v1",
+        "campaign_id": "x123",
+        "repository_root": str(repo),
+        "remote": "https://github.com/owner/repo.git",
+        "default_branch": "main",
+        "source_common_git_dir": str(repo / ".git"),
+        "target_repo": str(target),
+    }), encoding="utf-8")
+
+    campaign = campaign_from_state_dir(state_dir)
+    assert campaign is not None
+    assert campaign.state_dir == state_dir
+    assert campaign.target_dir == target
+
+
 def test_factory_run_once_requires_explicit_noninteractive_authority(tmp_path, monkeypatch):
     from tests._factory_test_helpers import make_git_repo, set_xdg_paths
 
@@ -232,3 +385,20 @@ def test_factory_run_once_requires_explicit_noninteractive_authority(tmp_path, m
     monkeypatch.chdir(repo)
     set_xdg_paths(monkeypatch, tmp_path)
     assert main(["factory", "run-once"]) == 1
+
+
+def test_factory_cli_parses_max_work_items_and_canary():
+    from src.control_plane.cli import build_parser
+
+    parser = build_parser()
+    run_args = parser.parse_args(["factory", "run", "--max-work-items", "5"])
+    assert run_args.factory_action == "run"
+    assert run_args.max_work_items == 5
+
+    canary_args = parser.parse_args(["factory", "canary"])
+    assert canary_args.factory_action == "canary"
+
+    start_args = parser.parse_args(["factory", "start", "--max-work-items", "3"])
+    assert start_args.factory_action == "start"
+    assert start_args.max_work_items == 3
+

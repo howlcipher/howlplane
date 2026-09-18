@@ -12,7 +12,7 @@ from pathlib import Path
 import sys
 import threading
 import time
-from typing import Iterator, Optional, TextIO, Union
+from typing import Any, Dict, Iterator, Optional, TextIO, Union
 
 from src.control_plane.atomic_io import atomic_write_json
 from src.control_plane.task_spec import DataClassSerializationMixin
@@ -87,6 +87,7 @@ class TaskProgressRecord(DataClassSerializationMixin):
     updated_at: str = field(default_factory=_now_utc_str)
     elapsed_seconds: int = 0
     phase_elapsed_seconds: int = 0
+    phase_deadline_seconds: Optional[int] = None
     cycle: int = 0
     state: str = TaskProgressState.RUNNING.value
     details: Optional[str] = None
@@ -166,6 +167,7 @@ class TaskProgressTracker:
         self, phase: Union[str, TaskPhase],
         resource_id: Optional[str] = None, role: Optional[str] = None,
         details: Optional[str] = None, cycle: int = 0,
+        deadline_seconds: Optional[int] = None,
     ) -> None:
         self._stop_ticker()
         p_name = phase.value if isinstance(phase, TaskPhase) else str(phase)
@@ -179,6 +181,7 @@ class TaskProgressTracker:
             self._record.role = role
             self._record.details = details
             self._record.cycle = cycle
+            self._record.phase_deadline_seconds = deadline_seconds
             self._record.phase_started_at = stamp
             self._record.updated_at = stamp
             self._record.elapsed_seconds = int(now_t - self._t_start)
@@ -200,8 +203,12 @@ class TaskProgressTracker:
         details: Optional[str] = None, cycle: int = 0,
         completion_message: Optional[str] = None,
         suppress_completion: bool = False,
+        deadline_seconds: Optional[int] = None,
     ) -> Iterator[None]:
-        self.transition(phase=phase, resource_id=resource_id, role=role, details=details, cycle=cycle)
+        self.transition(
+            phase=phase, resource_id=resource_id, role=role, details=details,
+            cycle=cycle, deadline_seconds=deadline_seconds,
+        )
         self._start_ticker()
         t0 = time.time()
         try:
@@ -251,6 +258,25 @@ class TaskProgressTracker:
         if reason:
             parts.append(reason)
         self._write_stream(" | ".join(parts))
+
+    def emit_provider_unusable(
+        self, resource_id: str, reason: str, elapsed_seconds: float,
+        diagnostics: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Emit an operator-facing terminal provider condition before rotation."""
+        label = "PROVIDER STALLED" if reason == "provider_stalled" else "PROVIDER EXHAUSTED"
+        self._write_stream(
+            f"[HowlPlane] {label} | {resource_id} | Reason: {reason} | "
+            f"Elapsed: {format_elapsed(elapsed_seconds)}"
+        )
+        if reason == "provider_stalled" and diagnostics:
+            stall_age = diagnostics.get("semantic_stall_age_seconds", elapsed_seconds)
+            self._write_stream(
+                "[HowlPlane] STALL DIAGNOSTICS | "
+                f"semantic_age={format_elapsed(float(stall_age))} | "
+                f"raw_output={'yes' if diagnostics.get('raw_output_activity') else 'no'} | "
+                f"last_semantic_event={diagnostics.get('last_semantic_event', 'unknown')}"
+            )
 
     def record_terminal(
         self,
@@ -320,9 +346,17 @@ class TaskProgressTracker:
                 p_str = self._record.phase
                 r_str = self._record.resource_id or self._record.details or ""
                 dur_str = format_elapsed(ph_s)
+                deadline = self._record.phase_deadline_seconds
+                deadline_str = (
+                    f" / {format_elapsed(deadline)}"
+                    if deadline is not None and deadline > 0
+                    else ""
+                )
 
                 tag = f"{p_str} | {r_str}" if r_str else p_str
-                self._write_stream(f"[HowlPlane] {tag} | elapsed {dur_str} | still working")
+                self._write_stream(
+                    f"[HowlPlane] {tag} | elapsed {dur_str}{deadline_str} | still working"
+                )
 
     def _write_stream(self, text: str) -> None:
         if self.enabled and self.stream:
@@ -351,6 +385,7 @@ def track_operation(
     cycle: Optional[int] = None,
     details: Optional[str] = None,
     suppress_completion: bool = False,
+    deadline_seconds: Optional[int] = None,
 ) -> Iterator[None]:
     """Scoped helper that enters tracker operation when tracker is provided."""
     if tracker is not None:
@@ -361,6 +396,7 @@ def track_operation(
             cycle=cycle,
             details=details,
             suppress_completion=suppress_completion,
+            deadline_seconds=deadline_seconds,
         ):
             yield
     else:

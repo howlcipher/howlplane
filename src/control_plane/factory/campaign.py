@@ -7,15 +7,19 @@ and an isolated Git checkout.
 
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
-from typing import Optional, Union
+from typing import List, Optional, Union
+import uuid
 
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
 from src.control_plane.launcher import TargetRepositoryNotFoundError, find_git_repo_root
+from src.control_plane.locking import get_systemd_main_pid, is_process_record_active
 
 
 class CampaignError(ValueError):
@@ -109,20 +113,177 @@ def discover_repository(start_dir: Optional[Union[str, Path]] = None) -> Reposit
     return RepositoryIdentity(root, remote, default_branch, commit, dirty, common, campaign_id)
 
 
+def _metadata_for_state_dir(state_dir: Path) -> Optional[dict]:
+    path = state_dir / "campaign.json"
+    if not path.is_file():
+        return None
+    try:
+        return safe_load_json(path)
+    except Exception:
+        return None
+
+
+def generate_bounded_campaign_id(repository: RepositoryIdentity) -> str:
+    repo_name = re.sub(r"[^A-Za-z0-9-]+", "-", repository.root.name.lower()).strip("-") or "repo"
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    unique_suffix = uuid.uuid4().hex[:6]
+    return f"{repo_name}-canary-{ts}-{unique_suffix}"
+
+
+def _expected_unit_name_for_state_dir(state_dir: Path, campaign_id: Optional[str] = None) -> str:
+    state_dir_name = state_dir.name
+    if campaign_id and state_dir_name == campaign_id:
+        return f"howlplane-factory-{campaign_id}"
+    safe = re.sub(r"[^A-Za-z0-9-]+", "-", state_dir_name).strip("-")
+    safe = safe[:200] or "factory"
+    return f"howlplane-factory-{safe}"
+
+
 def resolve_campaign(
     start_dir: Optional[Union[str, Path]] = None,
     *,
     state_dir: Optional[Union[str, Path]] = None,
     target_repo: Optional[Union[str, Path]] = None,
+    prefer_active: bool = False,
+    bounded: bool = False,
 ) -> FactoryCampaign:
     repository = discover_repository(start_dir)
-    raw_state = Path(state_dir).expanduser() if state_dir else factory_state_home() / repository.campaign_id
-    raw_target = Path(target_repo).expanduser() if target_repo else factory_data_home() / "worktrees" / repository.campaign_id / "target"
+    if bounded and not state_dir:
+        canary_id = generate_bounded_campaign_id(repository)
+        raw_state = factory_state_home() / canary_id
+        raw_target = (
+            Path(target_repo).expanduser()
+            if target_repo
+            else factory_data_home() / "worktrees" / canary_id / "target"
+        )
+    else:
+        raw_state = Path(state_dir).expanduser() if state_dir else factory_state_home() / repository.campaign_id
+        if target_repo:
+            raw_target = Path(target_repo).expanduser()
+        else:
+            raw_target = factory_data_home() / "worktrees" / repository.campaign_id / "target"
+            metadata = _metadata_for_state_dir(raw_state)
+            if metadata and metadata.get("target_repo"):
+                raw_target = Path(metadata["target_repo"]).expanduser()
     _refuse_symlink(raw_state.absolute())
     _refuse_symlink(raw_target.absolute())
     resolved_state = raw_state.resolve()
     resolved_target = raw_target.resolve()
+    if not prefer_active:
+        return FactoryCampaign(repository, resolved_state, resolved_target)
+    candidates = _list_campaign_state_dirs(repository)
+    if not candidates:
+        return FactoryCampaign(repository, resolved_state, resolved_target)
+    active = [c for c in candidates if _is_process_active_for_state_dir(c)]
+    if len(active) > 1:
+        names = ", ".join(str(c.name) for c in active)
+        raise CampaignError(
+            f"Multiple active Factory campaigns for this repository: {names}. "
+            "Use --state-dir to select one explicitly."
+        )
+    # Prefer a single active campaign; otherwise reuse a single stopped one.
+    chosen = active[0] if active else (candidates[0] if len(candidates) == 1 else None)
+    if chosen is not None:
+        metadata = _metadata_for_state_dir(chosen)
+        target = _target_dir_from_metadata(metadata, resolved_target)
+        return FactoryCampaign(repository, chosen.resolve(), target)
+    # Multiple stopped historical campaigns exist; fall back to the canonical/default state dir.
     return FactoryCampaign(repository, resolved_state, resolved_target)
+
+
+def _matches_repository(metadata: dict, repository: RepositoryIdentity) -> bool:
+    return (
+        metadata.get("schema") == "howlplane.factory.campaign/v1"
+        and metadata.get("campaign_id") == repository.campaign_id
+        and metadata.get("repository_root") == str(repository.root)
+        and metadata.get("remote") == repository.remote
+    )
+
+
+def _is_process_active_for_state_dir(state_dir: Path) -> bool:
+    record_path = state_dir / "campaign" / "process.json"
+    if not record_path.is_file():
+        return False
+    try:
+        data = safe_load_json(record_path)
+    except Exception:
+        return False
+
+    if data.get("status") == "stopped":
+        return False
+
+    cmd = data.get("command") or []
+    if "--state-dir" in cmd:
+        try:
+            idx = cmd.index("--state-dir")
+            if idx + 1 < len(cmd):
+                cmd_state = Path(cmd[idx + 1]).resolve()
+                if cmd_state != state_dir.resolve():
+                    return False
+        except (ValueError, IndexError):
+            pass
+
+    unit_name = data.get("unit_name")
+    if unit_name:
+        meta = _metadata_for_state_dir(state_dir)
+        campaign_id = meta.get("campaign_id") if meta else None
+        expected_unit = _expected_unit_name_for_state_dir(state_dir, campaign_id)
+        if unit_name != expected_unit:
+            return False
+
+    if not is_process_record_active(data):
+        return False
+
+    pid = data.get("pid", 0)
+    if data.get("backend") == "systemd" and unit_name:
+        main_pid = get_systemd_main_pid(unit_name)
+        if main_pid > 0:
+            pid = main_pid
+
+    if pid > 0:
+        proc_cmdline = Path(f"/proc/{pid}/cmdline")
+        if proc_cmdline.is_file():
+            try:
+                content = proc_cmdline.read_bytes().decode("utf-8", errors="ignore")
+                if str(state_dir.resolve()) not in content:
+                    return False
+            except OSError:
+                pass
+
+    return True
+
+
+def _list_campaign_state_dirs(repository: RepositoryIdentity) -> List[Path]:
+    base = factory_state_home()
+    if not base.is_dir():
+        return []
+    candidates: List[Path] = []
+    for entry in base.iterdir():
+        if not entry.is_dir():
+            continue
+        metadata = _metadata_for_state_dir(entry)
+        if metadata and _matches_repository(metadata, repository):
+            candidates.append(entry)
+    return sorted(candidates)
+
+
+def campaign_from_state_dir(state_dir: Union[str, Path]) -> Optional[FactoryCampaign]:
+    """Build a campaign directly from its durable metadata, without Git discovery.
+
+    Useful when the caller has supplied an explicit --state-dir and may not be
+    inside the source repository.
+    """
+    path = Path(state_dir).expanduser().resolve()
+    metadata = _metadata_for_state_dir(path)
+    if not metadata:
+        return None
+    # Reuse the canonical resolution path with the recorded source root. The
+    # metadata validation inside resolve_campaign confirms the state directory
+    # still belongs to the repository it claims.
+    return resolve_campaign(
+        start_dir=metadata["repository_root"],
+        state_dir=path,
+    )
 
 
 def _refuse_symlink(path: Path) -> None:
@@ -132,6 +293,12 @@ def _refuse_symlink(path: Path) -> None:
         if current.exists() and current.is_symlink():
             raise CampaignError(f"Factory-managed path contains a symlink and is refused: {current}")
         current = current.parent
+
+
+def _target_dir_from_metadata(metadata: Optional[dict], fallback: Path) -> Path:
+    if metadata and metadata.get("target_repo"):
+        return Path(metadata["target_repo"]).expanduser().resolve()
+    return fallback
 
 
 def _metadata(campaign: FactoryCampaign) -> dict:

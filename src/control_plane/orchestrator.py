@@ -13,7 +13,7 @@ Human Authority Boundary Gate -> Complete Evidence Ledger.
 from contextlib import ExitStack
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-import hashlib, json, os, shutil, sys, time
+import hashlib, inspect, json, os, shutil, sys, time
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 import yaml
@@ -25,6 +25,7 @@ from src.control_plane.agent_execution import (
     AgentUnavailableError,
     TOOL_PERMISSION_DENIED,
     TOOL_PERMISSION_KEY,
+    ProviderStreamObserver,
 )
 from src.control_plane.atomic_io import (
     atomic_write_json,
@@ -214,12 +215,20 @@ class OrchestrationConfig:
     custom_reviewer_fn: Optional[Callable[[str, str, TaskSpec], str]] = None
     custom_remediation_fn: Optional[Callable[[TaskSpec, Path, List[ReviewFinding]], None]] = None
     reviewer_agent_mapping: Optional[Dict[str, str]] = None
-    # Maximum number of implementation providers to try before giving up.
-    # Each provider/resource is attempted at most once per task.
-    max_provider_failover_attempts: int = 3
+    # Global safety ceiling. Normal traversal tries every eligible resource at
+    # most once; this only limits pathological or unexpectedly huge inventories.
+    max_provider_failover_attempts: int = 8
+    # A provider is stalled only after this period with no meaningful semantic
+    # progress. Raw CLI output and supervisor heartbeats are liveness evidence,
+    # not progress. The absolute timeout remains final.
+    provider_stall_timeout_seconds: int = 120
+    provider_watchdog_interval_seconds: float = 0.25
     # Optional resolver that overrides AgentBackendRegistry.get_backend. Useful
     # in deterministic tests to inject per-resource fake backends.
     backend_resolver: Optional[Callable[[str], AgentBackend]] = None
+    run_mode: str = "continuous"  # "continuous" | "bounded"
+    bounded_remediation_timeout_ceiling_seconds: int = 300  # 5 minutes maximum for bounded runs
+    preserve_independent_review: bool = True
     # Enables bounded reviewer failover (#59.2 Phase 4) in the governed review
     # cycle: a reviewer whose assigned provider fails, times out, or emits
     # invalid/malformed output gets one alternate-provider attempt instead of
@@ -254,11 +263,14 @@ def compute_remediation_timeout(
     - Add time per review finding weighted by severity.
     - Add time per affected file.
     - Never exceed max_multiplier * base timeout.
+    - For bounded runs, never exceed bounded_remediation_timeout_ceiling_seconds.
 
     An explicit ``remediation_timeout_seconds`` is honored up to the same max.
     """
     base = config.timeout_seconds
     max_total = int(base * max(1.0, config.remediation_timeout_max_multiplier))
+    if config.run_mode == "bounded":
+        max_total = min(max_total, config.bounded_remediation_timeout_ceiling_seconds)
 
     if config.remediation_timeout_seconds is not None:
         return min(config.remediation_timeout_seconds, max_total)
@@ -277,7 +289,10 @@ def compute_remediation_timeout(
 
     file_overhead = (len(set(affected_files or []))) * config.remediation_timeout_per_affected_file_seconds
 
-    return max(base, min(base + finding_overhead + file_overhead, max_total))
+    calculated = base + finding_overhead + file_overhead
+    if config.run_mode == "bounded":
+        return min(calculated, max_total)
+    return max(base, min(calculated, max_total))
 
 
 # A verification plan that has actually run reports one of these. Anything
@@ -518,6 +533,8 @@ class GovernedTaskOrchestrator:
             "schema": IMPLEMENTATION_ATTEMPT_SCHEMA_VERSION,
             "evidence_dir": str(attempt_dir.relative_to(run_dir)),
         }
+        if impl_res and isinstance((impl_res.metadata or {}).get("watchdog_diagnostics"), dict):
+            record["watchdog_diagnostics"] = impl_res.metadata["watchdog_diagnostics"]
         if carried_salvage:
             record["retained_salvage"] = carried_salvage
         self._persist_attempt_record(record, attempts_dir)
@@ -1631,6 +1648,7 @@ class GovernedTaskOrchestrator:
             ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED,
             ProviderFailureClass.MISSING_EXECUTABLE,
             ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED,
+            ProviderFailureClass.PROVIDER_STALLED,
         }
 
     def _map_failure_class_to_orchestrator_class(
@@ -1651,6 +1669,7 @@ class GovernedTaskOrchestrator:
             "TRANSPORT_UNAVAILABLE",
             "MISSING_EXECUTABLE",
             "EXECUTION_PERMISSION_REQUIRED",
+            "PROVIDER_STALLED",
         }:
             return FAILURE_CLASS_PROVIDER_UNAVAILABLE
         return FAILURE_CLASS_ENGINEERING
@@ -2605,19 +2624,49 @@ class GovernedTaskOrchestrator:
                     } if attempts_dir.is_dir() else set()
 
                     impl_agent_id = getattr(impl_backend, "agent_id", None) or current_impl_resource_id
+                    # capture_delta already owns the task baseline and control
+                    # plane exclusions. Reusing it keeps watchdog progress from
+                    # treating journals, scratch, locks, or .task_runs as work.
+                    def repository_fingerprint() -> str:
+                        delta = capture_delta(self.target_repo, baseline)
+                        return hashlib.sha256(delta.diff_content.encode("utf-8")).hexdigest()
+
+                    observe_provider = ProviderStreamObserver(
+                        impl_agent_id,
+                        self.config.provider_stall_timeout_seconds,
+                        repository_fingerprint,
+                    )
+
                     with progress.operation(
                         phase=TaskPhase.IMPLEMENTING,
                         resource_id=impl_agent_id,
                         role="implementation",
                         details="started",
                         suppress_completion=True,
+                        deadline_seconds=self.config.timeout_seconds,
                     ):
+                        execute_kwargs: Dict[str, Any] = {
+                            "task": task_spec,
+                            "cwd": self.target_repo,
+                            "role": "implementation",
+                            "prompt_override": impl_prompt,
+                            "timeout_seconds": self.config.timeout_seconds,
+                        }
+                        # Third-party/test adapters predate streamed execution.
+                        # Preserve their bounded legacy contract; built-in CLI
+                        # adapters opt into observation via **kwargs.
+                        parameters = inspect.signature(impl_backend.execute).parameters
+                        supports_kwargs = any(
+                            parameter.kind == inspect.Parameter.VAR_KEYWORD
+                            for parameter in parameters.values()
+                        )
+                        if supports_kwargs or "watchdog_callback" in parameters:
+                            execute_kwargs.update({
+                                "watchdog_callback": observe_provider,
+                                "watchdog_interval_seconds": self.config.provider_watchdog_interval_seconds,
+                            })
                         impl_res = impl_backend.execute(
-                            task=task_spec,
-                            cwd=self.target_repo,
-                            role="implementation",
-                            prompt_override=impl_prompt,
-                            timeout_seconds=self.config.timeout_seconds,
+                            **execute_kwargs,
                         )
 
                 # Relocate provider scratch before any evidence for this
@@ -2718,6 +2767,21 @@ class GovernedTaskOrchestrator:
                     else (impl_res.error_message if impl_res else f"Implementation failed on {current_impl_resource_id}")
                 )
                 failure_class_value = normalized_failure.value if normalized_failure else None
+                if normalized_failure in {
+                    ProviderFailureClass.SESSION_LIMIT,
+                    ProviderFailureClass.QUOTA_EXHAUSTED,
+                    ProviderFailureClass.RATE_LIMITED,
+                    ProviderFailureClass.AUTHENTICATION_REQUIRED,
+                    ProviderFailureClass.PROVIDER_UNAVAILABLE,
+                    ProviderFailureClass.PROVIDER_STALLED,
+                }:
+                    detail = failure_class_value.lower() if failure_class_value else "provider failure"
+                    progress.emit_provider_unusable(
+                        current_impl_resource_id,
+                        detail,
+                        impl_res.duration_seconds if impl_res else 0.0,
+                        diagnostics=(impl_res.metadata or {}).get("watchdog_diagnostics") if impl_res else None,
+                    )
 
                 progress.emit_implementation_failed(
                     current_impl_resource_id,
@@ -3054,6 +3118,33 @@ class GovernedTaskOrchestrator:
         remediation_count = 0
         current_reviewers = list(routing.recommended_reviewers)
 
+        def _make_parked_review_exit(park_msg: str) -> OrchestrationResult:
+            return self._make_result(
+                task_spec=task_spec,
+                final_state="awaiting_human",
+                exit_code=2,
+                start_time=start_time,
+                run_dir=run_dir,
+                routing=routing,
+                initial_delta=initial_delta,
+                current_delta=current_delta,
+                review_cycles=review_cycles,
+                reconciliation=latest_reconciliation,
+                verif_plan=verif_plan,
+                remediation_count=remediation_count,
+                err_msg=park_msg,
+                provider_execution=impl_res,
+                failure_class=FAILURE_CLASS_AUTHORITY_BLOCKED,
+                hf_status=hf_audit_status,
+                hf_match=hf_audit_match,
+                implementation_attempts=implementation_attempts,
+                failover_summary=self._build_failover_summary(
+                    implementation_attempts,
+                    TERMINATION_IMPLEMENTATION_SUCCEEDED,
+                    last_selection_decision,
+                ),
+            )
+
         while True:
             cycle_idx = len(review_cycles) + 1
             CheckpointManager.start_stage(
@@ -3159,6 +3250,44 @@ class GovernedTaskOrchestrator:
             if self.config.failure_injection_hook:
                 self.config.failure_injection_hook("post_review", run_dir, task_spec)
 
+            # Check if independent review was satisfied
+            if (
+                self.config.preserve_independent_review
+                and not self.config.custom_reviewer_fn
+                and not getattr(cycle_res, "independent_review_satisfied", True)
+            ):
+                triggers: List[str] = ["independent_review_unavailable"]
+                if cycle_res.non_independent_roles:
+                    triggers.append("non_independent_review")
+                risks: List[str] = ["No independent provider family was available to complete code review."]
+                evidence: List[str] = [
+                    f"{role}: reviewed by non-independent provider family ({getattr(cycle_res, 'reviewing_provider_families', {}).get(role, 'unknown')})"
+                    for role in cycle_res.non_independent_roles
+                ] or ["Independent review could not be satisfied by any configured provider."]
+                err_msg = "Independent review unavailable: no independent provider family completed review"
+                decision_pkt = HumanDecisionPacket(
+                    task_id=task_spec.task_id,
+                    objective=task_spec.objective,
+                    change_summary=(
+                        f"Implementation diff ({current_delta.insertions} ins, {current_delta.deletions} del) "
+                        f"lacks independent review; triggers: {', '.join(triggers)}."
+                    ),
+                    boundary_triggers=triggers,
+                    evidence=evidence,
+                    risks=risks,
+                    review_findings_summary=findings_summary,
+                    verification_status="unverified",
+                    recommended_action="Authorize manual review or configure an independent provider family.",
+                )
+                self._park_awaiting_human(
+                    task_spec,
+                    run_dir,
+                    err_msg,
+                    decision_pkt,
+                    progress,
+                )
+                return _make_parked_review_exit(err_msg)
+
             # Check if any findings require remediation
             if not cycle_res.requires_remediation:
                 break
@@ -3224,31 +3353,7 @@ class GovernedTaskOrchestrator:
                     decision_pkt,
                     progress,
                 )
-                return self._make_result(
-                    task_spec=task_spec,
-                    final_state="awaiting_human",
-                    exit_code=2,
-                    start_time=start_time,
-                    run_dir=run_dir,
-                    routing=routing,
-                    initial_delta=initial_delta,
-                    current_delta=current_delta,
-                    review_cycles=review_cycles,
-                    reconciliation=latest_reconciliation,
-                    verif_plan=verif_plan,
-                    remediation_count=remediation_count,
-                    err_msg=err_msg,
-                    provider_execution=impl_res,
-                    failure_class=FAILURE_CLASS_AUTHORITY_BLOCKED,
-                    hf_status=hf_audit_status,
-                    hf_match=hf_audit_match,
-                    implementation_attempts=implementation_attempts,
-                    failover_summary=self._build_failover_summary(
-                        implementation_attempts,
-                        TERMINATION_IMPLEMENTATION_SUCCEEDED,
-                        last_selection_decision,
-                    ),
-                )
+                return _make_parked_review_exit(err_msg)
 
             remediation_count += 1
             CheckpointManager.start_stage(
@@ -3286,21 +3391,24 @@ class GovernedTaskOrchestrator:
             rem_agent_id = getattr(rem_backend, "agent_id", None) or rem_resource_id
             rem_res = None
             rem_failure = None
+            remediation_timeout = None
+            if not self.config.custom_remediation_fn:
+                rem_prompt = self._build_remediation_prompt(task_spec, current_delta.diff_content, cycle_res.all_findings)
+                affected_files = set(current_delta.files_modified + current_delta.files_added)
+                remediation_timeout = compute_remediation_timeout(
+                    self.config, cycle_res.all_findings, affected_files
+                )
             with progress.operation(
                 phase=TaskPhase.REMEDIATING,
                 resource_id=rem_agent_id,
                 role="remediation",
                 cycle=remediation_count,
                 details=f"cycle {remediation_count}",
+                deadline_seconds=remediation_timeout,
             ):
                 if self.config.custom_remediation_fn:
                     self.config.custom_remediation_fn(task_spec, self.target_repo, cycle_res.all_findings)
                 else:
-                    rem_prompt = self._build_remediation_prompt(task_spec, current_delta.diff_content, cycle_res.all_findings)
-                    affected_files = set(current_delta.files_modified + current_delta.files_added)
-                    remediation_timeout = compute_remediation_timeout(
-                        self.config, cycle_res.all_findings, affected_files
-                    )
                     self._record_event(
                         task_id=task_spec.task_id,
                         agent_id=rem_agent_id,
@@ -3311,6 +3419,12 @@ class GovernedTaskOrchestrator:
                             "timeout_seconds": remediation_timeout,
                             "findings_count": len(cycle_res.all_findings),
                             "affected_files_count": len(affected_files),
+                            "run_mode": self.config.run_mode,
+                            "remediation_timeout_ceiling": (
+                                self.config.bounded_remediation_timeout_ceiling_seconds
+                                if self.config.run_mode == "bounded"
+                                else None
+                            ),
                         },
                     )
                     rem_res = rem_backend.execute(

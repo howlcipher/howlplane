@@ -11,6 +11,7 @@ evidence preservation, progress messaging, and final identity/reviewer behavior.
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import sys
 
 from src.control_plane.atomic_io import safe_load_json
 from io import StringIO
@@ -30,6 +31,7 @@ from src.control_plane.agent_execution import (
     TIMEOUT_SOURCE_KEY,
     TOOL_PERMISSION_DENIED,
     TOOL_PERMISSION_KEY,
+    SubprocessAgentBackend,
 )
 from src.control_plane.agent_registry import AgentProfile, AgentRegistry
 from src.control_plane.git_baseline import (
@@ -809,6 +811,57 @@ def test_second_availability_failure_reaches_third_provider(tmp_path: Path):
     res = _run_failover_task(repo, _three_hop_resolver(), max_attempts=3)
 
     _assert_completed_on_third_hop(res)
+
+
+def test_fourth_eligible_provider_is_reached_under_global_ceiling(tmp_path: Path):
+    """The ceiling bounds inventory; it is not the former fixed three-hop limit."""
+    registry = _make_registry([
+        _profile("resource_d", "Resource D", "provider_w"),
+    ])
+    repo = _init_test_repo(tmp_path / "repo")
+    resolver = _FakeBackendResolver({
+        "resource_a": {"success": False, "stderr": _TIMEOUT_STDERR},
+        "resource_b": {"success": False, "stderr": _TIMEOUT_STDERR},
+        "resource_c": {"success": False, "stderr": _TIMEOUT_STDERR},
+        "resource_d": {"success": True, "side_effect": _edit_feature_to_true},
+    })
+    result = _run_failover_task(repo, resolver, registry=registry, max_attempts=8)
+
+    assert result.final_state == "complete"
+    assert [attempt["resource_id"] for attempt in result.implementation_attempts] == [
+        "resource_a", "resource_b", "resource_c", "resource_d",
+    ]
+
+
+def test_semantically_stalled_noisy_provider_fails_over_to_healthy_provider(tmp_path: Path):
+    """Changing terminal bytes cannot keep a Factory implementation attempt alive."""
+    repo = _init_test_repo(tmp_path / "repo")
+    noisy = SubprocessAgentBackend(
+        "resource_a", sys.executable,
+        lambda *_args, **_kwargs: [
+            sys.executable, "-u", "-c",
+            "import sys,time\nwhile True:\n print('⠋ Working', flush=True); time.sleep(.02)",
+        ],
+    )
+    healthy = _FakeBackendResolver({
+        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
+    })
+
+    def resolver(resource_id: str) -> AgentBackend:
+        return noisy if resource_id == "resource_a" else healthy(resource_id)
+
+    result = _run_failover_task(
+        repo, resolver, max_attempts=2,
+        provider_stall_timeout_seconds=0.2,
+        provider_watchdog_interval_seconds=0.05,
+    )
+
+    assert result.final_state == "complete"
+    assert [attempt["resource_id"] for attempt in result.implementation_attempts] == [
+        "resource_a", "resource_b",
+    ]
+    assert result.implementation_attempts[0]["failure_class"] == "PROVIDER_STALLED"
+    assert _read_file(repo, "src/feature.py").endswith("True\n")
 
 
 def test_recovered_first_provider_does_not_dead_end_failover(tmp_path: Path):

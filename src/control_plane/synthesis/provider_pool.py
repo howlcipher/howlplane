@@ -23,6 +23,9 @@ from src.control_plane.agent_execution import (
     TERMINAL_PROVIDER_ERROR_KEY,
     TOOL_PERMISSION_DENIED,
     TOOL_PERMISSION_KEY,
+    WATCHDOG_TERMINATION_KEY,
+    WATCHDOG_TERMINATION_STALL,
+    PROVIDER_RETRY_AFTER_SECONDS_KEY,
 )
 from src.control_plane.agent_registry import AgentProfile, AgentRegistry
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
@@ -71,6 +74,9 @@ TASK_SUITABILITY_PREFERENCES: Dict[str, List[str]] = {
 EXHAUSTION_PATTERNS: Dict[str, List[str]] = {
     "claude_code": [
         "usage limit reached",
+        "you've hit your weekly limit",
+        "you've hit your daily limit",
+        "you've hit your limit",
         "rate limit exceeded",
         "quota exceeded",
         "credit limit",
@@ -159,7 +165,7 @@ _TERMINAL_HARD_FAILURE_PATTERNS = (
         ProviderFailureClass.SESSION_LIMIT,
         (
             re.compile(
-                r"(?:error:\s*)?you(?:'|’)ve hit your session limit"
+                r"(?:error:\s*)?you(?:\'|’)ve hit your (?:session |daily |weekly |monthly )?limit"
                 r"(?:\s*·\s*resets? .+)?[.!]?",
                 re.IGNORECASE,
             ),
@@ -354,6 +360,7 @@ class ProviderStatus(DataClassSerializationMixin):
     last_failure_at: Optional[str] = None
     unattended_mutation_capable: Optional[bool] = None
     capability_reason: Optional[str] = None
+    role_exclusions: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ProviderStatus":
@@ -370,6 +377,9 @@ class ProviderStatus(DataClassSerializationMixin):
         event = payload.get("exhaustion_event")
         if isinstance(event, dict):
             payload["exhaustion_event"] = ProviderExhaustionEvent.from_dict(event)
+        exclusions = payload.get("role_exclusions")
+        if not isinstance(exclusions, dict):
+            payload["role_exclusions"] = {}
         valid = cls.__dataclass_fields__
         return cls(**{key: value for key, value in payload.items() if key in valid})
 
@@ -794,6 +804,8 @@ class ProviderPoolManager:
         # very phrases these markers look for, so where the harness observed the
         # process directly, that observation wins (SLOPFIX-03).
         metadata = result.metadata or {}
+        if metadata.get(WATCHDOG_TERMINATION_KEY) == WATCHDOG_TERMINATION_STALL:
+            return ProviderFailureClass.PROVIDER_STALLED
         launch_outcome = metadata.get(LAUNCH_OUTCOME_KEY)
         if launch_outcome in (LAUNCH_OUTCOME_NOT_INSTALLED, LAUNCH_OUTCOME_SPAWN_FAILED):
             return ProviderFailureClass.MISSING_EXECUTABLE
@@ -901,6 +913,7 @@ class ProviderPoolManager:
         agent_id: str,
         result: AgentExecutionResult,
         task_id: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> ProviderFailureClass:
         """Updates shared state only when the observed result warrants it."""
         resource_id = self._normalize(agent_id)
@@ -926,17 +939,37 @@ class ProviderPoolManager:
             state.last_checked = now.isoformat()
             state.observed_at = now.isoformat()
             state.retry_after = None
+            if role and role in state.role_exclusions:
+                state.role_exclusions.pop(role, None)
             self._persist()
             return ProviderFailureClass.UNKNOWN
 
         failure_class = self.classify_failure(resource_id, result)
-        # EXECUTION_BUDGET_EXCEEDED is deliberately absent from this map. We
-        # stopped the provider at our own deadline, so nothing was learned about
-        # its availability and marking it UNREACHABLE (plus a global cooldown)
-        # would penalize a healthy resource across later tasks. Not reusing it
-        # inside this task is already guaranteed by the ALREADY_ATTEMPTED
-        # failover exclusion (HOWLFRAM-SLOPFIX-05).
+        metadata = result.metadata or {}
+
+        state.consecutive_failures += 1
+        state.last_failure_at = now.isoformat()
+        state.last_checked = now.isoformat()
+        state.observed_at = now.isoformat()
+        state.normalized_failure_class = failure_class.value
+        state.unavailable_reason = failure_class.value
+
+        if failure_class is ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED:
+            target_role = role or "unknown"
+            state.role_exclusions[target_role] = failure_class.value
+            if self._is_review_role(target_role):
+                state.role_exclusions["review"] = failure_class.value
+            self._persist()
+            return failure_class
+
+        # EXECUTION_BUDGET_EXCEEDED previously stayed out of this map to avoid
+        # penalizing a healthy resource for our own harness deadline. The live
+        # incident showed repeatedly burning ~10-minute slots on the same provider
+        # while another was available, so a bounded DEGRADED cooldown is recorded
+        # instead. DEGRADED still leaves the provider eligible, just deprioritized,
+        # and expires after the normal transient cooldown.
         availability_map = {
+            ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED: ProviderAvailabilityStatus.DEGRADED,
             ProviderFailureClass.QUOTA_EXHAUSTED: ProviderAvailabilityStatus.QUOTA_EXHAUSTED,
             ProviderFailureClass.SESSION_LIMIT: ProviderAvailabilityStatus.SESSION_EXHAUSTED,
             ProviderFailureClass.RATE_LIMITED: ProviderAvailabilityStatus.RATE_LIMITED,
@@ -944,15 +977,10 @@ class ProviderPoolManager:
             ProviderFailureClass.PROVIDER_UNAVAILABLE: ProviderAvailabilityStatus.UNAVAILABLE,
             ProviderFailureClass.TRANSPORT_UNAVAILABLE: ProviderAvailabilityStatus.UNREACHABLE,
             ProviderFailureClass.MISSING_EXECUTABLE: ProviderAvailabilityStatus.MISSING_EXECUTABLE,
+            ProviderFailureClass.PROVIDER_STALLED: ProviderAvailabilityStatus.UNAVAILABLE,
         }
         if failure_class in availability_map:
             state.status = availability_map[failure_class]
-            state.consecutive_failures += 1
-            state.last_failure_at = now.isoformat()
-            state.last_checked = now.isoformat()
-            state.observed_at = now.isoformat()
-            state.normalized_failure_class = failure_class.value
-            state.unavailable_reason = failure_class.value
             # Every capacity condition expires. QUOTA_EXHAUSTED was absent from
             # this set, so a quota event had no `retry_after` at all and the
             # resource stayed unavailable until someone called reset_resource --
@@ -962,19 +990,26 @@ class ProviderPoolManager:
             # cooldown would spend attempts proving what is already known
             # (issues.md #15).
             transient = {
-                ProviderFailureClass.SESSION_LIMIT,
                 ProviderFailureClass.RATE_LIMITED,
                 ProviderFailureClass.TRANSPORT_UNAVAILABLE,
                 ProviderFailureClass.PROVIDER_UNAVAILABLE,
+                ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED,
             }
             cooldown = None
-            if failure_class in transient:
+            if failure_class is ProviderFailureClass.SESSION_LIMIT:
+                cooldown = getattr(
+                    self.policy, "session_cooldown_seconds", None
+                ) or 14400
+            elif failure_class in transient:
                 cooldown = self.policy.cooldown_seconds
             elif failure_class is ProviderFailureClass.QUOTA_EXHAUSTED:
                 cooldown = getattr(
                     self.policy, "quota_cooldown_seconds", None
                 ) or self.policy.cooldown_seconds
-            if cooldown:
+            explicit_retry_seconds = metadata.get(PROVIDER_RETRY_AFTER_SECONDS_KEY)
+            if isinstance(explicit_retry_seconds, int) and explicit_retry_seconds >= 0:
+                state.retry_after = (now + timedelta(seconds=explicit_retry_seconds)).isoformat()
+            elif cooldown:
                 state.retry_after = (now + timedelta(seconds=cooldown)).isoformat()
             state.exhaustion_event = ProviderExhaustionEvent(
                 agent_id=resource_id,
@@ -983,6 +1018,7 @@ class ProviderPoolManager:
                     ProviderFailureClass.RATE_LIMITED: "rate_limit",
                     ProviderFailureClass.QUOTA_EXHAUSTED: "quota_exhausted",
                     ProviderFailureClass.AUTHENTICATION_REQUIRED: "authentication_required",
+                    ProviderFailureClass.PROVIDER_STALLED: "stalled",
                 }.get(failure_class, "unavailable"),
                 raw_error=(result.stderr or result.error_message or failure_class.value).strip(),
                 task_id=task_id,
@@ -995,6 +1031,7 @@ class ProviderPoolManager:
         agent_id: str,
         result: AgentExecutionResult,
         task_id: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> Optional[ProviderExhaustionEvent]:
         """Compatibility wrapper returning events only for availability failures."""
         resource_id = self._normalize(agent_id)
@@ -1013,7 +1050,7 @@ class ProviderPoolManager:
                     event,
                 )
                 return event
-        failure_class = self.record_result(agent_id, result, task_id=task_id)
+        failure_class = self.record_result(agent_id, result, task_id=task_id, role=role)
         availability_classes = {
             ProviderFailureClass.QUOTA_EXHAUSTED,
             ProviderFailureClass.SESSION_LIMIT,
@@ -1043,6 +1080,7 @@ class ProviderPoolManager:
         state.retry_after = None
         state.reset_at = datetime.now(timezone.utc).isoformat()
         state.unavailable_reason = None
+        state.role_exclusions.clear()
         if reprobe and not self._egress_forbidden(profile):
             self._apply_readiness(normalized, profile, state)
         self._persist()
@@ -1105,6 +1143,26 @@ class ProviderPoolManager:
             ProviderAvailabilityStatus.RESOURCE_CONSTRAINED,
         }
         return status.value if status in blocked else None
+
+    def check_capacity_exclusion(
+        self,
+        resource_id: str,
+        role: Optional[str] = None,
+    ) -> Optional[str]:
+        """Returns the capacity block or role exclusion reason for a resource, if any."""
+        normalized = self._normalize(resource_id)
+        state = self._provider_states.get(normalized)
+        if state is None:
+            return "UNKNOWN_RESOURCE"
+        general = self._capacity_exclusion(state.status)
+        if general:
+            return general
+        if role:
+            if role in state.role_exclusions:
+                return f"ROLE_EXCLUDED:{state.role_exclusions[role]}"
+            if self._is_review_role(role) and "review" in state.role_exclusions:
+                return f"ROLE_EXCLUDED:{state.role_exclusions['review']}"
+        return None
 
     def _recover_capacity_if_due(
         self,
@@ -1264,6 +1322,12 @@ class ProviderPoolManager:
             capacity_reason = self._capacity_exclusion(state.status)
             if capacity_reason:
                 exclude(profile, capacity_reason, "capacity")
+                continue
+            if role in state.role_exclusions:
+                exclude(profile, f"ROLE_EXCLUDED:{state.role_exclusions[role]}", "capacity")
+                continue
+            if self._is_review_role(role) and "review" in state.role_exclusions:
+                exclude(profile, f"ROLE_EXCLUDED:{state.role_exclusions['review']}", "capacity")
                 continue
             if resource_id in excluded_ids:
                 exclude(profile, "ALREADY_ATTEMPTED", "failover_policy")

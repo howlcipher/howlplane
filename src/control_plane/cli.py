@@ -713,8 +713,17 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
         help="Workspace YAML for ecosystem mode.",
     )
     p_run.add_argument("--until", type=float, help="Run for at most N seconds")
+    p_run.add_argument("--max-work-items", type=int, default=None,
+                       help="Stop after dispatching this many distinct work items (bounded run). "
+                            "Without this, the Factory runs continuously.")
     p_run.add_argument("--resume-stopped", action="store_true",
                        help="Resume saved stopped state after acquiring the supervisor lock")
+    p_run.add_argument(
+        "--authority",
+        choices=["safe", "standard", "autonomous"],
+        default=None,
+        help="Campaign authority preset",
+    )
     p_run.add_argument(
         "--authority-profile",
         choices=["strict", "overnight-safe", "howlframe-overnight"],
@@ -751,6 +760,8 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_start.add_argument("--target", choices=["repo", "self", "ecosystem"], default="repo")
     p_start.add_argument("--workspace", help="Workspace YAML for ecosystem mode")
     p_start.add_argument("--objective", help="Durable campaign objective")
+    p_start.add_argument("--max-work-items", type=int, default=None,
+                         help="Stop after dispatching this many distinct work items.")
     p_start.add_argument("--authority", choices=["safe", "standard", "autonomous"],
                          help="Named first-run authority choice")
     p_start.add_argument("--authority-profile", choices=["strict", "overnight-safe", "howlframe-overnight"],
@@ -766,6 +777,37 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_factory_doctor = factory_sub.add_parser("doctor", help="Check whether Factory can start safely", **kwargs)
     p_factory_doctor.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_factory_doctor.add_argument("--target-repo", help="Repository to resolve (advanced)")
+
+    p_canary = factory_sub.add_parser(
+        "canary", help="Run a single-item bounded canary (sugar for 'run --max-work-items 1')",
+        **kwargs,
+    )
+    p_canary.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_canary.add_argument("--target-repo", help="Repository to discover work from (advanced)")
+    p_canary.add_argument(
+        "--target",
+        choices=["repo", "self", "ecosystem"],
+        default="repo",
+        help="What the factory is improving.",
+    )
+    p_canary.add_argument("--objective", default=None, help="Campaign objective.")
+    p_canary.add_argument("--workspace", default=None, help="Workspace YAML for ecosystem mode.")
+    p_canary.add_argument("--until", type=float, help="Run for at most N seconds")
+    p_canary.add_argument("--resume-stopped", action="store_true",
+                         help="Resume saved stopped state after acquiring the supervisor lock")
+    p_canary.add_argument(
+        "--authority",
+        choices=["safe", "standard", "autonomous"],
+        default="safe",
+        help="Campaign authority preset (default: safe)",
+    )
+    p_canary.add_argument(
+        "--authority-profile",
+        choices=["strict", "overnight-safe", "howlframe-overnight"],
+        default=None,
+        help="Bind delegated campaign authority for autonomous git/GitHub actions.",
+    )
+    p_canary.add_argument("--json", action="store_true", help="Output JSON result")
 
 
 def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] = None) -> None:
@@ -1233,7 +1275,12 @@ def cmd_unlock(args: argparse.Namespace) -> int:
 def _resolve_factory_campaign(
     args: argparse.Namespace, *, prepare: bool = False, force_resolve: bool = False
 ):
-    """Resolve the zero-configuration campaign and attach its paths to args."""
+    """Resolve the zero-configuration campaign and attach its paths to args.
+
+    When no explicit state directory is given, prefer any currently-running
+    campaign for this repository over a stopped historical one. Explicit
+    --state-dir always wins and is surfaced directly in args.state_dir.
+    """
     from src.control_plane.factory.campaign import prepare_campaign, resolve_campaign
 
     # Preserve the established explicit interface exactly. It can point at a
@@ -1246,9 +1293,13 @@ def _resolve_factory_campaign(
         # checkout. Keep that advanced/debug contract intact.
         args.target_repo = "."
         return None
+
+    is_bounded = (getattr(args, "max_work_items", None) is not None and args.max_work_items > 0) or getattr(args, "factory_action", None) == "canary"
     campaign = resolve_campaign(
         state_dir=getattr(args, "state_dir", None),
         target_repo=getattr(args, "target_repo", None),
+        prefer_active=True,
+        bounded=is_bounded if prepare else False,
     )
     if prepare:
         campaign = prepare_campaign(campaign)
@@ -1263,28 +1314,62 @@ def _resolve_factory_campaign(
 def _select_factory_authority(args: argparse.Namespace, campaign: Any) -> Optional[str]:
     """Obtain explicit first-run authority without inventing a new policy model."""
     from src.control_plane.authority_envelope import ENVELOPE_FILENAME, load_envelope
+    from src.control_plane.authority_profile import CANONICAL_PROFILES
 
     envelope_dir = campaign.state_dir / "campaign"
+    existing_profile = None
     if (envelope_dir / ENVELOPE_FILENAME).is_file():
-        return load_envelope(envelope_dir).profile_id
+        existing_profile = load_envelope(envelope_dir).profile_id
+
     requested = getattr(args, "authority_profile", None)
     choice = getattr(args, "authority", None)
     if choice:
         remote = campaign.repository.remote
+        # Resolve only profiles already approved for this exact repository.
+        # `strict` is intentionally universal but loses to any repository grant.
+        compatible = [
+            profile for profile in CANONICAL_PROFILES.values()
+            if not profile.authorized_repositories
+            or any(remote.endswith(repository) for repository in profile.authorized_repositories)
+        ]
+        delegated = [profile for profile in compatible if profile.authorized_repositories]
+        # Explicit, auditable ordering of already-granted authority. This does
+        # not construct or broaden a profile.
+        strongest = max(
+            delegated or compatible,
+            key=lambda profile: (
+                len(profile.allowed_action_classes), profile.max_merges,
+                profile.ttl_hours, profile.profile_id,
+            ),
+            default=None,
+        )
         mappings = {
             "safe": "strict",
-            "standard": "howlframe-overnight" if remote.endswith("howlcipher/howlframe") else "overnight-safe",
-            "autonomous": "overnight-safe",
+            "standard": strongest.profile_id if strongest else None,
+            "autonomous": strongest.profile_id if strongest else None,
         }
         requested = mappings[choice]
-        if choice != "safe" and not remote.endswith("howlcipher/howlframe") and not remote.endswith("howlcipher/howlplane"):
+        if choice != "safe" and not delegated:
             raise ValueError(
                 "No existing delegated authority profile is compatible with this repository. "
                 "Use --authority safe, or configure an approved --authority-profile."
             )
+
+    if existing_profile is not None:
+        if requested is not None and requested != existing_profile:
+            display_choice = choice or getattr(args, "authority_profile", None)
+            raise ValueError(
+                f"Requested authority '{display_choice}' ({requested}) conflicts with existing "
+                f"campaign authority envelope '{existing_profile}'. Startup refused to prevent "
+                "silent authority override."
+            )
+        args.authority_profile = existing_profile
+        return existing_profile
+
     if requested:
         args.authority_profile = requested
         return requested
+
     if not sys.stdin.isatty():
         raise ValueError(
             "Factory needs an explicit authority choice in a non-interactive environment. "
@@ -1445,6 +1530,7 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
         sleep=sleep or time.sleep,
         state_dir=state_dir,
         lock=None,
+        max_work_items=getattr(args, "max_work_items", None),
     )
 
 
@@ -1503,6 +1589,12 @@ def cmd_factory_run(args: argparse.Namespace) -> int:
         print(json.dumps({"status": status}, indent=2, default=str))
     else:
         print(f"Factory stopped. State: {status['state']}")
+        print(f"Run mode: {status.get('run_mode', 'continuous')}")
+        if status.get('max_work_items') is not None:
+            print(f"Work item limit: {status['max_work_items']}")
+            print(f"Work items dispatched: {status.get('work_items_dispatched', 0)}")
+            remaining = max(0, (status['max_work_items'] or 0) - (status.get('work_items_dispatched') or 0))
+            print(f"Remaining: {remaining}")
         print(f"Stopped reason: {status['stopped_reason']}")
         print(f"Dispatches: {status['dispatch_history_count']}")
         print(f"Completed: {len(status['recent_completed'])}")
@@ -1518,9 +1610,12 @@ def _factory_state_store(args: argparse.Namespace):
 
 def cmd_factory_status(args: argparse.Namespace) -> int:
     from pathlib import Path
+    from src.control_plane.factory.campaign import campaign_from_state_dir
     from src.control_plane.factory.repo_proposal import RepoProposalStore
     from src.control_plane.factory.work_item import WorkItemState, WorkItemStore
     campaign = _resolve_factory_campaign(args)
+    if campaign is None:
+        campaign = campaign_from_state_dir(args.state_dir)
     store = _factory_state_store(args)
     record = store.load(reconcile_restart=False)
     work_store = WorkItemStore(Path(args.state_dir).resolve() / "work_items")
@@ -1557,6 +1652,13 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         "recent_failed": record.recent_failed,
         "dispatch_history_count": len(record.dispatch_history),
         "transition_history_count": len(record.transition_history),
+        "run_mode": record.run_mode if hasattr(record, "run_mode") else "continuous",
+        "max_work_items": getattr(record, "max_work_items", None),
+        "work_items_dispatched": getattr(record, "work_items_dispatched", 0),
+        "bounded_run_started_at": getattr(record, "bounded_run_started_at", None),
+        "bounded_run_completed_at": getattr(record, "bounded_run_completed_at", None),
+        "bounded_run_stop_reason": getattr(record, "bounded_run_stop_reason", None),
+        "bounded_dispatched_ids": list(getattr(record, "bounded_dispatched_ids", [])),
         "parked_items": parked,
         "proposals_awaiting_authority": proposals,
     }
@@ -1567,11 +1669,12 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         envelope_dir = campaign.state_dir / "campaign"
         if (envelope_dir / ENVELOPE_FILENAME).is_file():
             profile = load_envelope(envelope_dir).profile_id
+        display_authority = "safe" if profile == "strict" else profile
         status.update({
             "campaign_id": campaign.repository.campaign_id,
             "project": campaign.repository.remote or campaign.repository.root.name,
             "worktree": str(campaign.target_dir),
-            "authority": profile or "not configured",
+            "authority": display_authority or "not configured",
             "process": process_status(campaign),
         })
     if getattr(args, "json", False):
@@ -1585,6 +1688,15 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
             print(f"Target: isolated worktree ({status['worktree']})")
             print(f"Authority: {status['authority']}")
         print(f"State: {status['state']}")
+        run_mode = status.get("run_mode", "continuous")
+        print(f"Run mode: {run_mode}")
+        if status.get("max_work_items") is not None:
+            print(f"Work item limit: {status['max_work_items']}")
+            print(f"Work items dispatched: {status.get('work_items_dispatched', 0)}")
+            remaining = max(0, (status["max_work_items"] or 0) - (status.get("work_items_dispatched") or 0))
+            print(f"Remaining: {remaining}")
+        if status.get("bounded_run_stop_reason"):
+            print(f"Stopped reason: {status['bounded_run_stop_reason']}")
         if record.objective:
             print(f"Objective: {record.objective}")
         if record.target_mode:
@@ -1616,8 +1728,11 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
 
 
 def cmd_factory_stop(args: argparse.Namespace) -> int:
+    from src.control_plane.factory.campaign import campaign_from_state_dir
     from src.control_plane.factory.supervisor_state import SupervisorState
     campaign = _resolve_factory_campaign(args)
+    if campaign is None:
+        campaign = campaign_from_state_dir(args.state_dir)
     if campaign is not None:
         from src.control_plane.factory.service import stop_process
         # Persisting STOPPED first makes a crash during backend shutdown fail
@@ -1666,12 +1781,18 @@ def cmd_factory_start(args: argparse.Namespace) -> int:
     # operator choice durable even if the new backend exits before its first
     # tick, while still using the same supervisor builder and authority path.
     _build_factory_supervisor(args)
-    started, record = start_process(campaign, profile, getattr(args, "objective", None))
+    start_kwargs = {}
+    if getattr(args, "max_work_items", None) is not None:
+        start_kwargs["max_work_items"] = args.max_work_items
+    started, record = start_process(
+        campaign, profile, getattr(args, "objective", None), **start_kwargs
+    )
+    display_authority = "safe" if profile == "strict" else profile
     if getattr(args, "json", False):
         import json
         print(json.dumps({"started": started, "campaign_id": campaign.repository.campaign_id,
                           "state_dir": str(campaign.state_dir), "target_repo": str(campaign.target_dir),
-                          "backend": record.backend, "authority": profile}, indent=2))
+                          "backend": record.backend, "authority": display_authority}, indent=2))
         return 0
     if not started:
         print("Factory is already running.\n")
@@ -1683,15 +1804,18 @@ def cmd_factory_start(args: argparse.Namespace) -> int:
     if campaign.repository.dirty:
         print("Working tree contains local changes. Your checkout will not be modified.")
     print(f"Factory target: {campaign.target_dir}")
-    print(f"Authority: {profile}")
+    print(f"Authority: {display_authority}")
     print(f"Backend: {record.backend}")
     print("\nFactory started.\n\nUse:\n  howlplane factory status\n  howlplane factory logs --follow\n  howlplane factory stop")
     return 0
 
 
 def cmd_factory_logs(args: argparse.Namespace) -> int:
+    from src.control_plane.factory.campaign import campaign_from_state_dir
     from src.control_plane.factory.service import recent_logs
     campaign = _resolve_factory_campaign(args)
+    if campaign is None:
+        campaign = campaign_from_state_dir(args.state_dir)
     if campaign is None:
         raise ValueError("factory logs without campaign resolution requires a repository working directory")
     return recent_logs(campaign, follow=getattr(args, "follow", False), lines=getattr(args, "lines", 80))
@@ -1746,6 +1870,11 @@ def cmd_factory(args: argparse.Namespace) -> int:
             return cmd_factory_logs(args)
         if action == "doctor":
             return cmd_factory_doctor(args)
+        if action == "canary":
+            args.max_work_items = 1
+            if not getattr(args, "until", None):
+                args.until = None
+            return cmd_factory_run(args)
         print("Unknown factory action.")
         return 1
     except (OSError, ValueError) as exc:

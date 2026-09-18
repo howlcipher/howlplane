@@ -20,6 +20,7 @@ from src.control_plane.agent_execution import (
     LAUNCH_OUTCOME_KEY,
     TIMEOUT_SOURCE_KEY,
 )
+from src.control_plane.agent_registry import AgentRegistry
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
 from src.control_plane.reconciliation import ReviewFinding, ReconciliationResult, ReviewReconciler, VALID_SEVERITIES
 from src.control_plane.reviewers import get_reviewer_role, ReviewerRole, build_skill_context
@@ -209,10 +210,48 @@ def write_review_result(
         "independence": {
             "implementer": implementer,
             "reviewer": effective_resource,
+            "implementing_provider_family": (
+                AgentRegistry().get_resource(implementer).provider
+                if implementer and AgentRegistry().get_resource(implementer)
+                else implementer
+            ),
+            "reviewing_provider_family": (
+                AgentRegistry().get_resource(effective_resource).provider
+                if effective_resource and AgentRegistry().get_resource(effective_resource)
+                else effective_resource
+            ),
+            "same_provider_family": (
+                None
+                if implementer is None or effective_resource is None
+                else bool(
+                    (
+                        AgentRegistry().get_resource(implementer).provider
+                        if AgentRegistry().get_resource(implementer)
+                        else implementer
+                    )
+                    == (
+                        AgentRegistry().get_resource(effective_resource).provider
+                        if AgentRegistry().get_resource(effective_resource)
+                        else effective_resource
+                    )
+                )
+            ),
             "independent": (
                 None
                 if implementer is None or effective_resource is None
-                else implementer != effective_resource
+                else (
+                    implementer != effective_resource
+                    and (
+                        AgentRegistry().get_resource(implementer).provider
+                        if AgentRegistry().get_resource(implementer)
+                        else implementer
+                    )
+                    != (
+                        AgentRegistry().get_resource(effective_resource).provider
+                        if AgentRegistry().get_resource(effective_resource)
+                        else effective_resource
+                    )
+                )
             ),
         },
         "schema": REVIEW_RESULT_SCHEMA_VERSION,
@@ -291,11 +330,15 @@ class ReviewCycleResult:
     reviewer_results: Dict[str, SingleReviewResult] = field(default_factory=dict)
     all_findings: List[ReviewFinding] = field(default_factory=list)
     reconciliation: Optional[ReconciliationResult] = None
-    status: str = "clean"  # "clean", "has_findings", "review_failure"
+    status: str = "clean"  # "clean", "has_findings", "review_failure", "independent_review_unavailable"
     requires_remediation: bool = False
-    # Roles this cycle served with the implementer itself, i.e. a self-review.
+    # Roles this cycle served with the implementer itself or same provider family.
     # Recorded so the authority gate can name the real reason it triggered.
     non_independent_roles: List[str] = field(default_factory=list)
+    implementing_provider_family: Optional[str] = None
+    reviewing_provider_families: Dict[str, str] = field(default_factory=dict)
+    independent_review_required: bool = True
+    independent_review_satisfied: bool = True
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -307,6 +350,10 @@ class ReviewCycleResult:
             "status": self.status,
             "requires_remediation": self.requires_remediation,
             "non_independent_roles": self.non_independent_roles,
+            "implementing_provider_family": self.implementing_provider_family,
+            "reviewing_provider_families": self.reviewing_provider_families,
+            "independent_review_required": self.independent_review_required,
+            "independent_review_satisfied": self.independent_review_satisfied,
             "reviewer_results": {k: v.to_dict() for k, v in self.reviewer_results.items()},
             "all_findings": [f.to_dict() for f in self.all_findings],
             "reconciliation": self.reconciliation.to_dict() if self.reconciliation else None,
@@ -489,6 +536,7 @@ def build_reviewer_candidates(
         LOCAL_INELIGIBLE_REVIEWER_ROLES,
         LOCAL_PROVIDER_IDS,
     )
+    from src.control_plane.agent_registry import AgentRegistry
 
     fallback_pool = provider_pool.select_candidates(
         task_category="code_heavy",
@@ -498,23 +546,51 @@ def build_reviewer_candidates(
     )
     if role_id in LOCAL_INELIGIBLE_REVIEWER_ROLES:
         fallback_pool = [c for c in fallback_pool if c not in LOCAL_PROVIDER_IDS]
-    ordered = [preferred] + [c for c in fallback_pool if c != preferred]
+
+    preferred_blocked = bool(_current_capacity_block(provider_pool, preferred, role=role_id))
+    if preferred_blocked:
+        ordered = [c for c in fallback_pool if c != preferred] + [preferred]
+    else:
+        ordered = [preferred] + [c for c in fallback_pool if c != preferred]
+
     if implementer:
-        independent = [c for c in ordered if c != implementer]
-        if len(independent) != len(ordered):
-            ordered = independent + [implementer]
+        reg = getattr(provider_pool, "registry", None) or AgentRegistry()
+        imp_p = reg.get_resource(implementer)
+        imp_fam = (imp_p.provider if imp_p else None) or implementer
+
+        def is_imp_or_same_family(cand: str) -> bool:
+            if cand == implementer:
+                return True
+            cp = reg.get_resource(cand)
+            cfam = (cp.provider if cp else None) or cand
+            return bool(imp_fam and cfam and imp_fam == cfam)
+
+        independent = [c for c in ordered if not is_imp_or_same_family(c)]
+        same_fam_or_imp = [c for c in ordered if is_imp_or_same_family(c)]
+        same_fam_not_self = [c for c in same_fam_or_imp if c != implementer]
+        ordered = independent + same_fam_not_self + ([implementer] if implementer in same_fam_or_imp else [])
     return ordered
 
 
-def _current_capacity_block(provider_pool: Optional[Any], candidate: str) -> Optional[str]:
+def _current_capacity_block(
+    provider_pool: Optional[Any],
+    candidate: str,
+    role: Optional[str] = None,
+) -> Optional[str]:
     """Names the reason a provider cannot serve a review right now, if any.
 
     Consults the pool's live availability rather than only asking whether the
-    executable exists, so a provider already known to be unreachable or
-    exhausted is skipped before an attempt is spent on it.
+    executable exists, so a provider already known to be unreachable,
+    exhausted, or role-excluded is skipped before an attempt is spent on it.
     """
     if provider_pool is None:
         return None
+    checker = getattr(provider_pool, "check_capacity_exclusion", None)
+    if callable(checker):
+        try:
+            return checker(candidate, role=role)
+        except Exception:
+            pass
     try:
         status = provider_pool.get_status(candidate)
     except Exception:
@@ -572,18 +648,21 @@ def invoke_reviewer_with_failover(
         # provider's state now rather than the state it had at planning time:
         # SLOPFIX-06 routed the correctness review to a provider whose
         # transport had already failed, spent the attempt, and got nothing back.
-        unavailable_reason = _current_capacity_block(provider_pool, candidate)
+        unavailable_reason = _current_capacity_block(provider_pool, candidate, role=role_id)
         if unavailable_reason:
             # Recorded, never hidden -- but a resource the pool already knows
             # cannot serve costs no opportunity. Asking an exhausted provider
             # the same question again is not an attempt, and must not deny one
             # to a healthy independent resource behind it.
+            now_iso = datetime.now(timezone.utc).isoformat()
             attempts_log.append(
                 {
                     "provider": candidate,
                     "resource_id": candidate,
                     "outcome": "unavailable",
                     "reason": unavailable_reason,
+                    "started_at": now_iso,
+                    "ended_at": now_iso,
                     "checked_at": "launch",
                     "consumed_launch_budget": False,
                 }
@@ -612,6 +691,7 @@ def invoke_reviewer_with_failover(
         # `task.dispatch_target`, which falls back to `actual_agent` for the
         # implementation paths that never set a dispatch target.
         task.dispatch_resource_id = candidate
+        attempt_started = datetime.now(timezone.utc).isoformat()
         agent_res = backend.execute(
             task=task,
             cwd=cwd,
@@ -619,14 +699,26 @@ def invoke_reviewer_with_failover(
             prompt_override=prompt_override,
             timeout_seconds=REVIEW_TIMEOUT_SECONDS,
         )
+        attempt_ended = datetime.now(timezone.utc).isoformat()
         attempt: Dict[str, Any] = {
             "provider": candidate,
             "resource_id": candidate,
+            "started_at": attempt_started,
+            "ended_at": attempt_ended,
             "duration_seconds": round(agent_res.duration_seconds, 3),
         }
         attempt.update(_attempt_execution_evidence(agent_res, provider_pool, candidate))
 
-        exhaustion = provider_pool.detect_exhaustion(candidate, agent_res) if provider_pool else None
+        exhaustion = None
+        if provider_pool:
+            try:
+                exhaustion = provider_pool.detect_exhaustion(
+                    candidate, agent_res, task_id=task.task_id if task else None, role=role_id
+                )
+            except TypeError:
+                exhaustion = provider_pool.detect_exhaustion(
+                    candidate, agent_res, task_id=task.task_id if task else None
+                )
         if exhaustion:
             # Discovering that a provider is out of capacity is not a review
             # opportunity: it told us nothing about the change, only about the
@@ -675,11 +767,14 @@ def invoke_reviewer_with_failover(
 
 def _unlaunched_attempt(candidate: str, reason: str) -> Dict[str, Any]:
     """Records a candidate that was never launched, and cost no budget."""
+    now_iso = datetime.now(timezone.utc).isoformat()
     return {
         "provider": candidate,
         "resource_id": candidate,
         "outcome": "unavailable",
         "reason": reason,
+        "started_at": now_iso,
+        "ended_at": now_iso,
         "checked_at": "launch",
         "consumed_launch_budget": False,
     }
@@ -917,6 +1012,7 @@ class ReviewRunner:
             duration = 0.0
 
             attempts_log: List[Dict[str, Any]] = []
+            winner: Optional[str] = None
             assigned_agent = (reviewer_agent_mapping or {}).get(role_id) or "claude_code"
             if backend:
                 assigned_agent = getattr(backend, "agent_id", assigned_agent)
@@ -940,22 +1036,18 @@ class ReviewRunner:
                     candidates = build_reviewer_candidates(
                         role_id, assigned_agent, provider_pool, task, implementer_resource_id
                     )
+                    resolver = getattr(provider_pool, "backend_resolver", None) or getattr(provider_pool, "_backend_resolver", None)
+                    backend_lookup = resolver if resolver is not None else (lambda aid: AgentBackendRegistry.get_backend(aid))
                     winner, agent_res, attempts_log = invoke_reviewer_with_failover(
                         role_id=role_id,
                         candidates=candidates,
                         task=task,
                         cwd=target_cwd,
                         prompt_override=brief,
-                        backend_lookup=lambda aid: AgentBackendRegistry.get_backend(aid),
+                        backend_lookup=backend_lookup,
                         provider_pool=provider_pool,
                     )
                     duration = agent_res.duration_seconds if agent_res else 0.0
-                    if winner and implementer_resource_id and winner == implementer_resource_id:
-                        # Failover exhausted every independent candidate and fell
-                        # through to the implementer. The review still runs, but a
-                        # change reviewed by its own author is not independently
-                        # reviewed, and the gate has to say so.
-                        non_independent_roles.append(role_id)
                     if winner and agent_res:
                         raw_output = agent_res.stdout
                     else:
@@ -976,6 +1068,22 @@ class ReviewRunner:
                     else:
                         err_message = agent_res.stderr or agent_res.error_message
                         has_failure = True
+
+            if custom_reviewer_fn:
+                effective_reviewer = None
+            else:
+                effective_reviewer = winner or (getattr(backend, "agent_id", None) if backend else assigned_agent)
+            if effective_reviewer:
+                from src.control_plane.agent_registry import AgentRegistry
+                reg = getattr(provider_pool, "registry", None) or AgentRegistry()
+                imp_p = reg.get_resource(implementer_resource_id) if implementer_resource_id else None
+                imp_fam = (imp_p.provider if imp_p else None) or implementer_resource_id
+                rev_p = reg.get_resource(effective_reviewer)
+                rev_fam = (rev_p.provider if rev_p else None) or effective_reviewer
+                is_self = bool(implementer_resource_id and effective_reviewer == implementer_resource_id)
+                is_same_family = bool(imp_fam and rev_fam and imp_fam == rev_fam)
+                if (is_self or is_same_family) and role_id not in non_independent_roles:
+                    non_independent_roles.append(role_id)
 
             findings, parse_err, is_valid_output = parse_and_validate_findings(raw_output, role_id)
             if parse_err:
@@ -1051,7 +1159,34 @@ class ReviewRunner:
             elif reconciliation.confirmed or reconciliation.likely:
                 requires_remediation = True
 
+        from src.control_plane.agent_registry import AgentRegistry
+        reg = getattr(provider_pool, "registry", None) or AgentRegistry()
+        imp_p = reg.get_resource(implementer_resource_id) if implementer_resource_id else None
+        imp_family = (imp_p.provider if imp_p else None) or implementer_resource_id
+        reviewing_provider_families: Dict[str, str] = {}
+        for rid, sres in reviewer_results.items():
+            if custom_reviewer_fn:
+                reviewing_provider_families[rid] = "custom_reviewer"
+            else:
+                eff_res = (sres.attempts[-1].get("resource_id") if sres.attempts else None) or (
+                    getattr(sres.agent_result, "agent_id", None) if sres.agent_result else None
+                ) or (reviewer_agent_mapping or {}).get(rid)
+                if eff_res:
+                    rp = reg.get_resource(eff_res)
+                    reviewing_provider_families[rid] = (rp.provider if rp else None) or eff_res
+
+        preserve_indep = getattr(
+            getattr(provider_pool, "policy", None), "preserve_independent_review", True
+        )
+        independent_review_satisfied = True
+        if not custom_reviewer_fn and preserve_indep and implementer_resource_id:
+            if non_independent_roles or has_failure:
+                independent_review_satisfied = False
+
         overall_status = "review_failure" if has_failure else ("has_findings" if all_findings else "clean")
+        if not independent_review_satisfied and preserve_indep:
+            if overall_status in ("clean", "has_findings"):
+                overall_status = "independent_review_unavailable"
 
         return ReviewCycleResult(
             cycle_index=cycle_index,
@@ -1061,6 +1196,10 @@ class ReviewRunner:
             status=overall_status,
             requires_remediation=requires_remediation,
             non_independent_roles=non_independent_roles,
+            implementing_provider_family=imp_family,
+            reviewing_provider_families=reviewing_provider_families,
+            independent_review_required=preserve_indep,
+            independent_review_satisfied=independent_review_satisfied,
         )
 
     @classmethod

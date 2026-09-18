@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from src.control_plane.atomic_io import atomic_write_text
+from src.control_plane.atomic_io import atomic_write_json, atomic_write_text, safe_load_json
 from src.control_plane.factory.dispatcher import DispatchOutcome, MarathonDispatcherAdapter
 from src.control_plane.factory.portfolio import FactoryPolicy, select
 from src.control_plane.factory.repo_proposal import (
@@ -64,6 +64,7 @@ class FactorySupervisor:
         max_backoff_seconds: float = DEFAULT_MAX_BACKOFF_SECONDS,
         state_dir: Optional[Union[str, Path]] = None,
         lock: Optional[Any] = None,
+        max_work_items: Optional[int] = None,
     ):
         self.state_store = state_store
         self.work_item_store = work_item_store
@@ -84,6 +85,13 @@ class FactorySupervisor:
         self._stop_requested: Optional[str] = None
         self.instance_id: str = self._resolve_instance_id()
         self._state_record = self.state_store.load()
+        # Apply bounded execution policy from constructor (CLI/service args).
+        if max_work_items is not None:
+            self._state_record.run_mode = "bounded"
+            self._state_record.max_work_items = max_work_items
+            if self._state_record.bounded_run_started_at is None:
+                self._state_record.bounded_run_started_at = clock().isoformat()
+            self._persist()
         if self._state_record.created_at is None:
             self._state_record.created_at = clock().isoformat()
 
@@ -121,6 +129,457 @@ class FactorySupervisor:
 
     def _now_iso(self) -> str:
         return self._clock().isoformat()
+
+    def _bounded_limit_reached(self) -> bool:
+        """True when the bounded execution budget is exhausted."""
+        if self._state_record.run_mode != "bounded":
+            return False
+        if self._state_record.max_work_items is None:
+            return False
+        return self._state_record.work_items_dispatched >= self._state_record.max_work_items
+
+    def _collect_provider_attempts(self, wid: str) -> List[Dict[str, Any]]:
+        """Extract durable provider attempt history for a work item from task run evidence."""
+        attempts: List[Dict[str, Any]] = []
+        target_repo = self._state_record.target_repository
+        run_dirs = []
+        if target_repo:
+            target_path = Path(target_repo)
+            run_dirs.append(target_path / ".task_runs" / wid)
+            run_dirs.append(target_path / ".task_runs" / f"FACTORY-{wid}")
+        if self._state_dir:
+            run_dirs.append(self._state_dir / ".task_runs" / wid)
+            run_dirs.append(self._state_dir / ".task_runs" / f"FACTORY-{wid}")
+            run_dirs.append(self._state_dir / "work_items" / wid / ".task_runs")
+
+        run_dir = None
+        for cand in run_dirs:
+            if cand.is_dir():
+                run_dir = cand
+                break
+
+        if run_dir is not None and run_dir.is_dir():
+            # 1. Implementation attempts
+            impl_dir = run_dir / "implementation" / "attempts"
+            if not impl_dir.is_dir():
+                impl_dir = run_dir / "attempts"
+            if impl_dir.is_dir():
+                for p in sorted(impl_dir.iterdir()):
+                    if not p.is_dir():
+                        continue
+                    rec_file = p / "attempt_record.json"
+                    res_file = p / "result.json"
+                    rec = safe_load_json(rec_file) if rec_file.is_file() else {}
+                    res = safe_load_json(res_file) if res_file.is_file() else {}
+                    if not rec and not res:
+                        continue
+                    resource_id = rec.get("resource_id") or res.get("agent_id")
+                    if not resource_id and "-" in p.name:
+                        parts = p.name.split("-", 1)
+                        if parts[1]:
+                            resource_id = parts[1]
+                    resource_id = resource_id or "unknown"
+                    duration = res.get("duration_seconds") if res.get("duration_seconds") is not None else rec.get("duration_seconds")
+                    ended_at = res.get("timestamp") or rec.get("timestamp") or res.get("ended_at") or rec.get("ended_at")
+                    started_at = res.get("started_at") or rec.get("started_at")
+                    if not started_at and ended_at and duration is not None:
+                        try:
+                            end_dt = datetime.fromisoformat(ended_at)
+                            started_at = (end_dt - timedelta(seconds=duration)).isoformat()
+                        except Exception:
+                            started_at = None
+
+                    outcome = None
+                    if rec.get("success") or res.get("success"):
+                        outcome = "implementation succeeded"
+                    elif rec.get("failure_class"):
+                        outcome = rec["failure_class"]
+                    elif res.get("error_message"):
+                        outcome = "failed"
+                    else:
+                        outcome = "failed"
+
+                    capacity_after = rec.get("capacity_after", {}).get(resource_id)
+                    reason = res.get("error_message") or rec.get("failure_class") or res.get("stderr")
+
+                    att: Dict[str, Any] = {
+                        "work_item_id": wid,
+                        "resource_id": resource_id,
+                        "role": "implementation",
+                    }
+                    if started_at:
+                        att["started_at"] = started_at
+                    if ended_at:
+                        att["ended_at"] = ended_at
+                    if duration is not None:
+                        att["duration_seconds"] = duration
+                    if outcome:
+                        att["outcome"] = outcome
+                    if capacity_after:
+                        att["provider_state_after"] = capacity_after
+                    if reason:
+                        att["reason"] = reason
+                    attempts.append(att)
+
+            # 2. Review attempts
+            rev_dir = run_dir / "reviews"
+            if rev_dir.is_dir():
+                for p in sorted(rev_dir.iterdir()):
+                    if p.is_dir():
+                        res_file = p / "result.json"
+                        if res_file.is_file():
+                            r_data = safe_load_json(res_file)
+                            failover = r_data.get("failover") or {}
+                            failover_attempts = failover.get("attempts")
+                            if failover_attempts:
+                                for fa in failover_attempts:
+                                    res_id = fa.get("resource_id") or fa.get("provider") or "unknown"
+                                    fo_outcome = fa.get("outcome") or fa.get("failure_class") or "failed"
+                                    fo_reason = fa.get("failure_class") or fa.get("error_message")
+                                    att = {
+                                        "work_item_id": wid,
+                                        "resource_id": res_id,
+                                        "role": "review",
+                                        "outcome": fo_outcome,
+                                    }
+                                    if fa.get("started_at"):
+                                        att["started_at"] = fa["started_at"]
+                                    if fa.get("ended_at"):
+                                        att["ended_at"] = fa["ended_at"]
+                                    elif fa.get("checked_at"):
+                                        att["ended_at"] = fa["checked_at"]
+                                    if fa.get("duration_seconds") is not None:
+                                        att["duration_seconds"] = fa.get("duration_seconds")
+                                    if fo_reason:
+                                        att["reason"] = fo_reason
+                                    attempts.append(att)
+                            else:
+                                res_id = r_data.get("resource_id") or r_data.get("assigned_resource_id") or "unknown"
+                                is_indep = r_data.get("independence", {}).get("independent", False)
+                                is_success = r_data.get("process", {}).get("success", False) or r_data.get("status") in ("completed", "findings_detected")
+                                r_outcome = "independent review" if (is_indep and is_success) else (r_data.get("disposition") or r_data.get("status") or "completed")
+                                att = {
+                                    "work_item_id": wid,
+                                    "resource_id": res_id,
+                                    "role": "review",
+                                    "outcome": r_outcome,
+                                }
+                                if r_data.get("completed_at"):
+                                    att["ended_at"] = r_data["completed_at"]
+                                    if r_data.get("duration_seconds") is not None:
+                                        try:
+                                            c_dt = datetime.fromisoformat(r_data["completed_at"])
+                                            att["started_at"] = (c_dt - timedelta(seconds=r_data["duration_seconds"])).isoformat()
+                                        except Exception:
+                                            pass
+                                if r_data.get("duration_seconds") is not None:
+                                    att["duration_seconds"] = r_data["duration_seconds"]
+                                attempts.append(att)
+
+            # 3. Remediation attempts
+            rem_dir = run_dir / "remediation"
+            if rem_dir.is_dir():
+                for p in sorted(rem_dir.iterdir()):
+                    if not p.is_dir():
+                        continue
+                    res_file = p / "result.json"
+                    fail_file = p / "failure.json"
+                    res = safe_load_json(res_file) if res_file.is_file() else {}
+                    fail = safe_load_json(fail_file) if fail_file.is_file() else {}
+                    if not res and not fail:
+                        continue
+                    res_id = fail.get("resource_id") or res.get("agent_id") or "unknown"
+                    ended_at = res.get("timestamp") or res.get("ended_at") or fail.get("timestamp") or fail.get("ended_at")
+                    started_at = res.get("started_at") or fail.get("started_at")
+                    duration = res.get("duration_seconds") if res.get("duration_seconds") is not None else fail.get("duration_seconds")
+                    if not started_at and ended_at and duration is not None:
+                        try:
+                            e_dt = datetime.fromisoformat(ended_at)
+                            started_at = (e_dt - timedelta(seconds=duration)).isoformat()
+                        except Exception:
+                            pass
+                    if res.get("success"):
+                        rem_outcome = "remediation succeeded"
+                        rem_reason = None
+                    else:
+                        rem_outcome = fail.get("failure_class") or fail.get("provider_failure_class") or "remediation failed"
+                        rem_reason = res.get("error_message") or fail.get("failure_class")
+                    att = {
+                        "work_item_id": wid,
+                        "resource_id": res_id,
+                        "role": "remediation",
+                        "outcome": rem_outcome,
+                    }
+                    if started_at:
+                        att["started_at"] = started_at
+                    if ended_at:
+                        att["ended_at"] = ended_at
+                    if duration is not None:
+                        att["duration_seconds"] = duration
+                    if rem_reason:
+                        att["reason"] = rem_reason
+                    attempts.append(att)
+
+            # 4. Verification
+            verif_file = run_dir / "verification_result.json"
+            if not verif_file.is_file():
+                verif_file = run_dir / "verification_plan.json"
+            if verif_file.is_file():
+                v_data = safe_load_json(verif_file)
+                v_status = v_data.get("status") or v_data.get("overall_status")
+                if v_status:
+                    att = {
+                        "work_item_id": wid,
+                        "role": "verification",
+                        "outcome": "passed" if str(v_status).lower() in ("passed", "success", "completed") else str(v_status).lower(),
+                    }
+                    if v_data.get("started_at"):
+                        att["started_at"] = v_data["started_at"]
+                    ended_at = v_data.get("completed_at") or v_data.get("ended_at") or v_data.get("timestamp")
+                    if ended_at:
+                        att["ended_at"] = ended_at
+                    if v_data.get("duration_seconds") is not None:
+                        att["duration_seconds"] = v_data["duration_seconds"]
+                    attempts.append(att)
+
+            def _attempt_sort_key(att: Dict[str, Any]) -> str:
+                return str(att.get("started_at") or att.get("ended_at") or "9999-99-99")
+
+            attempts.sort(key=_attempt_sort_key)
+
+        # Fallback if no disk evidence was found: check work item blocked reason
+        if not attempts:
+            try:
+                item = self.work_item_store.load(wid)
+                reason = item.admission_blocked_reason or ""
+                if "tried " in reason:
+                    prov_list = reason.split("tried", 1)[1].strip()
+                    providers = [pr.strip().rstrip(".") for pr in prov_list.split(",") if pr.strip()]
+                    for pr in providers:
+                        attempts.append({
+                            "work_item_id": wid,
+                            "resource_id": pr,
+                            "role": "implementation",
+                            "outcome": "unavailable/exhausted",
+                            "reason": reason,
+                        })
+            except Exception:
+                pass
+
+        return attempts
+
+    def _bounded_stop(self, reason: str, now_iso: str) -> None:
+        """Complete a bounded run: persist reason, write report, transition to STOPPED."""
+        self._state_record.bounded_run_stop_reason = reason
+        # Ensure completion timestamp is at least as late as any recorded provider activity
+        for wid in self._state_record.bounded_dispatched_ids:
+            for att in self._collect_provider_attempts(wid):
+                att_end = att.get("ended_at")
+                if att_end and att_end > now_iso:
+                    now_iso = att_end
+        self._state_record.bounded_run_completed_at = now_iso
+        self._state_record.clear_current_dispatch()
+        self._state_record.transition_to(
+            SupervisorState.STOPPED, reason=reason, at=now_iso
+        )
+        self._state_record.stopped_reason = reason
+        self._persist()
+        # Proactively mark process.json as stopped if it exists
+        if self._state_dir is not None:
+            proc_file = self._state_dir / "campaign" / "process.json"
+            if proc_file.is_file():
+                try:
+                    proc_data = safe_load_json(proc_file)
+                    if proc_data and proc_data.get("status") != "stopped":
+                        proc_data["status"] = "stopped"
+                        atomic_write_json(proc_file, proc_data)
+                except Exception:
+                    pass
+        self._write_bounded_report()
+
+    @staticmethod
+    def _bounded_stop_reason_for(
+        dispatch_result: DispatchOutcome, item: WorkItem
+    ) -> str:
+        """Derive a normalized stop reason from the dispatch outcome."""
+        if dispatch_result.success:
+            return "bounded_work_item_completed"
+        if dispatch_result.requires_authority:
+            return "bounded_work_item_authority_blocked"
+        if dispatch_result.provider_unavailable:
+            return "bounded_no_eligible_provider"
+        if dispatch_result.next_work_item_state == WorkItemState.BLOCKED:
+            return "bounded_work_item_blocked"
+        if dispatch_result.next_work_item_state == WorkItemState.DEFERRED:
+            return "bounded_work_item_deferred"
+        if dispatch_result.next_work_item_state == WorkItemState.FAILED:
+            return "bounded_work_item_failed"
+        return "max_work_items_reached"
+
+    def _write_bounded_report(self) -> None:
+        """Write deterministic JSON and Markdown summaries when a bounded run completes."""
+        if self._state_dir is None:
+            return
+        import json as json_mod
+
+        reports_dir = self._state_dir / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        started = self._state_record.bounded_run_started_at or ""
+        completed = self._state_record.bounded_run_completed_at or ""
+        ts = completed.replace(":", "").replace("+", "").replace("-", "")[:15] or "unknown"
+
+        duration_seconds = None
+        if started and completed:
+            try:
+                s_dt = datetime.fromisoformat(started)
+                c_dt = datetime.fromisoformat(completed)
+                duration_seconds = max(0.0, (c_dt - s_dt).total_seconds())
+            except Exception:
+                duration_seconds = None
+
+        # Gather provider attempt chain from dispatch history.
+        provider_chain = []
+        for entry in self._state_record.dispatch_history:
+            if entry.get("work_item_id") in self._state_record.bounded_dispatched_ids:
+                provider_chain.append(entry)
+
+        # Collect detailed provider attempts across all bounded items
+        all_provider_attempts: List[Dict[str, Any]] = []
+        for wid in self._state_record.bounded_dispatched_ids:
+            all_provider_attempts.extend(self._collect_provider_attempts(wid))
+
+        report_data = {
+            "schema": "howlplane.factory.bounded_run_report/v1",
+            "run_mode": self._state_record.run_mode,
+            "max_work_items": self._state_record.max_work_items,
+            "work_items_dispatched": self._state_record.work_items_dispatched,
+            "bounded_dispatched_ids": list(self._state_record.bounded_dispatched_ids),
+            "bounded_run_started_at": started,
+            "bounded_run_completed_at": completed,
+            "duration_seconds": duration_seconds,
+            "bounded_run_stop_reason": self._state_record.bounded_run_stop_reason,
+            "target_repository": self._state_record.target_repository,
+            "target_mode": self._state_record.target_mode,
+            "objective": self._state_record.objective,
+            "supervisor_id": self._state_record.supervisor_id,
+            "instance_id": self.instance_id,
+            "failure_count": self._state_record.failure_count,
+            "merges_count": self._state_record.merges_count,
+            "provider_attempts": all_provider_attempts,
+            "provider_dispatch_chain": provider_chain,
+            "recent_completed": list(self._state_record.recent_completed),
+            "recent_failed": list(self._state_record.recent_failed),
+            "recent_parked": list(self._state_record.recent_parked),
+            "stopped_reason": self._state_record.stopped_reason,
+        }
+
+        # Enrich with per-item final state from work item store.
+        work_item_states = {}
+        for wid in self._state_record.bounded_dispatched_ids:
+            try:
+                item = self.work_item_store.load(wid)
+                work_item_states[wid] = {
+                    "state": item.state,
+                    "origin": item.origin,
+                    "title": item.title,
+                    "attempts": item.attempts,
+                    "admission_blocked_reason": item.admission_blocked_reason,
+                }
+            except Exception:
+                work_item_states[wid] = {"state": "unknown", "error": "load_failed"}
+        report_data["work_item_final_states"] = work_item_states
+
+        json_path = reports_dir / f"bounded_run_{ts}.json"
+        md_path = reports_dir / f"bounded_run_{ts}.md"
+
+        try:
+            atomic_write_text(json_path, json_mod.dumps(report_data, indent=2, default=str) + "\n")
+        except Exception:
+            pass
+
+        # Deterministic Markdown summary.
+        lines = [
+            "# HowlPlane Factory Bounded Run Report",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| Run mode | {self._state_record.run_mode} |",
+            f"| Max work items | {self._state_record.max_work_items} |",
+            f"| Work items dispatched | {self._state_record.work_items_dispatched} |",
+            f"| Started | {started} |",
+            f"| Completed | {completed} |",
+        ]
+        if duration_seconds is not None:
+            from src.control_plane.progress import format_elapsed
+            lines.append(f"| Duration | {format_elapsed(duration_seconds)} |")
+        lines.extend([
+            f"| Stop reason | {self._state_record.bounded_run_stop_reason} |",
+            f"| Target repository | {self._state_record.target_repository} |",
+            f"| Merges | {self._state_record.merges_count} |",
+            f"| Failures | {self._state_record.failure_count} |",
+            "",
+            "## Dispatched Work Items",
+            "",
+        ])
+        for wid in self._state_record.bounded_dispatched_ids:
+            ws = work_item_states.get(wid, {})
+            lines.append(f"### {wid}")
+            lines.append("")
+            lines.append(f"- **State:** {ws.get('state', 'unknown')}")
+            lines.append(f"- **Origin:** {ws.get('origin', 'unknown')}")
+            lines.append(f"- **Title:** {ws.get('title', 'unknown')}")
+            lines.append(f"- **Attempts:** {ws.get('attempts', 'unknown')}")
+            if ws.get("admission_blocked_reason"):
+                lines.append(f"- **Blocked reason:** {ws['admission_blocked_reason']}")
+            lines.append("")
+
+        if all_provider_attempts:
+            lines.append("## Provider Attempt Chain")
+            lines.append("")
+            for wid in self._state_record.bounded_dispatched_ids:
+                item_attempts = [a for a in all_provider_attempts if a.get("work_item_id") == wid]
+                lines.append(f"### {wid}")
+                lines.append("")
+                if not item_attempts:
+                    lines.append("- No provider attempts recorded.")
+                    lines.append("")
+                else:
+                    for idx, att in enumerate(item_attempts, 1):
+                        name = att.get("resource_id") or att.get("role") or "unknown"
+                        lines.append(f"{idx}. {name}")
+                        if att.get("role"):
+                            lines.append(f"   - role: {att['role']}")
+                        if att.get("started_at"):
+                            lines.append(f"   - started: {att['started_at']}")
+                        if att.get("ended_at"):
+                            lines.append(f"   - ended: {att['ended_at']}")
+                        if att.get("outcome"):
+                            lines.append(f"   - outcome: {att['outcome']}")
+                        if att.get("provider_state_after"):
+                            lines.append(f"   - provider state after attempt: {att['provider_state_after']}")
+                        if att.get("reason"):
+                            lines.append(f"   - failure/retry reason: {att['reason']}")
+                        lines.append("")
+                ws = work_item_states.get(wid, {})
+                final_outcome = ws.get("admission_blocked_reason") or ws.get("state")
+                if final_outcome:
+                    lines.append("Final work-item outcome:")
+                    lines.append(f"{final_outcome}")
+                    lines.append("")
+
+        if provider_chain:
+            lines.append("## Provider Dispatch Chain")
+            lines.append("")
+            for entry in provider_chain:
+                lines.append(f"- Dispatch `{entry.get('dispatch_id')}` at {entry.get('at')}")
+            lines.append("")
+
+        try:
+            atomic_write_text(md_path, "\n".join(lines) + "\n")
+        except Exception:
+            pass
+
 
     def _reload_state(self) -> None:
         """Reload persisted state so external stop commands are visible."""
@@ -161,6 +620,13 @@ class FactorySupervisor:
             "recent_parked": self._state_record.recent_parked,
             "dispatch_history_count": len(self._state_record.dispatch_history),
             "transition_history_count": len(self._state_record.transition_history),
+            "run_mode": self._state_record.run_mode,
+            "max_work_items": self._state_record.max_work_items,
+            "work_items_dispatched": self._state_record.work_items_dispatched,
+            "bounded_run_started_at": self._state_record.bounded_run_started_at,
+            "bounded_run_completed_at": self._state_record.bounded_run_completed_at,
+            "bounded_run_stop_reason": self._state_record.bounded_run_stop_reason,
+            "bounded_dispatched_ids": list(self._state_record.bounded_dispatched_ids),
             "admission_decisions_count": len(self._state_record.admission_decisions),
             "proposals_awaiting_authority": [
                 p.proposal_id for p in self.repo_proposal_store.list_awaiting_authority()
@@ -425,11 +891,21 @@ class FactorySupervisor:
             origin=item.origin,
             repository=item.repository,
         )
+        # Bounded execution: count distinct work items committed to dispatch.
+        if self._state_record.run_mode == "bounded":
+            self._state_record.work_items_dispatched += 1
+            if item.work_item_id not in self._state_record.bounded_dispatched_ids:
+                self._state_record.bounded_dispatched_ids.append(item.work_item_id)
         self._state_record.transition_to(SupervisorState.DISPATCHING, reason="item_selected", at=now_iso)
         self._persist()
-        dispatch_result = self.dispatcher.dispatch(
-            item, dispatch_id=dispatch_id, task_id=task_id
-        )
+        try:
+            dispatch_result = self.dispatcher.dispatch(
+                item, dispatch_id=dispatch_id, task_id=task_id, run_mode=self._state_record.run_mode
+            )
+        except TypeError:
+            dispatch_result = self.dispatcher.dispatch(
+                item, dispatch_id=dispatch_id, task_id=task_id
+            )
         if (
             dispatch_result.success
             and dispatch_result.git_record
@@ -583,6 +1059,12 @@ class FactorySupervisor:
         if state == SupervisorState.STOPPED:
             return TickResult(state=state, reason="stopped")
 
+        if self._bounded_limit_reached():
+            reason = self._state_record.bounded_run_stop_reason or "max_work_items_reached"
+            if self._state_record.state != SupervisorState.STOPPED:
+                self._bounded_stop(reason, now_iso)
+            return TickResult(state=self._state_record.state, reason=reason)
+
         # Persist the next wake time *before* doing any work.  If the process
         # crashes mid-tick, the next supervisor knows when it was due.
         next_wake = self._ensure_next_wake_persisted(now, state)
@@ -611,10 +1093,11 @@ class FactorySupervisor:
             dispatch_result = self._dispatch(selection.item, now_iso)
             if dispatch_result is None:
                 # Missing item: retain evidence and stop/park.
+                stop_at = self._now_iso()
                 self._state_record.transition_to(
                     SupervisorState.STOPPED,
                     reason="missing_item_at_dispatch",
-                    at=now_iso,
+                    at=stop_at,
                 )
                 self._state_record.stopped_reason = "missing_item"
                 self._persist()
@@ -625,16 +1108,36 @@ class FactorySupervisor:
                     reason="missing_item_at_dispatch",
                 )
 
-            next_state, reason = self._apply_dispatch_result(selection.item, dispatch_result, now_iso)
+            after_dispatch_now = self._now()
+            after_dispatch_iso = self._now_iso()
+
+            next_state, reason = self._apply_dispatch_result(selection.item, dispatch_result, after_dispatch_iso)
             self._state_record.clear_current_dispatch()
+
+            # Bounded execution check: stop instead of continuing if the
+            # work-item budget is exhausted. The current item's lifecycle is
+            # already finished (evidence persisted, work-item state updated)
+            # so this is a safe point to stop.
+            if self._bounded_limit_reached():
+                stop_reason = self._bounded_stop_reason_for(
+                    dispatch_result, selection.item
+                )
+                self._bounded_stop(stop_reason, after_dispatch_iso)
+                return TickResult(
+                    state=self._state_record.state,
+                    selected_work_item_id=selection.item.work_item_id,
+                    next_wake_at=None,
+                    reason=stop_reason,
+                )
+
             try:
-                self._state_record.transition_to(next_state, reason=reason, at=now_iso)
+                self._state_record.transition_to(next_state, reason=reason, at=after_dispatch_iso)
             except InvalidSupervisorStateTransitionError:
                 self._state_record.failure_count += 1
                 self._state_record.transition_to(
-                    SupervisorState.BACKOFF_AFTER_FAILURE, reason="dispatch_state_rejected", at=now_iso
+                    SupervisorState.BACKOFF_AFTER_FAILURE, reason="dispatch_state_rejected", at=after_dispatch_iso
                 )
-            next_wake = self._ensure_next_wake_persisted(now)
+            next_wake = self._ensure_next_wake_persisted(after_dispatch_now)
             return TickResult(
                 state=self._state_record.state,
                 selected_work_item_id=selection.item.work_item_id,
@@ -671,6 +1174,12 @@ class FactorySupervisor:
         while True:
             self._reload_state()
             if self._state_record.state == SupervisorState.STOPPED:
+                break
+            if self._bounded_limit_reached():
+                self._bounded_stop(
+                    self._state_record.bounded_run_stop_reason or "max_work_items_reached",
+                    self._now_iso(),
+                )
                 break
             if self._stop_requested:
                 self.stop(self._stop_requested)
