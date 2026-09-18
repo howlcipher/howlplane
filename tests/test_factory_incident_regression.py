@@ -25,7 +25,7 @@ from typing import Any, Dict
 
 import pytest
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     AgentExecutionResult,
     FakeAgentBackend,
     LAUNCH_OUTCOME_KEY,
@@ -33,18 +33,18 @@ from src.control_plane.agent_execution import (
     TIMEOUT_SOURCE_HARNESS,
     TIMEOUT_SOURCE_KEY,
 )
-from src.control_plane.agent_registry import AgentProfile, AgentRegistry
-from src.control_plane.factory.dispatcher import DispatchOutcome
-from src.control_plane.factory.supervisor import FactorySupervisor
-from src.control_plane.factory.supervisor_state import SupervisorState
-from src.control_plane.factory.work_item import WorkItem, WorkItemOrigin, WorkItemState, WorkItemStore
-from src.control_plane.resource_models import EconomicClass, ResourceLocality
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.agent_registry import AgentProfile, AgentRegistry
+from howlplane.control_plane.factory.dispatcher import DispatchOutcome
+from howlplane.control_plane.factory.supervisor import FactorySupervisor
+from howlplane.control_plane.factory.supervisor_state import SupervisorState
+from howlplane.control_plane.factory.work_item import WorkItem, WorkItemOrigin, WorkItemState, WorkItemStore
+from howlplane.control_plane.resource_models import EconomicClass, ResourceLocality
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
     ProviderFailureClass,
 )
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.task_spec import TaskSpec
 from tests._factory_test_helpers import make_supervisor
 
 

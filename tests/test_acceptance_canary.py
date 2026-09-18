@@ -18,14 +18,14 @@ from pathlib import Path
 
 import pytest
 
-from src.control_plane.git_integration import (
+from howlplane.control_plane.git_integration import (
     PREMATURE_MERGE_SUCCESS_PATTERN,
     GitIntegrationError,
     GitIntegrationExecutor,
 )
-from src.control_plane.synthesis.campaign_state import GitIntegrationRecord
-from src.control_plane.synthesis.marathon import MarathonDogfoodEngine
-from src.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus, ProviderPoolManager
+from howlplane.control_plane.synthesis.campaign_state import GitIntegrationRecord
+from howlplane.control_plane.synthesis.marathon import MarathonDogfoodEngine
+from howlplane.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus, ProviderPoolManager
 from tests._dogfood_test_helpers import (
     FakeOrchestrator,
     ScriptedRunner,

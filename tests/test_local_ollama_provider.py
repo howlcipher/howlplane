@@ -17,26 +17,26 @@ from typing import Dict
 
 import pytest
 
-from src.control_plane.git_integration import PR_MERGE_FIELDS
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.git_integration import PR_MERGE_FIELDS
+from howlplane.control_plane.agent_execution import (
     AgentBackendRegistry,
     OllamaAvailabilityReason,
     OllamaDiagnostics,
     OllamaLocalBackend,
     diagnose_ollama,
 )
-from src.control_plane.authority_envelope import create_envelope
-from src.control_plane.authority_profile import get_profile
-from src.control_plane.git_integration import GitIntegrationExecutor
-from src.control_plane.locking import LocalInferenceLock
-from src.control_plane.synthesis.campaign_state import DurableCampaignState
-from src.control_plane.synthesis.marathon import MarathonDogfoodEngine
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.authority_envelope import create_envelope
+from howlplane.control_plane.authority_profile import get_profile
+from howlplane.control_plane.git_integration import GitIntegrationExecutor
+from howlplane.control_plane.locking import LocalInferenceLock
+from howlplane.control_plane.synthesis.campaign_state import DurableCampaignState
+from howlplane.control_plane.synthesis.marathon import MarathonDogfoodEngine
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
     is_task_local_eligible,
 )
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.task_spec import TaskSpec
 from tests._dogfood_test_helpers import FakeOrchestrator
 
 
@@ -329,7 +329,7 @@ def test_low_risk_task_includes_local_when_cloud_exhausted():
 
 
 def test_engineering_failure_is_not_provider_exhaustion():
-    from src.control_plane.agent_execution import AgentExecutionResult
+    from howlplane.control_plane.agent_execution import AgentExecutionResult
     pool = ProviderPoolManager()
     pool.set_status("local_ollama", ProviderAvailabilityStatus.AVAILABLE)
     bad_result = AgentExecutionResult(
@@ -343,7 +343,7 @@ def test_engineering_failure_is_not_provider_exhaustion():
 
 
 def test_resource_constrained_is_not_session_exhausted():
-    from src.control_plane.agent_execution import AgentExecutionResult
+    from howlplane.control_plane.agent_execution import AgentExecutionResult
     pool = ProviderPoolManager()
     pool.set_status("local_ollama", ProviderAvailabilityStatus.AVAILABLE)
     constrained = AgentExecutionResult(
@@ -398,7 +398,7 @@ def test_resume_with_explicit_benchmarks_extends_scope_not_overrides(tmp_path):
 
 
 def test_dogfood_status_is_read_only(tmp_path, monkeypatch, capsys):
-    from src.control_plane import cli
+    from howlplane.control_plane import cli
 
     engine = MarathonDogfoodEngine(base_output_dir=tmp_path / "dogfood", campaign_dir=tmp_path / "runs")
     report = engine.run_marathon(benchmarks=["notes"], max_iterations=1)
@@ -420,7 +420,7 @@ def test_dogfood_status_is_read_only(tmp_path, monkeypatch, capsys):
 
 
 def test_dogfood_status_unknown_campaign_fails_closed(tmp_path, capsys):
-    from src.control_plane import cli
+    from howlplane.control_plane import cli
     rc = cli.main(["dogfood", "--status", "DOES-NOT-EXIST", "--campaign-dir", str(tmp_path / "runs")])
     assert rc == 1
 
@@ -428,7 +428,7 @@ def test_dogfood_status_unknown_campaign_fails_closed(tmp_path, capsys):
 # --- Phase 3: `ai local setup` -----------------------------------------------
 
 def test_local_setup_reports_fail_when_ollama_missing(monkeypatch, capsys):
-    from src.control_plane import cli
+    from howlplane.control_plane import cli
     import shutil as real_shutil
 
     monkeypatch.delenv("HOWLPLANE_LOCAL_AUTO_INSTALL", raising=False)
@@ -535,7 +535,7 @@ def test_local_only_continuation_budget_is_finite(tmp_path, monkeypatch):
     engine = _local_only_engine(tmp_path, monkeypatch)
     # Prevent ambient low-RAM conditions from short-circuiting the budget test.
     monkeypatch.setattr(
-        "src.control_plane.synthesis.marathon.read_available_memory_gib", lambda: 64.0
+        "howlplane.control_plane.synthesis.marathon.read_available_memory_gib", lambda: 64.0
     )
     state = DurableCampaignState(campaign_id="TEST-LOCAL-ONLY-BUDGET")
     state.ensure_local_model_defaults()

@@ -22,8 +22,8 @@ import json
 
 import pytest
 
-from src.control_plane.durable_store import ArtifactIdentityError
-from src.control_plane.factory.work_item import (
+from howlplane.control_plane.durable_store import ArtifactIdentityError
+from howlplane.control_plane.factory.work_item import (
     WORK_ITEM_TRANSITIONS,
     InvalidWorkItemTransitionError,
     WorkItem,

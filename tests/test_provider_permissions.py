@@ -10,29 +10,29 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import pytest
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     TOOL_PERMISSION_DENIED,
     TOOL_PERMISSION_KEY,
     ClaudeCodeBackend,
 )
-from src.control_plane.orchestrator import (
+from howlplane.control_plane.orchestrator import (
     FAILURE_CLASS_PROVIDER_UNAVAILABLE,
     GovernedTaskOrchestrator,
 )
-from src.control_plane.provider_execution_profile import (
+from howlplane.control_plane.provider_execution_profile import (
     MUTATION_PERMISSION_MODE,
     READ_ONLY_TOOLS,
     command_to_bash_specifier,
 )
-from src.control_plane.resource_models import (
+from howlplane.control_plane.resource_models import (
     ProviderFailureClass,
     ReadinessStatus,
 )
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderPoolManager,
     TASK_SUITABILITY_PREFERENCES,
 )
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.task_spec import TaskSpec
 from src.infrastructure.config_loader import (
     ProviderExecutionProfileSettings,
     ProviderResourceSettings,
@@ -256,8 +256,8 @@ def _go_project(tmp_path):
 
 
 def _profile_for(tmp_path, role, task=None, operator_settings=None):
-    from src.control_plane.project_adapter import ProjectAdapter
-    from src.control_plane.provider_execution_profile import build_execution_profile
+    from howlplane.control_plane.project_adapter import ProjectAdapter
+    from howlplane.control_plane.provider_execution_profile import build_execution_profile
 
     context = ProjectAdapter.discover(tmp_path)
     plan = ProjectAdapter.create_verification_plan(context, "TASK-PERM-FMT")

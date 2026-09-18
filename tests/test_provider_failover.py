@@ -13,14 +13,14 @@ import hashlib
 import json
 import sys
 
-from src.control_plane.atomic_io import safe_load_json
+from howlplane.control_plane.atomic_io import safe_load_json
 from io import StringIO
 from pathlib import Path
 import subprocess
 from typing import Any, Callable, Dict, List, Optional
 import pytest
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     AgentBackend,
     AgentBackendRegistry,
     AgentExecutionResult,
@@ -33,28 +33,28 @@ from src.control_plane.agent_execution import (
     TOOL_PERMISSION_KEY,
     SubprocessAgentBackend,
 )
-from src.control_plane.agent_registry import AgentProfile, AgentRegistry
-from src.control_plane.git_baseline import (
+from howlplane.control_plane.agent_registry import AgentProfile, AgentRegistry
+from howlplane.control_plane.git_baseline import (
     GitBaseline,
     capture_baseline,
     capture_delta,
     restore_repository_to_baseline,
 )
-from src.control_plane.orchestrator import (
+from howlplane.control_plane.orchestrator import (
     FAILURE_CLASS_ENGINEERING,
     GovernedTaskOrchestrator,
     FAILURE_CLASS_PROVIDER_EXHAUSTED,
     OrchestrationConfig,
     OrchestrationResult,
 )
-from src.control_plane.progress import TaskProgressTracker, TaskPhase
-from src.control_plane.resource_models import ProviderFailureClass
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.progress import TaskProgressTracker, TaskPhase
+from howlplane.control_plane.resource_models import ProviderFailureClass
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
 )
 from src.infrastructure.config_loader import ProviderResourceSettings
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.task_spec import TaskSpec
 from tests._dogfood_test_helpers import init_minimal_python_repo
 from tests._git_test_helpers import commit_all, git_in_repo
 
@@ -1056,7 +1056,7 @@ def test_capacity_before_precedes_the_attempt_it_describes(tmp_path: Path):
 
 def test_summary_reports_attempts_and_termination(tmp_path: Path):
     """The operator-facing summary explains exhaustion without guesswork."""
-    from src.control_plane.launcher import _print_failover_accounting
+    from howlplane.control_plane.launcher import _print_failover_accounting
     import io
     import contextlib
 

@@ -9,12 +9,12 @@ health probes, CRUD operations, input validation rejection, and restart persiste
 from pathlib import Path
 import pytest
 
-from src.control_plane.synthesis.acceptance_runner import (
+from howlplane.control_plane.synthesis.acceptance_runner import (
     AcceptanceCheckResult,
     ProductAcceptanceReport,
     ProductAcceptanceRunner,
 )
-from src.control_plane.synthesis.product_spec import (
+from howlplane.control_plane.synthesis.product_spec import (
     BehaviorSpec,
     EntitySpec,
     FieldSpec,

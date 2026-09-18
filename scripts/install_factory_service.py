@@ -20,15 +20,15 @@ def install(args):
     target = Path(args.target_repo).resolve()
     state = Path(args.state_dir).resolve()
     python = Path(args.python).absolute()
-    if not (checkout / "src/control_plane/cli.py").is_file():
-        raise ValueError("Checkout must contain src/control_plane/cli.py")
+    if not (checkout / "src/howlplane/control_plane/cli.py").is_file() and not (checkout / "src/control_plane/cli.py").is_file():
+        raise ValueError("Checkout must contain src/howlplane/control_plane/cli.py")
     if target == checkout or checkout in target.parents or target in checkout.parents:
         raise ValueError("Use an isolated target checkout outside the service controller")
     if not (target / ".git").exists():
         raise ValueError("Target must be a Git checkout or worktree")
     if not python.is_file() or not os.access(python, os.X_OK):
         raise ValueError("Python must be an executable absolute path")
-    command = [str(python), "-m", "src.control_plane.cli", "factory", "run",
+    command = [str(python), "-m", "howlplane.control_plane.cli", "factory", "run",
                "--state-dir", str(state), "--target-repo", str(target), "--resume-stopped"]
     # WorkingDirectory is a path directive, not an Exec argument list: quotes
     # are literal there and turn an absolute path into an invalid relative one.

@@ -9,12 +9,12 @@ provider exhaustion handling, and ledger recording.
 from pathlib import Path
 import pytest
 
-from src.control_plane.evidence_ledger import EvidenceLedger
-from src.control_plane.synthesis.marathon import (
+from howlplane.control_plane.evidence_ledger import EvidenceLedger
+from howlplane.control_plane.synthesis.marathon import (
     MarathonDogfoodEngine,
     STANDARD_BENCHMARKS,
 )
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
 )

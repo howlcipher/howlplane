@@ -21,10 +21,10 @@ from pathlib import Path
 
 import pytest
 
-from src.control_plane.cli import cmd_unlock
-from src.control_plane.evidence_ledger import EvidenceLedger
-from src.control_plane.human_boundary import HumanLifecycleManager
-from src.control_plane.locking import (
+from howlplane.control_plane.cli import cmd_unlock
+from howlplane.control_plane.evidence_ledger import EvidenceLedger
+from howlplane.control_plane.human_boundary import HumanLifecycleManager
+from howlplane.control_plane.locking import (
     LockOwnership,
     RepoLock,
     TaskLock,
@@ -175,11 +175,11 @@ def test_no_lock_survives_a_failure_during_startup(tmp_path, fault_stage):
     """Locks were acquired outside the try/finally, so a failure between the
     repo lock and the task lock stranded `.git/howlplane.lock` and no later run
     could proceed. Every startup point now unwinds cleanly."""
-    from src.control_plane.orchestrator import (
+    from howlplane.control_plane.orchestrator import (
         GovernedTaskOrchestrator,
         OrchestrationConfig,
     )
-    from src.control_plane.task_spec import TaskSpec
+    from howlplane.control_plane.task_spec import TaskSpec
 
     repo = _repo(tmp_path)
     task = TaskSpec(
@@ -303,7 +303,7 @@ def test_unlock_is_a_truthful_no_op_when_nothing_is_held(tmp_path, capsys):
 
 def _seed_interrupted_run(repo: Path, task_id: str, state: str = "reviewing") -> Path:
     """Writes a task run stopped mid-lifecycle, as an interruption leaves it."""
-    from src.control_plane.task_spec import TaskSpec
+    from howlplane.control_plane.task_spec import TaskSpec
 
     run_dir = repo / ".task_runs" / task_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -357,7 +357,7 @@ def test_a_failed_resume_is_recorded_and_leaks_nothing(tmp_path):
 def test_a_failed_resume_does_not_overwrite_durable_progress(tmp_path):
     """SLOPFIX-06's progress.json was reset to PREPARING/RUNNING by a resume
     that then failed, destroying the record of the interrupted review."""
-    from src.control_plane.atomic_io import safe_load_json
+    from howlplane.control_plane.atomic_io import safe_load_json
 
     repo = _repo(tmp_path)
     run_dir = _seed_interrupted_run(repo, "T-PROGRESS")
@@ -388,7 +388,7 @@ def test_a_failed_resume_does_not_overwrite_durable_progress(tmp_path):
 
 def _persist_reviewer_state(cycle_dir: Path, role: str, status: str, transcript: str):
     """Writes the artifacts a reviewer leaves behind, including its verdict."""
-    from src.control_plane.atomic_io import atomic_write_json
+    from howlplane.control_plane.atomic_io import atomic_write_json
 
     cycle_dir.mkdir(parents=True, exist_ok=True)
     (cycle_dir / f"{role}.md").write_text(transcript, encoding="utf-8")
@@ -418,7 +418,7 @@ def _persist_reviewer_state(cycle_dir: Path, role: str, status: str, transcript:
 def test_resume_preserves_the_exact_reviewer_verdict(tmp_path, status):
     """Status is read back, not re-derived. Re-deriving it from an empty
     findings list is what turned SLOPFIX-06's dead reviewer into a clean one."""
-    from src.control_plane.review_runner import ReviewRunner
+    from howlplane.control_plane.review_runner import ReviewRunner
 
     cycle_dir = tmp_path / "reviews"
     _persist_reviewer_state(cycle_dir, "correctness-reviewer", status, "transcript\n")
@@ -433,7 +433,7 @@ def test_resume_preserves_the_exact_reviewer_verdict(tmp_path, status):
 def test_an_empty_transcript_never_reconstructs_as_clean(tmp_path):
     """The exact SLOPFIX-06 artifacts: a 0-byte transcript beside `[]`
     findings, with no persisted verdict because none was written then."""
-    from src.control_plane.review_runner import ReviewRunner
+    from howlplane.control_plane.review_runner import ReviewRunner
 
     cycle_dir = tmp_path / "reviews"
     cycle_dir.mkdir(parents=True)
@@ -449,7 +449,7 @@ def test_an_empty_transcript_never_reconstructs_as_clean(tmp_path):
 
 
 def test_a_reviewer_that_never_ran_is_not_a_reviewer_that_found_nothing(tmp_path):
-    from src.control_plane.review_runner import ReviewRunner
+    from howlplane.control_plane.review_runner import ReviewRunner
 
     cycle_dir = tmp_path / "reviews"
     cycle_dir.mkdir(parents=True)
@@ -463,8 +463,8 @@ def test_an_invalid_review_is_re_run_on_resume_not_accepted(tmp_path):
     """The regression the canary needed: reviewer returns invalid output, the
     run is interrupted, and on resume the role is retried rather than silently
     passing."""
-    from src.control_plane.review_runner import ReviewRunner
-    from src.control_plane.task_spec import TaskSpec
+    from howlplane.control_plane.review_runner import ReviewRunner
+    from howlplane.control_plane.task_spec import TaskSpec
 
     repo = _repo(tmp_path)
     run_dir = repo / ".task_runs" / "T-REREVIEW"
@@ -507,7 +507,7 @@ def test_an_invalid_review_is_re_run_on_resume_not_accepted(tmp_path):
     ],
 )
 def test_status_reports_the_durable_reviewer_disposition(tmp_path, status, expected):
-    from src.control_plane.recovery import CrashRecoveryEngine
+    from howlplane.control_plane.recovery import CrashRecoveryEngine
 
     reviews = tmp_path / "reviews"
     _persist_reviewer_state(reviews, "correctness-reviewer", status, "transcript\n")
@@ -520,7 +520,7 @@ def test_status_reports_the_durable_reviewer_disposition(tmp_path, status, expec
 def test_status_does_not_call_an_empty_review_completed(tmp_path):
     """`ai status` said "Completed Reviews: correctness-reviewer" for a reviewer
     whose transcript was zero bytes. File presence is not a verdict."""
-    from src.control_plane.recovery import CrashRecoveryEngine
+    from howlplane.control_plane.recovery import CrashRecoveryEngine
 
     reviews = tmp_path / "reviews"
     reviews.mkdir(parents=True)
@@ -569,7 +569,7 @@ def test_route_stays_provisional_while_the_candidate_is_still_under_review(tmp_p
     """The state SLOPFIX-06 was actually in: candidate captured, review under
     way, nothing accepted. The route evidence on disk at that moment must not
     claim an accepted implementer."""
-    from src.control_plane.atomic_io import safe_load_json
+    from howlplane.control_plane.atomic_io import safe_load_json
     from tests.test_provider_failover import (
         _init_test_repo,
         _make_registry_three_providers,
@@ -731,11 +731,11 @@ def _fake_orchestrator(repo: Path, task_id: str, registry):
     `acquire_locks=True`, because the nested task-lock acquisition is precisely
     what is under test.
     """
-    from src.control_plane.orchestrator import (
+    from howlplane.control_plane.orchestrator import (
         GovernedTaskOrchestrator,
         OrchestrationConfig,
     )
-    from src.control_plane.synthesis.provider_pool import (
+    from howlplane.control_plane.synthesis.provider_pool import (
         ProviderPoolManager,
         ProviderResourceSettings,
     )
@@ -778,8 +778,8 @@ def test_interrupted_candidate_review_resumes_and_completes(tmp_path):
     -- no self-deadlock, no leaked repository lock, an audited recovery, the
     invalid review still invalid, and acceptance only at the very end.
     """
-    from src.control_plane.atomic_io import safe_load_json
-    from src.control_plane.recovery import CrashRecoveryEngine
+    from howlplane.control_plane.atomic_io import safe_load_json
+    from howlplane.control_plane.recovery import CrashRecoveryEngine
     from tests.test_provider_failover import (
         _init_test_repo,
         _make_registry_three_providers,
@@ -885,7 +885,7 @@ def test_status_recommends_a_command_that_can_actually_work(tmp_path):
     """A recommendation is only useful if it names a working command. A
     blocking repository lock had no branch at all, so `ai status` sent the
     operator to `ai resume`, which could not succeed."""
-    from src.control_plane.recovery import CrashRecoveryEngine
+    from howlplane.control_plane.recovery import CrashRecoveryEngine
 
     repo = _repo(tmp_path)
     _seed_interrupted_run(repo, "T-RECOMMEND")
@@ -910,7 +910,7 @@ def test_a_second_process_cannot_take_an_actively_held_task(tmp_path):
     try:
         script = (
             "import sys; sys.path.insert(0, %r)\n"
-            "from src.control_plane.locking import TaskLock, TaskLockedError\n"
+            "from howlplane.control_plane.locking import TaskLock, TaskLockedError\n"
             "try:\n"
             "    TaskLock(%r, 'T-CONCURRENT', operation='orchestrate').acquire()\n"
             "    print('ACQUIRED')\n"
@@ -961,7 +961,7 @@ def test_retained_fallback_survives_an_interruption(tmp_path, crash_stage):
     finished."""
     import hashlib
 
-    from src.control_plane.orchestrator import GovernedTaskOrchestrator
+    from howlplane.control_plane.orchestrator import GovernedTaskOrchestrator
 
     _, run_dir, attempts_dir = _crash_during_salvage(tmp_path, crash_stage)
 
@@ -999,7 +999,7 @@ def _resume_run(repo: Path, registry):
 
 
 def _route_metadata(run_dir: Path) -> dict:
-    from src.control_plane.atomic_io import safe_load_json
+    from howlplane.control_plane.atomic_io import safe_load_json
 
     return safe_load_json(run_dir / "effective_route.json")["metadata"]
 
@@ -1078,8 +1078,8 @@ def test_resume_does_not_credit_a_producer_for_another_resources_work(tmp_path):
 def test_resume_refuses_a_delta_that_is_not_the_retained_artifact(tmp_path):
     """The identity gate, directly. A retained record plus an unrelated delta in
     the tree must not resolve to the retained producer."""
-    from src.control_plane.atomic_io import safe_load_json
-    from src.control_plane.git_baseline import GitBaseline, capture_delta
+    from howlplane.control_plane.atomic_io import safe_load_json
+    from howlplane.control_plane.git_baseline import GitBaseline, capture_delta
     from tests.test_provider_failover import (
         _make_registry_with_spare_reviewer,
         _make_task,

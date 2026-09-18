@@ -14,8 +14,8 @@ from scripts.select_relevant_tests import (
 TEST_SOURCES = {
     "tests/test_provider_preflight.py": "from src.core.provider_preflight import run_preflight",
     "tests/test_config.py": "import yaml\nfrom src.core import config",
-    "tests/test_authority_profile.py": "from src.control_plane.authority_profile import AuthorityProfile",
-    "tests/test_backlog_marathon.py": "from src.control_plane.backlog_source import select_next_item",
+    "tests/test_authority_profile.py": "from howlplane.control_plane.authority_profile import AuthorityProfile",
+    "tests/test_backlog_marathon.py": "from howlplane.control_plane.backlog_source import select_next_item",
     "tests/test_rules_and_prompts.py": "def test_rules():\n    pass",
     "tests/test_skills_index.py": "def test_skills():\n    pass",
     "tests/test_generate_skills_manifest.py": "def test_manifest():\n    pass",
@@ -58,7 +58,7 @@ def test_direct_source_to_test_mapping_is_selected_even_without_an_import():
 
 def test_multiple_sources_union_direct_and_dependency_mappings():
     selected, uncovered, trigger = select_tests(
-        ["src/core/provider_preflight.py", "src/control_plane/backlog_source.py"],
+        ["src/core/provider_preflight.py", "src/howlplane/control_plane/backlog_source.py"],
         TEST_SOURCES,
     )
 
@@ -232,8 +232,8 @@ def test_structural_trigger_takes_precedence_over_uncertain_impact():
 
 SOURCE_MODULES = {
     "src/core/provider_preflight.py": "def run_preflight():\n    pass",
-    "src/control_plane/backlog_source.py": "from src.core.provider_preflight import run_preflight",
-    "src/control_plane/authority_profile.py": "from src.control_plane.backlog_source import select_next_item",
+    "src/howlplane/control_plane/backlog_source.py": "from src.core.provider_preflight import run_preflight",
+    "src/howlplane/control_plane/authority_profile.py": "from howlplane.control_plane.backlog_source import select_next_item",
 }
 
 
@@ -241,8 +241,8 @@ def test_transitive_dependents_walks_the_whole_import_chain():
     index = build_dependent_index(SOURCE_MODULES)
 
     assert transitive_dependents("src/core/provider_preflight.py", index) == [
-        "src/control_plane/backlog_source.py",
-        "src/control_plane/authority_profile.py",
+        "src/howlplane/control_plane/backlog_source.py",
+        "src/howlplane/control_plane/authority_profile.py",
     ]
 
 
@@ -255,7 +255,7 @@ def test_tests_reaching_a_module_through_an_importer_are_selected():
     regression ships silently.
     """
     sources = {
-        "tests/test_backlog_marathon.py": "from src.control_plane.backlog_source import select_next_item",
+        "tests/test_backlog_marathon.py": "from howlplane.control_plane.backlog_source import select_next_item",
     }
     selected, uncovered, trigger = select_tests(
         ["src/core/provider_preflight.py"], sources, SOURCE_MODULES
@@ -269,12 +269,12 @@ def test_tests_reaching_a_module_through_an_importer_are_selected():
 def test_transitive_selection_records_the_import_chain_as_its_reason():
     selection = select_tests_with_reasons(
         ["src/core/provider_preflight.py"],
-        {"tests/test_backlog_marathon.py": "from src.control_plane.backlog_source import select_next_item"},
+        {"tests/test_backlog_marathon.py": "from howlplane.control_plane.backlog_source import select_next_item"},
         SOURCE_MODULES,
     )
 
     assert selection.selected["tests/test_backlog_marathon.py"] == [
-        "imports or exercises src.control_plane.backlog_source, "
+        "imports or exercises howlplane.control_plane.backlog_source, "
         "which imports src/core/provider_preflight.py"
     ]
 

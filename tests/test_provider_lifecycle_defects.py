@@ -15,25 +15,25 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 import pytest
 
-from src.control_plane.agent_execution import AgentExecutionResult
-from src.control_plane.agent_registry import AgentProfile, AgentRegistry
-from src.control_plane.orchestrator import (
+from howlplane.control_plane.agent_execution import AgentExecutionResult
+from howlplane.control_plane.agent_registry import AgentProfile, AgentRegistry
+from howlplane.control_plane.orchestrator import (
     GovernedTaskOrchestrator,
     OrchestrationConfig,
     compute_remediation_timeout,
 )
-from src.control_plane.resource_models import (
+from howlplane.control_plane.resource_models import (
     ProviderFailureClass,
 )
-from src.control_plane.review_runner import (
+from howlplane.control_plane.review_runner import (
     ReviewRunner,
     build_reviewer_candidates,
 )
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
 )
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.task_spec import TaskSpec
 from src.infrastructure.config_loader import ProviderPolicySettings, ProviderResourceSettings
 from tests._dogfood_test_helpers import init_minimal_python_repo
 from tests.test_provider_failover import _FakeBackendResolver, _profile
@@ -160,7 +160,7 @@ def test_build_reviewer_candidates_skips_capacity_blocked_preferred():
 
 def test_independent_review_unavailable_detected_in_cycle(tmp_path: Path):
     """execute_review_cycle marks independent_review_satisfied=False when only same-family reviews."""
-    from src.control_plane.agent_execution import FakeAgentBackend
+    from howlplane.control_plane.agent_execution import FakeAgentBackend
 
     backend = FakeAgentBackend(agent_id="gemini_cli", default_stdout="findings: []\n")
     task = TaskSpec(task_id="T-INDEP-01", repository="test", objective="test", acceptance_criteria=[])
@@ -224,7 +224,7 @@ def test_bounded_remediation_timeout_ceiling():
 
 def test_supervisor_collect_provider_attempts_chronological(tmp_path: Path):
     """Supervisor._collect_provider_attempts sorts attempts chronologically and preserves timestamps."""
-    from src.control_plane.factory.supervisor import FactorySupervisor
+    from howlplane.control_plane.factory.supervisor import FactorySupervisor
 
     supervisor = FactorySupervisor.__new__(FactorySupervisor)
     supervisor._state_record = MagicMock(target_repository=str(tmp_path))

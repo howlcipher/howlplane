@@ -1,7 +1,7 @@
 import subprocess
 import os
 import pathlib
-from src.control_plane.git_env import run_git_in_repo
+from howlplane.control_plane.git_env import run_git_in_repo
 
 def test_user_profile_is_gitignored():
     """Assert USER_PROFILE.md is present in .gitignore and USER_PROFILE.example.md is tracked."""

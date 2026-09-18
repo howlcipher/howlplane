@@ -19,13 +19,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.control_plane.factory.portfolio import (
+from howlplane.control_plane.factory.portfolio import (
     FactoryPolicy,
     INTROSPECTIVE_ORIGINS,
     ORIGIN_PRIORITY,
     select,
 )
-from src.control_plane.factory.work_item import (
+from howlplane.control_plane.factory.work_item import (
     WorkItem,
     WorkItemOrigin,
     WorkItemState,

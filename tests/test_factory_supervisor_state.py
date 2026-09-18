@@ -3,7 +3,7 @@
 
 import pytest
 
-from src.control_plane.factory.supervisor_state import (
+from howlplane.control_plane.factory.supervisor_state import (
     SUPERVISOR_STATE_SCHEMA_VERSION,
     InvalidSupervisorStateTransitionError,
     SupervisorState,

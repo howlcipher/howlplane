@@ -13,10 +13,10 @@ from types import SimpleNamespace
 from typing import Optional
 import pytest
 
-import src.control_plane.launcher as launcher_module
-from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+import howlplane.control_plane.launcher as launcher_module
+from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 
-from src.control_plane.launcher import (
+from howlplane.control_plane.launcher import (
     find_git_repo_root,
     find_control_plane_root,
     infer_task_metadata,
@@ -31,8 +31,8 @@ from src.control_plane.launcher import (
     TargetRepositoryNotFoundError,
     ControlPlaneNotFoundError,
 )
-from src.control_plane.cli import _select_factory_authority
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.cli import _select_factory_authority
+from howlplane.control_plane.task_spec import TaskSpec
 
 
 # ============================================================================

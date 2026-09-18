@@ -11,10 +11,10 @@ Human Authority Boundary Gate -> Governed Completion & Evidence.
 from pathlib import Path
 import subprocess
 
-from src.control_plane.agent_execution import FakeAgentBackend
-from src.control_plane.launcher import cmd_work, cmd_status, build_parser
-from src.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.agent_execution import FakeAgentBackend
+from howlplane.control_plane.launcher import cmd_work, cmd_status, build_parser
+from howlplane.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
+from howlplane.control_plane.task_spec import TaskSpec
 from tests._git_test_helpers import git_in_repo, init_git_repo
 
 
@@ -446,8 +446,8 @@ findings:
 # ============================================================================
 
 def test_cli_work_execute_and_status(tmp_path, monkeypatch, capsys):
-    from src.control_plane import launcher as launcher_module
-    from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+    from howlplane.control_plane import launcher as launcher_module
+    from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 
     pool = ProviderPoolManager(probe_on_start=False)
     monkeypatch.setattr(

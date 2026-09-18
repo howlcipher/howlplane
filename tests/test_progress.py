@@ -14,21 +14,21 @@ import subprocess
 import time
 from typing import Optional
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     AgentBackend,
     AgentExecutionResult,
 )
-from src.control_plane.atomic_io import safe_load_json
-from src.control_plane.launcher import (
+from howlplane.control_plane.atomic_io import safe_load_json
+from howlplane.control_plane.launcher import (
     build_parser,
     cmd_status,
     cmd_work,
 )
-from src.control_plane.orchestrator import (
+from howlplane.control_plane.orchestrator import (
     GovernedTaskOrchestrator,
     OrchestrationConfig,
 )
-from src.control_plane.progress import (
+from howlplane.control_plane.progress import (
     PROGRESS_SCHEMA_VERSION,
     TaskPhase,
     TaskProgressRecord,
@@ -37,8 +37,8 @@ from src.control_plane.progress import (
     format_elapsed,
     format_last_heartbeat,
 )
-from src.control_plane.task_spec import TaskSpec
-from src.control_plane.verification import VerificationPlan
+from howlplane.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.verification import VerificationPlan
 from tests._git_test_helpers import init_git_repo
 
 
@@ -492,8 +492,8 @@ def test_status_reports_active_progress_and_stale_when_process_dead(
 
 def test_cli_progress_modes_and_stream_isolation(tmp_path, monkeypatch, capsys):
     """Verify --progress and -q flags work without corrupting stdout."""
-    from src.control_plane import launcher as launcher_module
-    from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+    from howlplane.control_plane import launcher as launcher_module
+    from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 
     # Keep resource selection independent of provider CLIs installed on the host.
     pool = ProviderPoolManager(probe_on_start=False)

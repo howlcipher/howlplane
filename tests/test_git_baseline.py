@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 from typing import Optional
 
-from src.control_plane.git_baseline import (
+from howlplane.control_plane.git_baseline import (
     GitBaseline,
     _parse_porcelain_lines,
     capture_baseline,

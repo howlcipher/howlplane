@@ -9,58 +9,58 @@ from pathlib import Path
 import tempfile
 import pytest
 
-from src.control_plane.task_spec import (
+from howlplane.control_plane.task_spec import (
     TaskSpec,
     InvalidStateTransitionError,
     TaskSpecValidationError,
     VALID_TASK_STATES,
 )
-from src.control_plane.agent_registry import (
+from howlplane.control_plane.agent_registry import (
     AgentProfile,
     AgentRegistry,
     BUILTIN_AGENTS,
 )
-from src.control_plane.router import (
+from howlplane.control_plane.router import (
     TaskRouter,
     RoutingDecision,
 )
-from src.control_plane.reviewers import (
+from howlplane.control_plane.reviewers import (
     ReviewerRole,
     REVIEWER_ROLES,
     get_reviewer_role,
     list_reviewer_roles,
 )
-from src.control_plane.reconciliation import (
+from howlplane.control_plane.reconciliation import (
     ReviewFinding,
     ReconciliationResult,
     ReviewReconciler,
     ReconciliationValidationError,
 )
-from src.control_plane.verification import (
+from howlplane.control_plane.verification import (
     VerificationStep,
     VerificationPlan,
     VerificationError,
     resolve_python_interpreter,
 )
-from src.control_plane.evidence_ledger import (
+from howlplane.control_plane.evidence_ledger import (
     EvidenceEntry,
     EvidenceLedger,
     redact_sensitive_data,
 )
-from src.control_plane.metrics import (
+from howlplane.control_plane.metrics import (
     MetricsCalculator,
     PerformanceMetricsSummary,
 )
-from src.control_plane.project_adapter import (
+from howlplane.control_plane.project_adapter import (
     ProjectContext,
     ProjectAdapter,
 )
-from src.control_plane.human_boundary import (
+from howlplane.control_plane.human_boundary import (
     HumanBoundaryGate,
     HumanDecisionPacket,
     BoundaryCheckResult,
 )
-from src.control_plane.cli import main as cli_main
+from howlplane.control_plane.cli import main as cli_main
 
 
 # ============================================================================

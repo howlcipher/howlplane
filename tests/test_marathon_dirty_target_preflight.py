@@ -23,13 +23,13 @@ from typing import List, Optional
 
 import pytest
 
-from src.control_plane.git_baseline import describe_working_tree
-from src.control_plane.git_env import run_git_in_repo
-from src.control_plane.synthesis.marathon import (
+from howlplane.control_plane.git_baseline import describe_working_tree
+from howlplane.control_plane.git_env import run_git_in_repo
+from howlplane.control_plane.synthesis.marathon import (
     DIRTY_TARGET_STOP_REASON,
     MarathonDogfoodEngine,
 )
-from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 
 RANKED_BACKLOG = """# Improvements
 
@@ -324,7 +324,7 @@ def test_resume_naming_a_campaign_that_does_not_exist_is_still_a_new_campaign(ta
 @pytest.mark.integration
 def test_the_cli_reports_a_refusal_on_stderr_with_a_non_zero_exit(target_repo, tmp_path, monkeypatch, capsys):
     """An unattended wrapper must not read a refusal as a run that found no work."""
-    from src.control_plane import launcher
+    from howlplane.control_plane import launcher
 
     (target_repo / "widget.py").write_text("dirty\n", encoding="utf-8")
 
@@ -357,7 +357,7 @@ def test_dry_run_still_works_against_a_dirty_target(target_repo, tmp_path, capsy
 
     This is what a readiness audit runs against a real, dirty checkout.
     """
-    from src.control_plane import launcher
+    from howlplane.control_plane import launcher
 
     (target_repo / "widget.py").write_text("dirty\n", encoding="utf-8")
 

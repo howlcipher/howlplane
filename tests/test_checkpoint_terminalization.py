@@ -15,13 +15,13 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import pytest
 
-from src.control_plane.atomic_io import safe_load_json
-from src.control_plane.checkpoints import CheckpointManager, StageCheckpoint
-from src.control_plane.orchestrator import (
+from howlplane.control_plane.atomic_io import safe_load_json
+from howlplane.control_plane.checkpoints import CheckpointManager, StageCheckpoint
+from howlplane.control_plane.orchestrator import (
     GovernedTaskOrchestrator,
     OrchestrationConfig,
 )
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.task_spec import TaskSpec
 from tests.test_provider_failover import (
     _FakeBackendResolver,
     _edit_feature_to_true,
@@ -192,7 +192,7 @@ def test_recovered_task_subsequent_failure_leaves_no_in_progress_implementation_
     run_dir = repo / ".task_runs" / task.task_id
     run_dir.mkdir(parents=True)
 
-    from src.control_plane.git_baseline import capture_baseline
+    from howlplane.control_plane.git_baseline import capture_baseline
     baseline = capture_baseline(repo)
     (run_dir / "baseline.json").write_text(baseline.to_json(), encoding="utf-8")
 

@@ -18,32 +18,32 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 import pytest
 
-from src.control_plane.agent_execution import AgentBackend, AgentExecutionResult
-from src.control_plane.atomic_io import (
+from howlplane.control_plane.agent_execution import AgentBackend, AgentExecutionResult
+from howlplane.control_plane.atomic_io import (
     atomic_write_json,
     atomic_write_text,
     safe_load_json,
     CorruptArtifactError,
 )
-from src.control_plane.checkpoints import CheckpointManager, StageCheckpoint
-from src.control_plane.cli import cmd_unlock
-from src.control_plane.evidence_ledger import EvidenceLedger
-from src.control_plane.executor import (
+from howlplane.control_plane.checkpoints import CheckpointManager, StageCheckpoint
+from howlplane.control_plane.cli import cmd_unlock
+from howlplane.control_plane.evidence_ledger import EvidenceLedger
+from howlplane.control_plane.executor import (
     AuthorityExecutor,
     ExecutionReceipt,
     ExecutionResult,
     ExecutorRegistry,
     HowlChangeOpsExecutor,
 )
-from src.control_plane.git_baseline import GitBaseline, capture_baseline, capture_delta
-from src.control_plane.human_boundary import (
+from howlplane.control_plane.git_baseline import GitBaseline, capture_baseline, capture_delta
+from howlplane.control_plane.human_boundary import (
     HumanDecisionRecord,
     HumanLifecycleManager,
     InvalidTaskStateError,
     StaleApprovalError,
     compute_repository_fingerprint,
 )
-from src.control_plane.locking import (
+from howlplane.control_plane.locking import (
     LockError,
     LockOwnerState,
     RepoLock,
@@ -56,18 +56,18 @@ from src.control_plane.locking import (
     is_process_alive,
     reclaim_lock,
 )
-from src.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
-from src.control_plane.process_manager import ProcessRecord, ProcessTracker
-from src.control_plane.proposed_action import ProposedAction
-from src.control_plane.recovery import (
+from howlplane.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
+from howlplane.control_plane.process_manager import ProcessRecord, ProcessTracker
+from howlplane.control_plane.proposed_action import ProposedAction
+from howlplane.control_plane.recovery import (
     CrashRecoveryEngine,
     RetryClassification,
     classify_stage_retry,
 )
-from src.control_plane.review_runner import ReviewFinding, ReviewRunner
-from src.control_plane.router import RoutingDecision
-from src.control_plane.task_spec import TaskSpec
-from src.control_plane.verification import VerificationPlan, VerificationStep
+from howlplane.control_plane.review_runner import ReviewFinding, ReviewRunner
+from howlplane.control_plane.router import RoutingDecision
+from howlplane.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.verification import VerificationPlan, VerificationStep
 from tests._git_test_helpers import init_git_repo
 
 

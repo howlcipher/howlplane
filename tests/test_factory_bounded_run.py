@@ -18,10 +18,10 @@ from tests._factory_test_helpers import (
     ready_work_item as _ready_work_item,
 )
 
-from src.control_plane.factory.dispatcher import DispatchOutcome
-from src.control_plane.factory.service import load_process, process_status
-from src.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
-from src.control_plane.factory.work_item import WorkItemOrigin, WorkItemState
+from howlplane.control_plane.factory.dispatcher import DispatchOutcome
+from howlplane.control_plane.factory.service import load_process, process_status
+from howlplane.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
+from howlplane.control_plane.factory.work_item import WorkItemOrigin, WorkItemState
 
 
 def _make_bounded_supervisor(tmp_path, *, max_work_items, dispatcher=None, pool=None):
@@ -314,9 +314,9 @@ def _setup_campaign_and_process(
     status="running",
 ):
     from types import SimpleNamespace
-    from src.control_plane.factory.campaign import FactoryCampaign
-    from src.control_plane.factory.service import FactoryProcessRecord, _save_process
-    from src.control_plane.factory.supervisor_state import SupervisorStateStore
+    from howlplane.control_plane.factory.campaign import FactoryCampaign
+    from howlplane.control_plane.factory.service import FactoryProcessRecord, _save_process
+    from howlplane.control_plane.factory.supervisor_state import SupervisorStateStore
 
     state_dir = tmp_path / "state"
     target_dir = tmp_path / "target"
@@ -425,7 +425,7 @@ def test_accurate_completion_timestamp_beyond_first_tick(tmp_path):
 
     assert f"| Started | {started_at} |" in md_content
     assert f"| Completed | {completed_at} |" in md_content
-    from src.control_plane.progress import format_elapsed
+    from howlplane.control_plane.progress import format_elapsed
     assert f"| Duration | {format_elapsed(duration_seconds)} |" in md_content
 
 
@@ -691,8 +691,8 @@ def test_continuous_running_campaign_reports_running(tmp_path):
     """Campaign with live process returns running."""
     import os
     import socket
-    from src.control_plane.factory.service import process_status
-    from src.control_plane.locking import get_process_create_time
+    from howlplane.control_plane.factory.service import process_status
+    from howlplane.control_plane.locking import get_process_create_time
 
     pid = os.getpid()
     campaign = _setup_campaign_and_process(

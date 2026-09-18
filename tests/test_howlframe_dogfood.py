@@ -8,16 +8,16 @@ from unittest.mock import patch
 import pytest
 from jsonschema import validate
 
-from src.control_plane.evidence_ledger import EvidenceLedger
-from src.control_plane.howlframe_runner import (
+from howlplane.control_plane.evidence_ledger import EvidenceLedger
+from howlplane.control_plane.howlframe_runner import (
     HowlFrameAuditRunner,
     find_howlframe_binary,
     normalize_project_context,
     PROJECT_CONTEXT_SCHEMA_VERSION,
 )
-from src.control_plane.project_adapter import ProjectAdapter, ProjectContext
-from src.control_plane.router import TaskRouter
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.project_adapter import ProjectAdapter, ProjectContext
+from howlplane.control_plane.router import TaskRouter
+from howlplane.control_plane.task_spec import TaskSpec
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = REPO_ROOT / "schemas" / "project-context-contract.schema.json"
@@ -116,7 +116,7 @@ def test_falsifications_payload(payload_str, expected_msg):
 def test_falsifications_subproc(tmp_path, script, expected_outcome):
     mock_bin = _make_mock_bin(tmp_path, script)
     ctx = ProjectAdapter.discover(REPO_ROOT)
-    with patch("src.control_plane.howlframe_runner.find_howlframe_binary", return_value=mock_bin):
+    with patch("howlplane.control_plane.howlframe_runner.find_howlframe_binary", return_value=mock_bin):
         res = HowlFrameAuditRunner.run_audit(ctx, record_evidence=False)
         assert res.status == expected_outcome
 
@@ -130,12 +130,12 @@ def test_falsifications_bounds_and_lifecycle(tmp_path):
     assert HowlFrameAuditRunner.run_audit(huge_ctx, record_evidence=False).status == "HOWLFRAME_FAILURE"
 
     # 2. Missing binary
-    with patch("src.control_plane.howlframe_runner.find_howlframe_binary", return_value=None):
+    with patch("howlplane.control_plane.howlframe_runner.find_howlframe_binary", return_value=None):
         assert HowlFrameAuditRunner.run_audit(ctx, record_evidence=False).status == "HOWLFRAME_UNAVAILABLE"
 
     # 3. Timeout
     sleep_bin = _make_mock_bin(tmp_path / "t1", "#!/bin/sh\nsleep 5\n")
-    with patch("src.control_plane.howlframe_runner.find_howlframe_binary", return_value=sleep_bin):
+    with patch("howlplane.control_plane.howlframe_runner.find_howlframe_binary", return_value=sleep_bin):
         assert HowlFrameAuditRunner.run_audit(ctx, timeout=0.1, record_evidence=False).status == "TIMEOUT"
 
     # 4. Budget limit
@@ -159,7 +159,7 @@ def test_falsifications_bounds_and_lifecycle(tmp_path):
     spec = TaskSpec(task_id="T-ISO", repository=ctx.name, objective="Verify isolation", acceptance_criteria=["OK"])
     router = TaskRouter()
     r1 = router.route(spec)
-    with patch("src.control_plane.howlframe_runner.find_howlframe_binary", return_value=fail_bin):
+    with patch("howlplane.control_plane.howlframe_runner.find_howlframe_binary", return_value=fail_bin):
         assert HowlFrameAuditRunner.run_audit(ctx, record_evidence=False, dogfood_mode="shadow").status == "HOWLFRAME_FAILURE"
         r2 = router.route(spec)
         assert r1.selected_agent_id == r2.selected_agent_id

@@ -16,12 +16,12 @@ from tests._factory_test_helpers import (
     unavailable_supervisor,
 )
 
-from src.control_plane.factory.dispatcher import DispatchOutcome, MarathonDispatcherAdapter
-from src.control_plane.factory.portfolio import FactoryPolicy
-from src.control_plane.factory.repo_proposal import CapabilityStore, RepoProposalStore
-from src.control_plane.factory.supervisor import FactorySupervisor
-from src.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
-from src.control_plane.factory.work_item import WorkItem, WorkItemOrigin, WorkItemState, WorkItemStore
+from howlplane.control_plane.factory.dispatcher import DispatchOutcome, MarathonDispatcherAdapter
+from howlplane.control_plane.factory.portfolio import FactoryPolicy
+from howlplane.control_plane.factory.repo_proposal import CapabilityStore, RepoProposalStore
+from howlplane.control_plane.factory.supervisor import FactorySupervisor
+from howlplane.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
+from howlplane.control_plane.factory.work_item import WorkItem, WorkItemOrigin, WorkItemState, WorkItemStore
 
 
 class _ParkedAuthorityEngine:
@@ -582,7 +582,7 @@ def test_status_includes_provider_inventory(tmp_path):
 
 
 def test_run_holds_single_supervisor_lock(tmp_path):
-    from src.control_plane.locking import SupervisorLock
+    from howlplane.control_plane.locking import SupervisorLock
 
     state_dir = tmp_path / "state"
     supervisor, now, sleeps = _make_supervisor(tmp_path, state_dir=state_dir)
@@ -683,7 +683,7 @@ def test_no_work_tick_reports_no_valuable_work(tmp_path):
 
 def test_all_candidates_capped_reports_no_valuable_work(tmp_path):
     """When policy caps every remaining candidate, the tick reports NO_VALUABLE_WORK."""
-    from src.control_plane.factory.portfolio import select as portfolio_select
+    from howlplane.control_plane.factory.portfolio import select as portfolio_select
 
     supervisor, now, sleeps = _make_supervisor(tmp_path)
     # Fill the introspective cap with self-improvement work.
@@ -711,7 +711,7 @@ def test_product_repo_explicit_and_state_record_resolution(tmp_path):
     # Case 1: explicit product_repo argument
     sup1, _, _ = _make_supervisor(tmp_path / "s1")
     # instantiate with explicit product_repo
-    from src.control_plane.factory.supervisor import FactorySupervisor
+    from howlplane.control_plane.factory.supervisor import FactorySupervisor
     s1 = FactorySupervisor(
         state_store=sup1.state_store,
         work_item_store=sup1.work_item_store,

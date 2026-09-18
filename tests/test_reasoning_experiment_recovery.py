@@ -5,35 +5,35 @@ from pathlib import Path
 
 import pytest
 
-from src.control_plane.atomic_io import atomic_write_json, safe_load_json
-from src.control_plane.reasoning.execution_trajectory import TrajectoryStore
-from src.control_plane.reasoning.experiment_coordinator import (
+from howlplane.control_plane.atomic_io import atomic_write_json, safe_load_json
+from howlplane.control_plane.reasoning.execution_trajectory import TrajectoryStore
+from howlplane.control_plane.reasoning.experiment_coordinator import (
     ReasoningExperimentCoordinator,
 )
-from src.control_plane.reasoning.experiment_evaluator import evaluate_experiment
-from src.control_plane.reasoning._json_store import ArtifactIdentityError
-from src.control_plane.reasoning.artifact_safety import (
+from howlplane.control_plane.reasoning.experiment_evaluator import evaluate_experiment
+from howlplane.control_plane.reasoning._json_store import ArtifactIdentityError
+from howlplane.control_plane.reasoning.artifact_safety import (
     ArtifactIntegrityError,
     MAX_COLLECTION_ITEMS,
     MAX_STRING_LENGTH,
 )
-from src.control_plane.reasoning.reasoning_experiment import (
+from howlplane.control_plane.reasoning.reasoning_experiment import (
     ExperimentIntegrityError,
     ReasoningExperimentStore,
     VALID_EXPERIMENT_TYPES,
 )
-from src.control_plane.reasoning.strategy_registry import (
+from howlplane.control_plane.reasoning.strategy_registry import (
     StrategyIdentityError,
     StrategyRegistry,
 )
-from src.control_plane.reasoning.trajectory_discovery import (
+from howlplane.control_plane.reasoning.trajectory_discovery import (
     ObservationStatus,
     ObservationStore,
     TrajectoryObservation,
     challenge_observation,
     discover_observations,
 )
-from src.control_plane.synthesis.campaign_state import DurableCampaignState
+from howlplane.control_plane.synthesis.campaign_state import DurableCampaignState
 from tests._dogfood_test_helpers import (
     execution_trajectory,
     reasoning_experiment,

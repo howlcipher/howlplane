@@ -18,26 +18,26 @@ import subprocess
 import sys
 import pytest
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     AgentBackendRegistry,
     FakeAgentBackend,
     AgentExecutionResult,
 )
-from src.control_plane.executor import (
+from howlplane.control_plane.executor import (
     ExecutorRegistry,
     HowlChangeOpsExecutor,
     ExecutionReceipt,
 )
-from src.control_plane.human_boundary import HumanLifecycleManager
-from src.control_plane.proposed_action import ProposedAction
-from src.control_plane.synthesis.engine import ProductSynthesizer
-from src.control_plane.synthesis.product_spec import ProductSpec
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.human_boundary import HumanLifecycleManager
+from howlplane.control_plane.proposed_action import ProposedAction
+from howlplane.control_plane.synthesis.engine import ProductSynthesizer
+from howlplane.control_plane.synthesis.product_spec import ProductSpec
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
 )
-from src.control_plane.synthesis.spec_synthesizer import NaturalLanguageSynthesizer
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.synthesis.spec_synthesizer import NaturalLanguageSynthesizer
+from howlplane.control_plane.task_spec import TaskSpec
 from tests._dogfood_test_helpers import clean_review_result
 
 

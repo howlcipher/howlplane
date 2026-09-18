@@ -1,0 +1,175 @@
+"""
+Multi-Agent Engineering Control Plane.
+
+Provides task specification, agent capability registry, deterministic routing,
+specialized independent reviewers, review reconciliation, verification plans,
+evidence ledgers, transparent performance metrics, project adapters, human authority boundaries,
+and closed-loop governed task orchestration.
+"""
+
+from importlib import metadata as _metadata
+
+try:
+    # The version of the installed "howlplane" wheel -- the source of
+    # truth once packaged, matching pyproject.toml's [project] version at
+    # the point the wheel was built.
+    __version__ = _metadata.version("howlplane")
+except _metadata.PackageNotFoundError:
+    # Not installed as a package (e.g. a source checkout run in place via
+    # PYTHONPATH, as bin/howlplane's developer fallback does).
+    __version__ = "0.1.0+dev"
+
+from howlplane.control_plane.task_spec import (
+    TaskSpec,
+    InvalidStateTransitionError,
+    TaskSpecValidationError,
+    VALID_TASK_STATES,
+)
+from howlplane.control_plane.agent_registry import (
+    AgentProfile,
+    AgentRegistry,
+    BUILTIN_AGENTS,
+)
+from howlplane.control_plane.agent_execution import (
+    AgentBackend,
+    AgentBackendRegistry,
+    AgentExecutionResult,
+    AgentExecutionError,
+    AgentUnavailableError,
+    FakeAgentBackend,
+    SubprocessAgentBackend,
+)
+from howlplane.control_plane.git_baseline import (
+    GitBaseline,
+    RepositoryDelta,
+    capture_baseline,
+    capture_delta,
+)
+from howlplane.control_plane.router import (
+    TaskRouter,
+    RoutingDecision,
+)
+from howlplane.control_plane.reviewers import (
+    ReviewerRole,
+    REVIEWER_ROLES,
+    get_reviewer_role,
+    list_reviewer_roles,
+)
+from howlplane.control_plane.review_runner import (
+    SingleReviewResult,
+    ReviewCycleResult,
+    ReviewRunner,
+    parse_and_validate_findings,
+)
+from howlplane.control_plane.reconciliation import (
+    ReviewFinding,
+    ReconciliationResult,
+    ReviewReconciler,
+    ReconciliationValidationError,
+)
+from howlplane.control_plane.verification import (
+    VerificationStep,
+    VerificationPlan,
+    VerificationError,
+)
+from howlplane.control_plane.evidence_ledger import (
+    EvidenceEntry,
+    EvidenceLedger,
+    redact_sensitive_data,
+)
+from howlplane.control_plane.metrics import (
+    AgentMetricSummary,
+    PerformanceMetricsSummary,
+    MetricsCalculator,
+)
+from howlplane.control_plane.project_adapter import (
+    ProjectContext,
+    ProjectAdapter,
+)
+from howlplane.control_plane.human_boundary import (
+    HumanBoundaryGate,
+    HumanDecisionPacket,
+    BoundaryCheckResult,
+    HUMAN_BOUNDARY_TRIGGERS,
+)
+from howlplane.control_plane.orchestrator import (
+    GovernedTaskOrchestrator,
+    OrchestrationConfig,
+    OrchestrationResult,
+)
+from howlplane.control_plane.role_binding import (
+    RoleDescriptor,
+    RoleBinding,
+    RoleBindingRegistry,
+    RoleExecutionRequest,
+    RoleExecutionResult,
+    RoleDispatcher,
+    IndependenceStatus,
+    RoleNotConfiguredError,
+    RoleExecutionError,
+    get_default_role_registry,
+)
+
+__all__ = [
+    "__version__",
+    "TaskSpec",
+    "InvalidStateTransitionError",
+    "TaskSpecValidationError",
+    "VALID_TASK_STATES",
+    "AgentProfile",
+    "AgentRegistry",
+    "BUILTIN_AGENTS",
+    "AgentBackend",
+    "AgentBackendRegistry",
+    "AgentExecutionResult",
+    "AgentExecutionError",
+    "AgentUnavailableError",
+    "FakeAgentBackend",
+    "SubprocessAgentBackend",
+    "GitBaseline",
+    "RepositoryDelta",
+    "capture_baseline",
+    "capture_delta",
+    "TaskRouter",
+    "RoutingDecision",
+    "ReviewerRole",
+    "REVIEWER_ROLES",
+    "get_reviewer_role",
+    "list_reviewer_roles",
+    "SingleReviewResult",
+    "ReviewCycleResult",
+    "ReviewRunner",
+    "parse_and_validate_findings",
+    "ReviewFinding",
+    "ReconciliationResult",
+    "ReviewReconciler",
+    "ReconciliationValidationError",
+    "VerificationStep",
+    "VerificationPlan",
+    "VerificationError",
+    "EvidenceEntry",
+    "EvidenceLedger",
+    "redact_sensitive_data",
+    "AgentMetricSummary",
+    "PerformanceMetricsSummary",
+    "MetricsCalculator",
+    "ProjectContext",
+    "ProjectAdapter",
+    "HumanBoundaryGate",
+    "HumanDecisionPacket",
+    "BoundaryCheckResult",
+    "HUMAN_BOUNDARY_TRIGGERS",
+    "GovernedTaskOrchestrator",
+    "OrchestrationConfig",
+    "OrchestrationResult",
+    "RoleDescriptor",
+    "RoleBinding",
+    "RoleBindingRegistry",
+    "RoleExecutionRequest",
+    "RoleExecutionResult",
+    "RoleDispatcher",
+    "IndependenceStatus",
+    "RoleNotConfiguredError",
+    "RoleExecutionError",
+    "get_default_role_registry",
+]

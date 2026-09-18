@@ -26,7 +26,7 @@ import subprocess
 from typing import Any, Dict, List, Optional, Tuple
 import pytest
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     AgentBackend,
     AgentExecutionResult,
     LAUNCH_OUTCOME_KEY,
@@ -38,18 +38,18 @@ from src.control_plane.agent_execution import (
     TIMEOUT_SOURCE_TRANSCRIPT,
     TIMEOUT_SOURCE_KEY,
 )
-from src.control_plane.authority_envelope import create_envelope
-from src.control_plane.authority_profile import get_profile
-from src.control_plane.checkpoints import CheckpointManager, StageCheckpoint
-from src.control_plane.git_baseline import (
+from howlplane.control_plane.authority_envelope import create_envelope
+from howlplane.control_plane.authority_profile import get_profile
+from howlplane.control_plane.checkpoints import CheckpointManager, StageCheckpoint
+from howlplane.control_plane.git_baseline import (
     GitBaseline,
     RepositoryDelta,
     capture_baseline,
     capture_delta,
 )
-from src.control_plane.git_integration import GitIntegrationExecutor
-from src.control_plane.launcher import _print_orchestration_summary
-from src.control_plane.orchestrator import (
+from howlplane.control_plane.git_integration import GitIntegrationExecutor
+from howlplane.control_plane.launcher import _print_orchestration_summary
+from howlplane.control_plane.orchestrator import (
     FAILURE_CLASS_ENGINEERING,
     FAILURE_CLASS_PROVIDER_EXHAUSTED,
     FAILURE_CLASS_PROVIDER_UNAVAILABLE,
@@ -58,26 +58,26 @@ from src.control_plane.orchestrator import (
     OrchestrationConfig,
     OrchestrationResult,
 )
-from src.control_plane.project_adapter import ProjectAdapter, ProjectContext
-from src.control_plane.resource_models import ProviderFailureClass
-from src.control_plane.router import RoutingDecision
-from src.control_plane.synthesis.campaign_state import DurableCampaignState
-from src.control_plane.synthesis.marathon import MarathonDogfoodEngine
-from src.control_plane.agent_registry import AgentRegistry
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.project_adapter import ProjectAdapter, ProjectContext
+from howlplane.control_plane.resource_models import ProviderFailureClass
+from howlplane.control_plane.router import RoutingDecision
+from howlplane.control_plane.synthesis.campaign_state import DurableCampaignState
+from howlplane.control_plane.synthesis.marathon import MarathonDogfoodEngine
+from howlplane.control_plane.agent_registry import AgentRegistry
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
     ProviderResourceSettings,
 )
-from src.control_plane.task_spec import TaskSpec
-from src.control_plane.verification import VerificationPlan, VerificationStep
+from howlplane.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.verification import VerificationPlan, VerificationStep
 from tests._dogfood_test_helpers import (
     ProviderScriptedOrchestrator,
     ScriptedRunner,
     build_full_merge_flow,
     init_minimal_python_repo,
 )
-from src.control_plane.git_env import run_git_in_repo
+from howlplane.control_plane.git_env import run_git_in_repo
 
 
 class FakeFailingBackend(AgentBackend):
@@ -978,7 +978,7 @@ def test_factory_budget_retry_refuses_unknown_git_status(tmp_path, monkeypatch):
     # actually restored, so the failure injection must target the git runner it
     # uses rather than marathon's wrapper.
     monkeypatch.setattr(
-        "src.control_plane.git_baseline._run_git_cmd",
+        "howlplane.control_plane.git_baseline._run_git_cmd",
         lambda repo, args: subprocess.CompletedProcess(args, 128, "", "status unavailable"),
     )
     ok, rec, orch, _ = _run_marathon_harness(

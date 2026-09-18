@@ -13,9 +13,9 @@ actually happen.
 
 import pytest
 
-from src.control_plane.authority_envelope import create_envelope
-from src.control_plane.authority_profile import get_profile
-from src.control_plane.git_integration import (
+from howlplane.control_plane.authority_envelope import create_envelope
+from howlplane.control_plane.authority_profile import get_profile
+from howlplane.control_plane.git_integration import (
     GitIntegrationError,
     GitIntegrationExecutor,
     GitHubCIObserver,
@@ -23,8 +23,8 @@ from src.control_plane.git_integration import (
     classify_check,
     pr_is_merged,
 )
-from src.control_plane.proposed_action import ProposedAction
-from src.control_plane.synthesis.campaign_state import GitIntegrationRecord
+from howlplane.control_plane.proposed_action import ProposedAction
+from howlplane.control_plane.synthesis.campaign_state import GitIntegrationRecord
 from tests._dogfood_test_helpers import ScriptedRunner, build_full_merge_flow
 
 
