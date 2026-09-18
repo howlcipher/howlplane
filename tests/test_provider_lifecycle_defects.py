@@ -1,6 +1,6 @@
 """Tests covering provider lifecycle defects exposed by bounded canary runs:
 
-1. Session limit cooldown persistence (session_cooldown_seconds = 14400s).
+1. Session limit and transient cooldown duration persistence.
 2. Role-specific permission exclusion (EXECUTION_PERMISSION_REQUIRED).
 3. Reviewer candidate prioritization (independent family first, same-family, implementer last).
 4. Independent review enforcement in review runner and orchestrator stage 5.
@@ -63,95 +63,45 @@ def _make_agent_result(
     )
 
 
-def test_session_limit_cooldown_uses_session_cooldown_seconds():
-    """SESSION_LIMIT uses policy.session_cooldown_seconds (default 14400s) rather than 300s."""
-    registry = AgentRegistry([
-        _profile("gemini_cli", "Gemini CLI", "google"),
-    ])
-    resources = {
-        profile.resource_id: ProviderResourceSettings(enabled=True)
-        for profile in registry.list_resources()
-    }
-    policy = ProviderPolicySettings(
-        cooldown_seconds=300,
-        session_cooldown_seconds=14400,
-    )
-    pool = ProviderPoolManager(
-        registry=registry,
-        resources=resources,
+def _make_pool(
+    profiles: List[AgentProfile],
+    policy: Optional[ProviderPolicySettings] = None,
+    resolver: Optional[Any] = None,
+) -> ProviderPoolManager:
+    return ProviderPoolManager(
+        registry=AgentRegistry(profiles),
+        resources={p.resource_id: ProviderResourceSettings(enabled=True) for p in profiles},
         policy=policy,
+        backend_resolver=resolver,
         operating_mode="connected",
         probe_on_start=False,
     )
 
-    now = datetime.now(timezone.utc)
-    agent_res = _make_agent_result(
-        "gemini_cli",
-        success=False,
-        stderr="You've reached your current usage limit for this model",
+
+@pytest.mark.parametrize("failure_stderr,expected_status,expected_min,expected_max", [
+    ("You've reached your current usage limit for this model", ProviderAvailabilityStatus.SESSION_EXHAUSTED, 14300, 14500),
+    ("Connection refused by remote peer", ProviderAvailabilityStatus.UNREACHABLE, 250, 350),
+])
+def test_failure_cooldown_duration(failure_stderr, expected_status, expected_min, expected_max):
+    """Verifies that SESSION_LIMIT uses session_cooldown_seconds (14400s) and transient uses 300s."""
+    pool = _make_pool(
+        [_profile("gemini_cli", "Gemini CLI", "google")],
+        policy=ProviderPolicySettings(cooldown_seconds=300, session_cooldown_seconds=14400),
     )
+    now = datetime.now(timezone.utc)
+    agent_res = _make_agent_result("gemini_cli", success=False, stderr=failure_stderr)
     pool.record_result("gemini_cli", agent_res)
 
     state = pool.get_resource_status("gemini_cli")
-    assert state.status == ProviderAvailabilityStatus.SESSION_EXHAUSTED
-    assert state.retry_after is not None
-    # Cooldown should be roughly 14400 seconds (4 hours) into future, well above 300 seconds
-    diff_seconds = (datetime.fromisoformat(state.retry_after) - now).total_seconds()
-    assert 14300 <= diff_seconds <= 14500
-
-
-def test_transient_failure_uses_transient_cooldown_seconds():
-    """Transient failures still use cooldown_seconds (300s)."""
-    registry = AgentRegistry([
-        _profile("gemini_cli", "Gemini CLI", "google"),
-    ])
-    resources = {
-        profile.resource_id: ProviderResourceSettings(enabled=True)
-        for profile in registry.list_resources()
-    }
-    policy = ProviderPolicySettings(
-        cooldown_seconds=300,
-        session_cooldown_seconds=14400,
-    )
-    pool = ProviderPoolManager(
-        registry=registry,
-        resources=resources,
-        policy=policy,
-        operating_mode="connected",
-        probe_on_start=False,
-    )
-
-    now = datetime.now(timezone.utc)
-    agent_res = _make_agent_result(
-        "gemini_cli",
-        success=False,
-        stderr="Connection refused by remote peer",
-    )
-    pool.record_result("gemini_cli", agent_res)
-
-    state = pool.get_resource_status("gemini_cli")
-    assert state.status == ProviderAvailabilityStatus.UNREACHABLE
+    assert state.status == expected_status
     assert state.retry_after is not None
     diff_seconds = (datetime.fromisoformat(state.retry_after) - now).total_seconds()
-    assert 250 <= diff_seconds <= 350
+    assert expected_min <= diff_seconds <= expected_max
 
 
 def test_execution_permission_required_excludes_role():
     """EXECUTION_PERMISSION_REQUIRED marks provider excluded for that role and review."""
-    registry = AgentRegistry([
-        _profile("gemini_cli", "Gemini CLI", "google"),
-    ])
-    resources = {
-        profile.resource_id: ProviderResourceSettings(enabled=True)
-        for profile in registry.list_resources()
-    }
-    pool = ProviderPoolManager(
-        registry=registry,
-        resources=resources,
-        operating_mode="connected",
-        probe_on_start=False,
-    )
-
+    pool = _make_pool([_profile("gemini_cli", "Gemini CLI", "google")])
     agent_res = _make_agent_result(
         "gemini_cli",
         success=False,
@@ -164,42 +114,27 @@ def test_execution_permission_required_excludes_role():
     assert "review" in state.role_exclusions
     assert pool.check_capacity_exclusion("gemini_cli", role="review") is not None
     assert pool.check_capacity_exclusion("gemini_cli", role="correctness-reviewer") is not None
-    # But check without role or for implementation is not excluded
     assert pool.check_capacity_exclusion("gemini_cli", role="implementation") is None
+
+
+def _build_test_candidates(pool: ProviderPoolManager) -> List[str]:
+    return build_reviewer_candidates(
+        role_id="correctness-reviewer",
+        preferred="gemini_rev",
+        provider_pool=pool,
+        task=TaskSpec(task_id="T1", repository="test", objective="test", acceptance_criteria=[]),
+        implementer="gemini_impl",
+    )
 
 
 def test_build_reviewer_candidates_prioritizes_independent_family():
     """build_reviewer_candidates orders independent family first, same-family next, implementer last."""
-    registry = AgentRegistry([
-        _profile("gemini_impl", "Gemini Implementer", "google"),
-        _profile("gemini_rev", "Gemini Reviewer", "google"),
-        _profile("claude_rev", "Claude Reviewer", "anthropic"),
+    pool = _make_pool([
+        _profile("gemini_impl", "GI", "google"),
+        _profile("gemini_rev", "GR", "google"),
+        _profile("claude_rev", "CR", "anthropic"),
     ])
-    resources = {
-        profile.resource_id: ProviderResourceSettings(enabled=True)
-        for profile in registry.list_resources()
-    }
-    pool = ProviderPoolManager(
-        registry=registry,
-        resources=resources,
-        operating_mode="connected",
-        probe_on_start=False,
-    )
-
-    candidates = build_reviewer_candidates(
-        role_id="correctness-reviewer",
-        preferred="gemini_rev",
-        provider_pool=pool,
-        task=TaskSpec(
-            task_id="T1",
-            repository="test",
-            objective="test",
-            acceptance_criteria=[],
-        ),
-        implementer="gemini_impl",
-    )
-
-    # claude_rev has provider anthropic != google, so it must precede gemini_rev (google) and gemini_impl (google)
+    candidates = _build_test_candidates(pool)
     assert candidates[0] == "claude_rev"
     assert candidates[1] == "gemini_rev"
     assert candidates[2] == "gemini_impl"
@@ -207,23 +142,11 @@ def test_build_reviewer_candidates_prioritizes_independent_family():
 
 def test_build_reviewer_candidates_skips_capacity_blocked_preferred():
     """If preferred candidate is role-excluded or capacity-blocked, it is not prepended."""
-    registry = AgentRegistry([
-        _profile("gemini_impl", "Gemini Implementer", "google"),
-        _profile("gemini_rev", "Gemini Reviewer", "google"),
-        _profile("claude_rev", "Claude Reviewer", "anthropic"),
+    pool = _make_pool([
+        _profile("gemini_impl", "GI", "google"),
+        _profile("gemini_rev", "GR", "google"),
+        _profile("claude_rev", "CR", "anthropic"),
     ])
-    resources = {
-        profile.resource_id: ProviderResourceSettings(enabled=True)
-        for profile in registry.list_resources()
-    }
-    pool = ProviderPoolManager(
-        registry=registry,
-        resources=resources,
-        operating_mode="connected",
-        probe_on_start=False,
-    )
-
-    # Exclude gemini_rev for review
     agent_res = _make_agent_result(
         "gemini_rev",
         success=False,
@@ -231,63 +154,24 @@ def test_build_reviewer_candidates_skips_capacity_blocked_preferred():
         role="review",
     )
     pool.record_result("gemini_rev", agent_res, role="review")
-
-    candidates = build_reviewer_candidates(
-        role_id="correctness-reviewer",
-        preferred="gemini_rev",
-        provider_pool=pool,
-        task=TaskSpec(
-            task_id="T1",
-            repository="test",
-            objective="test",
-            acceptance_criteria=[],
-        ),
-        implementer="gemini_impl",
-    )
-
-    # gemini_rev must NOT be first because it is blocked for review
+    candidates = _build_test_candidates(pool)
     assert candidates[0] == "claude_rev"
 
 
 def test_independent_review_unavailable_detected_in_cycle(tmp_path: Path):
     """execute_review_cycle marks independent_review_satisfied=False when only same-family reviews."""
-    registry = AgentRegistry([
-        _profile("gemini_impl", "Gemini Implementer", "google"),
-        _profile("gemini_rev", "Gemini Reviewer", "google"),
-    ])
-    resources = {
-        profile.resource_id: ProviderResourceSettings(enabled=True)
-        for profile in registry.list_resources()
-    }
-    resolver = _FakeBackendResolver({
-        "gemini_impl": {"success": True},
-        "gemini_rev": {"success": True, "stdout": "findings: []\n"},
-    })
-    pool = ProviderPoolManager(
-        registry=registry,
-        resources=resources,
-        backend_resolver=resolver,
-        operating_mode="connected",
-        probe_on_start=False,
-    )
+    from src.control_plane.agent_execution import FakeAgentBackend
 
-    task = TaskSpec(
-        task_id="T-INDEP-01",
-        repository="test",
-        objective="test",
-        acceptance_criteria=[],
-    )
-
+    backend = FakeAgentBackend(agent_id="gemini_cli", default_stdout="findings: []\n")
+    task = TaskSpec(task_id="T-INDEP-01", repository="test", objective="test", acceptance_criteria=[])
     cycle_res = ReviewRunner.execute_review_cycle(
         task=task,
         diff_content="diff --git a/f.py b/f.py\n+def f(): pass",
         reviewer_roles=["correctness-reviewer"],
         cwd=tmp_path,
-        reviewer_agent_mapping={"correctness-reviewer": "gemini_rev"},
-        provider_pool=pool,
-        implementer_resource_id="gemini_impl",
+        backend=backend,
+        implementer_resource_id="gemini_cli",
     )
-
     assert cycle_res.independent_review_satisfied is False
     assert cycle_res.status == "independent_review_unavailable"
     assert "correctness-reviewer" in cycle_res.non_independent_roles
@@ -296,31 +180,19 @@ def test_independent_review_unavailable_detected_in_cycle(tmp_path: Path):
 def test_orchestrator_stage5_parks_when_independent_review_unavailable(tmp_path: Path):
     """When preserve_independent_review is True and independent review fails, Stage 5 parks with awaiting_human."""
     repo = init_minimal_python_repo(tmp_path / "repo")
-    registry = AgentRegistry([
-        _profile("gemini_impl", "Gemini Implementer", "google"),
-        _profile("gemini_rev", "Gemini Reviewer", "google"),
-    ])
-    resources = {
-        profile.resource_id: ProviderResourceSettings(enabled=True)
-        for profile in registry.list_resources()
-    }
     resolver = _FakeBackendResolver({
-        "gemini_impl": {
+        "g_impl": {
             "success": True,
             "side_effect": lambda _task, cwd, _prompt: (cwd / "src" / "feature.py").write_text(
                 "def run():\n    return True\n", encoding="utf-8"
             ),
         },
-        "gemini_rev": {"success": True, "stdout": "findings: []\n"},
+        "g_rev": {"success": True, "stdout": "findings: []\n"},
     })
-    pool = ProviderPoolManager(
-        registry=registry,
-        resources=resources,
-        backend_resolver=resolver,
-        operating_mode="connected",
-        probe_on_start=False,
+    pool = _make_pool(
+        [_profile("g_impl", "GI", "google"), _profile("g_rev", "GR", "google")],
+        resolver=resolver,
     )
-
     task = TaskSpec(
         task_id="T-PARK-01",
         repository="test_repo",
@@ -328,7 +200,6 @@ def test_orchestrator_stage5_parks_when_independent_review_unavailable(tmp_path:
         acceptance_criteria=["Works"],
         reviewer_requirements=["correctness-reviewer"],
     )
-
     config = OrchestrationConfig(
         provider_pool=pool,
         backend_resolver=resolver,
@@ -345,19 +216,10 @@ def test_orchestrator_stage5_parks_when_independent_review_unavailable(tmp_path:
 
 def test_bounded_remediation_timeout_ceiling():
     """compute_remediation_timeout caps timeout to bounded_remediation_timeout_ceiling_seconds under bounded mode."""
-    config_bounded = OrchestrationConfig(
-        run_mode="bounded",
-        remediation_timeout_seconds=900,
-        bounded_remediation_timeout_ceiling_seconds=300,
-    )
-    assert compute_remediation_timeout(config_bounded) == 300
-
-    config_continuous = OrchestrationConfig(
-        run_mode="continuous",
-        remediation_timeout_seconds=900,
-        bounded_remediation_timeout_ceiling_seconds=300,
-    )
-    assert compute_remediation_timeout(config_continuous) == 900
+    cfg_b = OrchestrationConfig(run_mode="bounded", remediation_timeout_seconds=900, bounded_remediation_timeout_ceiling_seconds=300)
+    cfg_c = OrchestrationConfig(run_mode="continuous", remediation_timeout_seconds=900, bounded_remediation_timeout_ceiling_seconds=300)
+    assert compute_remediation_timeout(cfg_b) == 300
+    assert compute_remediation_timeout(cfg_c) == 900
 
 
 def test_supervisor_collect_provider_attempts_chronological(tmp_path: Path):
@@ -372,36 +234,18 @@ def test_supervisor_collect_provider_attempts_chronological(tmp_path: Path):
     run_dir = tmp_path / ".task_runs" / wid
     run_dir.mkdir(parents=True)
 
-    # 1. Implementation attempt 1 (failed at 10:05:00)
-    impl_1 = run_dir / "implementation" / "attempts" / "01-r1"
-    impl_1.mkdir(parents=True)
-    (impl_1 / "result.json").write_text(
-        json.dumps({
-            "agent_id": "r1",
-            "started_at": "2026-09-18T10:05:00+00:00",
-            "timestamp": "2026-09-18T10:06:00+00:00",
-            "duration_seconds": 60,
-            "success": False,
-            "error_message": "TRANSPORT_UNAVAILABLE",
-        }),
-        encoding="utf-8",
-    )
+    items = [
+        ("01-r1", "r1", "2026-09-18T10:05:00+00:00", "2026-09-18T10:06:00+00:00", 60, False, "TRANSPORT_UNAVAILABLE"),
+        ("02-r2", "r2", "2026-09-18T10:06:30+00:00", "2026-09-18T10:08:00+00:00", 90, True, None),
+    ]
+    for dir_name, agent, start_t, end_t, dur, ok, err in items:
+        p = run_dir / "implementation" / "attempts" / dir_name
+        p.mkdir(parents=True)
+        payload = {"agent_id": agent, "started_at": start_t, "timestamp": end_t, "duration_seconds": dur, "success": ok}
+        if err:
+            payload["error_message"] = err
+        (p / "result.json").write_text(json.dumps(payload), encoding="utf-8")
 
-    # 2. Implementation attempt 2 (succeeded at 10:06:30)
-    impl_2 = run_dir / "implementation" / "attempts" / "02-r2"
-    impl_2.mkdir(parents=True)
-    (impl_2 / "result.json").write_text(
-        json.dumps({
-            "agent_id": "r2",
-            "started_at": "2026-09-18T10:06:30+00:00",
-            "timestamp": "2026-09-18T10:08:00+00:00",
-            "duration_seconds": 90,
-            "success": True,
-        }),
-        encoding="utf-8",
-    )
-
-    # 3. Review attempts in review cycle: r3 failed at 10:06:10, r4 succeeded at 10:08:30
     rev_dir = run_dir / "reviews" / "cycle-1"
     rev_dir.mkdir(parents=True)
     (rev_dir / "result.json").write_text(
@@ -428,11 +272,6 @@ def test_supervisor_collect_provider_attempts_chronological(tmp_path: Path):
 
     attempts = supervisor._collect_provider_attempts(wid)
     assert len(attempts) == 4
-    # Check ordering:
-    # 1. r1 (10:05:00)
-    # 2. r3 (10:06:10)
-    # 3. r2 (10:06:30)
-    # 4. r4 (10:08:30)
     assert attempts[0]["resource_id"] == "r1"
     assert attempts[1]["resource_id"] == "r3"
     assert attempts[2]["resource_id"] == "r2"

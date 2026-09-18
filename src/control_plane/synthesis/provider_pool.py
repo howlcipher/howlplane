@@ -947,17 +947,18 @@ class ProviderPoolManager:
         failure_class = self.classify_failure(resource_id, result)
         metadata = result.metadata or {}
 
+        state.consecutive_failures += 1
+        state.last_failure_at = now.isoformat()
+        state.last_checked = now.isoformat()
+        state.observed_at = now.isoformat()
+        state.normalized_failure_class = failure_class.value
+        state.unavailable_reason = failure_class.value
+
         if failure_class is ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED:
             target_role = role or "unknown"
             state.role_exclusions[target_role] = failure_class.value
             if self._is_review_role(target_role):
                 state.role_exclusions["review"] = failure_class.value
-            state.consecutive_failures += 1
-            state.last_failure_at = now.isoformat()
-            state.last_checked = now.isoformat()
-            state.observed_at = now.isoformat()
-            state.normalized_failure_class = failure_class.value
-            state.unavailable_reason = failure_class.value
             self._persist()
             return failure_class
 
@@ -980,12 +981,6 @@ class ProviderPoolManager:
         }
         if failure_class in availability_map:
             state.status = availability_map[failure_class]
-            state.consecutive_failures += 1
-            state.last_failure_at = now.isoformat()
-            state.last_checked = now.isoformat()
-            state.observed_at = now.isoformat()
-            state.normalized_failure_class = failure_class.value
-            state.unavailable_reason = failure_class.value
             # Every capacity condition expires. QUOTA_EXHAUSTED was absent from
             # this set, so a quota event had no `retry_after` at all and the
             # resource stayed unavailable until someone called reset_resource --

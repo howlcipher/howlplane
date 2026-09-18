@@ -3118,6 +3118,33 @@ class GovernedTaskOrchestrator:
         remediation_count = 0
         current_reviewers = list(routing.recommended_reviewers)
 
+        def _make_parked_review_exit(park_msg: str) -> OrchestrationResult:
+            return self._make_result(
+                task_spec=task_spec,
+                final_state="awaiting_human",
+                exit_code=2,
+                start_time=start_time,
+                run_dir=run_dir,
+                routing=routing,
+                initial_delta=initial_delta,
+                current_delta=current_delta,
+                review_cycles=review_cycles,
+                reconciliation=latest_reconciliation,
+                verif_plan=verif_plan,
+                remediation_count=remediation_count,
+                err_msg=park_msg,
+                provider_execution=impl_res,
+                failure_class=FAILURE_CLASS_AUTHORITY_BLOCKED,
+                hf_status=hf_audit_status,
+                hf_match=hf_audit_match,
+                implementation_attempts=implementation_attempts,
+                failover_summary=self._build_failover_summary(
+                    implementation_attempts,
+                    TERMINATION_IMPLEMENTATION_SUCCEEDED,
+                    last_selection_decision,
+                ),
+            )
+
         while True:
             cycle_idx = len(review_cycles) + 1
             CheckpointManager.start_stage(
@@ -3259,31 +3286,7 @@ class GovernedTaskOrchestrator:
                     decision_pkt,
                     progress,
                 )
-                return self._make_result(
-                    task_spec=task_spec,
-                    final_state="awaiting_human",
-                    exit_code=2,
-                    start_time=start_time,
-                    run_dir=run_dir,
-                    routing=routing,
-                    initial_delta=initial_delta,
-                    current_delta=current_delta,
-                    review_cycles=review_cycles,
-                    reconciliation=latest_reconciliation,
-                    verif_plan=verif_plan,
-                    remediation_count=remediation_count,
-                    err_msg=err_msg,
-                    provider_execution=impl_res,
-                    failure_class=FAILURE_CLASS_AUTHORITY_BLOCKED,
-                    hf_status=hf_audit_status,
-                    hf_match=hf_audit_match,
-                    implementation_attempts=implementation_attempts,
-                    failover_summary=self._build_failover_summary(
-                        implementation_attempts,
-                        TERMINATION_IMPLEMENTATION_SUCCEEDED,
-                        last_selection_decision,
-                    ),
-                )
+                return _make_parked_review_exit(err_msg)
 
             # Check if any findings require remediation
             if not cycle_res.requires_remediation:
@@ -3350,31 +3353,7 @@ class GovernedTaskOrchestrator:
                     decision_pkt,
                     progress,
                 )
-                return self._make_result(
-                    task_spec=task_spec,
-                    final_state="awaiting_human",
-                    exit_code=2,
-                    start_time=start_time,
-                    run_dir=run_dir,
-                    routing=routing,
-                    initial_delta=initial_delta,
-                    current_delta=current_delta,
-                    review_cycles=review_cycles,
-                    reconciliation=latest_reconciliation,
-                    verif_plan=verif_plan,
-                    remediation_count=remediation_count,
-                    err_msg=err_msg,
-                    provider_execution=impl_res,
-                    failure_class=FAILURE_CLASS_AUTHORITY_BLOCKED,
-                    hf_status=hf_audit_status,
-                    hf_match=hf_audit_match,
-                    implementation_attempts=implementation_attempts,
-                    failover_summary=self._build_failover_summary(
-                        implementation_attempts,
-                        TERMINATION_IMPLEMENTATION_SUCCEEDED,
-                        last_selection_decision,
-                    ),
-                )
+                return _make_parked_review_exit(err_msg)
 
             remediation_count += 1
             CheckpointManager.start_stage(
