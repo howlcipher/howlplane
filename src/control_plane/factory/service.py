@@ -17,7 +17,7 @@ from typing import Optional
 
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
 from src.control_plane.factory.campaign import CampaignError, FactoryCampaign
-from src.control_plane.locking import LockError, SupervisorLock, get_process_create_time, is_process_alive
+from src.control_plane.locking import LockError, SupervisorLock, get_process_create_time, is_process_record_active
 
 
 @dataclass
@@ -69,15 +69,7 @@ def _systemd_available() -> bool:
 
 
 def _active(campaign: FactoryCampaign, record: FactoryProcessRecord) -> bool:
-    if record.backend == "systemd" and record.unit_name:
-        try:
-            result = subprocess.run(["systemctl", "--user", "is-active", "--quiet", record.unit_name],
-                                    timeout=3, check=False)
-            return result.returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            return False
-    alive, _ = is_process_alive(record.pid, record.hostname, record.process_create_time)
-    return alive
+    return is_process_record_active(asdict(record))
 
 
 def process_status(campaign: FactoryCampaign) -> str:
@@ -86,13 +78,55 @@ def process_status(campaign: FactoryCampaign) -> str:
         return "absent"
     if _active(campaign, record):
         return "running"
-    if record.status == "running":
-        record.status = "stale"
-        _save_process(campaign, record)
+
+    # Process is inactive/absent. Consult supervisor state to distinguish clean
+    # stops (bounded completion, operator stop) from genuine stale process records.
+    supervisor_record = None
+    supervisor_dir = campaign.state_dir / "supervisor"
+    if (supervisor_dir / "factory_supervisor.json").is_file():
+        try:
+            from src.control_plane.factory.supervisor_state import (
+                SupervisorState,
+                SupervisorStateStore,
+            )
+            supervisor_record = SupervisorStateStore(supervisor_dir).load(reconcile_restart=False)
+        except Exception:
+            supervisor_record = None
+
+    if supervisor_record is not None:
+        from src.control_plane.factory.supervisor_state import SupervisorState
+        if supervisor_record.state == SupervisorState.STOPPED:
+            if record.status != "stopped":
+                record.status = "stopped"
+                _save_process(campaign, record)
+            return "stopped"
+
+    if record.status in ("running", "stale"):
+        if record.status != "stale":
+            record.status = "stale"
+            _save_process(campaign, record)
+        return "stale"
     return record.status
 
 
-def _command(campaign: FactoryCampaign, authority_profile: Optional[str], objective: Optional[str]) -> list[str]:
+
+def _unit_name(campaign: FactoryCampaign) -> str:
+    """Return a service unit name that truthfully names the state directory.
+
+    When the state directory uses the canonical campaign-id name, the historical
+    unit name is preserved. When an explicit --state-dir is used, the unit name
+    reflects that directory so two campaigns for the same repository cannot
+    silently share or collide on one systemd service identity.
+    """
+    state_dir_name = campaign.state_dir.name
+    if state_dir_name == campaign.repository.campaign_id:
+        return f"howlplane-factory-{campaign.repository.campaign_id}"
+    safe = re.sub(r"[^A-Za-z0-9-]+", "-", state_dir_name).strip("-")
+    safe = safe[:200] or "factory"
+    return f"howlplane-factory-{safe}"
+
+
+def _command(campaign: FactoryCampaign, authority_profile: Optional[str], objective: Optional[str], max_work_items: Optional[int] = None) -> list[str]:
     command = [sys.executable, "-m", "src.control_plane.cli", "factory", "run",
                "--state-dir", str(campaign.state_dir), "--target-repo", str(campaign.target_dir),
                "--target", "repo", "--resume-stopped"]
@@ -100,12 +134,14 @@ def _command(campaign: FactoryCampaign, authority_profile: Optional[str], object
         command.extend(["--authority-profile", authority_profile])
     if objective:
         command.extend(["--objective", objective])
+    if max_work_items is not None:
+        command.extend(["--max-work-items", str(max_work_items)])
     return command
 
 
-def start_process(campaign: FactoryCampaign, authority_profile: Optional[str], objective: Optional[str]) -> tuple[bool, FactoryProcessRecord]:
+def start_process(campaign: FactoryCampaign, authority_profile: Optional[str], objective: Optional[str], max_work_items: Optional[int] = None) -> tuple[bool, FactoryProcessRecord]:
     """Start exactly one supervisor, preferring a usable user systemd manager."""
-    command = _command(campaign, authority_profile, objective)
+    command = _command(campaign, authority_profile, objective, max_work_items)
     launch_lock = SupervisorLock(campaign.state_dir, command="howlplane factory start")
     try:
         launch_lock.acquire()
@@ -124,7 +160,7 @@ def start_process(campaign: FactoryCampaign, authority_profile: Optional[str], o
         log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         now = datetime.now(timezone.utc).isoformat()
         if _systemd_available():
-            unit = f"howlplane-factory-{campaign.repository.campaign_id}"
+            unit = _unit_name(campaign)
             result = subprocess.run(
                 ["systemd-run", "--user", "--unit", unit, "--collect", "--same-dir",
                  "--property=Restart=on-failure", "--property=RestartSec=30", *command],

@@ -290,11 +290,13 @@ def test_launched_provider_inner_command_not_found_is_not_missing_executable():
     # deadline, not its reachability (HOWLFRAM-SLOPFIX-05).
     assert failure_class == ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED
     assert failure_class != ProviderFailureClass.TRANSPORT_UNAVAILABLE
-    # The provider must stay recoverable, not be permanently written off. Since
-    # nothing was observed about availability, it is not written off at all.
+    # The provider must stay recoverable, not be permanently written off. A
+    # harness budget kill now records a bounded DEGRADED cooldown so the same
+    # expensive resource is not immediately retried, but it remains eligible
+    # after the cooldown.
     pool.record_result("codex", res)
-    assert pool.get_status("codex") != ProviderAvailabilityStatus.UNREACHABLE
-    assert pool.get_resource_status("codex").retry_after is None
+    assert pool.get_status("codex") == ProviderAvailabilityStatus.DEGRADED
+    assert pool.get_resource_status("codex").retry_after is not None
 
 
 def test_launched_provider_engineering_failure_is_not_missing_executable():
@@ -821,11 +823,12 @@ def test_local_budget_kill_is_not_transport_unavailable():
         == ProviderFailureClass.TRANSPORT_UNAVAILABLE
     )
 
-    # The budget kill leaves availability state untouched: no UNREACHABLE, no
-    # cooldown, and nothing for a later task to recover from.
+    # The budget kill is now recorded as a bounded DEGRADED cooldown so the
+    # same expensive resource is not immediately retried, while remaining
+    # recoverable and not reported as an exhaustion event.
     pool.record_result("claude_code", harness_killed)
-    assert pool.get_status("claude_code") != ProviderAvailabilityStatus.UNREACHABLE
-    assert pool.get_resource_status("claude_code").retry_after is None
+    assert pool.get_status("claude_code") == ProviderAvailabilityStatus.DEGRADED
+    assert pool.get_resource_status("claude_code").retry_after is not None
     assert pool.detect_exhaustion("claude_code", harness_killed) is None
 
     # A genuine transport timeout still marks the resource unreachable and
@@ -963,7 +966,11 @@ def test_factory_salvaged_budget_candidate_verification_failure_is_not_capacity(
     assert not ok
     assert orch.attempted == ["agy"]
     assert rec["failure_class"] == FAILURE_CLASS_VERIFICATION
-    assert pool.get_status("agy") == ProviderAvailabilityStatus.AVAILABLE
+    # The implementation attempt hit the harness budget before verification
+    # failed, so AGY is recorded as DEGRADED (a bounded cooldown), not as a
+    # capacity exhaustion event.
+    assert pool.get_status("agy") == ProviderAvailabilityStatus.DEGRADED
+    assert pool.get_resource_status("agy").retry_after is not None
 
 
 def test_factory_budget_retry_refuses_unknown_git_status(tmp_path, monkeypatch):

@@ -205,7 +205,9 @@ def test_agy_zero_exit_partial_timeout_is_not_success(tmp_path, monkeypatch, rol
     assert result.timed_out is True
     assert result.error_message == message
     assert pool.record_result("agy", result) == ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED
-    assert pool.get_status("agy") == before
+    # A budget kill is now recorded as a bounded DEGRADED cooldown, not a
+    # permanent exhaustion, so the provider is deprioritized but can recover.
+    assert pool.get_status("agy") == ProviderAvailabilityStatus.DEGRADED
 
 
 def test_agy_quoted_partial_timeout_does_not_reject_completed_work(tmp_path, monkeypatch):
@@ -331,8 +333,10 @@ def test_agy_budget_derived_timeout_does_not_bench_provider(tmp_path, monkeypatc
     assert failure_class == ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED
 
     pool.record_result("agy", result)
-    assert pool.get_status("agy") != ProviderAvailabilityStatus.UNREACHABLE
-    assert pool.get_resource_status("agy").retry_after is None
+    # A budget-derived timeout is now a bounded DEGRADED cooldown rather than a
+    # permanent bench, so the provider is deprioritized but can recover.
+    assert pool.get_status("agy") == ProviderAvailabilityStatus.DEGRADED
+    assert pool.get_resource_status("agy").retry_after is not None
 
 
 def test_agy_genuine_transport_timeout_benches_provider(tmp_path, monkeypatch):

@@ -13,7 +13,7 @@ Human Authority Boundary Gate -> Complete Evidence Ledger.
 from contextlib import ExitStack
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-import hashlib, json, os, shutil, sys, time
+import hashlib, inspect, json, os, shutil, sys, time
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 import yaml
@@ -25,6 +25,7 @@ from src.control_plane.agent_execution import (
     AgentUnavailableError,
     TOOL_PERMISSION_DENIED,
     TOOL_PERMISSION_KEY,
+    ProviderStreamObserver,
 )
 from src.control_plane.atomic_io import (
     atomic_write_json,
@@ -214,9 +215,14 @@ class OrchestrationConfig:
     custom_reviewer_fn: Optional[Callable[[str, str, TaskSpec], str]] = None
     custom_remediation_fn: Optional[Callable[[TaskSpec, Path, List[ReviewFinding]], None]] = None
     reviewer_agent_mapping: Optional[Dict[str, str]] = None
-    # Maximum number of implementation providers to try before giving up.
-    # Each provider/resource is attempted at most once per task.
-    max_provider_failover_attempts: int = 3
+    # Global safety ceiling. Normal traversal tries every eligible resource at
+    # most once; this only limits pathological or unexpectedly huge inventories.
+    max_provider_failover_attempts: int = 8
+    # A provider is stalled only after this period with no meaningful semantic
+    # progress. Raw CLI output and supervisor heartbeats are liveness evidence,
+    # not progress. The absolute timeout remains final.
+    provider_stall_timeout_seconds: int = 120
+    provider_watchdog_interval_seconds: float = 0.25
     # Optional resolver that overrides AgentBackendRegistry.get_backend. Useful
     # in deterministic tests to inject per-resource fake backends.
     backend_resolver: Optional[Callable[[str], AgentBackend]] = None
@@ -518,6 +524,8 @@ class GovernedTaskOrchestrator:
             "schema": IMPLEMENTATION_ATTEMPT_SCHEMA_VERSION,
             "evidence_dir": str(attempt_dir.relative_to(run_dir)),
         }
+        if impl_res and isinstance((impl_res.metadata or {}).get("watchdog_diagnostics"), dict):
+            record["watchdog_diagnostics"] = impl_res.metadata["watchdog_diagnostics"]
         if carried_salvage:
             record["retained_salvage"] = carried_salvage
         self._persist_attempt_record(record, attempts_dir)
@@ -1631,6 +1639,7 @@ class GovernedTaskOrchestrator:
             ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED,
             ProviderFailureClass.MISSING_EXECUTABLE,
             ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED,
+            ProviderFailureClass.PROVIDER_STALLED,
         }
 
     def _map_failure_class_to_orchestrator_class(
@@ -1651,6 +1660,7 @@ class GovernedTaskOrchestrator:
             "TRANSPORT_UNAVAILABLE",
             "MISSING_EXECUTABLE",
             "EXECUTION_PERMISSION_REQUIRED",
+            "PROVIDER_STALLED",
         }:
             return FAILURE_CLASS_PROVIDER_UNAVAILABLE
         return FAILURE_CLASS_ENGINEERING
@@ -2605,19 +2615,49 @@ class GovernedTaskOrchestrator:
                     } if attempts_dir.is_dir() else set()
 
                     impl_agent_id = getattr(impl_backend, "agent_id", None) or current_impl_resource_id
+                    # capture_delta already owns the task baseline and control
+                    # plane exclusions. Reusing it keeps watchdog progress from
+                    # treating journals, scratch, locks, or .task_runs as work.
+                    def repository_fingerprint() -> str:
+                        delta = capture_delta(self.target_repo, baseline)
+                        return hashlib.sha256(delta.diff_content.encode("utf-8")).hexdigest()
+
+                    observe_provider = ProviderStreamObserver(
+                        impl_agent_id,
+                        self.config.provider_stall_timeout_seconds,
+                        repository_fingerprint,
+                    )
+
                     with progress.operation(
                         phase=TaskPhase.IMPLEMENTING,
                         resource_id=impl_agent_id,
                         role="implementation",
                         details="started",
                         suppress_completion=True,
+                        deadline_seconds=self.config.timeout_seconds,
                     ):
+                        execute_kwargs: Dict[str, Any] = {
+                            "task": task_spec,
+                            "cwd": self.target_repo,
+                            "role": "implementation",
+                            "prompt_override": impl_prompt,
+                            "timeout_seconds": self.config.timeout_seconds,
+                        }
+                        # Third-party/test adapters predate streamed execution.
+                        # Preserve their bounded legacy contract; built-in CLI
+                        # adapters opt into observation via **kwargs.
+                        parameters = inspect.signature(impl_backend.execute).parameters
+                        supports_kwargs = any(
+                            parameter.kind == inspect.Parameter.VAR_KEYWORD
+                            for parameter in parameters.values()
+                        )
+                        if supports_kwargs or "watchdog_callback" in parameters:
+                            execute_kwargs.update({
+                                "watchdog_callback": observe_provider,
+                                "watchdog_interval_seconds": self.config.provider_watchdog_interval_seconds,
+                            })
                         impl_res = impl_backend.execute(
-                            task=task_spec,
-                            cwd=self.target_repo,
-                            role="implementation",
-                            prompt_override=impl_prompt,
-                            timeout_seconds=self.config.timeout_seconds,
+                            **execute_kwargs,
                         )
 
                 # Relocate provider scratch before any evidence for this
@@ -2718,6 +2758,21 @@ class GovernedTaskOrchestrator:
                     else (impl_res.error_message if impl_res else f"Implementation failed on {current_impl_resource_id}")
                 )
                 failure_class_value = normalized_failure.value if normalized_failure else None
+                if normalized_failure in {
+                    ProviderFailureClass.SESSION_LIMIT,
+                    ProviderFailureClass.QUOTA_EXHAUSTED,
+                    ProviderFailureClass.RATE_LIMITED,
+                    ProviderFailureClass.AUTHENTICATION_REQUIRED,
+                    ProviderFailureClass.PROVIDER_UNAVAILABLE,
+                    ProviderFailureClass.PROVIDER_STALLED,
+                }:
+                    detail = failure_class_value.lower() if failure_class_value else "provider failure"
+                    progress.emit_provider_unusable(
+                        current_impl_resource_id,
+                        detail,
+                        impl_res.duration_seconds if impl_res else 0.0,
+                        diagnostics=(impl_res.metadata or {}).get("watchdog_diagnostics") if impl_res else None,
+                    )
 
                 progress.emit_implementation_failed(
                     current_impl_resource_id,
@@ -3286,21 +3341,24 @@ class GovernedTaskOrchestrator:
             rem_agent_id = getattr(rem_backend, "agent_id", None) or rem_resource_id
             rem_res = None
             rem_failure = None
+            remediation_timeout = None
+            if not self.config.custom_remediation_fn:
+                rem_prompt = self._build_remediation_prompt(task_spec, current_delta.diff_content, cycle_res.all_findings)
+                affected_files = set(current_delta.files_modified + current_delta.files_added)
+                remediation_timeout = compute_remediation_timeout(
+                    self.config, cycle_res.all_findings, affected_files
+                )
             with progress.operation(
                 phase=TaskPhase.REMEDIATING,
                 resource_id=rem_agent_id,
                 role="remediation",
                 cycle=remediation_count,
                 details=f"cycle {remediation_count}",
+                deadline_seconds=remediation_timeout,
             ):
                 if self.config.custom_remediation_fn:
                     self.config.custom_remediation_fn(task_spec, self.target_repo, cycle_res.all_findings)
                 else:
-                    rem_prompt = self._build_remediation_prompt(task_spec, current_delta.diff_content, cycle_res.all_findings)
-                    affected_files = set(current_delta.files_modified + current_delta.files_added)
-                    remediation_timeout = compute_remediation_timeout(
-                        self.config, cycle_res.all_findings, affected_files
-                    )
                     self._record_event(
                         task_id=task_spec.task_id,
                         agent_id=rem_agent_id,

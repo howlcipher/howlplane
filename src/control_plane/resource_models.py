@@ -77,6 +77,11 @@ class ProviderFailureClass(str, Enum):
     # repository delta, which is governed as a candidate rather than trusted
     # (HOWLFRAM-SLOPFIX-05).
     EXECUTION_BUDGET_EXCEEDED = "EXECUTION_BUDGET_EXCEEDED"
+    # The provider remained alive but produced no meaningful semantic progress
+    # or task-attributable repository change during the watchdog window.
+    # This is distinct from the absolute execution budget: it is evidence that
+    # this invocation is unusable, not evidence that the provider is offline.
+    PROVIDER_STALLED = "PROVIDER_STALLED"
     UNKNOWN = "UNKNOWN"
 
 

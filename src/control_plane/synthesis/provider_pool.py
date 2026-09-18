@@ -23,6 +23,9 @@ from src.control_plane.agent_execution import (
     TERMINAL_PROVIDER_ERROR_KEY,
     TOOL_PERMISSION_DENIED,
     TOOL_PERMISSION_KEY,
+    WATCHDOG_TERMINATION_KEY,
+    WATCHDOG_TERMINATION_STALL,
+    PROVIDER_RETRY_AFTER_SECONDS_KEY,
 )
 from src.control_plane.agent_registry import AgentProfile, AgentRegistry
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
@@ -71,6 +74,9 @@ TASK_SUITABILITY_PREFERENCES: Dict[str, List[str]] = {
 EXHAUSTION_PATTERNS: Dict[str, List[str]] = {
     "claude_code": [
         "usage limit reached",
+        "you've hit your weekly limit",
+        "you've hit your daily limit",
+        "you've hit your limit",
         "rate limit exceeded",
         "quota exceeded",
         "credit limit",
@@ -159,7 +165,7 @@ _TERMINAL_HARD_FAILURE_PATTERNS = (
         ProviderFailureClass.SESSION_LIMIT,
         (
             re.compile(
-                r"(?:error:\s*)?you(?:'|’)ve hit your session limit"
+                r"(?:error:\s*)?you(?:\'|’)ve hit your (?:session |daily |weekly |monthly )?limit"
                 r"(?:\s*·\s*resets? .+)?[.!]?",
                 re.IGNORECASE,
             ),
@@ -794,6 +800,8 @@ class ProviderPoolManager:
         # very phrases these markers look for, so where the harness observed the
         # process directly, that observation wins (SLOPFIX-03).
         metadata = result.metadata or {}
+        if metadata.get(WATCHDOG_TERMINATION_KEY) == WATCHDOG_TERMINATION_STALL:
+            return ProviderFailureClass.PROVIDER_STALLED
         launch_outcome = metadata.get(LAUNCH_OUTCOME_KEY)
         if launch_outcome in (LAUNCH_OUTCOME_NOT_INSTALLED, LAUNCH_OUTCOME_SPAWN_FAILED):
             return ProviderFailureClass.MISSING_EXECUTABLE
@@ -930,13 +938,15 @@ class ProviderPoolManager:
             return ProviderFailureClass.UNKNOWN
 
         failure_class = self.classify_failure(resource_id, result)
-        # EXECUTION_BUDGET_EXCEEDED is deliberately absent from this map. We
-        # stopped the provider at our own deadline, so nothing was learned about
-        # its availability and marking it UNREACHABLE (plus a global cooldown)
-        # would penalize a healthy resource across later tasks. Not reusing it
-        # inside this task is already guaranteed by the ALREADY_ATTEMPTED
-        # failover exclusion (HOWLFRAM-SLOPFIX-05).
+        metadata = result.metadata or {}
+        # EXECUTION_BUDGET_EXCEEDED previously stayed out of this map to avoid
+        # penalizing a healthy resource for our own harness deadline. The live
+        # incident showed repeatedly burning ~10-minute slots on the same provider
+        # while another was available, so a bounded DEGRADED cooldown is recorded
+        # instead. DEGRADED still leaves the provider eligible, just deprioritized,
+        # and expires after the normal transient cooldown.
         availability_map = {
+            ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED: ProviderAvailabilityStatus.DEGRADED,
             ProviderFailureClass.QUOTA_EXHAUSTED: ProviderAvailabilityStatus.QUOTA_EXHAUSTED,
             ProviderFailureClass.SESSION_LIMIT: ProviderAvailabilityStatus.SESSION_EXHAUSTED,
             ProviderFailureClass.RATE_LIMITED: ProviderAvailabilityStatus.RATE_LIMITED,
@@ -944,6 +954,7 @@ class ProviderPoolManager:
             ProviderFailureClass.PROVIDER_UNAVAILABLE: ProviderAvailabilityStatus.UNAVAILABLE,
             ProviderFailureClass.TRANSPORT_UNAVAILABLE: ProviderAvailabilityStatus.UNREACHABLE,
             ProviderFailureClass.MISSING_EXECUTABLE: ProviderAvailabilityStatus.MISSING_EXECUTABLE,
+            ProviderFailureClass.PROVIDER_STALLED: ProviderAvailabilityStatus.UNAVAILABLE,
         }
         if failure_class in availability_map:
             state.status = availability_map[failure_class]
@@ -966,6 +977,7 @@ class ProviderPoolManager:
                 ProviderFailureClass.RATE_LIMITED,
                 ProviderFailureClass.TRANSPORT_UNAVAILABLE,
                 ProviderFailureClass.PROVIDER_UNAVAILABLE,
+                ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED,
             }
             cooldown = None
             if failure_class in transient:
@@ -974,7 +986,10 @@ class ProviderPoolManager:
                 cooldown = getattr(
                     self.policy, "quota_cooldown_seconds", None
                 ) or self.policy.cooldown_seconds
-            if cooldown:
+            explicit_retry_seconds = metadata.get(PROVIDER_RETRY_AFTER_SECONDS_KEY)
+            if isinstance(explicit_retry_seconds, int) and explicit_retry_seconds >= 0:
+                state.retry_after = (now + timedelta(seconds=explicit_retry_seconds)).isoformat()
+            elif cooldown:
                 state.retry_after = (now + timedelta(seconds=cooldown)).isoformat()
             state.exhaustion_event = ProviderExhaustionEvent(
                 agent_id=resource_id,
@@ -983,6 +998,7 @@ class ProviderPoolManager:
                     ProviderFailureClass.RATE_LIMITED: "rate_limit",
                     ProviderFailureClass.QUOTA_EXHAUSTED: "quota_exhausted",
                     ProviderFailureClass.AUTHENTICATION_REQUIRED: "authentication_required",
+                    ProviderFailureClass.PROVIDER_STALLED: "stalled",
                 }.get(failure_class, "unavailable"),
                 raw_error=(result.stderr or result.error_message or failure_class.value).strip(),
                 task_id=task_id,

@@ -119,6 +119,12 @@ so discovery is not a later refinement, it belongs in the first slice.
 6. The derived index is never read for an authority, recovery, or execution
    decision; any staleness, corruption, or schema drift forces a rebuild or a
    file-scan fallback, never a different answer.
+7. Bounded execution (`--max-work-items`) halts after the requested work-item
+   budget is reached without dispatching subsequent items. When the supervisor
+   cleanly stops in bounded mode, its process state truthfully reports `stopped`
+   rather than `stale`. The deterministic bounded report captures true post-dispatch
+   completion time, elapsed duration, and the full multi-role provider attempt
+   chain extracted from durable task run evidence.
 
 ## Consequences
 

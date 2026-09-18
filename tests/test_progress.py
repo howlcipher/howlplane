@@ -106,6 +106,32 @@ def test_format_elapsed():
     assert format_elapsed(-10) == "00:00:00"
 
 
+def test_tracker_phase_exposes_effective_deadline_in_heartbeat(tmp_path):
+    """A phase-level deadline is surfaced as elapsed / total in progress output."""
+    stream = io.StringIO()
+    tracker = TaskProgressTracker(
+        task_id="TASK-DEADLINE",
+        run_dir=tmp_path,
+        stream=stream,
+        heartbeat_interval=0.05,
+    )
+
+    with tracker.operation(
+        phase=TaskPhase.IMPLEMENTING,
+        resource_id="agy",
+        role="implementation",
+        details="started",
+        deadline_seconds=600,
+    ):
+        time.sleep(0.15)
+
+    out = stream.getvalue()
+    assert "IMPLEMENTING | agy | elapsed" in out
+    assert " / 00:10:00 | still working" in out
+
+    tracker.close()
+
+
 def test_format_last_heartbeat():
     """Verify relative heartbeat freshness formatting."""
     assert format_last_heartbeat(None) == "unknown"

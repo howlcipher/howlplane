@@ -15,6 +15,7 @@ import errno
 import os
 from pathlib import Path
 import socket
+import subprocess
 import threading
 import time
 from typing import Any, Dict, Optional, Tuple, Type, Union
@@ -131,6 +132,60 @@ def classify_lock_owner(
             )
 
     return LockOwnerState.ACTIVE, f"Process PID {pid} is actively running"
+
+
+def get_systemd_main_pid(unit_name: str) -> int:
+    """Return the MainPID for a systemd user unit, or 0 if unavailable."""
+    try:
+        shown = subprocess.run(
+            ["systemctl", "--user", "show", unit_name, "--property=MainPID", "--value"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            check=False,
+        )
+        return int(shown.stdout.strip() or "0")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return 0
+
+
+def is_process_record_active(record: Dict[str, Any]) -> bool:
+    """Check whether a process record corresponds to a live process.
+
+    Used by both the campaign discovery path and the service status path so the
+    liveness predicate is not duplicated between convenience commands and the
+    long-running process supervisor.
+    """
+    if record.get("status") == "stopped":
+        return False
+    backend = record.get("backend")
+    unit_name = record.get("unit_name")
+    hostname = record.get("hostname", "")
+    if hostname and hostname != socket.gethostname():
+        return False
+    if backend == "systemd" and unit_name:
+        try:
+            result = subprocess.run(
+                ["systemctl", "--user", "is-active", "--quiet", unit_name],
+                timeout=3,
+                check=False,
+            )
+            if result.returncode != 0:
+                return False
+            main_pid = get_systemd_main_pid(unit_name)
+            if main_pid <= 0:
+                return False
+            rec_pid = record.get("pid", 0)
+            create_time = record.get("process_create_time", 0.0) if rec_pid == main_pid else None
+            alive, _ = is_process_alive(main_pid, hostname, create_time)
+            return alive
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            return False
+    pid = record.get("pid", 0)
+    create_time = record.get("process_create_time", 0.0)
+    alive, _ = is_process_alive(pid, hostname, create_time)
+    return alive
 
 
 def is_process_alive(

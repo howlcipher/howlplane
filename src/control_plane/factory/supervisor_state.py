@@ -123,6 +123,17 @@ class SupervisorStateRecord(DataClassSerializationMixin):
     transition_history: List[Dict[str, Any]] = field(default_factory=list)
     dispatch_history: List[Dict[str, Any]] = field(default_factory=list)
 
+    # Bounded execution policy. When run_mode is "bounded", the supervisor
+    # stops after dispatching max_work_items distinct work items instead of
+    # selecting another independent item.
+    run_mode: str = "continuous"
+    max_work_items: Optional[int] = None
+    work_items_dispatched: int = 0
+    bounded_run_started_at: Optional[str] = None
+    bounded_run_completed_at: Optional[str] = None
+    bounded_run_stop_reason: Optional[str] = None
+    bounded_dispatched_ids: List[str] = field(default_factory=list)
+
     def __post_init__(self):
         self.state = _plain(self.state)
         if self.state not in SUPERVISOR_TRANSITIONS:
