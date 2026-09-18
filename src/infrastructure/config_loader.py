@@ -164,6 +164,7 @@ class ProviderPolicySettings(BaseModel):
     # quota is reconsidered within the same day and long enough that an
     # overnight run does not keep asking.
     quota_cooldown_seconds: int = Field(default=21600, ge=0, le=604800)
+    session_cooldown_seconds: int = Field(default=14400, ge=0, le=604800)
     max_metered_invocations: Optional[int] = Field(default=None, ge=0)
 
     model_config = {"extra": "forbid"}

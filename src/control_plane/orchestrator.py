@@ -226,6 +226,9 @@ class OrchestrationConfig:
     # Optional resolver that overrides AgentBackendRegistry.get_backend. Useful
     # in deterministic tests to inject per-resource fake backends.
     backend_resolver: Optional[Callable[[str], AgentBackend]] = None
+    run_mode: str = "continuous"  # "continuous" | "bounded"
+    bounded_remediation_timeout_ceiling_seconds: int = 300  # 5 minutes maximum for bounded runs
+    preserve_independent_review: bool = True
     # Enables bounded reviewer failover (#59.2 Phase 4) in the governed review
     # cycle: a reviewer whose assigned provider fails, times out, or emits
     # invalid/malformed output gets one alternate-provider attempt instead of
@@ -260,11 +263,14 @@ def compute_remediation_timeout(
     - Add time per review finding weighted by severity.
     - Add time per affected file.
     - Never exceed max_multiplier * base timeout.
+    - For bounded runs, never exceed bounded_remediation_timeout_ceiling_seconds.
 
     An explicit ``remediation_timeout_seconds`` is honored up to the same max.
     """
     base = config.timeout_seconds
     max_total = int(base * max(1.0, config.remediation_timeout_max_multiplier))
+    if config.run_mode == "bounded":
+        max_total = min(max_total, config.bounded_remediation_timeout_ceiling_seconds)
 
     if config.remediation_timeout_seconds is not None:
         return min(config.remediation_timeout_seconds, max_total)
@@ -283,7 +289,10 @@ def compute_remediation_timeout(
 
     file_overhead = (len(set(affected_files or []))) * config.remediation_timeout_per_affected_file_seconds
 
-    return max(base, min(base + finding_overhead + file_overhead, max_total))
+    calculated = base + finding_overhead + file_overhead
+    if config.run_mode == "bounded":
+        return min(calculated, max_total)
+    return max(base, min(calculated, max_total))
 
 
 # A verification plan that has actually run reports one of these. Anything
@@ -3214,6 +3223,68 @@ class GovernedTaskOrchestrator:
             if self.config.failure_injection_hook:
                 self.config.failure_injection_hook("post_review", run_dir, task_spec)
 
+            # Check if independent review was satisfied
+            if (
+                self.config.preserve_independent_review
+                and not self.config.custom_reviewer_fn
+                and not getattr(cycle_res, "independent_review_satisfied", True)
+            ):
+                triggers: List[str] = ["independent_review_unavailable"]
+                if cycle_res.non_independent_roles:
+                    triggers.append("non_independent_review")
+                risks: List[str] = ["No independent provider family was available to complete code review."]
+                evidence: List[str] = [
+                    f"{role}: reviewed by non-independent provider family ({getattr(cycle_res, 'reviewing_provider_families', {}).get(role, 'unknown')})"
+                    for role in cycle_res.non_independent_roles
+                ] or ["Independent review could not be satisfied by any configured provider."]
+                err_msg = "Independent review unavailable: no independent provider family completed review"
+                decision_pkt = HumanDecisionPacket(
+                    task_id=task_spec.task_id,
+                    objective=task_spec.objective,
+                    change_summary=(
+                        f"Implementation diff ({current_delta.insertions} ins, {current_delta.deletions} del) "
+                        f"lacks independent review; triggers: {', '.join(triggers)}."
+                    ),
+                    boundary_triggers=triggers,
+                    evidence=evidence,
+                    risks=risks,
+                    review_findings_summary=findings_summary,
+                    verification_status="unverified",
+                    recommended_action="Authorize manual review or configure an independent provider family.",
+                )
+                self._park_awaiting_human(
+                    task_spec,
+                    run_dir,
+                    err_msg,
+                    decision_pkt,
+                    progress,
+                )
+                return self._make_result(
+                    task_spec=task_spec,
+                    final_state="awaiting_human",
+                    exit_code=2,
+                    start_time=start_time,
+                    run_dir=run_dir,
+                    routing=routing,
+                    initial_delta=initial_delta,
+                    current_delta=current_delta,
+                    review_cycles=review_cycles,
+                    reconciliation=latest_reconciliation,
+                    verif_plan=verif_plan,
+                    remediation_count=remediation_count,
+                    err_msg=err_msg,
+                    provider_execution=impl_res,
+                    failure_class=FAILURE_CLASS_AUTHORITY_BLOCKED,
+                    hf_status=hf_audit_status,
+                    hf_match=hf_audit_match,
+                    implementation_attempts=implementation_attempts,
+                    failover_summary=self._build_failover_summary(
+                        implementation_attempts,
+                        TERMINATION_IMPLEMENTATION_SUCCEEDED,
+                        last_selection_decision,
+                    ),
+                )
+
             # Check if any findings require remediation
             if not cycle_res.requires_remediation:
                 break
@@ -3369,6 +3440,12 @@ class GovernedTaskOrchestrator:
                             "timeout_seconds": remediation_timeout,
                             "findings_count": len(cycle_res.all_findings),
                             "affected_files_count": len(affected_files),
+                            "run_mode": self.config.run_mode,
+                            "remediation_timeout_ceiling": (
+                                self.config.bounded_remediation_timeout_ceiling_seconds
+                                if self.config.run_mode == "bounded"
+                                else None
+                            ),
                         },
                     )
                     rem_res = rem_backend.execute(

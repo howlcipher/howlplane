@@ -1528,6 +1528,7 @@ class MarathonDogfoodEngine:
         task_class: str = "feature",
         files_changed: Optional[List[str]] = None,
         dispatch_id: Optional[str] = None,
+        run_mode: str = "continuous",
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """Public adapter to run a single factory WorkItem through the governed engineering lifecycle.
 
@@ -1547,6 +1548,7 @@ class MarathonDogfoodEngine:
             files_changed=files_changed,
             repository_override=work_item.repository,
             dispatch_id=dispatch_id,
+            run_mode=run_mode,
         )
 
     def _execute_governed_engineering_improvement(
@@ -1567,6 +1569,7 @@ class MarathonDogfoodEngine:
         files_changed: Optional[List[str]] = None,
         repository_override: Optional[str] = None,
         dispatch_id: Optional[str] = None,
+        run_mode: str = "continuous",
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """
         Executes a bounded engineering task through the REAL governed
@@ -1721,6 +1724,7 @@ class MarathonDogfoodEngine:
             # alternate-provider failover and so review-time quota exhaustion
             # is visible to implementation failover (#59.2 Phases 4/9).
             provider_pool=self.provider_pool,
+            run_mode=run_mode,
         )
         attempted: set = set()
         result = None

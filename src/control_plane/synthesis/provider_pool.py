@@ -360,6 +360,7 @@ class ProviderStatus(DataClassSerializationMixin):
     last_failure_at: Optional[str] = None
     unattended_mutation_capable: Optional[bool] = None
     capability_reason: Optional[str] = None
+    role_exclusions: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ProviderStatus":
@@ -376,6 +377,9 @@ class ProviderStatus(DataClassSerializationMixin):
         event = payload.get("exhaustion_event")
         if isinstance(event, dict):
             payload["exhaustion_event"] = ProviderExhaustionEvent.from_dict(event)
+        exclusions = payload.get("role_exclusions")
+        if not isinstance(exclusions, dict):
+            payload["role_exclusions"] = {}
         valid = cls.__dataclass_fields__
         return cls(**{key: value for key, value in payload.items() if key in valid})
 
@@ -909,6 +913,7 @@ class ProviderPoolManager:
         agent_id: str,
         result: AgentExecutionResult,
         task_id: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> ProviderFailureClass:
         """Updates shared state only when the observed result warrants it."""
         resource_id = self._normalize(agent_id)
@@ -934,11 +939,28 @@ class ProviderPoolManager:
             state.last_checked = now.isoformat()
             state.observed_at = now.isoformat()
             state.retry_after = None
+            if role and role in state.role_exclusions:
+                state.role_exclusions.pop(role, None)
             self._persist()
             return ProviderFailureClass.UNKNOWN
 
         failure_class = self.classify_failure(resource_id, result)
         metadata = result.metadata or {}
+
+        if failure_class is ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED:
+            target_role = role or "unknown"
+            state.role_exclusions[target_role] = failure_class.value
+            if self._is_review_role(target_role):
+                state.role_exclusions["review"] = failure_class.value
+            state.consecutive_failures += 1
+            state.last_failure_at = now.isoformat()
+            state.last_checked = now.isoformat()
+            state.observed_at = now.isoformat()
+            state.normalized_failure_class = failure_class.value
+            state.unavailable_reason = failure_class.value
+            self._persist()
+            return failure_class
+
         # EXECUTION_BUDGET_EXCEEDED previously stayed out of this map to avoid
         # penalizing a healthy resource for our own harness deadline. The live
         # incident showed repeatedly burning ~10-minute slots on the same provider
@@ -973,14 +995,17 @@ class ProviderPoolManager:
             # cooldown would spend attempts proving what is already known
             # (issues.md #15).
             transient = {
-                ProviderFailureClass.SESSION_LIMIT,
                 ProviderFailureClass.RATE_LIMITED,
                 ProviderFailureClass.TRANSPORT_UNAVAILABLE,
                 ProviderFailureClass.PROVIDER_UNAVAILABLE,
                 ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED,
             }
             cooldown = None
-            if failure_class in transient:
+            if failure_class is ProviderFailureClass.SESSION_LIMIT:
+                cooldown = getattr(
+                    self.policy, "session_cooldown_seconds", None
+                ) or 14400
+            elif failure_class in transient:
                 cooldown = self.policy.cooldown_seconds
             elif failure_class is ProviderFailureClass.QUOTA_EXHAUSTED:
                 cooldown = getattr(
@@ -1011,6 +1036,7 @@ class ProviderPoolManager:
         agent_id: str,
         result: AgentExecutionResult,
         task_id: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> Optional[ProviderExhaustionEvent]:
         """Compatibility wrapper returning events only for availability failures."""
         resource_id = self._normalize(agent_id)
@@ -1029,7 +1055,7 @@ class ProviderPoolManager:
                     event,
                 )
                 return event
-        failure_class = self.record_result(agent_id, result, task_id=task_id)
+        failure_class = self.record_result(agent_id, result, task_id=task_id, role=role)
         availability_classes = {
             ProviderFailureClass.QUOTA_EXHAUSTED,
             ProviderFailureClass.SESSION_LIMIT,
@@ -1059,6 +1085,7 @@ class ProviderPoolManager:
         state.retry_after = None
         state.reset_at = datetime.now(timezone.utc).isoformat()
         state.unavailable_reason = None
+        state.role_exclusions.clear()
         if reprobe and not self._egress_forbidden(profile):
             self._apply_readiness(normalized, profile, state)
         self._persist()
@@ -1121,6 +1148,26 @@ class ProviderPoolManager:
             ProviderAvailabilityStatus.RESOURCE_CONSTRAINED,
         }
         return status.value if status in blocked else None
+
+    def check_capacity_exclusion(
+        self,
+        resource_id: str,
+        role: Optional[str] = None,
+    ) -> Optional[str]:
+        """Returns the capacity block or role exclusion reason for a resource, if any."""
+        normalized = self._normalize(resource_id)
+        state = self._provider_states.get(normalized)
+        if state is None:
+            return "UNKNOWN_RESOURCE"
+        general = self._capacity_exclusion(state.status)
+        if general:
+            return general
+        if role:
+            if role in state.role_exclusions:
+                return f"ROLE_EXCLUDED:{state.role_exclusions[role]}"
+            if self._is_review_role(role) and "review" in state.role_exclusions:
+                return f"ROLE_EXCLUDED:{state.role_exclusions['review']}"
+        return None
 
     def _recover_capacity_if_due(
         self,
@@ -1280,6 +1327,12 @@ class ProviderPoolManager:
             capacity_reason = self._capacity_exclusion(state.status)
             if capacity_reason:
                 exclude(profile, capacity_reason, "capacity")
+                continue
+            if role in state.role_exclusions:
+                exclude(profile, f"ROLE_EXCLUDED:{state.role_exclusions[role]}", "capacity")
+                continue
+            if self._is_review_role(role) and "review" in state.role_exclusions:
+                exclude(profile, f"ROLE_EXCLUDED:{state.role_exclusions['review']}", "capacity")
                 continue
             if resource_id in excluded_ids:
                 exclude(profile, "ALREADY_ATTEMPTED", "failover_policy")

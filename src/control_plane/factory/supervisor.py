@@ -242,6 +242,12 @@ class FactorySupervisor:
                                         "role": "review",
                                         "outcome": fo_outcome,
                                     }
+                                    if fa.get("started_at"):
+                                        att["started_at"] = fa["started_at"]
+                                    if fa.get("ended_at"):
+                                        att["ended_at"] = fa["ended_at"]
+                                    elif fa.get("checked_at"):
+                                        att["ended_at"] = fa["checked_at"]
                                     if fa.get("duration_seconds") is not None:
                                         att["duration_seconds"] = fa.get("duration_seconds")
                                     if fo_reason:
@@ -335,6 +341,11 @@ class FactorySupervisor:
                     if v_data.get("duration_seconds") is not None:
                         att["duration_seconds"] = v_data["duration_seconds"]
                     attempts.append(att)
+
+            def _attempt_sort_key(att: Dict[str, Any]) -> str:
+                return str(att.get("started_at") or att.get("ended_at") or "9999-99-99")
+
+            attempts.sort(key=_attempt_sort_key)
 
         # Fallback if no disk evidence was found: check work item blocked reason
         if not attempts:
@@ -887,9 +898,14 @@ class FactorySupervisor:
                 self._state_record.bounded_dispatched_ids.append(item.work_item_id)
         self._state_record.transition_to(SupervisorState.DISPATCHING, reason="item_selected", at=now_iso)
         self._persist()
-        dispatch_result = self.dispatcher.dispatch(
-            item, dispatch_id=dispatch_id, task_id=task_id
-        )
+        try:
+            dispatch_result = self.dispatcher.dispatch(
+                item, dispatch_id=dispatch_id, task_id=task_id, run_mode=self._state_record.run_mode
+            )
+        except TypeError:
+            dispatch_result = self.dispatcher.dispatch(
+                item, dispatch_id=dispatch_id, task_id=task_id
+            )
         if (
             dispatch_result.success
             and dispatch_result.git_record
