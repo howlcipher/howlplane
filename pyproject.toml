@@ -29,8 +29,8 @@ dev = [
 ]
 
 [project.scripts]
-ai = "howlplane.control_plane.launcher:legacy_main"
-howlplane = "howlplane.control_plane.launcher:main"
+ai = "howlplane.control_plane.cli:legacy_main"
+howlplane = "howlplane.control_plane.cli:main"
 
 # Canonical package is rooted at howlplane (HOWL-CANON-004).
 # Installs into site-packages as howlplane and howlplane.control_plane.
