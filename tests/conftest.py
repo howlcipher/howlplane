@@ -26,30 +26,53 @@ _REAL_COMPILER_INTEGRATION_MODULES = {
 # collection time without hiding tests behind a changed default invocation.
 # Every test gets exactly one primary tier. ``slow`` is orthogonal and contains
 # families that appeared in the measured duration report, not name guesses.
-_ACCEPTANCE_MODULES = {
-    "test_acceptance_canary.py", "test_acceptance_runner.py",
-    "test_backlog_marathon.py", "test_clean_environment_regression.py",
-    "test_cli_synthesis.py", "test_closed_loop_orchestrator.py",
-    "test_dogfood_crash_recovery_git.py", "test_dogfood_failure_handling.py",
-    "test_dogfood_hardening.py", "test_dogfood_parking.py",
-    "test_howlframe_dogfood.py", "test_marathon_dogfood.py",
-    "test_product_synthesis.py", "test_reasoning_strategy_dogfooding.py",
-    "test_spec_synthesizer.py",
-}
+_ACCEPTANCE_MODULES = set()
+
 _INTEGRATION_MODULES = {
-    "test_ai_resource_pool.py", "test_authority_execution_gap.py",
-    "test_authority_profile.py", "test_factory_self_modification.py",
-    "test_git_baseline.py", "test_git_env_isolation.py",
-    "test_git_integration.py", "test_go_build.py",
-    "test_human_approval_lifecycle.py", "test_install_global_codex.py",
-    "test_install_pre_commit_hook.py", "test_install_pre_push_hook.py",
-    "test_interrupted_governance_recovery.py", "test_local_ollama_provider.py",
-    "test_operational_resilience.py", "test_provider_failover.py",
-    "test_provider_permissions.py", "test_provider_pool.py",
-    "test_progress.py",
-    "test_review_integrity.py", "test_review_runner.py",
-    "test_reviewer_pool_traversal.py", "test_scratch_isolation.py",
+    "test_git_baseline.py",
+    "test_git_env_isolation.py",
+    "test_git_integration.py",
+    "test_go_build.py",
+    "test_howlframe_dogfood.py",
+    "test_install_global_codex.py",
+    "test_install_pre_commit_hook.py",
+    "test_install_pre_push_hook.py",
+    "test_test_taxonomy.py",
     "test_verification_view.py",
+}
+
+_CONTRACT_MODULES = {
+    "test_acceptance_canary.py",
+    "test_acceptance_runner.py",
+    "test_ai_resource_pool.py",
+    "test_authority_execution_gap.py",
+    "test_authority_profile.py",
+    "test_backlog_marathon.py",
+    "test_clean_environment_regression.py",
+    "test_cli_synthesis.py",
+    "test_closed_loop_orchestrator.py",
+    "test_dogfood_crash_recovery_git.py",
+    "test_dogfood_failure_handling.py",
+    "test_dogfood_hardening.py",
+    "test_dogfood_parking.py",
+    "test_factory_self_modification.py",
+    "test_howldream_integration.py",
+    "test_human_approval_lifecycle.py",
+    "test_interrupted_governance_recovery.py",
+    "test_local_ollama_provider.py",
+    "test_marathon_dogfood.py",
+    "test_operational_resilience.py",
+    "test_product_synthesis.py",
+    "test_progress.py",
+    "test_provider_failover.py",
+    "test_provider_permissions.py",
+    "test_provider_pool.py",
+    "test_reasoning_strategy_dogfooding.py",
+    "test_review_integrity.py",
+    "test_review_runner.py",
+    "test_reviewer_pool_traversal.py",
+    "test_scratch_isolation.py",
+    "test_spec_synthesizer.py",
 }
 # ``slow`` is orthogonal to the tier and is applied at the granularity the
 # measurement actually supports. A module belongs in _SLOW_MODULES only when the
@@ -107,7 +130,7 @@ def pytest_collection_modifyitems(config, items):
     """
     for item in items:
         existing_tiers = {
-            m.name for m in item.iter_markers() if m.name in {"unit", "integration", "acceptance"}
+            m.name for m in item.iter_markers() if m.name in {"unit", "contract", "integration", "acceptance"}
         }
         module_name = Path(str(item.fspath)).name
         if not existing_tiers:
@@ -115,6 +138,8 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(pytest.mark.acceptance)
             elif module_name in _INTEGRATION_MODULES:
                 item.add_marker(pytest.mark.integration)
+            elif module_name in _CONTRACT_MODULES:
+                item.add_marker(pytest.mark.contract)
             else:
                 item.add_marker(pytest.mark.unit)
         if item.get_closest_marker("slow"):
@@ -202,9 +227,16 @@ def setup_test_environment(request, monkeypatch):
     module_name = Path(str(request.node.fspath)).name
 
     # If HOWLFRAME_BIN is not set and howlframe is not on PATH, point to fake_compiler
-    # -- except for the real compiler integration tests, which need the genuine
-    # discovery contract to correctly skip/degrade when no real compiler exists.
-    if module_name not in _REAL_COMPILER_INTEGRATION_MODULES:
+    # -- ONLY for unit and contract tests. Real integration and acceptance tests
+    # must NEVER have fake_compiler injected, ensuring external binary fidelity.
+    is_integration_or_acceptance = (
+        module_name in _INTEGRATION_MODULES
+        or module_name in _ACCEPTANCE_MODULES
+        or module_name in _REAL_COMPILER_INTEGRATION_MODULES
+        or "integration" in {m.name for m in request.node.iter_markers()}
+        or "acceptance" in {m.name for m in request.node.iter_markers()}
+    )
+    if not is_integration_or_acceptance:
         if not os.environ.get("HOWLFRAME_BIN") and not shutil.which("howlframe"):
             if fake_compiler.is_file():
                 monkeypatch.setenv("HOWLFRAME_BIN", str(fake_compiler))

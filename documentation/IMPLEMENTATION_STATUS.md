@@ -1,7 +1,7 @@
 # Implementation Status
 
 > **Scope warning (2026-08-30, updated 2026-09-18).** This document tracks the **Go `ai`-framework
-> blueprint** — `internal/project`, `internal/capability`, `cmd/ai`, and `schemas/`.
+> blueprint** — `internal/project`, `internal/capability`, `cmd/ai`, and `schemas/`. It does **not** describe the live control plane (`src/control_plane/`).
 > Note: Unintegrated Go control-plane packages `internal/provider` and `internal/runtime`
 > were pruned in HOWL-CANON-007. The live production control plane is the Python
 > package `src/howlplane/control_plane/` (documented in `documentation/CONTROL_PLANE.md`).

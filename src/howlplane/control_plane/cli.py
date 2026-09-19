@@ -3279,10 +3279,7 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
     if args is None:
         args = sys.argv[1:]
     parser = build_parser(program_name=program_name)
-    try:
-        parsed_args = parser.parse_args(args)
-    except SystemExit as exc:
-        return exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+    parsed_args = parser.parse_args(args)
 
     if not parsed_args.subcommand:
         parser.print_help()

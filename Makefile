@@ -1,4 +1,4 @@
-.PHONY: install test test-changed test-fast test-fast-python test-unit test-integration test-acceptance test-slow test-live test-full test-coverage lint format clean coverage build docs sync
+.PHONY: install test test-changed test-fast test-fast-python test-unit test-contract test-integration test-acceptance test-slow test-live test-full test-coverage lint format clean coverage build docs sync
 
 # Environment and Setup
 install:
@@ -46,6 +46,9 @@ test-fast-python:
 
 test-unit:
 	PYTHONPATH=. $(PYTEST) tests/ -v -m unit
+
+test-contract:
+	PYTHONPATH=. $(PYTEST) tests/ -v -m contract
 
 test-integration:
 	PYTHONPATH=. $(PYTEST) tests/ -v -m integration

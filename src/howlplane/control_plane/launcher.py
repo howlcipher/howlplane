@@ -59,6 +59,7 @@ from howlplane.control_plane.cli import (
     build_parser,
     HANDLERS,
     ACTIONS,
+    _print_orchestration_summary,
     main,
     legacy_main,
 )
@@ -114,6 +115,7 @@ __all__ = [
     "build_parser",
     "HANDLERS",
     "ACTIONS",
+    "_print_orchestration_summary",
     "main",
     "legacy_main",
 ]

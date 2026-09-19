@@ -909,14 +909,14 @@ def test_a_second_process_cannot_take_an_actively_held_task(tmp_path):
     holder.acquire()
     try:
         script = (
-            "import sys; sys.path.insert(0, %r)\n"
+            "import sys; sys.path.insert(0, %r); sys.path.insert(0, %r)\n"
             "from howlplane.control_plane.locking import TaskLock, TaskLockedError\n"
             "try:\n"
             "    TaskLock(%r, 'T-CONCURRENT', operation='orchestrate').acquire()\n"
             "    print('ACQUIRED')\n"
             "except TaskLockedError:\n"
             "    print('BLOCKED')\n"
-        ) % (str(Path.cwd()), str(repo))
+        ) % (str(Path.cwd()), str(Path.cwd() / "src"), str(repo))
         out = subprocess.run(
             [sys.executable, "-c", script],
             capture_output=True, text=True, cwd=Path.cwd(),

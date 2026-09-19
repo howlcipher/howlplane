@@ -150,17 +150,10 @@ def test_provider_fallback_chain_clean_environment(tmp_path: Path):
     assert pool.get_status("claude_code") == ProviderAvailabilityStatus.AVAILABLE
 
 
-def test_real_compiler_integration_tests_skip_cleanly_without_real_compiler(tmp_path: Path):
-    """Proves the real HowlFrame compiler integration suites (test_howlframe_dogfood.py,
-    test_launcher.py) exercise the genuine discovery contract -- not the synthesis
-    fixture's fake compiler -- and therefore skip/degrade cleanly (never hard-fail)
-    in a clean environment with no real `howlframe` binary on PATH.
-
-    This reproduces the exact clean-CI failure mode fixed in tests/conftest.py: the
-    global fake-compiler injection previously applied to every test file, which made
-    `find_howlframe_binary()` return the fake compiler for these real-integration
-    suites too, causing them to skip their intended `pytest.skip`/`HOWLFRAME_UNAVAILABLE`
-    paths and hard-fail against a fixture never meant to satisfy their fidelity checks.
+def test_real_compiler_integration_tests_fail_closed_without_real_compiler(tmp_path: Path):
+    """Proves the real HowlFrame compiler integration suite (test_howlframe_dogfood.py)
+    fails closed (never silently skips or uses fake_compiler) in an environment with no
+    real `howlframe` binary on PATH (HOWL-CANON-009).
     """
     repo_root = Path(__file__).resolve().parents[1]
 
@@ -191,7 +184,6 @@ def test_real_compiler_integration_tests_skip_cleanly_without_real_compiler(tmp_
         [
             sys.executable, "-m", "pytest", "-q",
             "tests/test_howlframe_dogfood.py",
-            "tests/test_launcher.py::test_ai_howlframe_audit_subcommand",
         ],
         cwd=str(repo_root),
         capture_output=True,
@@ -199,11 +191,11 @@ def test_real_compiler_integration_tests_skip_cleanly_without_real_compiler(tmp_
         env=env,
     )
 
-    assert result.returncode == 0, (
-        f"Real compiler integration tests must skip cleanly without a real "
-        f"HowlFrame compiler, not hard-fail.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    assert result.returncode != 0, (
+        f"Real compiler integration tests must fail closed without a real "
+        f"HowlFrame compiler, not report success.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-    assert "failed" not in result.stdout.lower(), result.stdout
+    assert "Real howlframe binary is required for integration tests" in result.stdout
 
 
 def test_mcp_fastmcp_import_safety():

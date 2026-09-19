@@ -47,8 +47,9 @@ pythonpath = [".", "src"]
 addopts = "--strict-markers"
 markers = [
     "unit: fast, isolated behavioral coverage with no real external boundary",
-    "integration: multiple HowlPlane components with external boundaries faked",
-    "acceptance: end-to-end in-process capability or governed-flow coverage",
+    "contract: multi-component or boundary tests executing against hermetic in-process or mock doubles",
+    "integration: real multi-component tests invoking genuine external binaries and environment boundaries",
+    "acceptance: end-to-end full workflow capability across real system components",
     "slow: measured as unsuitable for the rapid inner development loop",
     "live: intentionally contacts a real external provider or service; explicitly gated",
 ]
