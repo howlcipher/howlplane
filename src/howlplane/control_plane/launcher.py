@@ -60,6 +60,7 @@ from howlplane.control_plane.cli import (
     HANDLERS,
     ACTIONS,
     _print_orchestration_summary,
+    _print_failover_accounting,
     main,
     legacy_main,
 )
@@ -116,6 +117,7 @@ __all__ = [
     "HANDLERS",
     "ACTIONS",
     "_print_orchestration_summary",
+    "_print_failover_accounting",
     "main",
     "legacy_main",
 ]
