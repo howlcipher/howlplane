@@ -93,15 +93,15 @@ format:
 
 clean:
 	@echo "Cleaning build artifacts and cache..."
-	rm -f ai_installer coverage.out
-	rm -rf __pycache__ .pytest_cache docs/
+	rm -f ai_installer howlplane coverage.out
+	rm -rf __pycache__ .pytest_cache docs/.build-tmp
 	find . -type d -name "__pycache__" -exec rm -r {} +
 
 # Build
 build:
-	@echo "Building Go binary installer..."
-	go build -o ai_installer ./cmd/installer
-	@echo "Build complete: ./ai_installer"
+	@echo "Building Go binary..."
+	go build -o howlplane ./cmd/howlplane
+	@echo "Build complete: ./howlplane"
 
 # Documentation
 

@@ -11,7 +11,7 @@ def test_go_code_compiles_successfully():
 
     # Run the exact build command used in cross_platform.yml
     result = subprocess.run(
-        ["go", "build", "-o", os.devnull, "./cmd/installer"],
+        ["go", "build", "-o", os.devnull, "./cmd/howlplane"],
         cwd=repo_root,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

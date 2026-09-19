@@ -93,7 +93,7 @@ def test_broad_surface_change_triggers_full_suite():
         "pyproject.toml",
         "tests/conftest.py",
         "config/settings.yaml",
-        "cmd/installer/main.go",
+        "cmd/howlplane/main.go",
         "src/control_plane/orchestrator.py",
     ):
         _, _, trigger = select_tests([path], TEST_SOURCES)
