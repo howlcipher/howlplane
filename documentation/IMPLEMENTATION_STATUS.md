@@ -1,16 +1,12 @@
 # Implementation Status
 
-> **Scope warning (2026-08-30).** This document tracks the **Go `ai`-framework
-> blueprint** only — `internal/project`, `internal/runtime`, `internal/provider`,
-> `internal/capability`, `cmd/ai`, and `schemas/`. It does **not** describe the
-> live control plane, which is the Python package `src/control_plane/` and is
-> documented in `documentation/CONTROL_PLANE.md`. The two tracks are parallel and
-> unintegrated; the Python track is the one in operational use and is far more
-> mature than the milestones below suggest. In particular, the open decision
-> "final cross-platform standard paths for SQLite state" belongs to the Go
-> blueprint and is unrelated to the derived factory index described in
-> `documentation/adr/0006_persistent_factory_supervisor.md`, which keeps durable
-> files authoritative. Read this file as blueprint history, not current state.
+> **Scope warning (2026-08-30, updated 2026-09-18).** This document tracks the **Go `ai`-framework
+> blueprint** — `internal/project`, `internal/capability`, `cmd/ai`, and `schemas/`.
+> Note: Unintegrated Go control-plane packages `internal/provider` and `internal/runtime`
+> were pruned in HOWL-CANON-007. The live production control plane is the Python
+> package `src/howlplane/control_plane/` (documented in `documentation/CONTROL_PLANE.md`).
+> Go retains portable project manifest validation (`internal/project`, `internal/capability`).
+> Read this file as blueprint history, not current state.
 
 ## Current-State Assessment
 The repository currently functions as a hybrid Go/Python project. Go provides the `ai_installer` CLI (using Cobra), while Python drives the `src/core` logic, testing, and vector indexing. The orchestrator logic and provider interactions exist but are spread across experimental Python files, and there is no unified `ai` command. 
