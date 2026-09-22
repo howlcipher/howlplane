@@ -1,0 +1,42 @@
+name: Decode Pages Index
+on:
+  push:
+    branches: ["cursor/crosslink-forge-instinct-4ad1"]
+    paths:
+      - "docs/index.html.zlib.b64"
+      - ".github/workflows/decode-index.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: decode-index
+  cancel-in-progress: true
+jobs:
+  decode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Decode docs/index.html
+        run: |
+          python3 <<'PY'
+          import base64, zlib, hashlib, pathlib
+          raw = pathlib.Path("docs/index.html.zlib.b64").read_text().strip()
+          data = zlib.decompress(base64.b64decode(raw))
+          digest = hashlib.sha256(data).hexdigest()
+          expected = "d47387362a85ab86b06bae6c9395b854a189c9b9de273a22f76790b67fb92498"
+          assert digest == expected, (digest, expected)
+          pathlib.Path("docs/index.html").write_bytes(data)
+          print(f"wrote docs/index.html ({len(data)} bytes)")
+          PY
+      - name: Commit decoded index.html
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f docs/.crosslink-probe.txt 2>/dev/null || true
+          git add docs/index.html
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "docs: decode index.html with HowlForge/HowlInstinct crosslinks"
+            git push
+          fi
