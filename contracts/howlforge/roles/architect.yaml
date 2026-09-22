@@ -1,0 +1,29 @@
+# EXAMPLE role definition.
+schema_version: howlforge.role/v1
+id: architect
+description: Designs system structure and evaluates technical trade offs.
+responsibilities:
+  - evaluate_options
+  - define_boundaries
+  - record_decisions
+  - assess_risk
+required_capabilities:
+  reasoning: very_high
+  planning: very_high
+  long_horizon: high
+  documentation: high
+  context_window: high
+preferred_runtimes:
+  - provider: anthropic
+    model: opus
+fallback_runtimes:
+  - provider: openai
+    model: gpt-5.6-sol
+  - provider: google
+    model: gemini-pro
+handoff_required: true
+verification_required: true
+verification:
+  required: true
+  verifier_role: reviewer
+  independent_runtime: preferred

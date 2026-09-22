@@ -1,0 +1,29 @@
+# EXAMPLE role definition. A local runtime is excluded outright: security work
+# is exactly where a weaker model's miss is most expensive.
+schema_version: howlforge.role/v1
+id: security
+description: Assesses a change for security defects and unsafe authority use.
+responsibilities:
+  - threat_model
+  - audit_inputs
+  - check_authority_boundaries
+  - report_findings
+required_capabilities:
+  security: high
+  reasoning: very_high
+  review: high
+  coding: high
+preferred_runtimes:
+  - provider: anthropic
+    model: opus
+fallback_runtimes:
+  - provider: openai
+    model: gpt-5.6-sol
+excluded_runtimes:
+  - id: ollama-local
+handoff_required: true
+verification_required: true
+verification:
+  required: true
+  verifier_role: auditor
+  independent_runtime: required

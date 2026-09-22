@@ -1,0 +1,25 @@
+# EXAMPLE role definition. The auditor is the independent check on work that
+# other roles have already reviewed, so it must not verify itself.
+schema_version: howlforge.role/v1
+id: auditor
+description: Independently audits evidence and authority decisions after the fact.
+responsibilities:
+  - audit_evidence
+  - check_authority_decisions
+  - verify_claims_against_artifacts
+  - report_findings
+required_capabilities:
+  review: high
+  reasoning: very_high
+  security: high
+  documentation: high
+preferred_runtimes:
+  - provider: anthropic
+    model: opus
+fallback_runtimes:
+  - provider: google
+    model: gemini-pro
+excluded_runtimes:
+  - id: ollama-local
+handoff_required: true
+verification_required: false

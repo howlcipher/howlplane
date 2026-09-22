@@ -1,0 +1,24 @@
+# EXAMPLE role definition.
+schema_version: howlforge.role/v1
+id: sre
+description: Protects reliability, diagnoses incidents and reduces recurrence.
+responsibilities:
+  - diagnose_incidents
+  - define_slos
+  - reduce_toil
+  - write_postmortems
+required_capabilities:
+  reasoning: very_high
+  tool_use: high
+  long_horizon: high
+  documentation: high
+preferred_runtimes:
+  - provider: anthropic
+    model: opus
+fallback_runtimes:
+  - provider: openai
+    model: gpt-5.6-sol
+  - provider: google
+    model: gemini-flash
+handoff_required: true
+verification_required: false

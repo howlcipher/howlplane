@@ -29,6 +29,7 @@ from src.control_plane.agent_execution import (
 )
 from src.control_plane.agent_registry import AgentProfile, AgentRegistry
 from src.control_plane.atomic_io import atomic_write_json, safe_load_json
+from src.control_plane.howlforge_roles import capabilities_for_lifecycle_role
 from src.control_plane.resource_models import (
     AuthenticationStatus,
     BackendReadiness,
@@ -1102,12 +1103,27 @@ class ProviderPoolManager:
 
     def _required_capabilities(self, task: TaskSpec, role: str) -> List[str]:
         required = set(task.metadata.get("required_resource_capabilities", []))
-        if role in ("implementation", "remediation"):
+
+        # A role's capability floor is stated by HowlForge, whose vendored
+        # definitions are the durable record of what a role needs (see
+        # contracts/howlforge/SOURCE.md). When no vendored definition covers
+        # this role -- including when the contracts directory is absent
+        # entirely -- the previous hard-coded derivation below still applies,
+        # unchanged. A sibling component being missing must never narrow what
+        # HowlPlane can select.
+        derived = capabilities_for_lifecycle_role(role)
+        if derived is not None:
+            required.update(derived)
+        elif role in ("implementation", "remediation"):
             required.update({"file_editing", "repository_access"})
         elif self._is_review_role(role):
             required.add("code_review")
         else:
             required.add("code_generation")
+
+        # Command execution stays task scoped, not role scoped: it is granted by
+        # the task's allowed_tools, and deriving it from a role's tool_use
+        # aptitude would require it for tasks that never permitted it.
         if "terminal_execution" in task.allowed_tools:
             required.add("command_execution")
         return sorted(required)

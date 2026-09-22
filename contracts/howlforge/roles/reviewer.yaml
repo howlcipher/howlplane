@@ -1,0 +1,24 @@
+# EXAMPLE role definition.
+schema_version: howlforge.role/v1
+id: reviewer
+description: Independently falsifies a change rather than confirming it.
+responsibilities:
+  - falsify_correctness
+  - check_contracts
+  - assess_regression_risk
+  - report_findings
+required_capabilities:
+  review: high
+  reasoning: very_high
+  coding: high
+  testing: high
+preferred_runtimes:
+  - provider: anthropic
+    model: opus
+fallback_runtimes:
+  - provider: openai
+    model: gpt-5.6-sol
+  - provider: google
+    model: gemini-pro
+handoff_required: true
+verification_required: false
