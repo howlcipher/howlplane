@@ -1,1 +1,475 @@
-FILE_REF:/tmp/howl-repos/howlplane/docs/index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="HowlPlane is an autonomous engineering control plane enforcing deterministic routing, independent reviews, verification gates, and human authority boundaries.">
+    <link rel="canonical" href="https://howlcipher.github.io/howlplane/">
+
+    <!-- Open Graph Metadata -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="HowlPlane">
+    <meta property="og:title" content="HowlPlane | Autonomous AI Engineering Control Plane">
+    <meta property="og:description" content="Command plane topology, deterministic task routing, adversarial reviews, and human authority gates for autonomous AI agents.">
+    <meta property="og:url" content="https://howlcipher.github.io/howlplane/">
+    <meta property="og:image" content="https://howlcipher.github.io/howlplane/social-preview.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="HowlPlane command plane topology and control pipeline overview">
+
+    <!-- Twitter Card Metadata -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="HowlPlane | Autonomous AI Engineering Control Plane">
+    <meta name="twitter:description" content="Command plane topology, deterministic task routing, adversarial reviews, and human authority gates for autonomous AI agents.">
+    <meta name="twitter:image" content="https://howlcipher.github.io/howlplane/social-preview.png">
+    <meta name="twitter:image:alt" content="HowlPlane command plane topology and control pipeline overview">
+
+    <title>HowlPlane | Autonomous AI Engineering Control Plane</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="alternate icon" type="image/png" href="favicon.png">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "HowlPlane",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Linux, macOS, Windows",
+      "description": "Autonomous engineering control plane combining deterministic routing, persistent coding agents, adversarial falsification, and human authority boundaries.",
+      "url": "https://howlcipher.github.io/howlplane/",
+      "author": {
+        "@type": "Person",
+        "name": "William Elias",
+        "jobTitle": "Software, DevOps & Automation Engineer",
+        "url": "https://howlcipher.github.io/william_elias/"
+      }
+    }
+    </script>
+</head>
+<body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    <!-- Ecosystem Slide-out Drawer -->
+    <div id="eco-drawer-overlay" class="eco-drawer-overlay" aria-hidden="true"></div>
+
+    <aside id="eco-drawer" class="eco-drawer" aria-label="Howl Ecosystem Directory" aria-hidden="true">
+        <div class="drawer-header">
+            <div class="drawer-title">HOWL // ECOSYSTEM DIRECTORY</div>
+            <button id="eco-drawer-close" class="btn-drawer-close" type="button" aria-label="Close ecosystem directory">[✕ CLOSE]</button>
+        </div>
+        <div class="drawer-body">
+            <a href="https://howlcipher.github.io/howl/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWL // HUB</span>
+                    <span class="node-card-role">[PORTAL]</span>
+                </div>
+                <div class="node-card-desc">Central ecosystem portal, architectural blueprint, and cross-project governance map.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/HowlFutureWorks/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLFUTUREWORKS</span>
+                    <span class="node-card-role" style="color: var(--color-blue);">[ORGANIZATION OS]</span>
+                </div>
+                <div class="node-card-desc">Version-controlled autonomous software organization: workforce, policy, institutional memory, governance and operating state.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/howlInstinct/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLINSTINCT</span>
+                    <span class="node-card-role" style="color: var(--color-amber);">[DECISION LAYER]</span>
+                </div>
+                <div class="node-card-desc">Bounded semantic judgments with explicit uncertainty and provenance. Confidence is not permission.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/howlforge/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLFORGE</span>
+                    <span class="node-card-role" style="color: var(--color-blue);">[WORKFORCE LAYER]</span>
+                </div>
+                <div class="node-card-desc">Durable roles, replaceable runtimes, deterministic matching, and inspectable handoff contracts for AI workers.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/howlproof/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLPROOF</span>
+                    <span class="node-card-role" style="color: var(--color-red);">[RED-TEAM QA]</span>
+                </div>
+                <div class="node-card-desc">Independent adversarial evaluation, falsification, reproducible findings, and evidence for verdicts.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/howlcreate/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLCREATE</span>
+                    <span class="node-card-role" style="color: var(--color-amber);">[CREATIVE SEARCH]</span>
+                </div>
+                <div class="node-card-desc">Computational creativity, open-ended problem exploration, reframing, and concept lineage.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/howlframe/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLFRAME</span>
+                    <span class="node-card-role" style="color: var(--color-magenta);">[VM &amp; COMPILER]</span>
+                </div>
+                <div class="node-card-desc">AI-native reasoning language, typed intermediate representation, and sandboxed bytecode VM.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/howlplane/" class="drawer-node-card active-hub">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLPLANE</span>
+                    <span class="node-card-role" style="color: var(--color-blue);">[CONTROL PLANE]</span>
+                </div>
+                <div class="node-card-desc">Engineering control plane with deterministic routing, adversarial falsification, and human gates.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/howlchangeops/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLCHANGEOPS</span>
+                    <span class="node-card-role" style="color: var(--color-red);">[AUTHORITY GATE]</span>
+                </div>
+                <div class="node-card-desc">Governed release controller enforcing cryptographic human approvals and bounded Git mutations.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/howlrelay/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLRELAY</span>
+                    <span class="node-card-role" style="color: var(--color-cyan);">[CONTINUITY]</span>
+                </div>
+                <div class="node-card-desc">Persistent asynchronous work coordination, durable journals, and resumable execution handoffs.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/howlnotes/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLNOTES</span>
+                    <span class="node-card-role" style="color: var(--color-cyan);">[KNOWLEDGE NOTEBOOK]</span>
+                </div>
+                <div class="node-card-desc">Engineering knowledge notebook &amp; full-stack dogfood consumer proving native persistent storage.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/howlboard/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLBOARD</span>
+                    <span class="node-card-role" style="color: var(--color-amber);">[EVALUATION SURFACE]</span>
+                </div>
+                <div class="node-card-desc">Observation console and full-stack deterministic task state machine application.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/howlwriter/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLWRITER</span>
+                    <span class="node-card-role" style="color: var(--color-magenta);">[WRITING CONTROL]</span>
+                </div>
+                <div class="node-card-desc">Writing control system for voice preservation, deterministic style linting, humanization, and review.</div>
+            </a>
+
+            <a href="https://howlcipher.github.io/howldream/" class="drawer-node-card">
+                <div class="node-card-top">
+                    <span class="node-card-name">HOWLDREAM</span>
+                    <span class="node-card-role" style="color: var(--color-khaki);">[CONTROLLED DIVERGENCE]</span>
+                </div>
+                <div class="node-card-desc">Controlled divergent experiments, hallucination testing, failure analysis, and scoped verification.</div>
+            </a>
+
+        </div>
+        <div class="drawer-footer">
+            <span>● 14 ECOSYSTEM NODES</span>
+            <span>AUTH // HOWL 2026</span>
+        </div>
+    </aside>
+
+    <div class="layout-container">
+        <!-- Site Header -->
+        <header class="site-header">
+            <div class="header-top">
+                <div class="header-brand">
+                    <a href="https://howlcipher.github.io/howlplane/" class="brand-sig">HOWL <span>//</span> HOWLPLANE</a>
+                    <span class="subsystem-tag">SYS_ID: HP-CTRL-02</span>
+                </div>
+                <div class="header-actions">
+                    <button id="eco-menu-toggle" class="btn-eco-toggle" type="button" aria-expanded="false" aria-controls="eco-drawer" aria-label="Toggle Howl Ecosystem Directory">
+                        <span aria-hidden="true">☰</span> [ECOSYSTEM]
+                    </button>
+                    <a href="api/" class="btn-tech">[ API DOCS ]</a>
+                    <button id="theme-toggle" class="btn-theme-toggle theme-toggle" type="button" aria-pressed="false">
+                        <span aria-hidden="true">☾</span> [DARK_MODE]
+                    </button>
+                    <a href="https://github.com/howlcipher/howlplane" class="btn-tech btn-tech-primary" target="_blank" rel="noreferrer">
+                        [ VIEW ON GITHUB ]
+                    </a>
+                </div>
+            </div>
+
+            <!-- In-Page Section Navigation -->
+            <nav class="section-nav" aria-label="Page sections">
+                <span class="section-nav-label">READ_PATH:</span>
+                <a href="#overview">01_Overview</a>
+                <a href="#workflow">02_Workflow</a>
+                <a href="#capabilities">03_Capabilities</a>
+                <a href="#howlframe">04_HowlFrame</a>
+                <a href="#governance">05_Governance</a>
+            </nav>
+        </header>
+
+        <!-- Main Content Surface -->
+        <main id="main-content">
+            <!-- Hero Panel -->
+            <section class="hero-panel" aria-labelledby="main-title">
+                <div class="hero-banner">
+                    <span>SPEC_VER // 1.2.0 (CONTROL PLANE)</span>
+                    <span>ARCHITECTURE: DETERMINISTIC ORCHESTRATION</span>
+                </div>
+                <div class="hero-body">
+                    <div class="hero-header-block">
+                        <p class="hero-kicker">// autonomous engineering control plane &amp; verification ledger</p>
+                        <h1 id="main-title" class="hero-title">HowlPlane <span class="jp-sub">ハウルプレーン // 2026</span></h1>
+                        <p class="hero-lead">
+                            Engineered by <a href="https://howlcipher.github.io/william_elias/" style="color: var(--color-cyan); text-decoration: underline;">William Elias</a>, HowlPlane is a structured control plane for multi-agent software engineering. It combines deterministic routing, adversarial falsification reviews, deterministic verification, and explicit human authority boundaries.
+                        </p>
+                    </div>
+
+                    <div class="axiom-card" role="region" aria-label="Governing Principle">
+                        <strong>AXIOM // ORCHESTRATION WITHOUT ARBITRARY DRIFT.</strong> Agents propose implementations; deterministic reviewers falsify assumptions; verification suites test live evidence before humans approve changes.
+                    </div>
+
+                    <div class="hero-actions">
+                        <a href="https://github.com/howlcipher/howlplane" class="btn-tech btn-tech-primary" target="_blank" rel="noreferrer">
+                            [ CLONE REPOSITORY ]
+                        </a>
+                        <a href="#workflow" class="btn-tech">
+                            [ CONTROL PIPELINE ]
+                        </a>
+                        <a href="#capabilities" class="btn-tech">
+                            [ CAPABILITY MATRIX ]
+                        </a>
+                        <a href="api/" class="btn-tech">
+                            [ API REFERENCE ]
+                        </a>
+                    </div>
+
+                    <!-- Hero Topology Diagram -->
+                    <div class="hero-diagram-wrap" aria-label="HowlPlane Control Topology">
+                        <div class="diagram-header">
+                            <span>TOPOLOGY // TASK SPEC &rarr; ROUTING &rarr; ADVERSARIAL AUDIT &rarr; HUMAN GATE</span>
+                            <span>STATUS: LIVE</span>
+                        </div>
+                        <div class="signal-grid">
+                            <div class="topology-step step-router">
+                                <div class="top-header">01 // ROUTER</div>
+                                <div class="top-body">
+                                    <div class="top-title">Deterministic Router</div>
+                                    <div class="top-desc">Classifies TaskSpecs by risk, domain, and required skills without LLM variance.</div>
+                                    <div class="top-tag">[DETERMINISTIC]</div>
+                                </div>
+                            </div>
+                            <div class="topology-step step-agents">
+                                <div class="top-header">02 // WORKERS</div>
+                                <div class="top-body">
+                                    <div class="top-title">Multi-Agent Execution</div>
+                                    <div class="top-desc">Specialized worker agents implement code in isolated worktree branches.</div>
+                                    <div class="top-tag">[ISOLATED]</div>
+                                </div>
+                            </div>
+                            <div class="topology-step step-falsify">
+                                <div class="top-header">03 // FALSIFY</div>
+                                <div class="top-body">
+                                    <div class="top-title">Adversarial Review</div>
+                                    <div class="top-desc">Independent falsifiers seek defects, security gaps, and ungrounded claims.</div>
+                                    <div class="top-tag">[ADVERSARIAL]</div>
+                                </div>
+                            </div>
+                            <div class="topology-step step-authority">
+                                <div class="top-header">04 // GATE</div>
+                                <div class="top-body">
+                                    <div class="top-title">Human Authority</div>
+                                    <div class="top-desc">Evidence ledger presents reconciled facts for human approval sign-off.</div>
+                                    <div class="top-tag">[HUMAN GATE]</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 01 Overview -->
+            <section id="overview" class="tech-panel">
+                <div class="tech-header">
+                    <h2><span class="sec-id">SECTION // 01</span> System Overview</h2>
+                    <span class="subsystem-tag">HP-MOD-OVERVIEW</span>
+                </div>
+                <div class="tech-body">
+                    <p>
+                        HowlPlane coordinates complex multi-agent engineering workflows. Rather than letting agents operate as unstructured chat loops, HowlPlane decomposes work into canonical <code>TaskSpecs</code>, validates changes with deterministic verification suites, and enforces strict human authority gates before mutations are applied.
+                    </p>
+                </div>
+            </section>
+
+            <!-- 02 Workflow -->
+            <section id="workflow" class="tech-panel">
+                <div class="tech-header">
+                    <h2><span class="sec-id">SECTION // 02</span> Closed-Loop Control Lifecycle</h2>
+                    <span class="subsystem-tag">HP-MOD-WORKFLOW</span>
+                </div>
+                <div class="tech-body">
+                    <div class="code-container">
+                        <div class="code-header">
+                            <span class="code-title">[SCHEMATIC // CONTROL_PLANE_FLOW]</span>
+                            <span class="subsystem-tag">ORCHESTRATION</span>
+                        </div>
+                        <pre><code>TaskSpec (Input Request)
+      │
+      ▼
+Deterministic Classifier &amp; Skill Router
+      │
+      ▼
+Specialized Implementer Agent (Worktree Isolation)
+      │
+      ▼
+Adversarial Falsification Reviewers (Independent LLMs)
+      │
+      ▼
+Reconciliation Engine (Consensus &amp; Evidence Matrix)
+      │
+      ▼
+Deterministic Verification Suite (Tests, Linters, Hygiene)
+      │
+      ▼
+[ HUMAN AUTHORITY GATE ] ──(Approved)──► Ship / Commit</code></pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 03 Capabilities -->
+            <section id="capabilities" class="tech-panel">
+                <div class="tech-header">
+                    <h2><span class="sec-id">SECTION // 03</span> Operational Capability Matrix</h2>
+                    <span class="subsystem-tag">HP-MOD-CAPS</span>
+                </div>
+                <div class="tech-body">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Subsystem</th>
+                                    <th>Role &amp; Responsibilities</th>
+                                    <th>Verification Method</th>
+                                    <th>Authority Level</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><strong>Task Router</strong></td>
+                                    <td>Classifies incoming engineering tasks and assigns skill tiers</td>
+                                    <td>Static pattern matrix</td>
+                                    <td><span class="chip chip-allow">AUTOMATIC</span></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Implementers</strong></td>
+                                    <td>Write code, update tests, and author architectural documentation</td>
+                                    <td>Unit &amp; integration tests</td>
+                                    <td><span class="chip chip-ai">PROBABILISTIC</span></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Falsifiers</strong></td>
+                                    <td>Probe for hallucinations, security bugs, and spec violations</td>
+                                    <td>Adversarial prompts &amp; static analysis</td>
+                                    <td><span class="chip chip-cyan">ADVERSARIAL</span></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Human Gate</strong></td>
+                                    <td>Final approval for consequential state mutations</td>
+                                    <td>Cryptographic sign-off</td>
+                                    <td><span class="chip chip-require">HUMAN SOVEREIGN</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 04 HowlFrame Relationship -->
+            <section id="howlframe" class="tech-panel">
+                <div class="tech-header">
+                    <h2><span class="sec-id">SECTION // 04</span> HowlFrame Integration</h2>
+                    <span class="subsystem-tag">HP-MOD-HOWLFRAME</span>
+                </div>
+                <div class="tech-body">
+                    <p>
+                        HowlPlane integrates closely with <strong>HowlFrame</strong> for capability-checked execution policies. While HowlPlane manages agent orchestration and workflow state, HowlFrame compiles and executes deterministic policy bytecode that guards dangerous runtime capabilities.
+                    </p>
+                </div>
+            </section>
+
+            
+            <!-- 04b Engineering Questions & Answers -->
+            <section id="faq" class="tech-panel">
+                <div class="tech-header">
+                    <h2><span class="sec-id">SECTION // 04B</span> Control Plane Architecture &amp; Questions</h2>
+                    <span class="subsystem-tag">HP-MOD-QA</span>
+                </div>
+                <div class="tech-body">
+                    <div class="faq-entry" style="margin-bottom: 2rem;">
+                        <h3 style="color: var(--color-cyan); margin-bottom: 0.5rem;">What does an AI engineering control plane do?</h3>
+                        <p><strong>Direct Answer:</strong> An AI engineering control plane orchestrates autonomous coding agents through deterministic lifecycle stages rather than unconstrained prompt loops. HowlPlane classifies tasks, assigns bounded roles, dispatches work, manages execution timeouts, enforces adversarial falsification gates, and verifies test evidence before requesting human sign-off.</p>
+                    </div>
+
+                    <div class="faq-entry" style="margin-bottom: 2rem;">
+                        <h3 style="color: var(--color-cyan); margin-bottom: 0.5rem;">How do persistent coding agents run continuously across sessions?</h3>
+                        <p><strong>Direct Answer:</strong> Persistent operation requires decoupling runtime state from transient LLM context windows. HowlPlane coordinates multi-agent workflows with supervisory state tracking, failover policies across provider pools, and integrates with <a href="https://howlcipher.github.io/howlrelay/" style="color: var(--color-cyan); text-decoration: underline;">HowlRelay</a> for durable trajectory journals and resumable handoff packages.</p>
+                    </div>
+
+                    <div class="faq-entry">
+                        <h3 style="color: var(--color-cyan); margin-bottom: 0.5rem;">How does HowlPlane prevent arbitrary agent drift?</h3>
+                        <p><strong>Direct Answer:</strong> Through adversarial verification and independent reviewer gates. Before any proposed patch is considered, HowlPlane routes the change to independent falsification reviewers whose sole objective is to discover edge cases, regressions, or spec violations. The change cannot proceed to human approval without verifiable test evidence and automated gate passage.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 05 Governance -->
+            <section id="governance" class="tech-panel">
+                <div class="tech-header">
+                    <h2><span class="sec-id">SECTION // 05</span> Ecosystem Governance</h2>
+                    <span class="subsystem-tag">HP-MOD-GOV</span>
+                </div>
+                <div class="tech-body">
+                    <p>
+                        HowlPlane operates as the orchestration layer within the broader Howl Ecosystem alongside <strong>HowlFrame</strong> (Compiler &amp; VM), <strong>HowlChangeOps</strong> (Release Authority), <strong>HowlNotes</strong> (Knowledge Notebook), and <strong>HowlBoard</strong> (Evaluation Telemetry).
+                    </p>
+                </div>
+            </section>
+        </main>
+
+        <!-- Site Footer -->
+        <footer class="site-footer">
+            <div class="footer-telemetry">
+                <div class="status-indicator">
+                    <span class="status-dot" aria-hidden="true"></span>
+                    <span>SYS_STATUS: ACTIVE // HOWLPLANE-CONTROL-PLANE</span>
+                </div>
+                <div>MAINTAINED BY <a href="https://howlcipher.github.io/william_elias/" style="color: var(--color-cyan); text-decoration: underline;">WILLIAM ELIAS</a> // HOWL ECOSYSTEM 2026</div>
+            </div>
+            <div class="footer-links">
+                <nav class="footer-nav" aria-label="Ecosystem Links">
+                    <a href="https://howlcipher.github.io/howl/">Howl Hub</a>
+                    <a href="https://howlcipher.github.io/howl/ecosystem.html">Ecosystem</a>
+                    <a href="https://howlcipher.github.io/HowlFutureWorks/">HowlFutureWorks</a>
+                    <a href="https://howlcipher.github.io/howlInstinct/">HowlInstinct</a>
+                    <a href="https://howlcipher.github.io/howlforge/">HowlForge</a>
+                    <a href="https://howlcipher.github.io/howlproof/">HowlProof</a>
+                    <a href="https://howlcipher.github.io/howlcreate/">HowlCreate</a>
+                    <a href="https://howlcipher.github.io/howlframe/">HowlFrame</a>
+                    <a href="https://howlcipher.github.io/howlplane/">HowlPlane</a>
+                    <a href="https://howlcipher.github.io/howlchangeops/">HowlChangeOps</a>
+                    <a href="https://howlcipher.github.io/howlrelay/">HowlRelay</a>
+                    <a href="https://howlcipher.github.io/howlnotes/">HowlNotes</a>
+                    <a href="https://howlcipher.github.io/howlboard/">HowlBoard</a>
+                    <a href="https://howlcipher.github.io/howlwriter/">HowlWriter</a>
+                    <a href="https://howlcipher.github.io/howldream/">HowlDream</a>
+                </nav>
+                <a href="#main-content">[ BACK TO TOP ]</a>
+            </div>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
