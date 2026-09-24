@@ -25,10 +25,29 @@ from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 from howlplane.control_plane.task_spec import TaskSpec
 
 SCHEMA = "howlplane.orchestration/v1"
+# v1: no capability evidence. v2: every agent carries `capabilities` and a
+# role-keyed `capacity` record; load migrates v1 by replaying recorded failures.
+SCHEMA_VERSION = 2
 AGENTS = ("claude_code", "codex", "cursor", "agy", "devin_cli")
+AGENT_STATES = {"AVAILABLE", "DEGRADED", "UNAVAILABLE", "RESERVED"}
+UNAVAILABLE_FAILURES = {"MISSING_EXECUTABLE", "AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE"}
+MODEL_LIMIT_FAILURES = {"QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"}
+# Hard failures bar the same agent from the same role for the rest of the
+# session, whatever model it would try next. Capacity failures are EXHAUSTED;
+# the others are deterministic role failures that another model rarely fixes.
+CAPACITY_FAILURES = {"EXECUTION_BUDGET_EXCEEDED", "SESSION_LIMIT"}
+ROLE_FAILURES = {
+    "EXECUTION_PERMISSION_REQUIRED", "ENGINEERING_FAILURE", "NO_REPOSITORY_CHANGE", "MALFORMED_OUTPUT",
+    "CAPABILITY_FAILURE", "POLICY_FAILURE", "VERIFICATION_FAILURE", "PROVIDER_STALLED",
+    "READ_ONLY_ROLE_MUTATED_REPOSITORY", "AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
+}
+REQUIRED_KEYS = ("id", "created_at", "goal", "orchestrator", "strategy", "failover", "policy", "stage", "status",
+                 "agents", "attempts", "lease", "repository_evidence")
 BINARIES = {"claude_code": "claude", "codex": "codex", "cursor": "agent", "agy": "agy", "devin_cli": "devin"}
 TERMINAL = {"COMPLETE", "COMPLETE WITH WARNINGS", "BLOCKED", "HANDOFF REQUIRED"}
-SECRET = re.compile(r"(?i)(bearer\s+|(?:token|password|secret|api[_-]?key)[=: ]+)([^\s,;]+)|\b(?:sk-|ghp_|gho_|github_pat_)[\w-]{8,}")
+# A value stops at a quote or backslash so redacting serialized JSON cannot
+# consume the string delimiter and corrupt the manifest.
+SECRET = re.compile(r"(?i)(bearer\s+|(?:token|password|secret|api[_-]?key)[=: ]+)([^\s,;\x22\\]+)|\b(?:sk-|ghp_|gho_|github_pat_)[\w-]{8,}")
 
 
 def redact(value: str) -> str:
@@ -118,8 +137,19 @@ class SessionProgress:
         self.last_change_at = self.clock()
         self._write("CAPABILITY", f"{AGENT_NAMES.get(agent, agent)} marked interactive-only for this session")
 
-    def route_skip(self, agent: str) -> None:
-        self._write("ROUTE", f"{AGENT_NAMES.get(agent, agent)} skipped: unattended execution unavailable")
+    def role_excluded(self, agent: str, role: str, entry: dict[str, Any]) -> None:
+        self.last_change_at = self.clock()
+        name = AGENT_NAMES.get(agent, agent)
+        if entry["state"] == "EXHAUSTED":
+            self._write("CAPABILITY", f"{name} {role} capacity marked exhausted for this session ({entry['reason']})")
+        else:
+            self._write("CAPABILITY", f"{name} excluded from {role} for this session after {entry['reason']}")
+
+    def route_skip(self, agent: str, reason: str = "unattended execution unavailable") -> None:
+        self._write("ROUTE", f"{AGENT_NAMES.get(agent, agent)} skipped: {reason}")
+
+    def excluded(self, agent: str, reason: str) -> None:
+        self._write("EXCLUDED", f"{AGENT_NAMES.get(agent, agent)}: {reason}")
 
     def explicit_override_warning(self, agent: str) -> None:
         self._write("WARNING", f"{AGENT_NAMES.get(agent, agent)} previously required interactive permission; explicit selection overrides AUTO exclusion")
@@ -277,9 +307,9 @@ def active_sessions(root: Path, repo: Path, include_terminal: bool = False) -> l
     sessions = []
     for path in root.glob("[0-9a-f]*.json"):
         doc = safe_load_json(path)
-        if doc.get("schema") == SCHEMA and doc.get("repository") == str(repo) and (include_terminal or doc.get("status") not in TERMINAL):
+        if isinstance(doc, dict) and doc.get("schema") == SCHEMA and doc.get("repository") == str(repo) and (include_terminal or doc.get("status") not in TERMINAL):
             sessions.append(doc)
-    return sorted(sessions, key=lambda item: item["created_at"], reverse=True)
+    return sorted(sessions, key=lambda item: str(item.get("created_at", "")), reverse=True)
 
 
 def now() -> str:
@@ -323,48 +353,174 @@ def inventory(availability: dict[str, str]) -> dict[str, dict[str, Any]]:
             "callable": installed,
             "state": "RESERVED" if requested == "RESERVED" else "AVAILABLE" if installed and requested != "UNAVAILABLE" else "UNAVAILABLE",
             "models": discover_models(agent) if installed and requested != "RESERVED" else [],
-            "capabilities": {
-                "unattended_execution": None,
-                "reason": "CLI metadata does not confirm unattended execution",
-                "evidence_time": None,
-                "scope": "session",
-            },
+            "capabilities": unknown_capabilities("CLI metadata does not confirm unattended execution"),
+            "capacity": {},
         }
     return found
 
 
-def record_capability_failure(doc: dict[str, Any], agent: str, reason: str) -> None:
-    state = doc["agents"][agent]
-    state["state"] = "DEGRADED"
-    state["capabilities"]["unattended_execution"] = False
-    state["capabilities"]["reason"] = reason
-    state["capabilities"]["evidence_time"] = now()
-    state["capabilities"]["scope"] = "session"
+class SessionStateInvalid(ValueError):
+    """A manifest that cannot be normalized without guessing at its evidence."""
+
+
+def unknown_capabilities(reason: str = "No unattended execution evidence recorded") -> dict[str, Any]:
+    return {"unattended_execution": None, "reason": reason, "evidence_time": None, "scope": "session"}
+
+
+def normalize_agent(agent: str, record: Any) -> dict[str, Any]:
+    """Bring one agent record to the v2 shape. Missing evidence is UNKNOWN, never AVAILABLE."""
+    if not isinstance(record, dict) or record.get("state") not in AGENT_STATES:
+        raise SessionStateInvalid(f"Agent record for {agent} is malformed")
+    record.setdefault("backend", BINARIES.get(agent, agent))
+    record.setdefault("installed", False)
+    record.setdefault("callable", record["installed"])
+    if not isinstance(record.get("models"), list):
+        record["models"] = []
+    capabilities = record.get("capabilities")
+    if not isinstance(capabilities, dict) or capabilities.get("unattended_execution") not in (None, True, False):
+        record["capabilities"] = unknown_capabilities()
+    else:
+        for key, value in unknown_capabilities().items():
+            capabilities.setdefault(key, value)
+    capacity = record.get("capacity")
+    record["capacity"] = {
+        role: entry for role, entry in (capacity.items() if isinstance(capacity, dict) else ())
+        if isinstance(entry, dict) and entry.get("state") in {"EXHAUSTED", "FAILED"} and entry.get("reason")
+    }
+    return record
+
+
+def agent_record(doc: dict[str, Any], agent: str) -> dict[str, Any]:
+    """Normalized access to an agent. An agent the manifest never recorded is UNAVAILABLE."""
+    agents = doc["agents"]
+    if agent not in agents:
+        agents[agent] = {"backend": BINARIES.get(agent, agent), "installed": False, "callable": False,
+                         "state": "UNAVAILABLE", "models": [],
+                         "capabilities": unknown_capabilities("Agent absent from session manifest"), "capacity": {}}
+    return normalize_agent(agent, agents[agent])
+
+
+def normalize_session(doc: Any) -> list[str]:
+    """Validate and migrate a loaded manifest in place; return migration notes for progress."""
+    if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
+        raise SessionStateInvalid("Manifest is not an orchestration session")
+    missing = [key for key in REQUIRED_KEYS if key not in doc]
+    if missing:
+        raise SessionStateInvalid(f"Manifest lacks required fields: {', '.join(missing)}")
+    if not isinstance(doc["agents"], dict) or not isinstance(doc["attempts"], list) or not isinstance(doc["lease"], dict) or "token" not in doc["lease"]:
+        raise SessionStateInvalid("Manifest agents, attempts, or lease are malformed")
+    if any(not isinstance(item, dict) or not {"stage", "agent", "model"} <= item.keys() for item in doc["attempts"]):
+        raise SessionStateInvalid("Manifest attempt history is malformed")
+    version = doc.get("schema_version", 1)
+    if not isinstance(version, int) or not 1 <= version <= SCHEMA_VERSION:
+        raise SessionStateInvalid(f"Unsupported session schema version {version!r}")
+    for key, default in (("constraints", []), ("role_models", {}), ("fallbacks", {}), ("model_states", {}),
+                         ("known_models", {}), ("tests", []), ("reroutes", []), ("capability_notices", [])):
+        if not isinstance(doc.get(key), type(default)):
+            doc[key] = default
+    doc["lease"].setdefault("pid", 0)
+    doc["lease"].setdefault("renewed_at", 0)
+    for agent in list(doc["agents"]):
+        normalize_agent(agent, doc["agents"][agent])
+    for agent in AGENTS:
+        agent_record(doc, agent)
+    if version == SCHEMA_VERSION:
+        return []
+    # v1 recorded failures only in the attempt log. Replaying that log restores
+    # the session's hard-failure evidence; successes are not replayed as
+    # positive capability claims, they only clear an earlier same-role failure.
+    for attempt in doc["attempts"]:
+        agent, role = attempt["agent"], attempt["stage"]
+        if agent not in AGENTS:
+            continue
+        if attempt.get("state") == "SUCCEEDED":
+            agent_record(doc, agent)["capacity"].pop(role, None)
+        elif attempt.get("failure"):
+            record_failure(doc, agent, role, attempt["model"], attempt["failure"], attempt.get("finished_at"))
+    doc["schema_version"] = SCHEMA_VERSION
+    doc.setdefault("migrations", []).append({"from": version, "to": SCHEMA_VERSION, "at": now()})
+    return [f"Session manifest normalized from schema v{version} → v{SCHEMA_VERSION}"]
+
+
+def record_capability_failure(doc: dict[str, Any], agent: str, reason: str, at: str | None = None) -> None:
+    state = agent_record(doc, agent)
+    if state["state"] == "AVAILABLE":
+        state["state"] = "DEGRADED"
+    state["capabilities"].update({"unattended_execution": False, "reason": reason, "evidence_time": at or now(), "scope": "session"})
 
 
 def record_capability_success(doc: dict[str, Any], agent: str) -> None:
-    state = doc["agents"][agent]
+    state = agent_record(doc, agent)
     state["state"] = "AVAILABLE"
-    state["capabilities"]["unattended_execution"] = True
-    state["capabilities"]["reason"] = "Successful unattended session invocation"
-    state["capabilities"]["evidence_time"] = now()
-    state["capabilities"]["scope"] = "session"
+    state["capabilities"].update({"unattended_execution": True, "reason": "Successful unattended session invocation",
+                                  "evidence_time": now(), "scope": "session"})
+
+
+def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failure: str, at: str | None = None) -> dict[str, Any] | None:
+    """Apply one failed attempt to session evidence. Returns the role exclusion it created, if any."""
+    state = agent_record(doc, agent)
+    if failure == "EXECUTION_PERMISSION_REQUIRED":
+        record_capability_failure(doc, agent, failure, at)
+    if failure in UNAVAILABLE_FAILURES:
+        state["state"] = "UNAVAILABLE"
+    if failure in MODEL_LIMIT_FAILURES:
+        doc["model_states"][f"{agent}:{model}"] = "EXHAUSTED"
+        if model == "UNKNOWN":
+            state["state"] = "UNAVAILABLE"
+    if failure not in CAPACITY_FAILURES and failure not in ROLE_FAILURES:
+        return None
+    if state["state"] == "AVAILABLE":
+        state["state"] = "DEGRADED"
+    entry = {"state": "EXHAUSTED" if failure in CAPACITY_FAILURES else "FAILED", "reason": failure,
+             "model": model, "evidence_time": at or now(), "scope": "session"}
+    state["capacity"][role] = entry
+    return entry
+
+
+def capacity_reason(entry: dict[str, Any]) -> str:
+    return {"EXECUTION_BUDGET_EXCEEDED": "execution budget exhausted", "SESSION_LIMIT": "session limit reached"}.get(
+        entry["reason"], f"failed earlier this session ({entry['reason']})")
 
 
 def capability_skip_reason(doc: dict[str, Any], agent: str, role: str) -> str | None:
-    state = doc["agents"][agent]
+    state = agent_record(doc, agent)
     if state["state"] == "RESERVED":
         return "reserved"
-    capability = state.get("capabilities", {}).get("unattended_execution")
-    if capability is not False:
+    # A role hard failure outranks an explicit orchestrator choice: selecting an
+    # agent is not consent to burn another call on capacity it just exhausted.
+    if role in state["capacity"]:
+        return capacity_reason(state["capacity"][role])
+    if state["capabilities"]["unattended_execution"] is not False:
         return None
     if doc.get("requested_orchestrator") == agent:
         return "explicit override"
     return "unattended execution unavailable"
 
 
+def exclusions(doc: dict[str, Any], role: str) -> list[dict[str, str]]:
+    """Why each agent is not a candidate for this role, for the terminal explanation."""
+    eligible = {agent for agent, _ in candidates(doc, role)}
+    found = []
+    for agent in AGENTS:
+        state = agent_record(doc, agent)
+        if agent in eligible and not (role == "review" and agent == doc.get("implementer")):
+            continue
+        reason = capability_skip_reason(doc, agent, role)
+        if reason in (None, "explicit override"):
+            if role == "review" and agent == doc.get("implementer"):
+                reason = "implemented this change; audit must be independent"
+            elif state["state"] == "UNAVAILABLE":
+                reason = "unavailable"
+            elif role == "acceptance":
+                reason = "not the session orchestrator"
+            else:
+                reason = "no usable model remains"
+        found.append({"agent": agent, "reason": reason})
+    return found
+
+
 def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
-    agents = doc["agents"]
+    agents = {agent: agent_record(doc, agent) for agent in AGENTS}
     lead = doc["orchestrator"]
     order = list(AGENTS)
     if lead != "AUTO":
@@ -405,8 +561,9 @@ def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
     if fallback:
         for item in fallback:
             agent, model = item.split(":", 1)
-            if doc["agents"][agent]["state"] == "AVAILABLE" and (
-                model == "UNKNOWN" or model in doc["agents"][agent]["models"]
+            skip_reason = capability_skip_reason(doc, agent, role)
+            if agents[agent]["state"] == "AVAILABLE" and skip_reason in (None, "explicit override") and (
+                model == "UNKNOWN" or model in agents[agent]["models"]
                 or model in doc.get("known_models", {}).get(agent, [])
             ) and doc["model_states"].get(item) != "EXHAUSTED":
                 selected.append((agent, model))
@@ -473,7 +630,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     if lead != "AUTO" and agents[lead]["state"] != "AVAILABLE":
         raise ValueError("Selected orchestrator is not available for this session")
     return {
-        "schema": SCHEMA, "id": uuid.uuid4().hex, "created_at": now(), "repository": snapshot["root"],
+        "schema": SCHEMA, "schema_version": SCHEMA_VERSION, "id": uuid.uuid4().hex, "created_at": now(), "repository": snapshot["root"],
         "goal": redact(goal), "constraints": [redact(item) for item in args.constraint],
         "requested_orchestrator": lead, "selected_orchestrator": None if lead == "AUTO" else lead,
         "orchestrator": lead, "agents": agents, "strategy": strategy,
@@ -543,32 +700,38 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             notices = doc.setdefault("capability_notices", [])
             for candidate in AGENTS:
                 reason = capability_skip_reason(doc, candidate, stage)
-                notice = f"{candidate}:{reason}"
-                if reason == "unattended execution unavailable" and notice not in notices:
-                    progress.route_skip(candidate)
-                    notices.append(notice)
-                elif reason == "explicit override" and notice not in notices:
+                # Session-wide reasons are announced once; capacity is per role.
+                notice = f"{candidate}:{reason}" if reason in ("explicit override", "unattended execution unavailable") else f"{candidate}:{stage}:{reason}"
+                if reason in (None, "reserved") or notice in notices:
+                    continue
+                if reason == "explicit override":
                     progress.explicit_override_warning(candidate)
-                    notices.append(notice)
-        options = candidates(doc, stage)
-        if stage == "review":
-            options = [pair for pair in options if pair[0] != doc.get("implementer")]
-        if not options:
-            doc["status"] = "BLOCKED" if stage == "review" else "HANDOFF REQUIRED"
-            doc["audit"] = "AUDIT BLOCKED: no independent reviewer" if stage == "review" else None
-            checkpoint(doc, path, token, repo)
-            if progress:
-                progress.blocked("AUDIT BLOCKED" if stage == "review" else "HANDOFF REQUIRED", doc.get("audit") or "No eligible worker remains", f"howlplane orchestrate resume --repo {repo}")
-            return report(doc)
+                else:
+                    progress.route_skip(candidate, reason)
+                notices.append(notice)
+
+        def eligible() -> list[tuple[str, str]]:
+            options = candidates(doc, stage)
+            return [pair for pair in options if not (stage == "review" and pair[0] == doc.get("implementer"))]
+
         succeeded = False
         transient_retries: dict[tuple[str, str], int] = {}
+        attempted: list[tuple[str, str]] = []
+        retry: tuple[str, str] | None = None
         prev_reroute: tuple[str, str] | None = None
-        for agent, model in options:
-            if doc["agents"][agent]["state"] not in {"AVAILABLE", "DEGRADED"}:
-                continue
-            skip = capability_skip_reason(doc, agent, stage)
-            if skip and skip != "explicit override":
-                continue
+        while True:
+            # Candidates are recomputed from session evidence after every
+            # failure, so the next assignment (and the REROUTE naming it) never
+            # reflects a list selected before the failure was recorded.
+            if retry:
+                agent, model = retry
+                retry = None
+            else:
+                pending = [pair for pair in eligible() if pair not in attempted]
+                if not pending:
+                    break
+                agent, model = pending[0]
+            attempted.append((agent, model))
             if prev_reroute and progress:
                 source_agent, reason = prev_reroute
                 progress.reroute(doc["id"][:8], source_agent, agent, reason)
@@ -628,38 +791,22 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             doc["reroutes"].append({"from": f"{agent}:{model}", "stage": stage, "reason": assignment["failure"]})
             if progress:
                 progress._write("FAIL", f"{AGENT_NAMES.get(agent, agent)} {stage} failed: {assignment['failure']}{no_change_detail}")
-            if assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED":
-                record_capability_failure(doc, agent, assignment["failure"])
-                if progress:
-                    progress.capability_downgrade(agent)
-            elif assignment["failure"] in {
-                "ENGINEERING_FAILURE", "NO_REPOSITORY_CHANGE", "MALFORMED_OUTPUT",
-                "CAPABILITY_FAILURE", "POLICY_FAILURE", "VERIFICATION_FAILURE",
-                "EXECUTION_BUDGET_EXCEEDED", "PROVIDER_STALLED", "MISSING_EXECUTABLE",
-                "AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE",
-                "READ_ONLY_ROLE_MUTATED_REPOSITORY", "AUDIT_FINDINGS_OR_UNCONFIRMED",
-                "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
-            }:
-                # Session-scoped degradation so AUTO routing does not burn
-                # another attempt on a backend that just demonstrated it cannot
-                # perform this role. A new session starts with fresh evidence.
-                if assignment["failure"] in {"MISSING_EXECUTABLE", "AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE"}:
-                    doc["agents"][agent]["state"] = "UNAVAILABLE"
-                else:
-                    record_capability_failure(doc, agent, assignment["failure"])
+            # Record the failure before choosing a replacement: the next
+            # candidate list must already exclude what this attempt proved.
+            exclusion = record_failure(doc, agent, stage, model, assignment["failure"])
             if progress:
-                if assignment["failure"] in {"QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"}:
+                if assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED":
+                    progress.capability_downgrade(agent)
+                elif exclusion:
+                    progress.role_excluded(agent, stage, exclusion)
+                if assignment["failure"] in MODEL_LIMIT_FAILURES:
                     progress.limit(agent, model, assignment["failure"])
                 progress.checkpoint(doc["id"][:8])
-            if failure.value in {"QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"}:
-                doc["model_states"][f"{agent}:{model}"] = "EXHAUSTED"
-                if model == "UNKNOWN":
-                    doc["agents"][agent]["state"] = "UNAVAILABLE"
             if before != after:
                 doc["reconciliation"] = {"at": now(), "needs_validation": True, "from": agent, "stage": stage}
             if failure.value == "TRANSPORT_UNAVAILABLE" and transient_retries.get((agent, model), 0) < 1:
                 transient_retries[(agent, model)] = transient_retries.get((agent, model), 0) + 1
-                options.insert(options.index((agent, model)) + 1, (agent, model))
+                retry = (agent, model)
             elif doc["failover"] != "OFF":
                 # Defer the progress REROUTE event until the next iteration so
                 # the reported target is the actual replacement selected from
@@ -676,10 +823,14 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
         if not succeeded:
             doc["status"] = "BLOCKED" if stage == "review" else "HANDOFF REQUIRED"
             if stage == "review":
-                doc["audit"] = "AUDIT BLOCKED: independent reviewers exhausted"
+                doc["audit"] = "AUDIT BLOCKED: independent reviewers exhausted" if attempted else "AUDIT BLOCKED: no independent reviewer"
+            doc["exclusions"] = {"stage": stage, "agents": exclusions(doc, stage)}
             checkpoint(doc, path, token, repo)
             if progress:
-                progress.blocked("AUDIT BLOCKED" if stage == "review" else "HANDOFF REQUIRED", doc.get("audit") or "Eligible workers exhausted", f"howlplane orchestrate resume --repo {repo}")
+                for item in doc["exclusions"]["agents"]:
+                    progress.excluded(item["agent"], item["reason"])
+                reason = doc.get("audit") or f"No eligible {stage} workers remain"
+                progress.blocked("AUDIT BLOCKED" if stage == "review" else "HANDOFF REQUIRED", reason, f"howlplane orchestrate resume --repo {repo}")
             return report(doc)
         if stage == "implementation":
             if progress:
@@ -739,8 +890,20 @@ def report(doc: dict[str, Any]) -> int:
     print(f"Recovery: {json.dumps(doc.get('reconciliation', {}))}")
     if doc.get("validation_gap"):
         print(f"Validation gap: {doc['validation_gap']}")
+    if doc.get("exclusions") and doc["status"] in TERMINAL:
+        print(f"Excluded {doc['exclusions']['stage']} workers: {json.dumps(doc['exclusions']['agents'])}")
     print(f"Failures: {json.dumps([{'stage': a['stage'], 'agent': a['agent'], 'model': a['model'], 'failure': a.get('failure')} for a in doc['attempts'] if a.get('failure')])}")
     return 0 if doc["status"] in {"COMPLETE", "COMPLETE WITH WARNINGS"} else 2
+
+
+def invalid_session_report(doc: Any, reason: str, repo: Path) -> int:
+    # The manifest is left untouched: rewriting state that cannot be trusted
+    # would destroy the only evidence of what the session did.
+    session = doc.get("id", "unknown") if isinstance(doc, dict) else "unknown"
+    print("HOWL ORCHESTRATION REPORT")
+    print(f"Session: {redact(str(session))}\nStatus: SESSION_STATE_INVALID\nReason: {redact(reason)}")
+    print(f"Next: howlplane orchestrate inspect --json --repo {repo}, then discard or repair the session")
+    return 2
 
 
 def command(args: argparse.Namespace) -> int:
@@ -770,6 +933,10 @@ def command(args: argparse.Namespace) -> int:
             if not active:
                 raise ValueError("No unfinished session")
             doc = active[0]
+            try:
+                migrations = normalize_session(doc)
+            except SessionStateInvalid as error:
+                return invalid_session_report(doc, str(error), repo)
             previous_orchestrator = doc["orchestrator"]
             if time.time() - doc["lease"]["renewed_at"] < 330 and doc["lease"]["pid"] != os.getpid():
                 try:
@@ -808,6 +975,8 @@ def command(args: argparse.Namespace) -> int:
     )
     if operation == "resume":
         progress._write("RESUME", f"Loading orchestration session {doc['id'][:8]}")
+        for note in migrations:
+            progress._write("MIGRATE", note)
         progress._write("RECONCILE", "Checking repository and worker state")
         if doc["orchestrator"] != previous_orchestrator:
             progress._write("TAKEOVER", f"{AGENT_NAMES.get(doc['orchestrator'], doc['orchestrator'])} is now orchestrator")
