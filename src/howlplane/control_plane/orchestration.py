@@ -79,11 +79,16 @@ class SessionProgress:
         if not self.enabled:
             return
         reserved = [AGENT_NAMES.get(agent, agent) for agent, state in self.document["agents"].items() if state["state"] == "RESERVED"]
+        requested = self.document.get("requested_orchestrator", self.document["orchestrator"])
+        selected = self.document.get("selected_orchestrator")
+        if selected is None and requested != "AUTO":
+            selected = requested
         lines = [
             "HOWL ORCHESTRATION",
             f"Session: {self.document['id'][:8]}...",
             f"Goal: {self._safe(self.document['goal'], 90)}",
-            f"Orchestrator: {AGENT_NAMES.get(self.document['orchestrator'], self.document['orchestrator'])}",
+            f"Requested orchestrator: {AGENT_NAMES.get(requested, requested)}",
+            f"Selected orchestrator: {AGENT_NAMES.get(selected, selected) if selected else 'pending'}",
             f"Strategy: {self.document['strategy']}",
             f"Failover: {self.document['failover']}",
             f"Execution: {self.document['policy']}",
@@ -108,6 +113,20 @@ class SessionProgress:
     def worker_complete(self, task_id: str, agent: str, task: str) -> None:
         self.last_change_at = self.clock()
         self._write("COMPLETE", f"{AGENT_NAMES.get(agent, agent)} completed {task_id}: {task}")
+
+    def capability_downgrade(self, agent: str) -> None:
+        self.last_change_at = self.clock()
+        self._write("CAPABILITY", f"{AGENT_NAMES.get(agent, agent)} marked interactive-only for this session")
+
+    def route_skip(self, agent: str) -> None:
+        self._write("ROUTE", f"{AGENT_NAMES.get(agent, agent)} skipped: unattended execution unavailable")
+
+    def explicit_override_warning(self, agent: str) -> None:
+        self._write("WARNING", f"{AGENT_NAMES.get(agent, agent)} previously required interactive permission; explicit selection overrides AUTO exclusion")
+
+    def selected_orchestrator(self, agent: str) -> None:
+        self.last_change_at = self.clock()
+        self._write("SELECT", f"{AGENT_NAMES.get(agent, agent)} selected as orchestrator")
 
     def limit(self, agent: str, model: str, reason: str) -> None:
         self.last_change_at = self.clock()
@@ -299,11 +318,49 @@ def inventory(availability: dict[str, str]) -> dict[str, dict[str, Any]]:
         installed = shutil.which(BINARIES[agent]) is not None
         requested = availability.get(agent, "AUTO").upper()
         found[agent] = {
+            "backend": BINARIES[agent],
             "installed": installed,
+            "callable": installed,
             "state": "RESERVED" if requested == "RESERVED" else "AVAILABLE" if installed and requested != "UNAVAILABLE" else "UNAVAILABLE",
             "models": discover_models(agent) if installed and requested != "RESERVED" else [],
+            "capabilities": {
+                "unattended_execution": None,
+                "reason": "CLI metadata does not confirm unattended execution",
+                "evidence_time": None,
+                "scope": "session",
+            },
         }
     return found
+
+
+def record_capability_failure(doc: dict[str, Any], agent: str, reason: str) -> None:
+    state = doc["agents"][agent]
+    state["state"] = "DEGRADED"
+    state["capabilities"]["unattended_execution"] = False
+    state["capabilities"]["reason"] = reason
+    state["capabilities"]["evidence_time"] = now()
+    state["capabilities"]["scope"] = "session"
+
+
+def record_capability_success(doc: dict[str, Any], agent: str) -> None:
+    state = doc["agents"][agent]
+    state["state"] = "AVAILABLE"
+    state["capabilities"]["unattended_execution"] = True
+    state["capabilities"]["reason"] = "Successful unattended session invocation"
+    state["capabilities"]["evidence_time"] = now()
+    state["capabilities"]["scope"] = "session"
+
+
+def capability_skip_reason(doc: dict[str, Any], agent: str, role: str) -> str | None:
+    state = doc["agents"][agent]
+    if state["state"] == "RESERVED":
+        return "reserved"
+    capability = state.get("capabilities", {}).get("unattended_execution")
+    if capability is not False:
+        return None
+    if doc.get("requested_orchestrator") == agent:
+        return "explicit override"
+    return "unattended execution unavailable"
 
 
 def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
@@ -326,7 +383,12 @@ def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
         order = order[:1]
     selected = []
     for agent in order:
-        if agents[agent]["state"] != "AVAILABLE":
+        state = agents[agent]["state"]
+        skip_reason = capability_skip_reason(doc, agent, role)
+        explicit_override = skip_reason == "explicit override"
+        if state == "RESERVED" or state not in {"AVAILABLE", "DEGRADED"}:
+            continue
+        if skip_reason and not explicit_override:
             continue
         configured = doc["role_models"].get(role, {}).get(agent, "AUTO")
         discovered = agents[agent]["models"]
@@ -413,6 +475,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     return {
         "schema": SCHEMA, "id": uuid.uuid4().hex, "created_at": now(), "repository": snapshot["root"],
         "goal": redact(goal), "constraints": [redact(item) for item in args.constraint],
+        "requested_orchestrator": lead, "selected_orchestrator": None if lead == "AUTO" else lead,
         "orchestrator": lead, "agents": agents, "strategy": strategy,
         "role_models": role_models, "fallbacks": fallbacks,
         "failover": failover, "policy": policy, "status": "PLANNED", "stage": "planning",
@@ -477,6 +540,16 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
         checkpoint(doc, path, token, repo)
         if progress:
             progress.phase(stage, {"planning": "Building implementation plan", "implementation": "Dispatching implementation worker", "review": "Independent audit started", "acceptance": "Orchestrator validating final result"}[stage])
+            notices = doc.setdefault("capability_notices", [])
+            for candidate in AGENTS:
+                reason = capability_skip_reason(doc, candidate, stage)
+                notice = f"{candidate}:{reason}"
+                if reason == "unattended execution unavailable" and notice not in notices:
+                    progress.route_skip(candidate)
+                    notices.append(notice)
+                elif reason == "explicit override" and notice not in notices:
+                    progress.explicit_override_warning(candidate)
+                    notices.append(notice)
         options = candidates(doc, stage)
         if stage == "review":
             options = [pair for pair in options if pair[0] != doc.get("implementer")]
@@ -489,7 +562,10 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             return report(doc)
         succeeded = False
         transient_retries: dict[tuple[str, str], int] = {}
+        permission_failed_agents: set[str] = set()
         for agent, model in options:
+            if agent in permission_failed_agents:
+                continue
             before = evidence(repo)
             assignment = {"task_id": doc["id"][:8], "stage": stage, "agent": agent, "model": model, "started_at": now(), "fence": token, "state": "ASSIGNED"}
             doc["attempts"].append(assignment)
@@ -521,8 +597,12 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
             if assignment["state"] == "SUCCEEDED":
+                record_capability_success(doc, agent)
                 if stage == "planning":
                     doc["orchestrator"] = agent
+                    doc["selected_orchestrator"] = agent
+                    if progress and doc.get("requested_orchestrator") == "AUTO":
+                        progress.selected_orchestrator(agent)
                 if stage == "implementation":
                     doc["implementer"] = agent
                 if stage == "review":
@@ -539,6 +619,12 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             doc["reroutes"].append({"from": f"{agent}:{model}", "stage": stage, "reason": assignment["failure"]})
             if progress:
                 progress._write("FAIL", f"{AGENT_NAMES.get(agent, agent)} {stage} failed: {assignment['failure']}")
+            if assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED":
+                record_capability_failure(doc, agent, assignment["failure"])
+                permission_failed_agents.add(agent)
+                if progress:
+                    progress.capability_downgrade(agent)
+            if progress:
                 if assignment["failure"] in {"QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"}:
                     progress.limit(agent, model, assignment["failure"])
                 progress.checkpoint(doc["id"][:8])
@@ -672,7 +758,9 @@ def command(args: argparse.Namespace) -> int:
             doc["lease"] = {"token": uuid.uuid4().hex, "pid": os.getpid(), "renewed_at": time.time()}
             reconcile(doc, repo)
             requested_orchestrator = getattr(args, "orchestrator", None)
-            if requested_orchestrator and requested_orchestrator != "AUTO" and doc["agents"].get(requested_orchestrator, {}).get("state") == "AVAILABLE":
+            if requested_orchestrator and requested_orchestrator != "AUTO" and doc["agents"].get(requested_orchestrator, {}).get("state") in {"AVAILABLE", "DEGRADED"}:
+                doc["requested_orchestrator"] = requested_orchestrator
+                doc["selected_orchestrator"] = requested_orchestrator
                 doc["orchestrator"] = requested_orchestrator
             path = path_for(root, doc["id"])
             secure_write(path, doc)

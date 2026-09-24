@@ -201,6 +201,74 @@ def test_resume_revokes_old_assignment_and_validates_partial_diff(tmp_path, monk
     assert "COMPLETE WITH WARNINGS" in capsys.readouterr().out
 
 
+def test_permission_failure_degrades_only_unattended_capability_and_auto_skips_backend(tmp_path, monkeypatch):
+    repo = repository(tmp_path)
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/fake/" + name)
+    monkeypatch.setattr(module, "discover_models", lambda agent: [])
+    doc = module.setup(arguments(repo, orchestrator="AUTO"), repo)
+    failure = result("claude_code", "planning", False, "execution permission required")
+
+    assert module.ProviderPoolManager.classify_result("claude_code", failure).value == "EXECUTION_PERMISSION_REQUIRED"
+    module.record_capability_failure(doc, "claude_code", "EXECUTION_PERMISSION_REQUIRED")
+
+    claude = doc["agents"]["claude_code"]
+    assert claude["state"] == "DEGRADED"
+    assert claude["capabilities"]["unattended_execution"] is False
+    assert claude["capabilities"]["reason"] == "EXECUTION_PERMISSION_REQUIRED"
+    assert claude["capabilities"]["scope"] == "session"
+    assert claude["installed"] is True
+    assert all(agent != "claude_code" for agent, _ in module.candidates(doc, "planning"))
+    assert claude["capabilities"].get("review") is None
+
+
+def test_explicit_override_warns_but_reserved_still_wins(tmp_path, monkeypatch):
+    repo = repository(tmp_path)
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/fake/" + name)
+    monkeypatch.setattr(module, "discover_models", lambda agent: [])
+    doc = module.setup(arguments(repo, orchestrator="claude_code"), repo)
+    module.record_capability_failure(doc, "claude_code", "EXECUTION_PERMISSION_REQUIRED")
+    assert module.candidates(doc, "planning")[0][0] == "claude_code"
+    assert module.capability_skip_reason(doc, "claude_code", "planning") == "explicit override"
+
+    doc["agents"]["claude_code"]["state"] = "RESERVED"
+    assert all(agent != "claude_code" for agent, _ in module.candidates(doc, "planning"))
+
+
+def test_new_session_resets_permission_evidence(tmp_path, monkeypatch):
+    repo = repository(tmp_path)
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/fake/" + name)
+    monkeypatch.setattr(module, "discover_models", lambda agent: [])
+    first = module.setup(arguments(repo, orchestrator="AUTO"), repo)
+    module.record_capability_failure(first, "claude_code", "EXECUTION_PERMISSION_REQUIRED")
+    second = module.setup(arguments(repo, orchestrator="AUTO"), repo)
+    assert second["agents"]["claude_code"]["capabilities"]["unattended_execution"] is None
+    assert second["agents"]["claude_code"]["state"] == "AVAILABLE"
+
+
+def test_permission_failure_reroutes_once_and_auto_selects_replacement(tmp_path, monkeypatch, capsys):
+    repo = repository(tmp_path)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/fake/" + name if name in {"claude", "codex"} else None)
+    monkeypatch.setattr(module, "discover_models", lambda agent: ["one", "two"] if agent == "claude_code" else [])
+    calls = []
+
+    def execute(document, role, agent, model, cwd):
+        calls.append((agent, model))
+        return result(agent, role, agent != "claude_code", "EXECUTION_PERMISSION_REQUIRED" if agent == "claude_code" else "")
+
+    monkeypatch.setattr(module, "execute_assignment", execute)
+    assert module.command(arguments(repo, orchestrator="AUTO")) == 0
+
+    assert calls == [("claude_code", "one"), ("codex", "UNKNOWN")]
+    output = capsys.readouterr().err
+    assert "Requested orchestrator: AUTO" in output
+    assert "Selected orchestrator: pending" in output
+    assert "CAPABILITY  Claude marked interactive-only for this session" in output
+    assert "REROUTE" in output and "Claude → Codex" in output
+    assert "SELECT" in output and "Codex selected as orchestrator" in output
+    assert "TAKEOVER" not in output
+
+
 def test_progress_reporter_projects_real_session_state_without_provider_calls():
     clock = [100.0]
     stream = io.StringIO()
@@ -228,6 +296,8 @@ def test_progress_reporter_projects_real_session_state_without_provider_calls():
     output = stream.getvalue()
     assert "HOWL ORCHESTRATION" in output
     assert "Session: 8f4c" in output
+    assert "Requested orchestrator: Codex" in output
+    assert "Selected orchestrator: Codex" in output
     assert "Strategy: BALANCED" in output
     assert "Execution: PLAN + EXECUTE + INDEPENDENT AUDIT" in output
     assert "Reserved agents: Claude" in output
@@ -246,6 +316,8 @@ def test_progress_events_redact_private_text_and_describe_failover():
     }
     progress = module.SessionProgress(doc, stream=stream, heartbeat_interval=30, clock=lambda: 1)
     progress.worker_complete("HP-004", "cursor", "UI adapter changes")
+    progress.capability_downgrade("claude_code")
+    progress.route_skip("claude_code")
     progress.limit("codex", "model-a", "SESSION_LIMIT")
     progress.checkpoint("HP-007")
     progress.reroute("HP-007", "codex", "agy", "token=supersecret; private chain-of-thought")
@@ -254,8 +326,10 @@ def test_progress_events_redact_private_text_and_describe_failover():
     progress.complete("COMPLETE")
 
     output = stream.getvalue()
-    for label in ("COMPLETE", "LIMIT", "CHECKPOINT", "REROUTE", "VERIFY", "ACTION REQUIRED"):
+    for label in ("COMPLETE", "CAPABILITY", "ROUTE", "LIMIT", "CHECKPOINT", "REROUTE", "VERIFY", "ACTION REQUIRED"):
         assert label in output
+    assert "unattended execution unavailable" in output
+    assert "TAKEOVER" not in output
     assert "Claude skipped: RESERVED" in output
     assert "supersecret" not in output
     assert "chain-of-thought" not in output
