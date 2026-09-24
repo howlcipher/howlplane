@@ -612,6 +612,11 @@ class SubprocessAgentBackend(AgentBackend):
         cmd_args = self.build_command(
             task, target_cwd, role, prompt, timeout_seconds=timeout_seconds
         )
+        model_id = kwargs.get("model_id")
+        if model_id and model_id != "UNKNOWN" and self.agent_id in {
+            "claude_code", "codex", "cursor", "agy", "devin_cli"
+        }:
+            cmd_args[1:1] = ["--model", model_id]
         cmd_str = " ".join(shlex.quote(c) for c in cmd_args)
 
         env = os.environ.copy()
@@ -913,7 +918,7 @@ class CodexBackend(SubprocessAgentBackend):
             # Codex defaults to a read-only sandbox; implementation and
             # remediation roles must be able to edit files in the workspace.
             # Review roles keep the default read-only sandbox.
-            if r and (r.endswith("-reviewer") or r == "review" or r.startswith("writing:")):
+            if r and (r.endswith("-reviewer") or r in ("review", "planning", "acceptance") or r.startswith("writing:")):
                 return ["codex", "exec", "--skip-git-repo-check", p]
             return [
                 "codex",
@@ -956,7 +961,7 @@ class AgyBackend(SubprocessAgentBackend):
             return [
                 "agy",
                 "-p", p,
-                "--mode", "accept-edits",
+                "--mode", "plan" if r in ("planning", "review", "acceptance") else "accept-edits",
                 "--print-timeout", f"{print_timeout}s",
             ]
         super().__init__("agy", "agy", _agy_cmd)
@@ -969,6 +974,7 @@ class AgyBackend(SubprocessAgentBackend):
         timeout_seconds: int = 300,
         env_vars: Optional[Dict[str, str]] = None,
         prompt_override: Optional[str] = None,
+        **kwargs,
     ) -> AgentExecutionResult:
         result = super().execute(
             task=task,
@@ -977,6 +983,7 @@ class AgyBackend(SubprocessAgentBackend):
             timeout_seconds=timeout_seconds,
             env_vars=env_vars,
             prompt_override=prompt_override,
+            **kwargs,
         )
         # agy can exit zero while its turn is still running. That acknowledges
         # delivery of partial output, not completion of engineering work. Keep
@@ -1014,8 +1021,20 @@ class AgyBackend(SubprocessAgentBackend):
 class DevinCLIBackend(SubprocessAgentBackend):
     def __init__(self):
         def _devin_cmd(t, c, r, p, timeout_seconds: int = 300, **kwargs):
-            return ["devin", "-p", p, "--permission-mode", "accept-edits"]
+            return ["devin", "-p", p, "--permission-mode", "auto" if r in ("planning", "review", "acceptance") else "accept-edits"]
         super().__init__("devin_cli", "devin", _devin_cmd)
+
+
+class CursorBackend(SubprocessAgentBackend):
+    """Cursor's documented print-mode CLI adapter."""
+
+    def __init__(self):
+        def _cursor_cmd(task, cwd, role, prompt, **kwargs):
+            command = ["cursor-agent", "--print"]
+            if role in ("planning", "review", "acceptance"):
+                command += ["--mode", "plan"]
+            return command + [prompt]
+        super().__init__("cursor", "cursor-agent", _cursor_cmd)
 
 
 class OllamaLocalBackend(AgentBackend):
@@ -1325,6 +1344,7 @@ class AgentBackendRegistry:
         "codex": CodexBackend(),
         "gemini_cli": GeminiCLIBackend(),
         "agy": AgyBackend(),
+        "cursor": CursorBackend(),
         "devin_cli": DevinCLIBackend(),
         "local_ollama": OllamaLocalBackend(),
     }
