@@ -26,7 +26,7 @@ from howlplane.control_plane.task_spec import TaskSpec
 
 SCHEMA = "howlplane.orchestration/v1"
 AGENTS = ("claude_code", "codex", "cursor", "agy", "devin_cli")
-BINARIES = {"claude_code": "claude", "codex": "codex", "cursor": "cursor-agent", "agy": "agy", "devin_cli": "devin"}
+BINARIES = {"claude_code": "claude", "codex": "codex", "cursor": "agent", "agy": "agy", "devin_cli": "devin"}
 TERMINAL = {"COMPLETE", "COMPLETE WITH WARNINGS", "BLOCKED", "HANDOFF REQUIRED"}
 SECRET = re.compile(r"(?i)(bearer\s+|(?:token|password|secret|api[_-]?key)[=: ]+)([^\s,;]+)|\b(?:sk-|ghp_|gho_|github_pat_)[\w-]{8,}")
 
@@ -289,7 +289,7 @@ def now() -> str:
 def discover_models(agent: str) -> list[str]:
     """Read only advertised lists. A silent CLI default remains UNKNOWN."""
     commands = {
-        "cursor": ["cursor-agent", "--list-models"],
+        "cursor": ["agent", "--list-models"],
         "agy": ["agy", "models"],
         "devin_cli": ["devin", "models", "list"],
     }
@@ -562,10 +562,17 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             return report(doc)
         succeeded = False
         transient_retries: dict[tuple[str, str], int] = {}
-        permission_failed_agents: set[str] = set()
+        prev_reroute: tuple[str, str] | None = None
         for agent, model in options:
-            if agent in permission_failed_agents:
+            if doc["agents"][agent]["state"] not in {"AVAILABLE", "DEGRADED"}:
                 continue
+            skip = capability_skip_reason(doc, agent, stage)
+            if skip and skip != "explicit override":
+                continue
+            if prev_reroute and progress:
+                source_agent, reason = prev_reroute
+                progress.reroute(doc["id"][:8], source_agent, agent, reason)
+                prev_reroute = None
             before = evidence(repo)
             assignment = {"task_id": doc["id"][:8], "stage": stage, "agent": agent, "model": model, "started_at": now(), "fence": token, "state": "ASSIGNED"}
             doc["attempts"].append(assignment)
@@ -584,9 +591,11 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                                "repo_before": fingerprint(before), "repo_after": fingerprint(after),
                                "output_sha256": fingerprint({"stdout": result.stdout}),
                                "error": redact((result.error_message or result.stderr)[:200])})
+            no_change_detail = ""
             if result.success and stage == "implementation" and before == after:
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "NO_REPOSITORY_CHANGE"
+                no_change_detail = " (no repository delta detected)"
             if stage in {"review", "acceptance"} and before != after:
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "READ_ONLY_ROLE_MUTATED_REPOSITORY"
@@ -618,30 +627,44 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 break
             doc["reroutes"].append({"from": f"{agent}:{model}", "stage": stage, "reason": assignment["failure"]})
             if progress:
-                progress._write("FAIL", f"{AGENT_NAMES.get(agent, agent)} {stage} failed: {assignment['failure']}")
+                progress._write("FAIL", f"{AGENT_NAMES.get(agent, agent)} {stage} failed: {assignment['failure']}{no_change_detail}")
             if assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED":
                 record_capability_failure(doc, agent, assignment["failure"])
-                permission_failed_agents.add(agent)
                 if progress:
                     progress.capability_downgrade(agent)
+            elif assignment["failure"] in {
+                "ENGINEERING_FAILURE", "NO_REPOSITORY_CHANGE", "MALFORMED_OUTPUT",
+                "CAPABILITY_FAILURE", "POLICY_FAILURE", "VERIFICATION_FAILURE",
+                "EXECUTION_BUDGET_EXCEEDED", "PROVIDER_STALLED", "MISSING_EXECUTABLE",
+                "AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE",
+                "READ_ONLY_ROLE_MUTATED_REPOSITORY", "AUDIT_FINDINGS_OR_UNCONFIRMED",
+                "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
+            }:
+                # Session-scoped degradation so AUTO routing does not burn
+                # another attempt on a backend that just demonstrated it cannot
+                # perform this role. A new session starts with fresh evidence.
+                if assignment["failure"] in {"MISSING_EXECUTABLE", "AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE"}:
+                    doc["agents"][agent]["state"] = "UNAVAILABLE"
+                else:
+                    record_capability_failure(doc, agent, assignment["failure"])
             if progress:
                 if assignment["failure"] in {"QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"}:
                     progress.limit(agent, model, assignment["failure"])
                 progress.checkpoint(doc["id"][:8])
-                remaining = next((candidate for candidate, _ in options if candidate != agent and doc["agents"][candidate]["state"] == "AVAILABLE"), None)
-                if remaining and doc["failover"] != "OFF":
-                    progress.reroute(doc["id"][:8], agent, remaining, assignment["failure"])
             if failure.value in {"QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"}:
                 doc["model_states"][f"{agent}:{model}"] = "EXHAUSTED"
                 if model == "UNKNOWN":
                     doc["agents"][agent]["state"] = "UNAVAILABLE"
-            elif failure.value in {"AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE", "MISSING_EXECUTABLE"}:
-                doc["agents"][agent]["state"] = "UNAVAILABLE"
             if before != after:
                 doc["reconciliation"] = {"at": now(), "needs_validation": True, "from": agent, "stage": stage}
             if failure.value == "TRANSPORT_UNAVAILABLE" and transient_retries.get((agent, model), 0) < 1:
                 transient_retries[(agent, model)] = transient_retries.get((agent, model), 0) + 1
                 options.insert(options.index((agent, model)) + 1, (agent, model))
+            elif doc["failover"] != "OFF":
+                # Defer the progress REROUTE event until the next iteration so
+                # the reported target is the actual replacement selected from
+                # the updated eligible candidate list, not a stale intermediate.
+                prev_reroute = (agent, assignment["failure"])
             checkpoint(doc, path, token, repo)
             if stage in {"review", "acceptance"} and before != after:
                 doc["status"] = "BLOCKED"
