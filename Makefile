@@ -112,7 +112,7 @@ docs:
 	@echo "Generating API documentation via pdoc..."
 	rm -rf docs/.build-tmp
 	mkdir -p docs/.build-tmp/api
-	$(PDOC) ./src ./scripts -o docs/.build-tmp/api # pdoc staging build
+	PYTHONPATH=src $(PDOC) ./src ./scripts -o docs/.build-tmp/api # pdoc staging build
 	cp -r documentation docs/.build-tmp/documentation
 	cp -r assets docs/.build-tmp/assets
 	cp -r .agents docs/.build-tmp/.agents

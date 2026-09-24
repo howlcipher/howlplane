@@ -158,7 +158,7 @@ def test_cursor_backend_passes_selected_model_without_generation_probe(tmp_path,
     from howlplane.control_plane.agent_execution import CursorBackend
     from howlplane.control_plane.task_spec import TaskSpec
 
-    binary = tmp_path / "cursor-agent"
+    binary = tmp_path / "agent"
     binary.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
     binary.chmod(0o700)
     monkeypatch.setenv("PATH", str(tmp_path) + ":" + module.os.environ["PATH"])

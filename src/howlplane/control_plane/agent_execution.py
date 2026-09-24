@@ -179,9 +179,9 @@ class ProviderStreamObserver:
             return {"reason": WATCHDOG_TERMINATION_STALL, "diagnostics": self._diagnostics(now)}
         return None
 
-# Fallback phrases for a provider that reports an approval block in prose
-# without populating a structured denial record. Deliberately narrow: this can
-# only ever demote a claimed success, never manufacture one.
+# Fallback phrases for a provider that reports an approval or trust block in
+# prose without populating a structured denial record. Deliberately narrow:
+# this can only ever demote a claimed success, never manufacture one.
 _PERMISSION_BLOCK_MARKERS = (
     "requires approval",
     "require approval",
@@ -190,6 +190,9 @@ _PERMISSION_BLOCK_MARKERS = (
     "permission denied by user",
     "not permitted to use",
     "approve bash execution",
+    "workspace trust required",
+    "trust the current workspace",
+    "pass --trust",
 )
 
 
@@ -537,6 +540,7 @@ class SubprocessAgentBackend(AgentBackend):
             error_message=f"Timeout after {timeout_seconds}s",
             metadata=_launch_metadata(LAUNCH_OUTCOME_LAUNCHED, TIMEOUT_SOURCE_HARNESS),
         )
+
     def is_available(self) -> bool:
         return shutil.which(self.binary_name) is not None
 
@@ -617,7 +621,7 @@ class SubprocessAgentBackend(AgentBackend):
             "claude_code", "codex", "cursor", "agy", "devin_cli"
         }:
             cmd_args[1:1] = ["--model", model_id]
-        cmd_str = " ".join(shlex.quote(c) for c in cmd_args)
+        cmd_str = _redact_command(" ".join(shlex.quote(c) for c in cmd_args))
 
         env = os.environ.copy()
         if env_vars:
@@ -1026,15 +1030,22 @@ class DevinCLIBackend(SubprocessAgentBackend):
 
 
 class CursorBackend(SubprocessAgentBackend):
-    """Cursor's documented print-mode CLI adapter."""
+    """Cursor Agent CLI non-interactive adapter.
+
+    Uses the installed ``agent`` executable in print mode, which is Cursor's
+    supported non-interactive automation interface. The ``agent`` binary is
+    distinct from the IDE launcher (``cursor``) and does not require the IDE.
+    Planning, review, and acceptance roles use ``--mode plan`` so they stay
+    read-only; implementation uses the default editing mode.
+    """
 
     def __init__(self):
         def _cursor_cmd(task, cwd, role, prompt, **kwargs):
-            command = ["cursor-agent", "--print"]
+            command = ["agent", "-p", prompt, "--output-format", "text", "--workspace", str(cwd)]
             if role in ("planning", "review", "acceptance"):
                 command += ["--mode", "plan"]
-            return command + [prompt]
-        super().__init__("cursor", "cursor-agent", _cursor_cmd)
+            return command
+        super().__init__("cursor", "agent", _cursor_cmd)
 
 
 class OllamaLocalBackend(AgentBackend):
