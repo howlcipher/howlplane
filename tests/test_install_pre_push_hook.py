@@ -13,7 +13,7 @@ import pathlib
 
 import pytest
 
-from src.control_plane.git_env import GIT_REPOSITORY_SELECTION_ENV_VARS
+from howlplane.control_plane.git_env import GIT_REPOSITORY_SELECTION_ENV_VARS
 
 # Repository root is two directories up from this test file
 repo_root = pathlib.Path(__file__).resolve().parents[1]

@@ -8,9 +8,9 @@ Unit tests for domain-neutral role execution and binding in HowlPlane.
 import os
 from unittest.mock import patch
 
-from src.control_plane.agent_execution import FakeAgentBackend
-from src.control_plane.agent_registry import AgentProfile, AgentRegistry
-from src.control_plane.role_binding import (
+from howlplane.control_plane.agent_execution import FakeAgentBackend
+from howlplane.control_plane.agent_registry import AgentProfile, AgentRegistry
+from howlplane.control_plane.role_binding import (
     IndependenceStatus,
     RoleBinding,
     RoleBindingRegistry,
@@ -194,7 +194,7 @@ rationale: "Direct sentence structure."
 
 
 def test_dispatcher_reviewer_independence_multiple_providers(monkeypatch):
-    from src.control_plane.agent_execution import SubprocessAgentBackend
+    from howlplane.control_plane.agent_execution import SubprocessAgentBackend
 
     monkeypatch.setattr(
         SubprocessAgentBackend, "is_available", lambda self: True

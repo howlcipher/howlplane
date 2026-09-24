@@ -20,16 +20,16 @@ from pathlib import Path
 
 import pytest
 
-from src.control_plane.authority_profile import (
+from howlplane.control_plane.authority_profile import (
     OVERNIGHT_SAFE_PROFILE,
 )
-from src.control_plane.authority_envelope import (
+from howlplane.control_plane.authority_envelope import (
     AuthorityDecision,
     AuthorityEnvelope,
     create_envelope,
     evaluate_action_against_envelope,
 )
-from src.control_plane.reasoning import (
+from howlplane.control_plane.reasoning import (
     ExecutionTrajectory,
     ExecutionTrajectoryBuilder,
     ReasoningExperiment,
@@ -47,14 +47,14 @@ from src.control_plane.reasoning import (
     summarize_for_experiment,
     experiment_exists_for_observation,
 )
-from src.control_plane.reasoning.reasoning_experiment import VALID_EXPERIMENT_OUTCOMES
-from src.control_plane.reasoning.experiment_evaluator import (
+from howlplane.control_plane.reasoning.reasoning_experiment import VALID_EXPERIMENT_OUTCOMES
+from howlplane.control_plane.reasoning.experiment_evaluator import (
     evaluate_falsification_criterion,
 )
-from src.control_plane.reasoning.trajectory_discovery import (
+from howlplane.control_plane.reasoning.trajectory_discovery import (
     _fingerprint as _observation_fingerprint,
 )
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.task_spec import TaskSpec
 from tests._dogfood_test_helpers import (
     execution_trajectory,
     init_minimal_python_repo,
@@ -172,8 +172,8 @@ findings:
 
 
 def test_review_findings_linked_in_trajectory(tmp_path: Path):
-    from src.control_plane.review_runner import ReviewCycleResult, SingleReviewResult
-    from src.control_plane.reconciliation import ReviewFinding
+    from howlplane.control_plane.review_runner import ReviewCycleResult, SingleReviewResult
+    from howlplane.control_plane.reconciliation import ReviewFinding
 
     cycle = ReviewCycleResult(
         cycle_index=1,
@@ -221,7 +221,7 @@ def test_verification_linked_in_trajectory(tmp_path: Path):
 
 
 def test_provider_events_linked_in_trajectory(tmp_path: Path):
-    from src.control_plane.agent_execution import AgentExecutionResult
+    from howlplane.control_plane.agent_execution import AgentExecutionResult
 
     provider_exec = AgentExecutionResult(
         agent_id="claude_code",
@@ -927,7 +927,7 @@ def test_strategy_config_cannot_expand_authority(
 
 
 def test_strategy_experiment_cannot_modify_authority_envelope():
-    from src.control_plane.authority_envelope import (
+    from howlplane.control_plane.authority_envelope import (
         compute_policy_digest,
         verify_envelope_integrity,
     )

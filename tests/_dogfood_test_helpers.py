@@ -18,26 +18,26 @@ from pathlib import Path
 import subprocess
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from src.control_plane.agent_execution import AgentExecutionResult, FakeAgentBackend
-from src.control_plane.git_baseline import RepositoryDelta
-from src.control_plane.git_integration import PR_MERGE_FIELDS, GitIntegrationExecutor
-from src.control_plane.orchestrator import (
+from howlplane.control_plane.agent_execution import AgentExecutionResult, FakeAgentBackend
+from howlplane.control_plane.git_baseline import RepositoryDelta
+from howlplane.control_plane.git_integration import PR_MERGE_FIELDS, GitIntegrationExecutor
+from howlplane.control_plane.orchestrator import (
     FAILURE_CLASS_AUTHORITY_BLOCKED,
     FAILURE_CLASS_ENGINEERING,
     GovernedTaskOrchestrator,
     OrchestrationConfig,
     OrchestrationResult,
 )
-from src.control_plane.reasoning import (
+from howlplane.control_plane.reasoning import (
     ExecutionTrajectory,
     ReasoningExperiment,
     StrategyDefinition,
     StrategySnapshot,
     TrajectoryStore,
 )
-from src.control_plane.router import RoutingDecision
-from src.control_plane.task_spec import TaskSpec
-from src.control_plane.verification import VerificationPlan
+from howlplane.control_plane.router import RoutingDecision
+from howlplane.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.verification import VerificationPlan
 
 from tests._git_test_helpers import init_git_repo
 

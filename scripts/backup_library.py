@@ -10,7 +10,7 @@ and destinations.
 import os
 import tarfile
 
-from src.infrastructure.config_loader import load_config
+from howlplane.control_plane.config_loader import load_config
 
 
 class LibraryBackupManager:
@@ -23,7 +23,7 @@ class LibraryBackupManager:
         Initializes the LibraryBackupManager by loading configuration
         and setting up paths.
         """
-        from src.infrastructure.config_loader import ConfigLoader
+        from howlplane.control_plane.config_loader import ConfigLoader
 
         self.repo_root = ConfigLoader().get_repo_root()
         loader = load_config()
@@ -48,7 +48,7 @@ class LibraryBackupManager:
         import shutil
         import subprocess
 
-        from src.infrastructure.config_loader import get_chroma_db_path
+        from howlplane.control_plane.config_loader import get_chroma_db_path
 
         os.makedirs(self.backup_dir, exist_ok=True)
         out_path = os.path.join(self.backup_dir, self.backup_filename)

@@ -27,15 +27,15 @@ from pathlib import Path
 
 import pytest
 
-from src.control_plane.evidence_ledger import EvidenceLedger
-from src.control_plane.human_boundary import (
+from howlplane.control_plane.evidence_ledger import EvidenceLedger
+from howlplane.control_plane.human_boundary import (
     HumanLifecycleManager,
     VERIFICATION_NO_PLAN,
     VERIFICATION_PASSED,
 )
-from src.control_plane.orchestrator import TERMINAL_VERIFICATION_STATUSES
-from src.control_plane.task_spec import TaskSpec
-from src.control_plane.verification import VerificationPlan
+from howlplane.control_plane.orchestrator import TERMINAL_VERIFICATION_STATUSES
+from howlplane.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.verification import VerificationPlan
 from tests._git_test_helpers import init_git_repo
 from tests.test_human_approval_lifecycle import _create_awaiting_human_task_run
 
@@ -347,7 +347,7 @@ def test_a_run_without_any_plan_completes_without_claiming_verification(tmp_path
 
 def test_resume_without_approval_still_refuses(tmp_path):
     """Running the gate is not a way around needing a human at all."""
-    from src.control_plane.human_boundary import ApprovalRequiredError
+    from howlplane.control_plane.human_boundary import ApprovalRequiredError
 
     repo = _repo(tmp_path)
     run_dir = _park_before_verification(repo, "TASK-NOAPPROVAL")

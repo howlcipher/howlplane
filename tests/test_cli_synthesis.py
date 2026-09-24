@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import pytest
 
-from src.control_plane.cli import build_parser, main
+from howlplane.control_plane.cli import build_parser, main
 
 
 def test_cli_create_notes_app(tmp_path: Path, capsys):

@@ -10,7 +10,7 @@ Black-box Acceptance -> Review -> Runnable Product Bundle.
 from pathlib import Path
 import pytest
 
-from src.control_plane.synthesis import (
+from howlplane.control_plane.synthesis import (
     NaturalLanguageSynthesizer,
     ProductSynthesizer,
     ProductBundle,

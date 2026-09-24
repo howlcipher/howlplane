@@ -1,4 +1,4 @@
-.PHONY: install test test-changed test-fast test-fast-python test-unit test-integration test-acceptance test-slow test-live test-full test-coverage lint format clean coverage build docs sync
+.PHONY: install test test-changed test-fast test-fast-python test-unit test-contract test-integration test-acceptance test-slow test-live test-full test-coverage lint format clean coverage build docs sync
 
 # Environment and Setup
 install:
@@ -47,6 +47,9 @@ test-fast-python:
 test-unit:
 	PYTHONPATH=. $(PYTEST) tests/ -v -m unit
 
+test-contract:
+	PYTHONPATH=. $(PYTEST) tests/ -v -m contract
+
 test-integration:
 	PYTHONPATH=. $(PYTEST) tests/ -v -m integration
 
@@ -93,15 +96,15 @@ format:
 
 clean:
 	@echo "Cleaning build artifacts and cache..."
-	rm -f ai_installer coverage.out
-	rm -rf __pycache__ .pytest_cache docs/
+	rm -f ai_installer howlplane coverage.out
+	rm -rf __pycache__ .pytest_cache docs/.build-tmp
 	find . -type d -name "__pycache__" -exec rm -r {} +
 
 # Build
 build:
-	@echo "Building Go binary installer..."
-	go build -o ai_installer ./cmd/installer
-	@echo "Build complete: ./ai_installer"
+	@echo "Building Go binary..."
+	go build -o howlplane ./cmd/howlplane
+	@echo "Build complete: ./howlplane"
 
 # Documentation
 

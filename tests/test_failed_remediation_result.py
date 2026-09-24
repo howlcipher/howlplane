@@ -3,10 +3,10 @@ import json
 
 import pytest
 
-from src.control_plane.agent_execution import FakeAgentBackend
-from src.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
-from src.control_plane.task_spec import TaskSpec
-from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+from howlplane.control_plane.agent_execution import FakeAgentBackend
+from howlplane.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
+from howlplane.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 from tests.test_closed_loop_orchestrator import _init_test_git_repo
 
 

@@ -27,14 +27,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
-from src.control_plane.agent_execution import AgentExecutionResult
-from src.control_plane.review_runner import (
+from howlplane.control_plane.agent_execution import AgentExecutionResult
+from howlplane.control_plane.review_runner import (
     MAX_REVIEWER_LAUNCH_ATTEMPTS,
     build_reviewer_candidates,
     invoke_reviewer_with_failover,
 )
-from src.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus
+from howlplane.control_plane.task_spec import TaskSpec
 
 # Devin's real stderr, from the issues.md #15 live reproduction.
 DEVIN_QUOTA_STDERR = (
@@ -67,11 +67,11 @@ class _FakePool:
 
     @staticmethod
     def _capacity_exclusion(status: ProviderAvailabilityStatus) -> Optional[str]:
-        from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+        from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
         return ProviderPoolManager._capacity_exclusion(status)
 
     def classify_failure(self, resource_id: str, result: AgentExecutionResult):
-        from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+        from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
         return ProviderPoolManager.classify_failure(self, resource_id, result)
 
     def _normalize(self, resource_id: str) -> str:
@@ -79,7 +79,7 @@ class _FakePool:
 
     def detect_exhaustion(self, resource_id, result, task_id=None):
         """Records the condition durably and removes the resource from selection."""
-        from src.control_plane.resource_models import ProviderFailureClass
+        from howlplane.control_plane.resource_models import ProviderFailureClass
         failure_class = self.classify_failure(resource_id, result)
         availability = {
             ProviderFailureClass.QUOTA_EXHAUSTED: ProviderAvailabilityStatus.QUOTA_EXHAUSTED,
@@ -362,7 +362,7 @@ def test_scenario_e_a_timeout_does_not_blacklist_the_provider(tmp_path):
     """A harness timeout says the provider was too slow for this request. It
     says nothing about the provider's availability, so it must not mark the
     resource unavailable or remove it from later selection."""
-    from src.control_plane.agent_execution import (
+    from howlplane.control_plane.agent_execution import (
         TIMEOUT_SOURCE_HARNESS, TIMEOUT_SOURCE_KEY,
     )
 
@@ -396,7 +396,7 @@ def test_scenario_e_a_timeout_does_not_blacklist_the_provider(tmp_path):
 
 def test_devins_real_stderr_is_a_quota_condition_not_an_engineering_failure(tmp_path):
     """issues.md #15, end to end through reviewer selection."""
-    from src.control_plane.resource_models import ProviderFailureClass
+    from howlplane.control_plane.resource_models import ProviderFailureClass
 
     pool = _FakePool({})
     lookup, _launches = _backend({

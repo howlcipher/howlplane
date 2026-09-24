@@ -8,7 +8,7 @@ respecting centralized configuration for the backup directory.
 
 import os
 
-from src.infrastructure.config_loader import load_config
+from howlplane.control_plane.config_loader import load_config
 
 
 class BackupCleaner:
@@ -20,7 +20,7 @@ class BackupCleaner:
         """
         Initializes the BackupCleaner and loads configuration.
         """
-        from src.infrastructure.config_loader import ConfigLoader
+        from howlplane.control_plane.config_loader import ConfigLoader
         self.repo_root = ConfigLoader().get_repo_root()
         self.config = load_config().get("backup", {})
 

@@ -20,14 +20,18 @@ from pathlib import Path
 
 import pytest
 
-from src.control_plane.proposed_action import (
+from howlplane.control_plane.proposed_action import (
     SELF_MODIFICATION_PATH_PREFIXES,
     SELF_MODIFICATION_PATHS,
     infer_proposed_actions_from_diff,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-FACTORY_DIR = REPO_ROOT / "src" / "control_plane" / "factory"
+FACTORY_DIR = (
+    (REPO_ROOT / "src" / "howlplane" / "control_plane" / "factory")
+    if (REPO_ROOT / "src" / "howlplane" / "control_plane" / "factory").exists()
+    else (REPO_ROOT / "src" / "control_plane" / "factory")
+)
 
 
 def _factory_modules():
@@ -109,10 +113,10 @@ def test_the_prefix_list_is_anchored_to_a_directory():
 def test_factory_work_item_with_self_modifying_path_is_parked_by_boundary(tmp_path):
     from unittest.mock import MagicMock
 
-    from src.control_plane.authority_envelope import create_envelope
-    from src.control_plane.authority_profile import OVERNIGHT_SAFE_PROFILE
-    from src.control_plane.factory.work_item import WorkItem, WorkItemOrigin
-    from src.control_plane.synthesis import MarathonDogfoodEngine
+    from howlplane.control_plane.authority_envelope import create_envelope
+    from howlplane.control_plane.authority_profile import OVERNIGHT_SAFE_PROFILE
+    from howlplane.control_plane.factory.work_item import WorkItem, WorkItemOrigin
+    from howlplane.control_plane.synthesis import MarathonDogfoodEngine
 
     # Overnight-safe profile allows routine git/GitHub actions but explicitly
     # denies authority_enforcement_modification via NEVER_DELEGATABLE_BOUNDARIES,

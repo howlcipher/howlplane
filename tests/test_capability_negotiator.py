@@ -8,13 +8,13 @@ and structured framework gap classification.
 
 import pytest
 
-from src.control_plane.synthesis.capability_negotiator import (
+from howlplane.control_plane.synthesis.capability_negotiator import (
     CapabilityNegotiator,
     FeasibilityStatus,
     FrameworkGap,
     HowlFrameCapabilityRegistry,
 )
-from src.control_plane.synthesis.product_spec import (
+from howlplane.control_plane.synthesis.product_spec import (
     BehaviorSpec,
     EntitySpec,
     FieldSpec,

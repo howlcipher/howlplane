@@ -25,7 +25,7 @@ from typing import Dict, Set
 
 import pytest
 
-from src.control_plane import cli, launcher
+from howlplane.control_plane import cli, launcher
 
 
 def _registered_subcommands(parser: argparse.ArgumentParser) -> Set[str]:
@@ -98,7 +98,7 @@ def test_the_scan_would_catch_a_missing_handler(monkeypatch):
 # subparsers and cli.HANDLERS dispatched them, but the canonical launcher --
 # the console_scripts target in pyproject.toml, and so the only thing an
 # operator or an unattended run actually invokes -- registered neither. The
-# persistent supervisor could be driven with `python -m src.control_plane
+# persistent supervisor could be driven with `python -m howlplane.control_plane
 # factory` and not with `howlplane factory`, which is the command the 24/7
 # factory depends on. Presence has to be asserted directly.
 FACTORY_ACTIONS = {"run-once", "run", "status", "stop", "resume"}

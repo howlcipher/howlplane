@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src.infrastructure.config_loader import (
+from howlplane.control_plane.config_loader import (
     load_config,
     get_chroma_db_path,
     is_local_only,

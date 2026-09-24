@@ -26,7 +26,7 @@ class ChromaDBSyncer:
         """Loads repository specific config dependencies dynamically."""
         script_dir = os.path.dirname(os.path.abspath(__file__))
         os.path.dirname(script_dir)
-        from src.infrastructure.config_loader import get_chroma_db_path
+        from howlplane.control_plane.config_loader import get_chroma_db_path
 
         return get_chroma_db_path
 

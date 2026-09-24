@@ -15,7 +15,7 @@ Not itself a test module -- pytest only collects `test_*.py`/`*_test.py`.
 from pathlib import Path
 from typing import List, Optional, Union
 
-from src.control_plane.git_env import run_git_in_repo
+from howlplane.control_plane.git_env import run_git_in_repo
 
 DEFAULT_TEST_USER_EMAIL = "ci@howlplane.local"
 DEFAULT_TEST_USER_NAME = "HowlPlane CI"

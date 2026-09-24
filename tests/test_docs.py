@@ -17,6 +17,7 @@ def test_pdoc_api_generation():
         result = subprocess.run(
             [sys.executable, "-m", "pdoc", "./src", "./scripts", "-o", tmpdir],
             cwd=repo_root,
+            env={**os.environ, "PYTHONPATH": os.pathsep.join((os.path.join(repo_root, "src"), repo_root))},
             capture_output=True,
             text=True,
         )

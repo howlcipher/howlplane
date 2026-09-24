@@ -8,7 +8,7 @@ script convention resolution, nested module awareness, and sovereign command ove
 from pathlib import Path
 import pytest
 
-from src.control_plane.project_adapter import ProjectAdapter, ProjectContext
+from howlplane.control_plane.project_adapter import ProjectAdapter, ProjectContext
 
 
 def test_synthetic_howlframe_repo_discovery(tmp_path: Path):

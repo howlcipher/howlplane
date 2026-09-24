@@ -34,7 +34,14 @@ CENTRAL_CONTROL_PLANE_MODULES = {
     "src/control_plane/launcher.py",
     "src/control_plane/orchestrator.py",
     "src/control_plane/task_spec.py",
-    "src/core/config.py",
+    "src/howlplane/control_plane/agent_registry.py",
+    "src/howlplane/control_plane/authority_envelope.py",
+    "src/howlplane/control_plane/durable_store.py",
+    "src/howlplane/control_plane/human_boundary.py",
+    "src/howlplane/control_plane/launcher.py",
+    "src/howlplane/control_plane/orchestrator.py",
+    "src/howlplane/control_plane/task_spec.py",
+    "src/howlplane/control_plane/config_loader.py",
 }
 DOCUMENTATION_PREFIXES = ("docs/", "documentation/")
 DOCUMENTATION_FILES = {"README.md", "CHANGELOG.md", "change_log.md", "LICENSE"}

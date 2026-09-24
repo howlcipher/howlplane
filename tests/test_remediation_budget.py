@@ -6,8 +6,8 @@ Deterministic tests for the remediation execution-budget policy.
 
 import pytest
 
-from src.control_plane.orchestrator import OrchestrationConfig, compute_remediation_timeout
-from src.control_plane.reconciliation import ReviewFinding
+from howlplane.control_plane.orchestrator import OrchestrationConfig, compute_remediation_timeout
+from howlplane.control_plane.reconciliation import ReviewFinding
 
 
 def _finding(severity: str) -> ReviewFinding:

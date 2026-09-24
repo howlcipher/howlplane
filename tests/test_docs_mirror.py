@@ -1,6 +1,6 @@
 import subprocess
 from pathlib import Path
-from src.control_plane.git_env import run_git_in_repo
+from howlplane.control_plane.git_env import run_git_in_repo
 
 
 def test_site_nav_has_no_broken_docs_html_link():

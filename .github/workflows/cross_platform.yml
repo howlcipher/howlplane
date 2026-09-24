@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - "cmd/installer/**"
+      - "cmd/howlplane/**"
       - "**.go"
       - "go.mod"
       - "go.sum"
@@ -25,5 +25,5 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.26.x'
-      - name: Build Installer
-        run: go build -o ai_installer ./cmd/installer
+      - name: Build HowlPlane CLI
+        run: go build -o howlplane ./cmd/howlplane

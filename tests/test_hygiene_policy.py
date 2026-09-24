@@ -8,21 +8,21 @@ and evidence metrics.
 
 from pathlib import Path
 
-from src.control_plane.hygiene_policy import (
+from howlplane.control_plane.hygiene_policy import (
     HygienePolicyClassifier,
     PolicyChangeType,
 )
-from src.control_plane.human_boundary import (
+from howlplane.control_plane.human_boundary import (
     HumanBoundaryGate,
 )
-from src.control_plane.verification import (
+from howlplane.control_plane.verification import (
     VerificationPlan,
 )
-from src.control_plane.task_spec import TaskSpec
-from src.control_plane.evidence_ledger import (
+from howlplane.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.evidence_ledger import (
     EvidenceEntry,
 )
-from src.control_plane.metrics import MetricsCalculator
+from howlplane.control_plane.metrics import MetricsCalculator
 
 
 # ============================================================================

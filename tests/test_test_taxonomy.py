@@ -36,6 +36,7 @@ ON_DISK = {path.name for path in TESTS_DIR.rglob("test_*.py")}
 TIER_SETS = {
     "_ACCEPTANCE_MODULES": CONFTEST._ACCEPTANCE_MODULES,
     "_INTEGRATION_MODULES": CONFTEST._INTEGRATION_MODULES,
+    "_CONTRACT_MODULES": CONFTEST._CONTRACT_MODULES,
     "_SLOW_MODULES": CONFTEST._SLOW_MODULES,
 }
 
@@ -52,13 +53,16 @@ def test_every_classified_module_exists_on_disk(set_name):
 
 def test_primary_tiers_are_disjoint():
     """Every test gets exactly one primary tier, so the sets cannot overlap."""
-    overlap = sorted(
-        CONFTEST._ACCEPTANCE_MODULES & CONFTEST._INTEGRATION_MODULES
-    )
-    assert not overlap, (
-        f"Modules claimed by two primary tiers: {overlap}. Acceptance wins in "
-        "pytest_collection_modifyitems, so the integration entry is dead."
-    )
+    pairs = [
+        ("_ACCEPTANCE_MODULES", "_INTEGRATION_MODULES"),
+        ("_ACCEPTANCE_MODULES", "_CONTRACT_MODULES"),
+        ("_INTEGRATION_MODULES", "_CONTRACT_MODULES"),
+    ]
+    for set_a, set_b in pairs:
+        overlap = sorted(getattr(CONFTEST, set_a) & getattr(CONFTEST, set_b))
+        assert not overlap, (
+            f"Modules claimed by two primary tiers ({set_a} and {set_b}): {overlap}."
+        )
 
 
 def _module_level_test_names(module_name):
