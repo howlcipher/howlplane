@@ -16,7 +16,7 @@ from howlplane.control_plane import cli, launcher
 def test_all_overlapping_subcommands_parse_in_cli():
     """All subcommands previously handled in launcher.py must parse cleanly in cli.py."""
     parser = cli.build_parser()
-    
+
     # 1. work
     parsed = parser.parse_args(["work", "fix a bug", "--task-id", "T-01", "--risk", "low"])
     assert parsed.subcommand == "work"

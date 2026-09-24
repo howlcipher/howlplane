@@ -244,5 +244,3 @@ def setup_test_environment(request, monkeypatch):
     # In automated test runs, set deterministic baseline mode unless live providers requested
     if not os.environ.get("HOWLPLANE_LIVE_PROVIDERS") and not os.environ.get("HOWLPLANE_SYNTHESIS_MODE"):
         monkeypatch.setenv("HOWLPLANE_SYNTHESIS_MODE", "deterministic_baseline")
-
-
