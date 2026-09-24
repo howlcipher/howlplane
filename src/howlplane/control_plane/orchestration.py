@@ -12,11 +12,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable, TextIO
 
 from howlplane.control_plane.agent_execution import AgentBackendRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
@@ -32,6 +33,164 @@ SECRET = re.compile(r"(?i)(bearer\s+|(?:token|password|secret|api[_-]?key)[=: ]+
 
 def redact(value: str) -> str:
     return SECRET.sub(lambda match: match.group(1) + "<redacted>" if match.group(1) else "<redacted>", value)
+
+
+AGENT_NAMES = {"claude_code": "Claude", "codex": "Codex", "cursor": "Cursor", "agy": "AGY", "devin_cli": "Devin"}
+PHASE_NAMES = {"planning": "PLAN", "implementation": "IMPLEMENT", "review": "AUDIT", "acceptance": "INTEGRATE", "verification": "VERIFY"}
+PRIVATE_REASONING = re.compile(r"(?i)(?:private\s+)?(?:chain[- ]of[- ]thought|internal reasoning).*?(?:[.;]|$)")
+
+
+class SessionProgress:
+    def __init__(
+        self,
+        document: dict[str, Any],
+        stream: TextIO | None = None,
+        heartbeat_interval: float = 30.0,
+        enabled: bool = True,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.document = document
+        self.stream = stream or sys.stderr
+        self.heartbeat_interval = max(1.0, float(heartbeat_interval))
+        self.enabled = enabled
+        self.clock = clock
+        self.started_at = clock()
+        self.last_visible_at = self.started_at
+        self.last_change_at = self.started_at
+        self.phase_name = PHASE_NAMES.get(document.get("stage", "planning"), "SESSION CREATED")
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._stall_reported = False
+
+    @staticmethod
+    def _safe(value: Any, limit: int = 160) -> str:
+        text = PRIVATE_REASONING.sub("", redact(str(value))).replace("\n", " ").strip()
+        return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+    def _write(self, label: str, message: str, timestamp: bool = True) -> None:
+        if not self.enabled:
+            return
+        prefix = f"[{datetime.now().strftime('%H:%M:%S')}] " if timestamp else ""
+        self.stream.write(f"{prefix}{label:<11} {self._safe(message)}\n")
+        self.stream.flush()
+        self.last_visible_at = self.clock()
+
+    def session_started(self) -> None:
+        if not self.enabled:
+            return
+        reserved = [AGENT_NAMES.get(agent, agent) for agent, state in self.document["agents"].items() if state["state"] == "RESERVED"]
+        requested = self.document.get("requested_orchestrator", self.document["orchestrator"])
+        selected = self.document.get("selected_orchestrator")
+        if selected is None and requested != "AUTO":
+            selected = requested
+        lines = [
+            "HOWL ORCHESTRATION",
+            f"Session: {self.document['id'][:8]}...",
+            f"Goal: {self._safe(self.document['goal'], 90)}",
+            f"Requested orchestrator: {AGENT_NAMES.get(requested, requested)}",
+            f"Selected orchestrator: {AGENT_NAMES.get(selected, selected) if selected else 'pending'}",
+            f"Strategy: {self.document['strategy']}",
+            f"Failover: {self.document['failover']}",
+            f"Execution: {self.document['policy']}",
+        ]
+        if reserved:
+            lines.append(f"Reserved agents: {', '.join(reserved)}")
+        lines.extend(["", "Starting orchestration..."])
+        self.stream.write("\n".join(lines) + "\n")
+        self.stream.flush()
+        self.last_visible_at = self.clock()
+
+    def phase(self, phase: str, message: str) -> None:
+        self.phase_name = PHASE_NAMES.get(phase, phase.upper())
+        self.last_change_at = self.clock()
+        self._stall_reported = False
+        self._write(self.phase_name, message)
+
+    def assignment(self, task_id: str, agent: str, task: str) -> None:
+        self.last_change_at = self.clock()
+        self._write("ASSIGN", f"{AGENT_NAMES.get(agent, agent)} assigned task {task_id}: {task}")
+
+    def worker_complete(self, task_id: str, agent: str, task: str) -> None:
+        self.last_change_at = self.clock()
+        self._write("COMPLETE", f"{AGENT_NAMES.get(agent, agent)} completed {task_id}: {task}")
+
+    def capability_downgrade(self, agent: str) -> None:
+        self.last_change_at = self.clock()
+        self._write("CAPABILITY", f"{AGENT_NAMES.get(agent, agent)} marked interactive-only for this session")
+
+    def route_skip(self, agent: str) -> None:
+        self._write("ROUTE", f"{AGENT_NAMES.get(agent, agent)} skipped: unattended execution unavailable")
+
+    def explicit_override_warning(self, agent: str) -> None:
+        self._write("WARNING", f"{AGENT_NAMES.get(agent, agent)} previously required interactive permission; explicit selection overrides AUTO exclusion")
+
+    def selected_orchestrator(self, agent: str) -> None:
+        self.last_change_at = self.clock()
+        self._write("SELECT", f"{AGENT_NAMES.get(agent, agent)} selected as orchestrator")
+
+    def limit(self, agent: str, model: str, reason: str) -> None:
+        self.last_change_at = self.clock()
+        self._write("LIMIT", f"{agent}/{model} reached {reason.lower().replace('_', ' ')}")
+
+    def checkpoint(self, task_id: str) -> None:
+        self._write("CHECKPOINT", f"Preserved task {task_id} state")
+
+    def reroute(self, task_id: str, source: str, target: str, reason: str) -> None:
+        self.last_change_at = self.clock()
+        self._write("REROUTE", f"{task_id}: {AGENT_NAMES.get(source, source)} → {AGENT_NAMES.get(target, target)} ({reason})")
+        reserved = [AGENT_NAMES.get(agent, agent) for agent, state in self.document["agents"].items() if state["state"] == "RESERVED"]
+        if reserved:
+            self._write("REROUTE", f"{', '.join(reserved)} skipped: RESERVED")
+
+    def validation(self, started: bool, message: str) -> None:
+        self.phase_name = "VERIFY"
+        self.last_change_at = self.clock()
+        self._write("VERIFY", message)
+
+    def blocked(self, status: str, reason: str, next_step: str | None = None) -> None:
+        self.last_change_at = self.clock()
+        self._write(status, reason)
+        if next_step:
+            self._write("RESUME", next_step)
+
+    def complete(self, status: str) -> None:
+        successes = sum(attempt.get("state") == "SUCCEEDED" for attempt in self.document.get("attempts", []))
+        passed = sum(test.get("exit_code") == 0 for test in self.document.get("tests", []))
+        self._write("COMPLETE", f"Session finished; {successes} tasks completed; {len(self.document.get('reroutes', []))} rerouted; {passed} validations passed; final status: {status}")
+
+    def heartbeat(self, force: bool = False) -> bool:
+        current = self.clock()
+        if not force and current - self.last_visible_at < self.heartbeat_interval:
+            return False
+        active = [attempt for attempt in self.document.get("attempts", []) if attempt.get("state") == "ASSIGNED"]
+        if active:
+            tasks = ", ".join(attempt.get("task_id", self.document["id"][:8]) for attempt in active)
+            message = f"{self.phase_name} — {len(active)} active worker(s); tasks: {tasks}"
+        else:
+            message = f"Session active; current phase: {self.phase_name}"
+        self._write("WORKING", message)
+        if current - self.last_change_at >= 300 and not self._stall_reported:
+            self._write("WARNING", "No worker state change for 5m; session remains active")
+            self._stall_reported = True
+        return True
+
+    @contextmanager
+    def waiting(self):
+        if self.enabled:
+            self._stop.clear()
+            self._thread = threading.Thread(target=self._heartbeat_loop, name=f"howl-progress-{self.document['id'][:8]}", daemon=True)
+            self._thread.start()
+        try:
+            yield
+        finally:
+            self._stop.set()
+            if self._thread and self._thread is not threading.current_thread():
+                self._thread.join(timeout=1)
+            self._thread = None
+
+    def _heartbeat_loop(self) -> None:
+        while not self._stop.wait(self.heartbeat_interval):
+            self.heartbeat()
 
 
 def state_root() -> Path:
@@ -159,11 +318,49 @@ def inventory(availability: dict[str, str]) -> dict[str, dict[str, Any]]:
         installed = shutil.which(BINARIES[agent]) is not None
         requested = availability.get(agent, "AUTO").upper()
         found[agent] = {
+            "backend": BINARIES[agent],
             "installed": installed,
+            "callable": installed,
             "state": "RESERVED" if requested == "RESERVED" else "AVAILABLE" if installed and requested != "UNAVAILABLE" else "UNAVAILABLE",
             "models": discover_models(agent) if installed and requested != "RESERVED" else [],
+            "capabilities": {
+                "unattended_execution": None,
+                "reason": "CLI metadata does not confirm unattended execution",
+                "evidence_time": None,
+                "scope": "session",
+            },
         }
     return found
+
+
+def record_capability_failure(doc: dict[str, Any], agent: str, reason: str) -> None:
+    state = doc["agents"][agent]
+    state["state"] = "DEGRADED"
+    state["capabilities"]["unattended_execution"] = False
+    state["capabilities"]["reason"] = reason
+    state["capabilities"]["evidence_time"] = now()
+    state["capabilities"]["scope"] = "session"
+
+
+def record_capability_success(doc: dict[str, Any], agent: str) -> None:
+    state = doc["agents"][agent]
+    state["state"] = "AVAILABLE"
+    state["capabilities"]["unattended_execution"] = True
+    state["capabilities"]["reason"] = "Successful unattended session invocation"
+    state["capabilities"]["evidence_time"] = now()
+    state["capabilities"]["scope"] = "session"
+
+
+def capability_skip_reason(doc: dict[str, Any], agent: str, role: str) -> str | None:
+    state = doc["agents"][agent]
+    if state["state"] == "RESERVED":
+        return "reserved"
+    capability = state.get("capabilities", {}).get("unattended_execution")
+    if capability is not False:
+        return None
+    if doc.get("requested_orchestrator") == agent:
+        return "explicit override"
+    return "unattended execution unavailable"
 
 
 def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
@@ -186,7 +383,12 @@ def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
         order = order[:1]
     selected = []
     for agent in order:
-        if agents[agent]["state"] != "AVAILABLE":
+        state = agents[agent]["state"]
+        skip_reason = capability_skip_reason(doc, agent, role)
+        explicit_override = skip_reason == "explicit override"
+        if state == "RESERVED" or state not in {"AVAILABLE", "DEGRADED"}:
+            continue
+        if skip_reason and not explicit_override:
             continue
         configured = doc["role_models"].get(role, {}).get(agent, "AUTO")
         discovered = agents[agent]["models"]
@@ -273,6 +475,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     return {
         "schema": SCHEMA, "id": uuid.uuid4().hex, "created_at": now(), "repository": snapshot["root"],
         "goal": redact(goal), "constraints": [redact(item) for item in args.constraint],
+        "requested_orchestrator": lead, "selected_orchestrator": None if lead == "AUTO" else lead,
         "orchestrator": lead, "agents": agents, "strategy": strategy,
         "role_models": role_models, "fallbacks": fallbacks,
         "failover": failover, "policy": policy, "status": "PLANNED", "stage": "planning",
@@ -323,7 +526,7 @@ def reconcile(doc: dict[str, Any], repo: Path) -> None:
     doc["repository_evidence"] = actual
 
 
-def run(doc: dict[str, Any], path: Path, repo: Path) -> int:
+def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress | None = None) -> int:
     token = doc["lease"]["token"]
     stages = ["planning"] if doc["policy"] == "PLAN ONLY" else ["planning", "implementation"]
     if doc["policy"] == "PLAN + EXECUTE + INDEPENDENT AUDIT":
@@ -335,6 +538,18 @@ def run(doc: dict[str, Any], path: Path, repo: Path) -> int:
         doc["stage"] = stage
         doc["status"] = stage.upper()
         checkpoint(doc, path, token, repo)
+        if progress:
+            progress.phase(stage, {"planning": "Building implementation plan", "implementation": "Dispatching implementation worker", "review": "Independent audit started", "acceptance": "Orchestrator validating final result"}[stage])
+            notices = doc.setdefault("capability_notices", [])
+            for candidate in AGENTS:
+                reason = capability_skip_reason(doc, candidate, stage)
+                notice = f"{candidate}:{reason}"
+                if reason == "unattended execution unavailable" and notice not in notices:
+                    progress.route_skip(candidate)
+                    notices.append(notice)
+                elif reason == "explicit override" and notice not in notices:
+                    progress.explicit_override_warning(candidate)
+                    notices.append(notice)
         options = candidates(doc, stage)
         if stage == "review":
             options = [pair for pair in options if pair[0] != doc.get("implementer")]
@@ -342,15 +557,26 @@ def run(doc: dict[str, Any], path: Path, repo: Path) -> int:
             doc["status"] = "BLOCKED" if stage == "review" else "HANDOFF REQUIRED"
             doc["audit"] = "AUDIT BLOCKED: no independent reviewer" if stage == "review" else None
             checkpoint(doc, path, token, repo)
+            if progress:
+                progress.blocked("AUDIT BLOCKED" if stage == "review" else "HANDOFF REQUIRED", doc.get("audit") or "No eligible worker remains", f"howlplane orchestrate resume --repo {repo}")
             return report(doc)
         succeeded = False
         transient_retries: dict[tuple[str, str], int] = {}
+        permission_failed_agents: set[str] = set()
         for agent, model in options:
+            if agent in permission_failed_agents:
+                continue
             before = evidence(repo)
-            assignment = {"stage": stage, "agent": agent, "model": model, "started_at": now(), "fence": token, "state": "ASSIGNED"}
+            assignment = {"task_id": doc["id"][:8], "stage": stage, "agent": agent, "model": model, "started_at": now(), "fence": token, "state": "ASSIGNED"}
             doc["attempts"].append(assignment)
             checkpoint(doc, path, token, repo)
-            result = execute_assignment(doc, stage, agent, model, repo)
+            if progress:
+                progress.assignment(doc["id"][:8], agent, stage)
+                progress._write("START", f"{AGENT_NAMES.get(agent, agent)} started {stage}")
+                with progress.waiting():
+                    result = execute_assignment(doc, stage, agent, model, repo)
+            else:
+                result = execute_assignment(doc, stage, agent, model, repo)
             failure = ProviderPoolManager.classify_result(agent, result)
             after = evidence(repo)
             assignment.update({"state": "SUCCEEDED" if result.success else "REVOKED", "exit_code": result.exit_code,
@@ -371,8 +597,12 @@ def run(doc: dict[str, Any], path: Path, repo: Path) -> int:
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
             if assignment["state"] == "SUCCEEDED":
+                record_capability_success(doc, agent)
                 if stage == "planning":
                     doc["orchestrator"] = agent
+                    doc["selected_orchestrator"] = agent
+                    if progress and doc.get("requested_orchestrator") == "AUTO":
+                        progress.selected_orchestrator(agent)
                 if stage == "implementation":
                     doc["implementer"] = agent
                 if stage == "review":
@@ -383,8 +613,24 @@ def run(doc: dict[str, Any], path: Path, repo: Path) -> int:
                     doc["known_models"].setdefault(agent, []).append(model)
                 succeeded = True
                 checkpoint(doc, path, token, repo)
+                if progress:
+                    progress.worker_complete(doc["id"][:8], agent, stage)
                 break
             doc["reroutes"].append({"from": f"{agent}:{model}", "stage": stage, "reason": assignment["failure"]})
+            if progress:
+                progress._write("FAIL", f"{AGENT_NAMES.get(agent, agent)} {stage} failed: {assignment['failure']}")
+            if assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED":
+                record_capability_failure(doc, agent, assignment["failure"])
+                permission_failed_agents.add(agent)
+                if progress:
+                    progress.capability_downgrade(agent)
+            if progress:
+                if assignment["failure"] in {"QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"}:
+                    progress.limit(agent, model, assignment["failure"])
+                progress.checkpoint(doc["id"][:8])
+                remaining = next((candidate for candidate, _ in options if candidate != agent and doc["agents"][candidate]["state"] == "AVAILABLE"), None)
+                if remaining and doc["failover"] != "OFF":
+                    progress.reroute(doc["id"][:8], agent, remaining, assignment["failure"])
             if failure.value in {"QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"}:
                 doc["model_states"][f"{agent}:{model}"] = "EXHAUSTED"
                 if model == "UNKNOWN":
@@ -409,18 +655,31 @@ def run(doc: dict[str, Any], path: Path, repo: Path) -> int:
             if stage == "review":
                 doc["audit"] = "AUDIT BLOCKED: independent reviewers exhausted"
             checkpoint(doc, path, token, repo)
+            if progress:
+                progress.blocked("AUDIT BLOCKED" if stage == "review" else "HANDOFF REQUIRED", doc.get("audit") or "Eligible workers exhausted", f"howlplane orchestrate resume --repo {repo}")
             return report(doc)
         if stage == "implementation":
+            if progress:
+                progress.validation(True, "Running repository diff validation")
             check = subprocess.run(["git", "-C", str(repo), "diff", "--check"], capture_output=True, text=True, timeout=30)
             doc["tests"].append({"command": "git diff --check", "exit_code": check.returncode, "output": redact(check.stderr[:500])})
+            if progress:
+                progress.validation(False, "Repository diff validation passed" if check.returncode == 0 else "Repository diff validation failed")
             if check.returncode:
                 doc["status"] = "HANDOFF REQUIRED"
                 checkpoint(doc, path, token, repo)
                 return report(doc)
             if doc.get("verify_command"):
                 command = doc["verify_command"]
-                verified = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=300)
+                if progress:
+                    progress.validation(True, f"Running configured validation: {' '.join(command)}")
+                    with progress.waiting():
+                        verified = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=300)
+                else:
+                    verified = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=300)
                 doc["tests"].append({"command": command, "exit_code": verified.returncode, "output": redact((verified.stdout + verified.stderr)[-1000:])})
+                if progress:
+                    progress.validation(False, "Configured validation passed" if verified.returncode == 0 else "Configured validation failed")
                 if verified.returncode:
                     doc["status"] = "HANDOFF REQUIRED"
                     checkpoint(doc, path, token, repo)
@@ -435,6 +694,8 @@ def run(doc: dict[str, Any], path: Path, repo: Path) -> int:
             checkpoint(doc, path, token, repo)
     doc["status"] = "COMPLETE WITH WARNINGS" if doc.get("reconciliation") else "COMPLETE"
     checkpoint(doc, path, token, repo)
+    if progress:
+        progress.complete(doc["status"])
     result = report(doc)
     if doc["status"] in {"COMPLETE", "COMPLETE WITH WARNINGS"} and not doc.get("retain_report"):
         with locked(path.parent):
@@ -486,6 +747,7 @@ def command(args: argparse.Namespace) -> int:
             if not active:
                 raise ValueError("No unfinished session")
             doc = active[0]
+            previous_orchestrator = doc["orchestrator"]
             if time.time() - doc["lease"]["renewed_at"] < 330 and doc["lease"]["pid"] != os.getpid():
                 try:
                     os.kill(doc["lease"]["pid"], 0)
@@ -495,6 +757,11 @@ def command(args: argparse.Namespace) -> int:
                     raise ValueError("Session has a live coordinator lease")
             doc["lease"] = {"token": uuid.uuid4().hex, "pid": os.getpid(), "renewed_at": time.time()}
             reconcile(doc, repo)
+            requested_orchestrator = getattr(args, "orchestrator", None)
+            if requested_orchestrator and requested_orchestrator != "AUTO" and doc["agents"].get(requested_orchestrator, {}).get("state") in {"AVAILABLE", "DEGRADED"}:
+                doc["requested_orchestrator"] = requested_orchestrator
+                doc["selected_orchestrator"] = requested_orchestrator
+                doc["orchestrator"] = requested_orchestrator
             path = path_for(root, doc["id"])
             secure_write(path, doc)
             if doc["policy"] == "PLAN ONLY" and doc.get("reconciliation", {}).get("needs_validation"):
@@ -510,13 +777,36 @@ def command(args: argparse.Namespace) -> int:
             doc["retain_report"] = args.retain_report
             path = path_for(root, doc["id"])
             save(path, doc, doc["lease"]["token"])
-    return run(doc, path, repo)
+    progress = SessionProgress(
+        doc,
+        stream=sys.stderr,
+        heartbeat_interval=getattr(args, "heartbeat", 30.0),
+        enabled=not (getattr(args, "quiet", False) or getattr(args, "no_progress", False) or getattr(args, "json", False)),
+    )
+    if operation == "resume":
+        progress._write("RESUME", f"Loading orchestration session {doc['id'][:8]}")
+        progress._write("RECONCILE", "Checking repository and worker state")
+        if doc["orchestrator"] != previous_orchestrator:
+            progress._write("TAKEOVER", f"{AGENT_NAMES.get(doc['orchestrator'], doc['orchestrator'])} is now orchestrator")
+    else:
+        progress.session_started()
+    try:
+        return run(doc, path, repo, progress)
+    except KeyboardInterrupt:
+        progress._write("INTERRUPT", "Stopping new dispatches and checkpointing session...")
+        doc["status"] = "INTERRUPTED"
+        checkpoint(doc, path, doc["lease"]["token"], repo)
+        progress._write("CHECKPOINT", f"Session can be resumed with: howlplane orchestrate resume --repo {repo}")
+        return 130
 
 
 def add_parser(subparsers: Any, common_parser: Any) -> None:
     parser = subparsers.add_parser("orchestrate", parents=[common_parser], help="Run a session-scoped agent workflow")
     parser.add_argument("input", nargs="?", help="Goal, resume, inspect, or discard")
     parser.add_argument("--json", action="store_true", help="Machine-readable session inspection")
+    parser.add_argument("--quiet", action="store_true", help="Only print the final report and errors")
+    parser.add_argument("--no-progress", action="store_true", help="Disable task-level progress and local heartbeats")
+    parser.add_argument("--heartbeat", type=float, default=30.0, metavar="SECONDS", help="Heartbeat interval during otherwise silent work (default: 30)")
     parser.add_argument("--separate", action="store_true", help="Start a separate session alongside an unfinished one")
     parser.add_argument("--retain-report", action="store_true")
     parser.add_argument("--orchestrator", choices=["AUTO", *AGENTS])

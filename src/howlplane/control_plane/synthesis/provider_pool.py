@@ -864,7 +864,8 @@ class ProviderPoolManager:
             return ProviderFailureClass.MISSING_EXECUTABLE
         if any(marker in combined for marker in (
             "requires approval", "require approval", "permission denied",
-            "requires permission", "needs approval", "approve bash execution",
+            "requires permission", "execution permission required", "execution_permission_required",
+            "needs approval", "approve bash execution",
         )):
             return ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
         if any(marker in combined for marker in (
