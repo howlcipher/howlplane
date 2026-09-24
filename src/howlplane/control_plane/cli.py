@@ -1387,6 +1387,9 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="subcommand", help="Command to execute")
 
+    from howlplane.control_plane.orchestration import add_parser as add_orchestration_parser
+    add_orchestration_parser(subparsers, common_parser)
+
     # work
     p_work = subparsers.add_parser(
         "work",
@@ -3238,6 +3241,7 @@ def _print_local_report(args: argparse.Namespace, report: Dict[str, Any]) -> Non
 
 # Every subcommand build_parser() registers must appear here; see the same note
 HANDLERS = {
+    "orchestrate": lambda args: __import__("howlplane.control_plane.orchestration", fromlist=["command"]).command(args),
     "work": cmd_work,
     "route": cmd_route,
     "providers": cmd_providers,
