@@ -99,4 +99,3 @@ fi
 
 export PYTHONPATH="${CP_DIR}/src:${CP_DIR}:${PYTHONPATH:-}"
 exec "$PYTHON_BIN" -m howlplane.control_plane.cli "$@"
-

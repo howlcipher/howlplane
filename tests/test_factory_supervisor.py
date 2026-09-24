@@ -738,4 +738,3 @@ def test_product_repo_explicit_and_state_record_resolution(tmp_path):
         provider_pool=sup2.provider_pool,
     )
     assert s2.policy.product_repository == "howlcipher/custom-repo"
-

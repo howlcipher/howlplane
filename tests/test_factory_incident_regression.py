@@ -322,5 +322,3 @@ def test_deadlock_reproduction_alert_and_dynamic_resolution(tmp_path: Path):
     assert res5.selected_work_item_id is not None
     assert supervisor.state_record.consecutive_capped_ticks == 0
     assert len(supervisor.dispatcher.calls) == 1
-
-
