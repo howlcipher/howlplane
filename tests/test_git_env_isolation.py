@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from src.control_plane.git_env import (
+from howlplane.control_plane.git_env import (
     GIT_REPOSITORY_SELECTION_ENV_VARS,
     run_git_in_repo,
     sanitized_git_env,

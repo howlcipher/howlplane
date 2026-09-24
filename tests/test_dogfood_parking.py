@@ -12,14 +12,14 @@ decision while Task B lands.
 
 from pathlib import Path
 
-from src.control_plane.evidence_ledger import EvidenceLedger
-from src.control_plane.git_integration import GitIntegrationExecutor
-from src.control_plane.synthesis.campaign_state import GitIntegrationRecord
-from src.control_plane.synthesis.capability_negotiator import FrameworkGap
-from src.control_plane.synthesis.engine import ProductSynthesizer, SynthesisResult
-from src.control_plane.synthesis.marathon import MarathonDogfoodEngine
-from src.control_plane.synthesis.product_spec import ProductSpec
-from src.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus, ProviderPoolManager
+from howlplane.control_plane.evidence_ledger import EvidenceLedger
+from howlplane.control_plane.git_integration import GitIntegrationExecutor
+from howlplane.control_plane.synthesis.campaign_state import GitIntegrationRecord
+from howlplane.control_plane.synthesis.capability_negotiator import FrameworkGap
+from howlplane.control_plane.synthesis.engine import ProductSynthesizer, SynthesisResult
+from howlplane.control_plane.synthesis.marathon import MarathonDogfoodEngine
+from howlplane.control_plane.synthesis.product_spec import ProductSpec
+from howlplane.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus, ProviderPoolManager
 from tests._dogfood_test_helpers import FakeOrchestrator, ScriptedRunner, build_full_merge_flow
 
 REPO_SLUG = "howlcipher/howlplane"
@@ -124,7 +124,7 @@ def test_task_a_parks_task_b_completes_campaign_does_not_hang(tmp_path):
     assert notes_result.success is False
 
     # Morning decision queue clearly shows Task A awaiting operator decision.
-    from src.control_plane.synthesis.campaign_state import DurableCampaignState
+    from howlplane.control_plane.synthesis.campaign_state import DurableCampaignState
     state = DurableCampaignState.load(Path(report.state_dir))
     assert len(state.pending_human_decisions) == 1
     assert state.pending_human_decisions[0]["boundary_type"] == "force_push"

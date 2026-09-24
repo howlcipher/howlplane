@@ -5,12 +5,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import subprocess
 
-from src.control_plane.factory.dispatcher import MarathonDispatcherAdapter
-from src.control_plane.factory.portfolio import FactoryPolicy
-from src.control_plane.factory.repo_proposal import CapabilityStore, RepoProposalStore
-from src.control_plane.factory.supervisor import FactorySupervisor
-from src.control_plane.factory.supervisor_state import SupervisorStateStore
-from src.control_plane.factory.work_item import WorkItem, WorkItemOrigin, WorkItemState, WorkItemStore
+from howlplane.control_plane.factory.dispatcher import MarathonDispatcherAdapter
+from howlplane.control_plane.factory.portfolio import FactoryPolicy
+from howlplane.control_plane.factory.repo_proposal import CapabilityStore, RepoProposalStore
+from howlplane.control_plane.factory.supervisor import FactorySupervisor
+from howlplane.control_plane.factory.supervisor_state import SupervisorStateStore
+from howlplane.control_plane.factory.work_item import WorkItem, WorkItemOrigin, WorkItemState, WorkItemStore
 
 
 START = datetime(2026, 8, 30, 12, 0, 0, tzinfo=timezone.utc)

@@ -127,7 +127,7 @@ def test_no_operator_facing_error_names_the_deprecated_launcher():
     every caller. `legacy_main`'s own deprecation notice is the one place `ai`
     is the correct subject, so it is excluded by name.
     """
-    from src.control_plane import launcher
+    from howlplane.control_plane import launcher
 
     offenders = []
     for path in sorted(SRC_DIR.rglob("*.py")):
@@ -147,7 +147,7 @@ def test_no_operator_facing_error_names_the_deprecated_launcher():
 @pytest.mark.unit
 def test_the_deprecated_ai_entry_point_still_exists():
     """Modernizing the recommendations must not remove backwards compatibility."""
-    from src.control_plane import launcher
+    from howlplane.control_plane import launcher
 
     assert callable(launcher.legacy_main)
     assert (REPO_ROOT / "bin" / "ai").is_file()

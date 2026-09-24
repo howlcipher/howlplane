@@ -4,7 +4,7 @@ import os
 import urllib.request
 from datetime import datetime
 
-from src.infrastructure.config_loader import ConfigLoader
+from howlplane.control_plane.config_loader import ConfigLoader
 
 
 class SecurityNewsFetcher:

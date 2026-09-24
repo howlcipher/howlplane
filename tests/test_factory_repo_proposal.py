@@ -3,7 +3,7 @@
 
 import pytest
 
-from src.control_plane.factory.repo_proposal import (
+from howlplane.control_plane.factory.repo_proposal import (
     CapabilityRecord,
     CapabilityRegistry,
     CapabilityStore,

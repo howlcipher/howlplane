@@ -8,7 +8,7 @@ into structured, deterministic ProductSpec instances with observable acceptance 
 
 import pytest
 
-from src.control_plane.synthesis.spec_synthesizer import NaturalLanguageSynthesizer
+from howlplane.control_plane.synthesis.spec_synthesizer import NaturalLanguageSynthesizer
 
 
 def test_synthesize_notes_prompt():

@@ -4,7 +4,7 @@ import sys
 import time
 from pathlib import Path
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     PROVIDER_RETRY_AFTER_SECONDS_KEY,
     WATCHDOG_TERMINATION_KEY,
     WATCHDOG_TERMINATION_EXHAUSTION,
@@ -13,9 +13,9 @@ from src.control_plane.agent_execution import (
     SubprocessAgentBackend,
     trusted_terminal_provider_signal,
 )
-from src.control_plane.resource_models import ProviderFailureClass
-from src.control_plane.synthesis.provider_pool import ProviderPoolManager
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.resource_models import ProviderFailureClass
+from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
+from howlplane.control_plane.task_spec import TaskSpec
 
 
 def _backend(program: str) -> SubprocessAgentBackend:

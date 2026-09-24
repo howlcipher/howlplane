@@ -20,8 +20,8 @@ from pathlib import Path
 import subprocess
 import pytest
 
-from src.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
-from src.control_plane.human_boundary import (
+from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+from howlplane.control_plane.human_boundary import (
     HumanDecisionRecord,
     HumanLifecycleManager,
     RepositoryStateFingerprint,
@@ -33,9 +33,9 @@ from src.control_plane.human_boundary import (
     StaleApprovalError,
     ApprovalRequiredError,
 )
-from src.control_plane.launcher import cmd_approve, cmd_reject, cmd_resume, cmd_status, build_parser
-from src.control_plane.task_spec import TaskSpec
-from src.control_plane.git_env import run_git_in_repo
+from howlplane.control_plane.launcher import cmd_approve, cmd_reject, cmd_resume, cmd_status, build_parser
+from howlplane.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.git_env import run_git_in_repo
 from tests._git_test_helpers import git_in_repo, init_git_repo
 
 

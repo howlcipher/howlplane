@@ -47,6 +47,13 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           bash scripts/install_slopslint.sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install pinned HowlFrame binary
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
+          cd /tmp/howlframe && git checkout 508196d69dc68a027693be70f672c41a155f9819
+          cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Run fast deterministic suite
         run: make test-fast
 
@@ -75,6 +82,13 @@ jobs:
         run: |
           mkdir -p "$HOME/.local/bin"
           bash scripts/install_slopslint.sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install pinned HowlFrame binary
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
+          cd /tmp/howlframe && git checkout 508196d69dc68a027693be70f672c41a155f9819
+          cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       # `shell: bash` is load-bearing: it runs the step under `bash -eo pipefail`.
       # GitHub's default shell is `bash -e {0}`, which does NOT set pipefail, so
@@ -117,6 +131,13 @@ jobs:
         run: |
           mkdir -p "$HOME/.local/bin"
           bash scripts/install_slopslint.sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install pinned HowlFrame binary
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
+          cd /tmp/howlframe && git checkout 508196d69dc68a027693be70f672c41a155f9819
+          cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       # `live` tests are deselected by tests/conftest.py unless
       # HOWLPLANE_LIVE_PROVIDERS is set, so this step cannot reach a real

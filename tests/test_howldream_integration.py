@@ -15,13 +15,13 @@ from pathlib import Path
 import pytest
 from unittest.mock import patch
 
-from src.control_plane.executor import (
+from howlplane.control_plane.executor import (
     ExecutionReceipt,
     ExecutorRegistry,
     ExecutorError,
     HowlChangeOpsExecutor,
 )
-from src.control_plane.howldream_runner import (
+from howlplane.control_plane.howldream_runner import (
     HowlDreamRunner,
     ExplorationPolicy,
     ExplorationBudget,
@@ -30,7 +30,7 @@ from src.control_plane.howldream_runner import (
     assert_no_execution_authority,
     DeterministicTestExplorationProvider,
 )
-from src.control_plane import launcher
+from howlplane.control_plane import launcher
 
 
 def test_exploration_policy_never_skips_execution(tmp_path: Path):

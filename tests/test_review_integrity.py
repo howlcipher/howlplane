@@ -19,13 +19,13 @@ through them is real.
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from src.control_plane.agent_execution import AgentBackend
-from src.control_plane.synthesis.engine import ProductSynthesizer
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.agent_execution import AgentBackend
+from howlplane.control_plane.synthesis.engine import ProductSynthesizer
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
 )
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.task_spec import TaskSpec
 from tests._dogfood_test_helpers import scripted_result
 from tests.test_dogfood_hardening import _seed_valid_howl_files
 
@@ -173,7 +173,7 @@ def test_reviewer_failover_is_bounded_not_infinite(tmp_path: Path):
     # candidates skipped because the pool already knew they could not serve are
     # recorded as evidence and cost no opportunity (issues.md #15) -- so the
     # bound is on launches, not on how far the traversal looked.
-    from src.control_plane.review_runner import MAX_REVIEWER_LAUNCH_ATTEMPTS
+    from howlplane.control_plane.review_runner import MAX_REVIEWER_LAUNCH_ATTEMPTS
     launched = [
         a for a in security_invocation["attempts"]
         if a.get("consumed_launch_budget") is not False
@@ -197,7 +197,7 @@ def test_review_provider_quota_exhaustion_updates_state_and_retries(tmp_path: Pa
 
     res = engine.create_from_prompt("Create a persistent notes app", output_dir=tmp_path / "app")
 
-    from src.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus
+    from howlplane.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus
     assert pool.get_status("agy") == ProviderAvailabilityStatus.SESSION_EXHAUSTED
     arch_invocation = next(i for i in res.reviewer_invocations if i["role"] == "architecture-reviewer")
     # Failover moved on to an independent candidate after the exhaustion.
@@ -222,7 +222,7 @@ def test_completed_diversity_true_when_a_single_role_completes(tmp_path: Path):
     engine = ProductSynthesizer(provider_pool=pool, custom_backend=backend)
     out_path = tmp_path / "app"
     out_path.mkdir()
-    from src.control_plane.synthesis.product_spec import ProductSpec
+    from howlplane.control_plane.synthesis.product_spec import ProductSpec
     spec = ProductSpec(name="notes-app", title="Notes", description="notes app")
 
     _findings, _mapping, diversity_achieved, invocations, completed_diversity = engine._run_independent_reviews(
@@ -276,7 +276,7 @@ class _ProseThenValidBackend(AgentBackend):
 
 
 def _register_prose_backends(monkeypatch, providers):
-    from src.control_plane.agent_execution import AgentBackendRegistry
+    from howlplane.control_plane.agent_execution import AgentBackendRegistry
     for agent_id in providers:
         monkeypatch.setattr(
             AgentBackendRegistry, "get_backend",
@@ -287,7 +287,7 @@ def _register_prose_backends(monkeypatch, providers):
 def _run_prose_review_cycle(monkeypatch, with_pool: bool):
     """One governed review cycle whose assigned reviewer emits the live prose
     shape, with failover either enabled (pool supplied) or not."""
-    from src.control_plane.review_runner import ReviewRunner
+    from howlplane.control_plane.review_runner import ReviewRunner
 
     _register_prose_backends(monkeypatch, ("claude_code", "codex"))
     return ReviewRunner.execute_review_cycle(
@@ -330,7 +330,7 @@ def test_orchestration_config_wires_provider_pool_into_review_cycle():
     """The orchestrator must actually forward its pool -- the gap that left the
     governed path (used by the acceptance canary) with no reviewer failover."""
     import inspect
-    from src.control_plane.orchestrator import OrchestrationConfig, GovernedTaskOrchestrator
+    from howlplane.control_plane.orchestrator import OrchestrationConfig, GovernedTaskOrchestrator
 
     assert "provider_pool" in OrchestrationConfig.__dataclass_fields__
     source = inspect.getsource(GovernedTaskOrchestrator._run_governed_loop)

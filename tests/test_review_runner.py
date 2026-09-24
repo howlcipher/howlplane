@@ -5,7 +5,7 @@ Unit tests for independent review execution, structured findings validation,
 and targeted re-review role determination.
 """
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     AgentExecutionResult,
     LAUNCH_OUTCOME_KEY,
     LAUNCH_OUTCOME_LAUNCHED,
@@ -13,10 +13,10 @@ from src.control_plane.agent_execution import (
     TIMEOUT_SOURCE_KEY,
     TIMEOUT_SOURCE_HARNESS,
 )
-from src.control_plane.atomic_io import safe_load_json
-from src.control_plane.reconciliation import ReviewFinding
-from src.control_plane.resource_models import ProviderFailureClass
-from src.control_plane.review_runner import (
+from howlplane.control_plane.atomic_io import safe_load_json
+from howlplane.control_plane.reconciliation import ReviewFinding
+from howlplane.control_plane.resource_models import ProviderFailureClass
+from howlplane.control_plane.review_runner import (
     REVIEW_TIMEOUT_SECONDS,
     ReviewRunner,
     SingleReviewResult,
@@ -25,8 +25,8 @@ from src.control_plane.review_runner import (
     parse_and_validate_findings,
     write_review_result,
 )
-from src.control_plane.synthesis.provider_pool import ProviderPoolManager
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
+from howlplane.control_plane.task_spec import TaskSpec
 
 
 def test_parse_findings_clean_output():
@@ -299,7 +299,7 @@ def test_no_implementer_supplied_preserves_previous_ordering():
 
 def _real_pool():
     """A real ProviderPoolManager, used only for its failure classifier."""
-    from src.control_plane.agent_registry import AgentRegistry
+    from howlplane.control_plane.agent_registry import AgentRegistry
 
     return ProviderPoolManager(
         registry=AgentRegistry([]), backend_resolver=None, probe_on_start=False

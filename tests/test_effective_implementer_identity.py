@@ -24,14 +24,14 @@ Every test uses fake backends. No live provider quota is consumed.
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     AgentExecutionResult,
     TIMEOUT_SOURCE_HARNESS,
     TIMEOUT_SOURCE_KEY,
 )
-from src.control_plane.agent_registry import AgentRegistry
-from src.control_plane.atomic_io import safe_load_json
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.agent_registry import AgentRegistry
+from howlplane.control_plane.atomic_io import safe_load_json
+from howlplane.control_plane.task_spec import TaskSpec
 from tests.test_provider_failover import (
     _FakeBackendResolver,
     _edit_feature_to_true,
@@ -291,7 +291,7 @@ def test_reviewer_dispatch_does_not_overwrite_actual_agent():
     represents. Writing that to `actual_agent` is what left task.yaml naming
     the test-falsifier reviewer as the implementing agent.
     """
-    from src.control_plane.review_runner import invoke_reviewer_with_failover
+    from howlplane.control_plane.review_runner import invoke_reviewer_with_failover
 
     task = _make_task("TEST-IDENTITY-REVIEW-DISPATCH")
     task.effective_implementer_resource_id = "resource_b"

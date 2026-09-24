@@ -15,21 +15,21 @@ from pathlib import Path
 import subprocess
 import pytest
 
-from src.control_plane.agent_execution import AgentBackend, AgentExecutionResult
-from src.control_plane.evidence_ledger import EvidenceLedger
-from src.control_plane.executor import (
+from howlplane.control_plane.agent_execution import AgentBackend, AgentExecutionResult
+from howlplane.control_plane.evidence_ledger import EvidenceLedger
+from howlplane.control_plane.executor import (
     ExecutionReceipt,
     ExecutorRegistry,
     UnsupportedActionError,
     InvalidReceiptError,
     ExecutionFailedError,
 )
-from src.control_plane.human_boundary import (
+from howlplane.control_plane.human_boundary import (
     HumanLifecycleManager,
     compute_repository_fingerprint,
 )
-from src.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
+from howlplane.control_plane.task_spec import TaskSpec
 
 
 class CountingMockBackend(AgentBackend):

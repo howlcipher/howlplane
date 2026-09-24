@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.control_plane.cli import _build_factory_supervisor
+from howlplane.control_plane.cli import _build_factory_supervisor
 from tests.test_backlog_marathon import RANKED
 
 

@@ -11,13 +11,13 @@ is grounded in that remote truth rather than local assumptions, so a crash
 at any point never causes duplicate branches/commits/PRs or a double merge.
 """
 
-from src.control_plane.git_integration import PR_MERGE_FIELDS
-from src.control_plane.authority_envelope import create_envelope
-from src.control_plane.authority_profile import get_profile
-from src.control_plane.decision_queue import already_parked
-from src.control_plane.git_integration import GitIntegrationExecutor
-from src.control_plane.proposed_action import ProposedAction
-from src.control_plane.synthesis.campaign_state import DurableCampaignState
+from howlplane.control_plane.git_integration import PR_MERGE_FIELDS
+from howlplane.control_plane.authority_envelope import create_envelope
+from howlplane.control_plane.authority_profile import get_profile
+from howlplane.control_plane.decision_queue import already_parked
+from howlplane.control_plane.git_integration import GitIntegrationExecutor
+from howlplane.control_plane.proposed_action import ProposedAction
+from howlplane.control_plane.synthesis.campaign_state import DurableCampaignState
 from tests._dogfood_test_helpers import ScriptedRunner
 
 REPO_SLUG = "howlcipher/howlplane"

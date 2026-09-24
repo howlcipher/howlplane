@@ -9,8 +9,8 @@ suitability ranking, avoid-provider policies, and cross-provider review.
 
 import pytest
 
-from src.control_plane.agent_execution import AgentExecutionResult
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.agent_execution import AgentExecutionResult
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderExhaustionEvent,
     ProviderPoolManager,

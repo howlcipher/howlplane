@@ -12,9 +12,9 @@ from tests._factory_test_helpers import (
     unavailable_supervisor,
 )
 
-from src.control_plane.factory.dispatcher import DispatchOutcome
-from src.control_plane.factory.supervisor_state import SupervisorState
-from src.control_plane.factory.work_item import WorkItemState
+from howlplane.control_plane.factory.dispatcher import DispatchOutcome
+from howlplane.control_plane.factory.supervisor_state import SupervisorState
+from howlplane.control_plane.factory.work_item import WorkItemState
 
 
 class _CountingDispatcher:

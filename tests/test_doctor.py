@@ -5,7 +5,7 @@ Unit tests for src/infrastructure/doctor.py diagnostics.
 """
 
 from pathlib import Path
-from src.infrastructure.doctor import (
+from howlplane.control_plane.doctor import (
     check_python_environment,
     check_dependencies,
     check_go_toolchain,
