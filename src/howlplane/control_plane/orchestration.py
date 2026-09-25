@@ -72,9 +72,11 @@ SUCCESSFULLY_TERMINAL_STATUSES = frozenset({"COMPLETE", "COMPLETE WITH WARNINGS"
 RESUMABLE_STATUSES = frozenset({
     "HANDOFF REQUIRED", "INTERRUPTED", "PLANNED", "PLANNING", "IMPLEMENTATION", "REVIEW", "ACCEPTANCE",
 })
-TRULY_TERMINAL_STATUSES = frozenset({"SESSION_STATE_INVALID"})
+# A session retired in favour of replacement work: kept as history, never resumed.
+SUPERSEDED = "SUPERSEDED"
+TRULY_TERMINAL_STATUSES = frozenset({"SESSION_STATE_INVALID", SUPERSEDED})
 # Kept for compatibility with any external imports:
-TERMINAL = frozenset({"COMPLETE", "COMPLETE WITH WARNINGS", "SESSION_STATE_INVALID"})
+TERMINAL = frozenset({"COMPLETE", "COMPLETE WITH WARNINGS", "SESSION_STATE_INVALID", SUPERSEDED})
 
 
 def is_resumable(status_or_doc: str | dict[str, Any], reason: str | None = None) -> bool:
@@ -412,6 +414,46 @@ def active_sessions(root: Path, repo: Path, include_terminal: bool = False) -> l
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def live_lease(doc: dict[str, Any]) -> bool:
+    """True while another process still holds this session's coordinator lease."""
+    lease = doc.get("lease") or {}
+    if time.time() - lease.get("renewed_at", 0) >= 330 or lease.get("pid", 0) == os.getpid():
+        return False
+    try:
+        os.kill(lease["pid"], 0)
+    except (ProcessLookupError, KeyError, TypeError, ValueError):
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def supersede(root: Path, session_id: str, reason: str, replaced_by: str) -> dict[str, Any]:
+    """Retire one resumable session in favour of replacement work.
+
+    Unlike ``discard``, the manifest is kept: it becomes ``SUPERSEDED`` history
+    that records why and by what it was replaced, and it no longer owns its
+    worktree. A session that is not resumable, or whose coordinator is still
+    alive, is refused rather than taken over.
+    """
+    with locked(root):
+        path = path_for(root, session_id)
+        if not path.exists():
+            raise ValueError(f"Session {session_id} does not exist")
+        doc = safe_load_json(path)
+        if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
+            raise ValueError(f"Session {session_id} is not an orchestration session")
+        if not is_resumable(doc):
+            raise ValueError(f"Session {session_id} is {doc.get('status')}, not resumable; nothing to supersede")
+        if live_lease(doc):
+            raise ValueError(f"Session {session_id} has a live coordinator lease")
+        doc["superseded"] = {"at": now(), "reason": reason, "replaced_by": replaced_by,
+                             "previous_status": doc.get("status"), "previous_stage": doc.get("stage")}
+        doc["status"] = SUPERSEDED
+        secure_write(path, doc)
+    return doc
 
 
 def discover_models(agent: str) -> list[str]:
@@ -1339,13 +1381,8 @@ def command(args: argparse.Namespace) -> int:
             except SessionStateInvalid as error:
                 return invalid_session_report(doc, str(error), repo)
             previous_orchestrator = doc["orchestrator"]
-            if time.time() - doc["lease"]["renewed_at"] < 330 and doc["lease"]["pid"] != os.getpid():
-                try:
-                    os.kill(doc["lease"]["pid"], 0)
-                except ProcessLookupError:
-                    pass
-                else:
-                    raise ValueError("Session has a live coordinator lease")
+            if live_lease(doc):
+                raise ValueError("Session has a live coordinator lease")
             doc["lease"] = {"token": uuid.uuid4().hex, "pid": os.getpid(), "renewed_at": time.time()}
             reconcile(doc, repo)
             budget_change = parse_execution_budget(getattr(args, "execution_budget", None))

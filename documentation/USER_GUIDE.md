@@ -33,6 +33,11 @@ howlplane agents doctor --live --json
 howlplane agents doctor --repo /path/to/repo
 howlplane factory prepare --repo /path/to/repo
 
+# Run a finite queue of human-APPROVED tasks, one orchestration session each
+# (see documentation/FACTORY_QUEUE.md); --dry-run shows what would happen:
+howlplane factory queue queue.json --dry-run
+howlplane factory queue queue.json
+
 # Execute deterministic verification on the current project:
 howlplane verify
 ```

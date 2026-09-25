@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 
+- `howlplane factory queue QUEUE.json [--dry-run] [--retry ID] [--max-tasks N]
+  [--stop-on-failure] [--json]`: a finite Factory supervisor over an explicit
+  queue of human-`APPROVED` tasks. Each task becomes one ordinary orchestration
+  session; the queue adds only priority/dependency selection, a revision
+  fingerprint, and a ledger outside the repository. A same-revision
+  `HANDOFF REQUIRED` session stays canonical and `--retry` resumes it; an edited
+  task is a new revision that retires the older revision's resumable session
+  through `orchestration.supersede` (kept as `SUPERSEDED` history) before
+  launching. Unrelated sessions always block. Dependents wait for the current
+  revision. See `documentation/FACTORY_QUEUE.md`.
+- `orchestration.supersede`: evidence-preserving retirement of one resumable
+  session, and the `SUPERSEDED` terminal status.
+
 - `howlplane agents doctor [--live] [--json]` verifies every supported agent
   CLI: installation, version, auth, advertised models, and unattended execution
   through HowlPlane's own invocation (`--live`: one tiny prompt each). Capacity

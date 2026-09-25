@@ -394,3 +394,60 @@ def test_cli_guidance_truthfulness():
     prog_terminal.blocked("COMPLETE", "Done", "howlplane orchestrate resume --repo /tmp/test")
     resume_tags_term = [w for w in prog_terminal.written if w[0] == "RESUME"]
     assert len(resume_tags_term) == 0
+
+
+def test_supersede_retires_a_handoff_session_but_keeps_its_history(tmp_path, monkeypatch, capsys):
+    """Superseding is the evidence-preserving alternative to discard for replacement work."""
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch)
+    doc = module.setup(arguments(repo), repo)
+    doc["status"] = "HANDOFF REQUIRED"
+    doc["lease"]["renewed_at"] = 0
+    persist(doc)
+    root = module.state_root()
+
+    retired = module.supersede(root, doc["id"], "task definition changed", "replacement revision")
+
+    stored = module.safe_load_json(module.path_for(root, doc["id"]))
+    assert stored == retired and stored["status"] == module.SUPERSEDED
+    assert stored["superseded"]["previous_status"] == "HANDOFF REQUIRED"
+    assert (stored["superseded"]["reason"], stored["superseded"]["replaced_by"]) == (
+        "task definition changed", "replacement revision")
+    assert stored["attempts"] == doc["attempts"]
+    assert not module.is_resumable(stored) and module.is_final(stored)
+    assert module.active_sessions(root, repo) == []
+    assert [s["id"] for s in module.active_sessions(root, repo, include_terminal=True)] == [doc["id"]]
+    # Neither discard nor resume touches retired history.
+    assert module.command(arguments(repo, input="discard")) == 0
+    assert "Discarded 0 active session(s)" in capsys.readouterr().out
+    assert module.path_for(root, doc["id"]).exists()
+    with pytest.raises(ValueError, match="No unfinished session"):
+        module.command(arguments(repo, input="resume", orchestrator=None))
+    with pytest.raises(ValueError, match="not resumable"):
+        module.supersede(root, doc["id"], "again", "x")
+
+
+def test_supersede_refuses_finished_missing_and_live_sessions(tmp_path, monkeypatch):
+    import os
+    import time
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch)
+    root = module.state_root()
+    complete = module.setup(arguments(repo), repo)
+    complete["status"] = "COMPLETE"
+    persist(complete)
+    with pytest.raises(ValueError, match="not resumable"):
+        module.supersede(root, complete["id"], "r", "x")
+    assert module.safe_load_json(module.path_for(root, complete["id"]))["status"] == "COMPLETE"
+
+    with pytest.raises(ValueError, match="does not exist"):
+        module.supersede(root, "0" * 32, "r", "x")
+
+    live = module.setup(arguments(repo, input="Other"), repo)
+    live["status"] = "HANDOFF REQUIRED"
+    path = persist(live)
+    live["lease"].update(pid=os.getppid(), renewed_at=time.time())  # a coordinator that is still running
+    module.secure_write(path, live)
+    with pytest.raises(ValueError, match="live coordinator lease"):
+        module.supersede(root, live["id"], "r", "x")
+    assert module.safe_load_json(module.path_for(root, live["id"]))["status"] == "HANDOFF REQUIRED"
