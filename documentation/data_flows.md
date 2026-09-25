@@ -26,6 +26,7 @@ HowlPlane operates primarily as a **local-first control plane and knowledge base
 | **Model Context Protocol (MCP) - `memory`** | Context indexing/retrieval | Memory keys and knowledge snippets | Subprocess `mcp-server-memory` (Local IPC) | `active_mcps: [memory]` in `config/settings.yaml` | Active (Local subprocess) |
 | **LangSmith Tracing** | Optional LLM observability | Prompts, outputs, metadata | `api.smith.langchain.com` | `operating_mode: connected` AND `LANGCHAIN_TRACING_V2=true` | Disabled in `local_only` mode (hard-disabled) |
 | **Google Drive / Docs API** | User runs `scripts/push_to_docs.py` or `scripts/pull_from_docs.py` | Exported markdown docs, OAuth tokens | Google Workspace APIs | `operating_mode: connected` AND `credentials.json` | Off by default (hard-blocked in `local_only` mode) |
+| **Agent doctor (`howlplane agents doctor`, `factory doctor`)** | Level 1: each installed agent CLI's own auth-status and model-list commands. `--live` (explicit opt-in): one `Respond exactly: HOWL_READY` prompt per eligible CLI | The fixed smoke prompt only; no repository content (runs in an empty temporary directory) | Each agent CLI's provider (OpenAI, Anthropic, Cursor, AGY, Devin) | `connected` mode for any hosted probe; `--live` for the smoke | In `local_only` mode only executable lookup and `--version` run; auth, model listing, and `--live` are skipped |
 | **GitHub Actions CI/CD** | Git push to remote repository | Repository commits, test execution | GitHub runners (`github.com`) | Standard Git push operations | CI only on push |
 
 Resource selection applies `local_only` and per-task no-egress filters before
@@ -35,7 +36,10 @@ zero hosted readiness requests and zero hosted generation. `howlplane route` is
 read-only in every mode and uses persisted capacity without probing. Local
 Ollama traffic remains loopback-only. Operator configuration and current
 capacity live outside the repository in `~/.config/howlplane/`; neither carries
-credentials.
+credentials. Agent readiness evidence lives in
+`~/.local/state/howlplane/agent_readiness.json` (mode 0600). It holds parsed
+facts only, never raw auth output, and emails, names, organization IDs, and
+tokens are redacted.
 
 ---
 

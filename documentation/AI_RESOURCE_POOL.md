@@ -170,6 +170,12 @@ capacity without probing or generation and explains requirements, eligible and
 excluded resources, economics, recommendation, and likely selected identity.
 `--json` emits `howlplane.resource_selection/v1`.
 
+`howlplane agents doctor` verifies each agent CLI independently: auth,
+advertised models, unattended execution through HowlPlane's own invocation
+(`--live`, one tiny prompt each), and capacity only where the CLI reports it.
+Orchestration routing and `factory doctor` consume its cache. See
+[AGENT_DOCTOR.md](AGENT_DOCTOR.md).
+
 `howlplane doctor` validates configuration and runs non-generative readiness checks.
 Hosted CLI checks inspect executable presence only; generation capacity and
 authentication remain unknown unless safely observed elsewhere. In local-only
