@@ -310,7 +310,7 @@ def revoke(repo_root: Path) -> dict[str, Any] | None:
     return removed
 
 
-def authorization_for(path: str | Path) -> dict[str, Any] | None:
+def authorized_scope_for(path: str | Path) -> dict[str, Any] | None:
     """The authorization covering `path`, or None. Arbitrary paths are never covered.
 
     Covered means: the authorized checkout or a listed workspace exactly, or a
@@ -400,7 +400,7 @@ PREPARERS: dict[str, Callable[[Path], dict[str, Any]]] = {
 def prepare(agent: str, path: Path) -> dict[str, Any]:
     """Establish vendor trust for one authorized directory, then re-verify it."""
     target = Path(path).expanduser().resolve()
-    if authorization_for(target) is None:
+    if authorized_scope_for(target) is None:
         raise PreparationRefused(f"{target} is not inside a HowlPlane-authorized scope; refusing to prepare trust")
     spec = ADAPTERS.get(agent)
     if spec is None:
@@ -409,19 +409,3 @@ def prepare(agent: str, path: Path) -> dict[str, Any]:
     if current["state"] == READY or spec.method == "none":
         return current
     return PREPARERS[agent](target)
-
-
-def workspace_readiness(workspace: str | Path, agents: Iterable[str], live: bool = False,
-                        runner: Callable[[list[str], Path], tuple[int, str]] | None = None) -> dict[str, Any]:
-    """Per-agent trust for one workspace, plus whether HowlPlane is authorized to use it."""
-    path = Path(workspace).expanduser().resolve()
-    authorization = authorization_for(path)
-    agents_state = {}
-    for agent in agents:
-        result = probe(agent, path, runner) if live and agent in PROBE_ARGV else check(agent, path)
-        agents_state[agent] = result
-    return {"workspace": str(path), "authorized": authorization is not None,
-            "authorized_scope": None if authorization is None else {
-                "repo_root": authorization["repo_root"], "factory_root": authorization["factory_root"],
-                "authorized_at": authorization["authorized_at"]},
-            "agents": agents_state}

@@ -514,10 +514,10 @@ def workspace_report(workspace: str | Path, agents: Iterable[str] | None = None,
     path = Path(workspace).expanduser().resolve()
     selected = [agent for agent in AGENT_ORDER if agents is None or agent in set(agents)]
     cache = load_cache()
-    authorization = workspace_trust.authorization_for(path)
-    return {"workspace": str(path), "exists": path.is_dir(), "authorized": authorization is not None,
-            "authorization": None if authorization is None else {
-                key: authorization.get(key) for key in ("repo_root", "factory_root", "authorized_at", "strategy",
+    scope = workspace_trust.authorized_scope_for(path)
+    return {"workspace": str(path), "exists": path.is_dir(), "authorized": scope is not None,
+            "scope": None if scope is None else {
+                key: scope.get(key) for key in ("repo_root", "factory_root", "authorized_at", "strategy",
                                                         "last_verified_at")},
             "agents": {agent: workspace_status(agent, path, live, cache) for agent in selected}}
 
@@ -744,10 +744,10 @@ def _workspace_text(status: dict[str, Any]) -> str:
 
 
 def render_workspace(report: dict[str, Any]) -> list[str]:
-    authorization = report["authorization"]
+    scope = report["scope"]
     lines = ["WORKSPACE READINESS", f"  Workspace:      {report['workspace']}" + ("" if report["exists"] else " (not created yet)"),
-             "  Authorized:     " + (f"YES — {authorization['repo_root']} (factory root {authorization['factory_root']})"
-                                     if authorization else "NO — run `howlplane factory prepare --repo <repo>`"), ""]
+             "  Authorized:     " + (f"YES — {scope['repo_root']} (factory root {scope['factory_root']})"
+                                     if scope else "NO — run `howlplane factory prepare --repo <repo>`"), ""]
     for agent, status in report["agents"].items():
         spec = workspace_trust.adapter(agent)
         lines.append(f"  {SPECS[agent].name}: {_workspace_text(status)}")

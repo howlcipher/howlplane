@@ -230,26 +230,26 @@ def test_authorization_record_is_private_and_secret_free(tmp_path):
 
 def test_only_the_authorized_scope_is_covered(tmp_path):
     repo, root, _ = _authorize(tmp_path)
-    assert trust.authorization_for(repo) is not None
-    assert trust.authorization_for(root) is not None
-    assert trust.authorization_for(root / "not-created-yet" / "target") is not None
+    assert trust.authorized_scope_for(repo) is not None
+    assert trust.authorized_scope_for(root) is not None
+    assert trust.authorized_scope_for(root / "not-created-yet" / "target") is not None
     (tmp_path / "arbitrary").mkdir()
-    assert trust.authorization_for(tmp_path / "arbitrary") is None
-    assert trust.authorization_for(repo / "subdir-not-listed") is None
+    assert trust.authorized_scope_for(tmp_path / "arbitrary") is None
+    assert trust.authorized_scope_for(repo / "subdir-not-listed") is None
     # A different repository placed inside the Factory root is not this repository's worktree.
     intruder = make_git_repo(root, name="intruder")
-    assert trust.authorization_for(intruder) is None
+    assert trust.authorized_scope_for(intruder) is None
     # A genuine worktree of the authorized repository is.
     import subprocess
     subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "--detach", str(root / "slot")], check=True)
-    assert trust.authorization_for(root / "slot") is not None
+    assert trust.authorized_scope_for(root / "slot") is not None
 
 
 def test_revoke_removes_only_howlplane_authorization(stores, tmp_path):
     repo, root, _ = _authorize(tmp_path)
     cursor_trust(stores, root)
     assert trust.revoke(repo) is not None
-    assert trust.authorization_for(repo) is None
+    assert trust.authorized_scope_for(repo) is None
     assert trust.check("cursor", root)["state"] == trust.READY, "vendor trust is not HowlPlane's to change"
 
 
@@ -545,7 +545,7 @@ def test_prepare_authorizes_creates_the_worktree_and_prepares_supported_trust(st
     assert report["workspace"]["agents"]["devin_cli"]["state"] == "TRUST_REQUIRED"
     assert report["readiness"]["status"] in ("READY", "DEGRADED")
     assert report["readiness"]["workspace_trust_required"] == ["Devin"]
-    entry = trust.authorization_for(repo)
+    entry = trust.authorized_scope_for(repo)
     assert entry["agents_prepared"]["cursor"]["state"] == "READY"
     # A fresh canary worktree under the root needs no further preparation.
     assert trust.check("cursor", root / "canaries" / "next" / "target")["state"] == "READY"
@@ -569,7 +569,7 @@ def test_revoke_reports_vendor_locations_without_touching_them(stores, tmp_path,
     assert prepare.command(_prepare_args(repo, revoke=True)) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["revoked"] is True and "devin_cli" in out["vendor_trust_stores"]
-    assert trust.authorization_for(repo) is None
+    assert trust.authorized_scope_for(repo) is None
     assert sorted(p for p in (stores["cursor"] / "projects").rglob(".workspace-trusted")) == markers
 
 
