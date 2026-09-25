@@ -184,7 +184,7 @@ existing preferences are unchanged, and an operator configuration that lists
 providers explicitly must enable it (`[ai_resources.providers.cursor]`).
 Selection also excludes a resource whose CLI would meet a workspace trust prompt
 in the task's repository (`WORKSPACE_TRUST_REQUIRED`, scoped to that workspace
-only). See [WORKSPACE_TRUST.md](WORKSPACE_TRUST.md).
+only). The check uses effective readiness under the workspace trust policy, so under `bypass` Cursor and Devin stay eligible in a fresh worktree. See [WORKSPACE_TRUST.md](WORKSPACE_TRUST.md).
 
 `howlplane doctor` validates configuration and runs non-generative readiness checks.
 Hosted CLI checks inspect executable presence only; generation capacity and
