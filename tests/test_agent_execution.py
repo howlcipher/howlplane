@@ -5,7 +5,7 @@ Unit and integration tests for normalized agent execution abstraction.
 """
 import pytest
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     AgentBackendRegistry,
     AgentExecutionResult,
     AgyBackend,
@@ -14,12 +14,12 @@ from src.control_plane.agent_execution import (
     FakeAgentBackend,
     SubprocessAgentBackend,
 )
-from src.control_plane.resource_models import ProviderFailureClass
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.resource_models import ProviderFailureClass
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
 )
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.task_spec import TaskSpec
 
 
 def test_agent_execution_result_serialization():

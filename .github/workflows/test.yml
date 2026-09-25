@@ -47,6 +47,13 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           bash scripts/install_slopslint.sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install pinned HowlFrame binary
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
+          cd /tmp/howlframe && git checkout 508196d69dc68a027693be70f672c41a155f9819
+          cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Run fast deterministic suite
         run: make test-fast
 
@@ -75,6 +82,13 @@ jobs:
         run: |
           mkdir -p "$HOME/.local/bin"
           bash scripts/install_slopslint.sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install pinned HowlFrame binary
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
+          cd /tmp/howlframe && git checkout 508196d69dc68a027693be70f672c41a155f9819
+          cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       # `shell: bash` is load-bearing: it runs the step under `bash -eo pipefail`.
       # GitHub's default shell is `bash -e {0}`, which does NOT set pipefail, so
@@ -118,27 +132,18 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           bash scripts/install_slopslint.sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install pinned HowlFrame binary
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
+          cd /tmp/howlframe && git checkout 508196d69dc68a027693be70f672c41a155f9819
+          cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
       # `live` tests are deselected by tests/conftest.py unless
       # HOWLPLANE_LIVE_PROVIDERS is set, so this step cannot reach a real
       # provider even though it names no marker expression.
       - name: Run full, slow, and acceptance coverage
         run: PYTHONPATH=. python -m pytest tests/ -v --durations=25
-      # HowlForge role definitions are vendored under contracts/howlforge/, not
-      # installed: they are data, and nothing in src/ imports or executes
-      # HowlForge. This step only asserts the vendored copy still matches the
-      # commit SOURCE.md pins, so a silent drift between the two is a CI
-      # failure rather than a misrouted role at run time.
-      - name: Verify the vendored HowlForge pin matches SOURCE.md
-        run: |
-          pinned=$(grep -oE '[0-9a-f]{40}' contracts/howlforge/SOURCE.md | head -1)
-          expected=""
-          if [ "$pinned" != "$expected" ]; then
-            echo "contracts/howlforge/SOURCE.md pins $pinned, workflow expects $expected"
-            echo "bump both together, or re-vendor per contracts/howlforge/SOURCE.md"
-            exit 1
-          fi
-          echo "vendored HowlForge pin: $pinned"
-
       # Installs howldream ONLY here, pinned to an exact commit -- never as a
       # pyproject.toml dependency. HowlPlane's native provider (see
       # src/control_plane/howldream_runner.py) treats howldream as an optional

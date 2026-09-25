@@ -3,38 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-### Added
-
-- Adopt HowlForge role definitions as the source of role capability
-  requirements. The 11 role definitions and 3 contract schemas are vendored
-  under `contracts/howlforge/`, pinned to an exact commit and validated against
-  their own schema by test, following the `contracts/howl/` precedent. Nothing
-  imports or executes HowlForge: the definitions are data, and when no vendored
-  definition covers a role -- including when the directory is absent entirely --
-  capability derivation falls back to the previous behavior unchanged. Selection
-  itself is untouched; HowlForge's runtime preference ordering is deliberately
-  not consumed, because live capacity, economics and egress policy are not
-  modelled by it. See `documentation/adr/0007_howlforge_role_definitions.md`.
-
 ### Fixed
-
-- Describe every field the agent registry actually serializes.
-  `AgentRegistry.to_dict()` stamped `ai.agent_registry/v1` while emitting ten
-  fields the schema forbade under `additionalProperties: false`, `roles` among
-  them -- the field `select_resource` gates every candidate on via
-  `ROLE_NOT_SUPPORTED`. All six built-in agents failed validation against the
-  schema they declared conformance to. `roles` is now required, because an
-  omitted list is silently filled from `AgentProfile`'s default factory and
-  would widen a deliberately narrowed agent. The drift survived because the
-  existing test validated a hand-written example payload that conformed by
-  construction; the new tests validate the serializer instead.
-
-- Test review capability before coding when deriving a role's requirements.
-  HowlForge's reviewer role declares coding aptitude, so the reverse order
-  handed every reviewer candidate `file_editing` and `repository_access` and
-  would have shrunk the reviewer pool -- the independent-review collapse
-  recorded as `issues.md` #13.
-
 
 - Route unsuccessful factory execution-budget attempts to another eligible
   worker without treating the factory's initial selection as an owner pin or

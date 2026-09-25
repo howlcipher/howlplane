@@ -97,5 +97,5 @@ else
     exit 1
 fi
 
-export PYTHONPATH="${CP_DIR}:${PYTHONPATH:-}"
-exec "$PYTHON_BIN" -m src.control_plane.launcher "$@"
+export PYTHONPATH="${CP_DIR}/src:${CP_DIR}:${PYTHONPATH:-}"
+exec "$PYTHON_BIN" -m howlplane.control_plane.cli "$@"

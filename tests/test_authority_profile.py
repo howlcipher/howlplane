@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from src.control_plane.authority_envelope import (
+from howlplane.control_plane.authority_envelope import (
     AuthorityDecision,
     ENVELOPE_FILENAME,
     EnvelopeAlreadyExistsError,
@@ -25,7 +25,7 @@ from src.control_plane.authority_envelope import (
     load_envelope,
     save_envelope,
 )
-from src.control_plane.authority_profile import (
+from howlplane.control_plane.authority_profile import (
     CANONICAL_PROFILES,
     HOWLFRAME_OVERNIGHT_PROFILE,
     OVERNIGHT_SAFE_PROFILE,
@@ -33,17 +33,17 @@ from src.control_plane.authority_profile import (
     UnknownProfileError,
     get_profile,
 )
-from src.control_plane.decision_queue import (
+from howlplane.control_plane.decision_queue import (
     ParkedTaskRecord,
     compute_blocks_other_work,
     request_ai_recommendation,
 )
-from src.control_plane.git_integration import GitIntegrationExecutor
-from src.control_plane.human_boundary import HumanBoundaryGate
-from src.control_plane.synthesis.campaign_state import DurableCampaignState, GitIntegrationRecord
-from src.control_plane.synthesis.marathon import MarathonDogfoodEngine
-from src.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus, ProviderPoolManager
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.git_integration import GitIntegrationExecutor
+from howlplane.control_plane.human_boundary import HumanBoundaryGate
+from howlplane.control_plane.synthesis.campaign_state import DurableCampaignState, GitIntegrationRecord
+from howlplane.control_plane.synthesis.marathon import MarathonDogfoodEngine
+from howlplane.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus, ProviderPoolManager
+from howlplane.control_plane.task_spec import TaskSpec
 from tests._dogfood_test_helpers import FakeOrchestrator, ScriptedRunner, build_full_merge_flow
 
 REPO_SLUG = "howlcipher/howlplane"
@@ -318,7 +318,7 @@ def test_scenario_16_tampered_authorization_artifact_fails_closed(tmp_path):
 
 
 def test_scenario_17_read_only_dogfood_status_cannot_mutate_or_authorize(monkeypatch, tmp_path):
-    from src.control_plane import cli as cli_module
+    from howlplane.control_plane import cli as cli_module
 
     def _explode(*args, **kwargs):
         raise AssertionError("read-only status must never construct a provider pool")

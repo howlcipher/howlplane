@@ -16,12 +16,12 @@ bad output never is on its own, and no quantity of model opinion substitutes.
 """
 
 
-from src.control_plane.synthesis.campaign_state import DurableCampaignState
-from src.control_plane.synthesis.capability_negotiator import FrameworkGap
-from src.control_plane.synthesis.engine import SynthesisResult
-from src.control_plane.synthesis.marathon import FrameworkGapEvidence, MarathonDogfoodEngine
-from src.control_plane.synthesis.product_spec import ProductSpec
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.synthesis.campaign_state import DurableCampaignState
+from howlplane.control_plane.synthesis.capability_negotiator import FrameworkGap
+from howlplane.control_plane.synthesis.engine import SynthesisResult
+from howlplane.control_plane.synthesis.marathon import FrameworkGapEvidence, MarathonDogfoodEngine
+from howlplane.control_plane.synthesis.product_spec import ProductSpec
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
 )

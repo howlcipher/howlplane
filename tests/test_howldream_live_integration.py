@@ -22,7 +22,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from src.control_plane.howldream_runner import (
+from howlplane.control_plane.howldream_runner import (
     ExplorationBudget,
     NativeHowlDreamProvider,
 )

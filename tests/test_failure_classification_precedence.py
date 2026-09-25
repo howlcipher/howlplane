@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     AgentExecutionResult,
     ClaudeCodeBackend,
     LAUNCH_OUTCOME_KEY,
@@ -19,9 +19,9 @@ from src.control_plane.agent_execution import (
     TOOL_PERMISSION_DENIED,
     TOOL_PERMISSION_KEY,
 )
-from src.control_plane.resource_models import ProviderFailureClass
-from src.control_plane.synthesis.provider_pool import ProviderPoolManager
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.resource_models import ProviderFailureClass
+from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
+from howlplane.control_plane.task_spec import TaskSpec
 
 
 def _failed_result(

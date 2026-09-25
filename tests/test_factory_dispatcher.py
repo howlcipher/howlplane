@@ -3,8 +3,8 @@
 
 import pytest
 
-from src.control_plane.factory.dispatcher import DispatchOutcome, MarathonDispatcherAdapter
-from src.control_plane.factory.work_item import WorkItem, WorkItemState, WorkItemOrigin
+from howlplane.control_plane.factory.dispatcher import DispatchOutcome, MarathonDispatcherAdapter
+from howlplane.control_plane.factory.work_item import WorkItem, WorkItemState, WorkItemOrigin
 
 
 class FakeEngine:

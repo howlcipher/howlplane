@@ -60,7 +60,7 @@ class GoogleDocsPuller:
         """
         Fetches the most recent Google Docs and saves them as plain text locally.
         """
-        from src.infrastructure.config_loader import is_local_only
+        from howlplane.control_plane.config_loader import is_local_only
 
         if is_local_only():
             print(

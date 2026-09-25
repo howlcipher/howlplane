@@ -31,7 +31,6 @@ Scores apply to Pending rows only; Done, Closed, and Merged rows show `—`.
 
 | # | Improvement | Status | Score (V×D÷E) | Claude model | Gemini model | ROI rationale |
 | --- | --- | --- | --- | --- | --- | --- |
-| 70 | [Adopt HowlForge role definitions as the source of role requirements](#70-adopt-howlforge-role-definitions-as-the-source-of-role-requirements) | Done (2026-09-22) | — | Opus 5 | Gemini 3.7 Flash | `AgentRegistry.to_dict()` stamped `ai.agent_registry/v1` while emitting 10 fields the schema forbade under `additionalProperties: false`, `roles` among them — the field `select_resource` gates every candidate on. 6 of 6 agents failed validation against the schema they declared conformance to, and the existing test validated a hand-written example that conformed by construction |
 | 61 | [Encode Test Impact Assessment in the verification and completion prompts](#61-encode-test-impact-assessment-in-the-verification-and-completion-prompts) | Pending | 2.0 (4×1.0÷2) | Sonnet 5 | Gemini 3.7 Flash | The Continuous Test Governance policy landed in AGENTS.md, two skills, one rule, and `work_next_item`, but not in `verify_change.md` or `ship_check.md` — the two prompts that actually own final verification and completion authority, which is where the policy says the TIA record and full regression gate belong |
 | 62 | [Give the anti-append-only test policy an actual mechanism](#62-give-the-anti-append-only-test-policy-an-actual-mechanism) | Pending | 1.5 (6×1.0÷4) | Sonnet 5 | Gemini 3.7 Flash | "Treat tests as production infrastructure, not an append-only ledger" is prose only: no TIA field in `schemas/evidence-entry.schema.json`, no duplicate-contract detection, no `ship_check` gate. The milestone that introduced the policy shipped a duplicate test itself |
 | 63 | [Resolve the contradictory coverage guidance across skills](#63-resolve-the-contradictory-coverage-guidance-across-skills) | Pending | 3.0 (3×1.0÷1) | Haiku 4.5 | Gemini 3.7 Flash | `test_and_verify/SKILL.md` still mandates "strict project coverage thresholds" while `quality_assurance` was rewritten to treat coverage as signal only; `defensive_debugging` and the `improvements.md` Working Protocol still point at the old stance and at an unconditional `make test` |
@@ -780,74 +779,6 @@ Realize the fundamental Howl North Star:
 - **Skill routing recall gap for security prompts (done 2026-07-18):** all 38 skills declare `triggers` frontmatter; the failing prompt ("security hardening runbook for a FastAPI webhook server") now routes `cyber_security` deterministically. Threshold calibration continues as item 21.
 - **Priority `tier` frontmatter (done 2026-07-18):** every SKILL.md declares `tier:` 0 to 3, parsed by `SkillRouter` and exposed in `skills.json` and the AGENTS.md manifest. See `documentation/skill_refinement_progress.md`. Pipeline pass affinity continues as item 19.
 - **Skill library refinement (done 2026-07-18):** all 38 skills refined against a shared rubric, tiered, and cross deduplicated with Related Skills deferrals; tracked in `documentation/skill_refinement_progress.md`.
-
-### 70. Adopt HowlForge role definitions as the source of role requirements
-
-* **Symptom:** HowlPlane had no durable statement of what a role requires. The statement
-  lived in three places at once, none authoritative: a three-branch `if/elif` in
-  `ProviderPoolManager._required_capabilities`, a code-side default factory on
-  `AgentProfile.roles`, and role-name string literals scattered across `src/`. HowlForge,
-  built to be that statement, was parallel rather than load bearing, so the two systems
-  could disagree about what a role needs with nothing to catch it.
-* **Production evidence** (measured from this repository, 2026-09-22):
-
-  | Evidence | Measurement | Defect class |
-  | --- | --- | --- |
-  | The canonical registry schema could not validate its own artifact | `AgentRegistry.to_dict()` stamps `ai.agent_registry/v1` and emitted 10 forbidden fields under `additionalProperties: false`; 6 of 6 built-in agents failed validation | Verification |
-  | The field gating every selection was absent from that schema | `select_resource` excludes on `ROLE_NOT_SUPPORTED` by exact membership in `profile.roles`; `roles` was not a schema property at all | Verification |
-  | The drift was invisible to the suite | `tests/test_control_plane_schemas.py` validated a hand-written example payload, never the serializer | Verification |
-  | Role identity was literals, not data | 78 role-string literal sites across 16 files; 43 reviewer-role-id sites | Severe usability |
-  | Operators could not declare roles | `ProviderResourceSettings` is `extra="forbid"` with no `roles` field | Severe usability |
-  | The seam for external role definitions was never connected | `AppSettings.roles` read by nothing; `RoleBindingRegistry.load_from_config` called only from tests; `RoleDescriptor` never constructed | Severe usability |
-
-  Deliberately not claimed: the `from_dict` round-trip defect, which would restore
-  `local_ollama`'s narrowed roles to the mutating default. `AgentRegistry.from_dict` has
-  no production caller, so that path is latent rather than live.
-
-* **Admissibility:** admitted under `CONTROL_PLANE.md` §1.1 as a defect fix, not under
-  the §1.1.1 carve-out, which is scoped to persistent operation. The reasoning and the
-  counter-argument are both recorded in
-  `documentation/adr/0007_howlforge_role_definitions.md` so a reviewer can disagree with
-  a visible artifact rather than a silent assumption.
-
-* **Done (2026-09-22):** Landed in two stages so the governance question stays isolated.
-
-  Stage one, `fix(schemas)`, stands alone and needs no §1.1 interpretation: the schema
-  now describes all 10 drifted fields, `roles` is required (an omitted list is silently
-  filled from the default factory, which would widen a deliberately narrowed agent), and
-  three tests validate the serializer rather than a fixture. Verified 6 validation errors
-  against the previous schema, 0 against this one.
-
-  Stage two vendors HowlForge's 11 role definitions and 3 contract schemas into
-  `contracts/howlforge/`, pinned to `c08b888`, following the `contracts/howl/` precedent:
-  no import, no subprocess, no package dependency. `src/control_plane/howlforge_roles.py`
-  loads them and projects declared aptitudes onto HowlPlane capability strings;
-  `_required_capabilities` consults it and falls back to the previous branches whenever no
-  vendored definition covers a role, including when the directory is absent entirely.
-
-  Parity is the headline property: `implementation` and `remediation` still derive
-  `{file_editing, repository_access}`, `review` still derives `{code_review}`, everything
-  else still derives `{code_generation}`. A parametrized test asserts the new derivation
-  equals the old one verbatim across 10 roles and both `allowed_tools` states, with the
-  previous implementation kept in the test file as the oracle.
-
-  Scope deliberately not taken: no delegation of selection, no consumption of HowlForge's
-  runtime preference ordering, no role renaming. HowlForge ids are mapped onto the
-  existing lifecycle roles because `ROLE_NOT_SUPPORTED` matches exactly, so adopting
-  `implementer` as a role name would make every provider ineligible for it.
-
-  One bug was found and fixed during the work. The first derivation tested `coding`
-  before `review`; HowlForge's reviewer role declares coding aptitude, so that ordering
-  handed every reviewer `file_editing` and `repository_access` and would have shrunk the
-  reviewer pool — the independent-review collapse already recorded as `issues.md` #13.
-  Review is tested first and `test_reviewer_never_requires_repository_write` pins it.
-
-  47 new tests in `tests/test_howlforge_roles.py` plus 3 in
-  `tests/test_control_plane_schemas.py`. `test_ai_resource_pool.py`,
-  `test_provider_pool.py` and `test_reviewer_pool_traversal.py` pass unchanged, including
-  `test_reviewer_role_eligibility_is_enforced` and
-  `test_security_reviewer_role_never_local_eligible`, the two tests that would have caught
-  an overreach.
 
 ### 61. Encode Test Impact Assessment in the verification and completion prompts
 The Continuous Test Governance milestone added the TIA to `AGENTS.md`, `.agents/skills/test_and_verify/SKILL.md`, `.agents/skills/quality_assurance/SKILL.md`, `.agents/rules/test_driven_development.md`, and `.agents/prompts/work_next_item.md`. It did not add it to `.agents/prompts/verify_change.md` or `.agents/prompts/ship_check.md`. Those two prompts own "run the project verification plan" and "run final project verification" respectively — the exact points where the policy says the TIA record and the full regression gate belong. `review_change.md` also gained no reviewer directive about obsolete or duplicate test contracts, despite the policy naming that as a review concern. Add the TIA step to `verify_change.md` §2 and `ship_check.md` §2.3, and give `review_change.md`'s `test-falsifier` role an explicit duplicate/obsolete-contract check. Found during the independent review of the milestone, 2026-09-02.

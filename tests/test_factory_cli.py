@@ -8,8 +8,8 @@ import socket
 
 import pytest
 
-from src.control_plane.cli import main
-from src.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
+from howlplane.control_plane.cli import main
+from howlplane.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
 
 
 @pytest.mark.parametrize("json_output", [False, True])
@@ -96,7 +96,7 @@ class FakeSupervisor:
 
 def test_factory_status_creates_default_state(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(
-        "src.control_plane.cli._build_factory_supervisor",
+        "howlplane.control_plane.cli._build_factory_supervisor",
         lambda args, sleep=None: FakeSupervisor(),
     )
     code = main(["factory", "status", "--state-dir", str(tmp_path / "state")])
@@ -120,7 +120,7 @@ def test_factory_stop_and_resume(tmp_path, monkeypatch):
 def test_factory_run_once_invokes_tick(tmp_path, monkeypatch):
     supervisor = FakeSupervisor()
     monkeypatch.setattr(
-        "src.control_plane.cli._build_factory_supervisor",
+        "howlplane.control_plane.cli._build_factory_supervisor",
         lambda args, sleep=None: supervisor,
     )
     code = main(["factory", "run-once", "--state-dir", str(tmp_path / "state"), "--authority", "safe"])
@@ -131,7 +131,7 @@ def test_factory_run_once_invokes_tick(tmp_path, monkeypatch):
 def test_factory_run_invokes_loop(tmp_path, monkeypatch):
     supervisor = FakeSupervisor()
     monkeypatch.setattr(
-        "src.control_plane.cli._build_factory_supervisor",
+        "howlplane.control_plane.cli._build_factory_supervisor",
         lambda args, sleep=None: supervisor,
     )
     code = main(["factory", "run", "--state-dir", str(tmp_path / "state"), "--until", "0.1"])
@@ -142,7 +142,7 @@ def test_factory_run_invokes_loop(tmp_path, monkeypatch):
 def test_build_factory_supervisor_binds_authority_envelope_once(tmp_path):
     from types import SimpleNamespace
 
-    from src.control_plane.cli import _build_factory_supervisor
+    from howlplane.control_plane.cli import _build_factory_supervisor
 
     args = SimpleNamespace(
         state_dir=str(tmp_path / "state"),
@@ -166,8 +166,8 @@ def test_build_factory_supervisor_binds_authority_envelope_once(tmp_path):
 def test_build_factory_supervisor_persists_objective(tmp_path):
     from types import SimpleNamespace
 
-    from src.control_plane.cli import _build_factory_supervisor
-    from src.control_plane.factory.supervisor_state import SupervisorStateStore
+    from howlplane.control_plane.cli import _build_factory_supervisor
+    from howlplane.control_plane.factory.supervisor_state import SupervisorStateStore
 
     args = SimpleNamespace(
         state_dir=str(tmp_path / "state"),
@@ -187,7 +187,7 @@ def test_build_factory_supervisor_self_target_rejects_controller_checkout(tmp_pa
     from pathlib import Path
     from types import SimpleNamespace
 
-    from src.control_plane.cli import _build_factory_supervisor
+    from howlplane.control_plane.cli import _build_factory_supervisor
 
     # The controller checkout is Path.cwd(); pointing target-repo at cwd must fail.
     args = SimpleNamespace(
@@ -218,7 +218,7 @@ def test_factory_start_uses_zero_config_campaign_and_is_idempotent(tmp_path, mon
         calls.append((campaign, authority, objective))
         return len(calls) == 1, SimpleNamespace(backend="process")
 
-    monkeypatch.setattr("src.control_plane.factory.service.start_process", fake_start)
+    monkeypatch.setattr("howlplane.control_plane.factory.service.start_process", fake_start)
     assert main(["factory", "start", "--authority", "safe"]) == 0
     assert main(["factory", "start", "--authority", "safe"]) == 0
     assert len(calls) == 2
@@ -230,8 +230,8 @@ def test_factory_start_uses_zero_config_campaign_and_is_idempotent(tmp_path, mon
 def test_factory_status_prefers_active_campaign_over_stopped_historical(tmp_path, monkeypatch, capsys):
     """Default status must report the active campaign, not an older stopped one."""
     from types import SimpleNamespace
-    from src.control_plane.factory.campaign import resolve_campaign, prepare_campaign, _is_process_active_for_state_dir
-    from src.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
+    from howlplane.control_plane.factory.campaign import resolve_campaign, prepare_campaign, _is_process_active_for_state_dir
+    from howlplane.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
     from tests._factory_test_helpers import make_git_repo, set_xdg_paths
 
     repo = make_git_repo(tmp_path, readme_text="# Active\n")
@@ -282,7 +282,7 @@ def test_factory_status_prefers_active_campaign_over_stopped_historical(tmp_path
 
     def fake_active(state_dir):
         return str(Path(state_dir).resolve()) == str(new_state.resolve())
-    monkeypatch.setattr("src.control_plane.factory.campaign._is_process_active_for_state_dir", fake_active)
+    monkeypatch.setattr("howlplane.control_plane.factory.campaign._is_process_active_for_state_dir", fake_active)
 
     # Default status from the repository should resolve to the new campaign.
     resolved = resolve_campaign(prefer_active=True)
@@ -292,8 +292,8 @@ def test_factory_status_prefers_active_campaign_over_stopped_historical(tmp_path
 
 def test_factory_status_rejects_multiple_active_campaigns(tmp_path, monkeypatch):
     """Multiple active campaigns for the same repo must be reported, not guessed."""
-    from src.control_plane.factory.campaign import resolve_campaign, CampaignError, discover_repository
-    from src.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
+    from howlplane.control_plane.factory.campaign import resolve_campaign, CampaignError, discover_repository
+    from howlplane.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
     from tests._factory_test_helpers import make_git_repo, set_xdg_paths
 
     repo = make_git_repo(tmp_path, readme_text="# Ambiguous\n")
@@ -322,7 +322,7 @@ def test_factory_status_rejects_multiple_active_campaigns(tmp_path, monkeypatch)
         # A freshly-created supervisor record starts as idle.
         store.save(rec)
 
-    monkeypatch.setattr("src.control_plane.factory.campaign._is_process_active_for_state_dir", lambda _s: True)
+    monkeypatch.setattr("howlplane.control_plane.factory.campaign._is_process_active_for_state_dir", lambda _s: True)
     with pytest.raises(CampaignError) as exc:
         resolve_campaign(prefer_active=True)
     assert "Multiple active Factory campaigns" in str(exc.value)
@@ -333,8 +333,8 @@ def test_factory_status_rejects_multiple_active_campaigns(tmp_path, monkeypatch)
 def test_factory_service_unit_name_reflects_explicit_state_dir(tmp_path):
     """A non-default state directory gets its own systemd unit name."""
     from types import SimpleNamespace
-    from src.control_plane.factory.service import _unit_name
-    from src.control_plane.factory.campaign import FactoryCampaign, RepositoryIdentity
+    from howlplane.control_plane.factory.service import _unit_name
+    from howlplane.control_plane.factory.campaign import FactoryCampaign, RepositoryIdentity
 
     repo = RepositoryIdentity(
         root=tmp_path,
@@ -354,7 +354,7 @@ def test_factory_service_unit_name_reflects_explicit_state_dir(tmp_path):
 
 def test_factory_status_explicit_state_dir_wins_without_repository(tmp_path, monkeypatch):
     """--state-dir alone resolves the campaign from saved metadata."""
-    from src.control_plane.factory.campaign import campaign_from_state_dir
+    from howlplane.control_plane.factory.campaign import campaign_from_state_dir
     from tests._factory_test_helpers import make_git_repo
 
     repo = make_git_repo(tmp_path)
@@ -388,7 +388,7 @@ def test_factory_run_once_requires_explicit_noninteractive_authority(tmp_path, m
 
 
 def test_factory_cli_parses_max_work_items_and_canary():
-    from src.control_plane.cli import build_parser
+    from howlplane.control_plane.cli import build_parser
 
     parser = build_parser()
     run_args = parser.parse_args(["factory", "run", "--max-work-items", "5"])

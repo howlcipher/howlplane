@@ -28,7 +28,7 @@ class ContextPruner:
         Returns:
             str: The path to the ChromaDB directory.
         """
-        from src.infrastructure.config_loader import get_chroma_db_path
+        from howlplane.control_plane.config_loader import get_chroma_db_path
 
         return get_chroma_db_path()
 

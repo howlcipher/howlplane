@@ -7,7 +7,7 @@ Unit tests for the generalized Factory target/workspace abstraction.
 import pytest
 import yaml
 
-from src.control_plane.factory.target import (
+from howlplane.control_plane.factory.target import (
     FactoryTarget,
     FactoryTargetMode,
     Workspace,
@@ -98,7 +98,7 @@ def test_factory_target_ecosystem_loads_workspace(tmp_path):
 
 
 def test_campaign_resolution_is_stable_from_subdirectory_and_uses_xdg(tmp_path, monkeypatch):
-    from src.control_plane.factory.campaign import prepare_campaign, resolve_campaign
+    from howlplane.control_plane.factory.campaign import prepare_campaign, resolve_campaign
 
     repo = make_git_repo(tmp_path)
     nested = repo / "nested" / "directory"
@@ -115,7 +115,7 @@ def test_campaign_resolution_is_stable_from_subdirectory_and_uses_xdg(tmp_path, 
 
 
 def test_campaign_worktree_leaves_dirty_user_checkout_untouched(tmp_path, monkeypatch):
-    from src.control_plane.factory.campaign import prepare_campaign, resolve_campaign
+    from howlplane.control_plane.factory.campaign import prepare_campaign, resolve_campaign
 
     repo = make_git_repo(tmp_path)
     (repo / "README.md").write_text("user change\n", encoding="utf-8")
@@ -129,7 +129,7 @@ def test_campaign_worktree_leaves_dirty_user_checkout_untouched(tmp_path, monkey
 
 
 def test_campaign_identity_distinguishes_same_basename_repositories(tmp_path, monkeypatch):
-    from src.control_plane.factory.campaign import resolve_campaign
+    from howlplane.control_plane.factory.campaign import resolve_campaign
 
     first_root = tmp_path / "one"
     second_root = tmp_path / "two"

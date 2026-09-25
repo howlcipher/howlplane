@@ -10,8 +10,9 @@ reports the deselection unless `HOWLPLANE_LIVE_PROVIDERS` is set.
 | Tier | Meaning | Typical use |
 | --- | --- | --- |
 | `unit` | Fast isolated contract with no live boundary | Inner-loop behavior and error paths |
-| `integration` | Real HowlPlane components with Git, providers, or processes faked | Subsystem changes |
-| `acceptance` | In-process governed capability, synthesis, dogfood, or recovery flow | Important end-to-end capability |
+| `contract` | Multi-component or boundary tests executing against hermetic in-process or mock doubles | System contracts and boundary simulation |
+| `integration` | Real multi-component tests invoking genuine external binaries (real HowlFrame, Git, etc.) and environment boundaries | Subsystem changes and sibling toolchain integration |
+| `acceptance` | End-to-end full workflow capability across real system components | Important end-to-end capability |
 | `slow` | Orthogonal measured runtime marker | Explicit local run, full PR gate, nightly |
 | `live` | Intentional real provider, GitHub, or remote-service check | Explicitly enabled nightly or release only |
 
@@ -77,7 +78,7 @@ move.
 | Explain selection | `python scripts/select_relevant_tests.py --from-ref origin/main --dry-run` |
 | Fast normal verification (Python + Go) | `make test-fast` |
 | Fast Python only | `make test-fast-python` |
-| Tier-specific checks | `make test-unit`, `make test-integration`, `make test-acceptance` |
+| Tier-specific checks | `make test-unit`, `make test-contract`, `make test-integration`, `make test-acceptance` |
 | Measured expensive checks | `make test-slow` |
 | Full PR or final gate | `make test-full` |
 | Branch coverage | `make test-coverage` |

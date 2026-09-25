@@ -6,21 +6,21 @@ from pathlib import Path
 from types import SimpleNamespace
 import pytest
 
-from src.control_plane.authority_envelope import (
+from howlplane.control_plane.authority_envelope import (
     ENVELOPE_FILENAME,
     create_envelope,
     load_envelope,
     save_envelope,
 )
-from src.control_plane.authority_profile import get_profile
-from src.control_plane.cli import (
+from howlplane.control_plane.authority_profile import get_profile
+from howlplane.control_plane.cli import (
     _build_factory_supervisor,
     _resolve_factory_campaign,
     _select_factory_authority,
     build_parser,
     cmd_factory_status,
 )
-from src.control_plane.factory.campaign import (
+from howlplane.control_plane.factory.campaign import (
     CampaignError,
     FactoryCampaign,
     _is_process_active_for_state_dir,
@@ -28,8 +28,8 @@ from src.control_plane.factory.campaign import (
     discover_repository,
     resolve_campaign,
 )
-from src.control_plane.factory.service import _command
-from src.control_plane.factory.supervisor_state import SupervisorStateStore
+from howlplane.control_plane.factory.service import _command
+from howlplane.control_plane.factory.supervisor_state import SupervisorStateStore
 from tests._factory_test_helpers import make_git_repo, set_xdg_paths
 
 
@@ -110,7 +110,7 @@ def test_two_genuinely_live_campaigns_raise_ambiguity(tmp_path, monkeypatch):
         _write_campaign_meta(base_state / tag, base_data / tag / "target", rid)
 
     monkeypatch.setattr(
-        "src.control_plane.factory.campaign._is_process_active_for_state_dir",
+        "howlplane.control_plane.factory.campaign._is_process_active_for_state_dir",
         lambda _s: True,
     )
     with pytest.raises(CampaignError, match="Multiple active Factory campaigns"):
@@ -239,8 +239,8 @@ def test_bounded_campaign_restart_preserves_isolated_state(tmp_path):
 
 def test_bounded_work_item_accounting_and_reports_intact(tmp_path):
     """Bounded supervisor properly completes 1 work item and generates reports."""
-    from src.control_plane.factory.dispatcher import DispatchOutcome
-    from src.control_plane.factory.work_item import WorkItemState
+    from howlplane.control_plane.factory.dispatcher import DispatchOutcome
+    from howlplane.control_plane.factory.work_item import WorkItemState
     from tests._factory_test_helpers import (
         RecordingDispatcher,
         make_supervisor,

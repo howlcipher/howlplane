@@ -9,16 +9,16 @@ import json
 from pathlib import Path
 import pytest
 
-from src.control_plane.launcher import _print_orchestration_summary
-from src.control_plane.orchestrator import (
+from howlplane.control_plane.launcher import _print_orchestration_summary
+from howlplane.control_plane.orchestrator import (
     GovernedTaskOrchestrator,
     OrchestrationConfig,
     OrchestrationResult,
     RoutingDecision,
 )
-from src.control_plane.project_adapter import ProjectContext
-from src.control_plane.synthesis.provider_pool import ProviderPoolManager
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.project_adapter import ProjectContext
+from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
+from howlplane.control_plane.task_spec import TaskSpec
 from tests._git_test_helpers import init_git_repo
 
 

@@ -17,10 +17,10 @@ import subprocess
 
 import pytest
 
-from src.control_plane.atomic_io import safe_load_json
-from src.control_plane.git_baseline import capture_baseline, capture_delta
-from src.control_plane.git_env import run_git_in_repo
-from src.control_plane.verification_view import (
+from howlplane.control_plane.atomic_io import safe_load_json
+from howlplane.control_plane.git_baseline import capture_baseline, capture_delta
+from howlplane.control_plane.git_env import run_git_in_repo
+from howlplane.control_plane.verification_view import (
     VerificationViewError,
     build_verification_view,
     destroy_verification_view,

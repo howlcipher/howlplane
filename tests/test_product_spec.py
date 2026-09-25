@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.control_plane.synthesis.product_spec import (
+from howlplane.control_plane.synthesis.product_spec import (
     BehaviorSpec,
     EntitySpec,
     FieldSpec,

@@ -5,20 +5,20 @@ from pathlib import Path
 
 import pytest
 
-from src.control_plane.agent_execution import FakeAgentBackend
-from src.control_plane.atomic_io import safe_load_json
-from src.control_plane.authority_envelope import create_envelope
-from src.control_plane.authority_profile import get_profile
-from src.control_plane.reasoning.artifact_safety import canonical_digest
-from src.control_plane.factory.dispatcher import MarathonDispatcherAdapter
-from src.control_plane.factory.supervisor import FactorySupervisor
-from src.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
-from src.control_plane.factory.work_item import WorkItemState, WorkItemStore
-from src.control_plane.git_integration import GitIntegrationExecutor
-from src.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
-from src.control_plane.reasoning.execution_trajectory import ExecutionTrajectory, TrajectoryStore
-from src.control_plane.synthesis.marathon import MarathonDogfoodEngine
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.agent_execution import FakeAgentBackend
+from howlplane.control_plane.atomic_io import safe_load_json
+from howlplane.control_plane.authority_envelope import create_envelope
+from howlplane.control_plane.authority_profile import get_profile
+from howlplane.control_plane.reasoning.artifact_safety import canonical_digest
+from howlplane.control_plane.factory.dispatcher import MarathonDispatcherAdapter
+from howlplane.control_plane.factory.supervisor import FactorySupervisor
+from howlplane.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
+from howlplane.control_plane.factory.work_item import WorkItemState, WorkItemStore
+from howlplane.control_plane.git_integration import GitIntegrationExecutor
+from howlplane.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
+from howlplane.control_plane.reasoning.execution_trajectory import ExecutionTrajectory, TrajectoryStore
+from howlplane.control_plane.synthesis.marathon import MarathonDogfoodEngine
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderPoolManager,
 )

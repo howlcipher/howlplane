@@ -37,7 +37,7 @@ class GoogleDocsPusher:
         """
         Executes the push operation to Google Docs.
         """
-        from src.infrastructure.config_loader import is_local_only
+        from howlplane.control_plane.config_loader import is_local_only
 
         if is_local_only():
             print(

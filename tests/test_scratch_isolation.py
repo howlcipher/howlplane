@@ -18,13 +18,13 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import pytest
 
-from src.control_plane.atomic_io import safe_load_json
-from src.control_plane.orchestrator import (
+from howlplane.control_plane.atomic_io import safe_load_json
+from howlplane.control_plane.orchestrator import (
     GovernedTaskOrchestrator,
     OrchestrationConfig,
     SCRATCH_MANIFEST_SCHEMA_VERSION,
 )
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.task_spec import TaskSpec
 from tests.test_provider_failover import (
     _FakeBackendResolver,
     _edit_feature_to_true,

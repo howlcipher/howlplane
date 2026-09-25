@@ -18,8 +18,8 @@ import sys
 
 import pytest
 
-from src.control_plane import launcher
-from src.control_plane.git_env import run_git_in_repo
+from howlplane.control_plane import launcher
+from howlplane.control_plane.git_env import run_git_in_repo
 
 MARATHON_ARGV = [
     "marathon",
@@ -120,9 +120,9 @@ def test_marathon_is_invokable_through_the_real_executable(backlog_repo):
     """Guards the launcher entry point itself, not just an in-process call."""
     repo_root = Path(__file__).resolve().parent.parent
     result = subprocess.run(
-        [sys.executable, "-m", "src.control_plane.launcher", "marathon", "--help"],
+        [sys.executable, "-m", "howlplane.control_plane.launcher", "marathon", "--help"],
         cwd=repo_root,
-        env={**os.environ, "PYTHONPATH": str(repo_root)},
+        env={**os.environ, "PYTHONPATH": f"{repo_root / 'src'}:{repo_root}"},
         capture_output=True,
         text=True,
         timeout=120,
@@ -134,7 +134,7 @@ def test_marathon_is_invokable_through_the_real_executable(backlog_repo):
 @pytest.mark.unit
 def test_authority_show_accepts_every_canonical_profile(capsys):
     """`howlframe-overnight` is a valid marathon profile; it must be inspectable."""
-    from src.control_plane.authority_profile import CANONICAL_PROFILES
+    from howlplane.control_plane.authority_profile import CANONICAL_PROFILES
 
     for profile_id in sorted(CANONICAL_PROFILES):
         assert launcher.main(["authority", "show", profile_id]) == 0
@@ -144,7 +144,7 @@ def test_authority_show_accepts_every_canonical_profile(capsys):
 @pytest.mark.unit
 def test_authority_show_choices_track_the_registry():
     """A second hard-coded list is what made howlframe-overnight uninspectable."""
-    from src.control_plane.authority_profile import CANONICAL_PROFILES
+    from howlplane.control_plane.authority_profile import CANONICAL_PROFILES
 
     def subparser_choices(parser):
         return next(
@@ -164,7 +164,7 @@ def test_authority_show_choices_track_the_registry():
 @pytest.mark.unit
 def test_authority_inspection_never_writes_or_invokes_a_provider(monkeypatch, tmp_path):
     """Inspection is read-only; it is what an operator does before granting."""
-    from src.control_plane.synthesis.provider_pool import ProviderPoolManager
+    from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 
     def explode(*args, **kwargs):
         raise AssertionError("authority show must not construct a provider pool")

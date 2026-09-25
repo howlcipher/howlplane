@@ -3,8 +3,8 @@ import os
 
 import pytest
 
-from src.core.skill_router import SkillRouter
-from src.infrastructure.config_loader import default_loader
+from howlplane.control_plane.skill_router import SkillRouter
+from howlplane.control_plane.config_loader import default_loader
 
 REPO_ROOT = default_loader.get_repo_root()
 INDEX_PATH = os.path.join(REPO_ROOT, ".agents", "skills.json")

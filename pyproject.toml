@@ -95,34 +95,27 @@ all = [
 ]
 
 [project.scripts]
-ai = "src.control_plane.launcher:legacy_main"
-howlplane = "src.control_plane.launcher:main"
+ai = "howlplane.control_plane.cli:legacy_main"
+howlplane = "howlplane.control_plane.cli:main"
 
-# Every internal and public import in this codebase is rooted at the
-# literal "src" package (e.g. `from src.control_plane import ...`, and the
-# console_scripts above target `src.control_plane.launcher:main`).
-# setuptools' automatic package discovery does not know that and instead
-# flattens src/control_plane, src/core, etc. into top-level packages with
-# no "src" package at all -- a wheel built without this section installs
-# successfully but its own console scripts fail with
-# "ModuleNotFoundError: No module named 'src'". Pin discovery explicitly
-# to "src" and its submodules so the built wheel matches every import in
-# the codebase.
+# Canonical package is rooted at howlplane (HOWL-CANON-004).
+# Installs into site-packages as howlplane and howlplane.control_plane.
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["src", "src.*"]
+where = ["src"]
+include = ["howlplane", "howlplane.*"]
 
 [tool.setuptools.package-data]
-"src.control_plane.reasoning" = ["builtin_strategies.yaml"]
+"howlplane.control_plane.reasoning" = ["builtin_strategies.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "src"]
 addopts = "--strict-markers"
 markers = [
     "unit: fast, isolated behavioral coverage with no real external boundary",
-    "integration: multiple HowlPlane components with external boundaries faked",
-    "acceptance: end-to-end in-process capability or governed-flow coverage",
+    "contract: multi-component or boundary tests executing against hermetic in-process or mock doubles",
+    "integration: real multi-component tests invoking genuine external binaries and environment boundaries",
+    "acceptance: end-to-end full workflow capability across real system components",
     "slow: measured as unsuitable for the rapid inner development loop",
     "live: intentionally contacts a real external provider or service; explicitly gated",
 ]

@@ -21,22 +21,22 @@ import pytest
 import time
 from typing import Dict, List, Tuple
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     AgentBackend,
     AgentBackendRegistry,
     AgentExecutionResult,
     FakeAgentBackend,
 )
-from src.control_plane.evidence_ledger import EvidenceLedger
-from src.control_plane.synthesis.campaign_state import DurableCampaignState, GitIntegrationRecord
-from src.control_plane.synthesis.capability_negotiator import CapabilityNegotiator, FrameworkGap
-from src.control_plane.synthesis.engine import ProductSynthesizer, SynthesisResult
-from src.control_plane.synthesis.marathon import (
+from howlplane.control_plane.evidence_ledger import EvidenceLedger
+from howlplane.control_plane.synthesis.campaign_state import DurableCampaignState, GitIntegrationRecord
+from howlplane.control_plane.synthesis.capability_negotiator import CapabilityNegotiator, FrameworkGap
+from howlplane.control_plane.synthesis.engine import ProductSynthesizer, SynthesisResult
+from howlplane.control_plane.synthesis.marathon import (
     DogfoodIterationResult,
     MarathonDogfoodEngine,
     STANDARD_BENCHMARKS,
 )
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderExhaustionEvent,
     ProviderPoolManager,
@@ -55,10 +55,10 @@ def _seed_valid_howl_files(task, cwd: Path, prompt: str):
     """Side effect for fake backends to seed a working HowlFrame application matching spec."""
     spec_path = cwd / "product_spec.yaml"
     if spec_path.is_file():
-        from src.control_plane.synthesis.product_spec import ProductSpec
+        from howlplane.control_plane.synthesis.product_spec import ProductSpec
         spec = ProductSpec.load_from_file(spec_path)
     else:
-        from src.control_plane.synthesis.spec_synthesizer import NaturalLanguageSynthesizer
+        from howlplane.control_plane.synthesis.spec_synthesizer import NaturalLanguageSynthesizer
         spec = NaturalLanguageSynthesizer().synthesize(prompt or "Create an app")
     ProductSynthesizer()._synthesize_product_files(cwd, spec)
 
@@ -300,7 +300,7 @@ def test_scenario_9_closed_loop_self_improvement_flywheel(tmp_path: Path):
                     current_support="in-memory only",
                     suggested_enhancement="add store sync opcode",
                 )
-                from src.control_plane.synthesis.product_spec import ProductSpec
+                from howlplane.control_plane.synthesis.product_spec import ProductSpec
                 mock_spec = ProductSpec(name="flywheel_app", title="Flywheel App", description="Flywheel test")
                 return SynthesisResult(
                     product_name="flywheel_app",
@@ -313,7 +313,7 @@ def test_scenario_9_closed_loop_self_improvement_flywheel(tmp_path: Path):
             else:
                 # Succeeded on retry after fix!
                 _seed_valid_howl_files(None, out_path, prompt)
-                from src.control_plane.synthesis.product_spec import ProductSpec
+                from howlplane.control_plane.synthesis.product_spec import ProductSpec
                 mock_spec = ProductSpec(name="flywheel_app", title="Flywheel App", description="Flywheel test")
                 report = self.acceptance_runner.run_acceptance_suite(out_path, mock_spec)
                 bundle = self._package_product_bundle(out_path, mock_spec, report)

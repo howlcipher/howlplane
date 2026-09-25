@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from src.control_plane.agent_execution import (
+from howlplane.control_plane.agent_execution import (
     AgentExecutionResult,
     BackendReadiness,
     FakeAgentBackend,
 )
-from src.control_plane.agent_registry import AgentProfile, AgentRegistry
-from src.control_plane.resource_models import (
+from howlplane.control_plane.agent_registry import AgentProfile, AgentRegistry
+from howlplane.control_plane.resource_models import (
     AuthenticationStatus,
     EconomicClass,
     ProviderFailureClass,
@@ -22,33 +22,33 @@ from src.control_plane.resource_models import (
     ResourceLocality,
     ResourceSelectionStatus,
 )
-from src.control_plane.orchestrator import (
+from howlplane.control_plane.orchestrator import (
     FAILURE_CLASS_NO_ELIGIBLE_RESOURCE,
     GovernedTaskOrchestrator,
     OrchestrationConfig,
     OrchestrationResult,
 )
-from src.control_plane import launcher
-from src.control_plane.resource_cli import (
+from howlplane.control_plane import launcher
+from howlplane.control_plane.resource_cli import (
     inventory_document,
     render_inventory,
     render_route,
     resource_diagnostic_rows,
 )
-from src.control_plane.reasoning.execution_trajectory import (
+from howlplane.control_plane.reasoning.execution_trajectory import (
     EXECUTION_TRAJECTORY_SCHEMA_VERSION,
     EXECUTION_TRAJECTORY_SCHEMA_VERSION_V1,
     ExecutionTrajectory,
     ExecutionTrajectoryBuilder,
 )
-from src.control_plane.router import TaskRouter
-from src.control_plane.synthesis.provider_pool import (
+from howlplane.control_plane.router import TaskRouter
+from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderConfigurationError,
     ProviderPoolManager,
 )
-from src.control_plane.task_spec import TaskSpec
-from src.infrastructure.config_loader import (
+from howlplane.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.config_loader import (
     AppSettings,
     ProviderPolicySettings,
     ProviderResourceSettings,

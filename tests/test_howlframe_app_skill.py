@@ -14,11 +14,11 @@ import json
 from pathlib import Path
 import yaml
 
-from src.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
-from src.control_plane.project_adapter import ProjectAdapter
-from src.control_plane.review_runner import ReviewRunner
-from src.control_plane.reviewers import get_reviewer_role
-from src.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
+from howlplane.control_plane.project_adapter import ProjectAdapter
+from howlplane.control_plane.review_runner import ReviewRunner
+from howlplane.control_plane.reviewers import get_reviewer_role
+from howlplane.control_plane.task_spec import TaskSpec
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

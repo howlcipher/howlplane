@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from src.control_plane.factory.supervisor_state import SupervisorStateStore
+from howlplane.control_plane.factory.supervisor_state import SupervisorStateStore
 from tests._factory_test_helpers import make_supervisor
 
 
@@ -85,8 +85,8 @@ def test_real_idle_process_sigterm_releases_lock_and_can_resume(tmp_path):
     repo.mkdir()
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     state = tmp_path / "state"
-    command = [sys.executable, "-m", "src.control_plane.cli", "factory"]
-    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+    command = [sys.executable, "-m", "howlplane.control_plane.cli", "factory"]
+    env = {**os.environ, "PYTHONPATH": f"{Path(__file__).resolve().parents[1] / 'src'}:{Path(__file__).resolve().parents[1]}"}
     store = SupervisorStateStore(state / "supervisor")
 
     def run_and_stop(resume=False):
@@ -104,7 +104,7 @@ def test_real_idle_process_sigterm_releases_lock_and_can_resume(tmp_path):
                     pytest.fail("Factory did not finish its idle tick")
                 time.sleep(0.05)
             # Also ensure a resumed process acquired the lock before signalling.
-            from src.control_plane.locking import get_supervisor_lock_path
+            from howlplane.control_plane.locking import get_supervisor_lock_path
             while not get_supervisor_lock_path(state).exists():
                 if time.monotonic() >= deadline:
                     pytest.fail("Factory did not acquire its supervisor lock")

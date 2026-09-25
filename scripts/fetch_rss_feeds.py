@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 
-from src.infrastructure.config_loader import ConfigLoader
+from howlplane.control_plane.config_loader import ConfigLoader
 
 
 class RSSFeedFetcher:

@@ -162,85 +162,61 @@ def test_schema_valid_and_invalid_payloads(schema_file, valid_payload, invalid_p
         validate(instance=invalid_payload, schema=schema)
 
 
-def test_agent_registry_serialization_conforms_to_its_own_schema():
-    """The registry's real output must validate against the schema it stamps.
+def test_agent_registry_serialization_conforms_to_its_schema():
+    """The registry's actual emitted document validates against its schema."""
+    from howlplane.control_plane.agent_registry import AgentRegistry
 
-    The example payload above is hand written, so it conformed by construction and
-    could never catch drift in the serializer. `AgentRegistry.to_dict()` stamps
-    `ai.agent_registry/v1` while emitting fields the schema forbade under
-    `additionalProperties: false` -- `roles` among them, which is the field
-    `ProviderPoolManager.select_resource` gates every candidate on via
-    `ROLE_NOT_SUPPORTED`. A schema that rejects its own artifact proves nothing
-    about it, so this test validates the serializer, not a fixture.
-    """
-    from src.control_plane.agent_registry import AgentRegistry
-
-    schema_path = SCHEMA_DIR / "agent-registry.schema.json"
-    with open(schema_path, "r", encoding="utf-8") as f:
-        schema_json = json.load(f)
-
+    schema = json.loads((SCHEMA_DIR / "agent-registry.schema.json").read_text(encoding="utf-8"))
     document = AgentRegistry().to_dict()
     errors = sorted(
-        Draft202012Validator(schema_json).iter_errors(document),
-        key=lambda err: list(err.path),
+        Draft202012Validator(schema).iter_errors(document),
+        key=lambda error: list(error.path),
     )
-    assert not errors, "registry output violates ai.agent_registry/v1: " + "; ".join(
-        f"{list(e.path)}: {e.message}" for e in errors
+    assert not errors, "; ".join(
+        f"{list(error.path)}: {error.message}" for error in errors
     )
-    assert document["agents"], "registry serialized no agents, so conformance proves nothing"
+    assert document["agents"]
 
 
 def test_agent_registry_schema_covers_every_serialized_field():
-    """No field may be emitted that the schema does not describe.
+    from howlplane.control_plane.agent_registry import AgentRegistry
 
-    `additionalProperties: false` already makes an undescribed field a validation
-    error, but this asserts the same property directly so the failure message names
-    the drifted fields instead of pointing at one agent entry.
-    """
-    from src.control_plane.agent_registry import AgentRegistry
+    schema = json.loads((SCHEMA_DIR / "agent-registry.schema.json").read_text(encoding="utf-8"))
+    described = set(schema["properties"]["agents"]["items"]["properties"])
+    emitted = {
+        field
+        for agent in AgentRegistry().to_dict()["agents"]
+        for field in agent
+    }
+    assert not emitted - described, f"serialized fields missing from schema: {sorted(emitted - described)}"
 
-    schema_path = SCHEMA_DIR / "agent-registry.schema.json"
-    with open(schema_path, "r", encoding="utf-8") as f:
-        schema_json = json.load(f)
 
-    described = set(schema_json["properties"]["agents"]["items"]["properties"])
-    emitted = set()
-    for agent in AgentRegistry().to_dict()["agents"]:
-        emitted |= set(agent)
+def test_builtin_local_agent_keeps_restricted_roles():
+    from howlplane.control_plane.agent_registry import AgentRegistry
 
-    undescribed = sorted(emitted - described)
-    assert not undescribed, f"serialized fields missing from the schema: {undescribed}"
+    local_agent = AgentRegistry().get_agent("local_ollama")
+
+    assert local_agent is not None
+    assert local_agent.roles == ["planning", "review", "synthesis"]
 
 
 def test_agent_registry_schema_requires_roles():
-    """`roles` must be required, not optional.
+    schema = json.loads((SCHEMA_DIR / "agent-registry.schema.json").read_text(encoding="utf-8"))
+    item_schema = schema["properties"]["agents"]["items"]
+    assert "roles" in item_schema["required"]
 
-    An agent document that omits `roles` is silently filled from the code side
-    default factory in `AgentProfile`, which would widen a deliberately narrowed
-    agent -- `local_ollama` is restricted to planning, review and synthesis
-    specifically so it is never selected for mutating work.
-    """
-    schema_path = SCHEMA_DIR / "agent-registry.schema.json"
-    with open(schema_path, "r", encoding="utf-8") as f:
-        schema_json = json.load(f)
-
-    item = schema_json["properties"]["agents"]["items"]
-    assert "roles" in item["required"]
-
-    without_roles = {
+    payload_without_roles = {
         "schema": "ai.agent_registry/v1",
-        "agents": [
-            {
-                "agent_id": "a",
-                "name": "A",
-                "provider": "p",
-                "interface": "cli",
-                "capabilities": ["code_generation"],
-                "reasoning_tier": "tier_1",
-                "cost_class": "subscription_included",
-                "availability": "available",
-            }
-        ],
+        "agents": [{
+            "agent_id": "local",
+            "name": "Local",
+            "provider": "local",
+            "interface": "api",
+            "capabilities": ["code_generation"],
+            "reasoning_tier": "tier_3",
+            "cost_class": "free_local",
+            "availability": "available",
+        }],
     }
     with pytest.raises(ValidationError):
-        validate(instance=without_roles, schema=schema_json)
+        validate(instance=payload_without_roles, schema=schema)

@@ -41,7 +41,9 @@ venv/
 .coverage
 coverage.out
 
-# Go binaries and builds (root anchored so cmd/installer sources stay addable)
+# Go binaries and builds
+/howlplane
+/howlplane.exe
 /ai_installer
 /ai_installer.exe
 /installer

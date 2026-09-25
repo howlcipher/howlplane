@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
-from src.control_plane.authority_profile import (
+from howlplane.control_plane.authority_profile import (
     CANONICAL_PROFILES,
     HOWLFRAME_OVERNIGHT_PROFILE,
     OVERNIGHT_SAFE_ALLOWED_ACTIONS,
@@ -34,7 +34,7 @@ from src.control_plane.authority_profile import (
     STRICT_PROFILE,
     get_profile,
 )
-from src.control_plane.backlog_source import (
+from howlplane.control_plane.backlog_source import (
     BacklogParseError,
     BacklogSource,
     parse_backlog_file,
@@ -223,7 +223,7 @@ def _engine(repo: Path, campaign_dir: Path, pool=None, outcomes=None):
     orchestrator's own suites; these tests are about the loop around it --
     what it selects, when it stops, and what it records.
     """
-    from src.control_plane.synthesis.marathon import MarathonDogfoodEngine
+    from howlplane.control_plane.synthesis.marathon import MarathonDogfoodEngine
 
     engine = MarathonDogfoodEngine(
         provider_pool=pool or _StubPool(),

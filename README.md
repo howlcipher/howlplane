@@ -316,27 +316,6 @@ HowlPlane (AI Engineering Control Plane)
 - **Why HowlPlane dogfoods HowlFrame:** Smaller applications prove individual language features; HowlChangeOps proves governed consequential change execution; HowlPlane provides high-frequency real AI engineering workloads that pressure generated structured programs, capability boundaries, malformed AI output, instruction budgets, partial failures, result normalization, and structured evidence.
 - **Independence:** HowlPlane remains completely usable without HowlFrame. HowlFrame is an optional runtime dependency for selected bounded tasks.
 
-## HowlForge Architectural Relationship & Role Definitions
-
-HowlPlane reads its role capability requirements from [HowlForge](https://github.com/howlcipher/howlforge), the workforce definition layer for HowlFutureWorks.
-
-```text
-HowlForge role definitions (what a role requires)
-      |
-      v
-HowlPlane provider pool (who is available, and what it costs)
-      |
-      v
-selected resource
-```
-
-- **What HowlForge is:** the durable statement of which roles exist and what capabilities each one requires, independent of which model fills it. Roles are durable, models are replaceable, sessions are disposable.
-- **What HowlPlane takes:** role capability requirements only. The definitions are vendored under `contracts/howlforge/`, pinned to an exact commit, exactly as `contracts/howl/` vendors HowlDream's contract.
-- **What HowlPlane does not take:** HowlForge's runtime preference ordering. `select_resource` ranks on live capacity, economics and egress policy, none of which HowlForge models, and a static preference list must not override them.
-- **Independence:** HowlPlane remains completely usable without HowlForge. Nothing imports or executes it; there is no Go toolchain, binary, subprocess or network call. If `contracts/howlforge/` is absent, capability derivation falls back to the previous behavior unchanged, and that fallback is pinned by test.
-
-See `documentation/adr/0007_howlforge_role_definitions.md` and `contracts/howlforge/SOURCE.md`.
-
 ---
 
 ## Knowledge & Skills Layer Subsystem
