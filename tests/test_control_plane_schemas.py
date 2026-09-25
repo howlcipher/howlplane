@@ -62,6 +62,7 @@ def test_control_plane_schema_is_valid_draft_2020_12(schema_name):
                         "reasoning_tier": "tier_1",
                         "cost_class": "subscription_included",
                         "availability": "available",
+                        "roles": ["planning", "implementation", "remediation", "review"],
                     }
                 ],
             },
@@ -159,3 +160,63 @@ def test_schema_valid_and_invalid_payloads(schema_file, valid_payload, invalid_p
     validate(instance=valid_payload, schema=schema)
     with pytest.raises(ValidationError):
         validate(instance=invalid_payload, schema=schema)
+
+
+def test_agent_registry_serialization_conforms_to_its_schema():
+    """The registry's actual emitted document validates against its schema."""
+    from howlplane.control_plane.agent_registry import AgentRegistry
+
+    schema = json.loads((SCHEMA_DIR / "agent-registry.schema.json").read_text(encoding="utf-8"))
+    document = AgentRegistry().to_dict()
+    errors = sorted(
+        Draft202012Validator(schema).iter_errors(document),
+        key=lambda error: list(error.path),
+    )
+    assert not errors, "; ".join(
+        f"{list(error.path)}: {error.message}" for error in errors
+    )
+    assert document["agents"]
+
+
+def test_agent_registry_schema_covers_every_serialized_field():
+    from howlplane.control_plane.agent_registry import AgentRegistry
+
+    schema = json.loads((SCHEMA_DIR / "agent-registry.schema.json").read_text(encoding="utf-8"))
+    described = set(schema["properties"]["agents"]["items"]["properties"])
+    emitted = {
+        field
+        for agent in AgentRegistry().to_dict()["agents"]
+        for field in agent
+    }
+    assert not emitted - described, f"serialized fields missing from schema: {sorted(emitted - described)}"
+
+
+def test_builtin_local_agent_keeps_restricted_roles():
+    from howlplane.control_plane.agent_registry import AgentRegistry
+
+    local_agent = AgentRegistry().get_agent("local_ollama")
+
+    assert local_agent is not None
+    assert local_agent.roles == ["planning", "review", "synthesis"]
+
+
+def test_agent_registry_schema_requires_roles():
+    schema = json.loads((SCHEMA_DIR / "agent-registry.schema.json").read_text(encoding="utf-8"))
+    item_schema = schema["properties"]["agents"]["items"]
+    assert "roles" in item_schema["required"]
+
+    payload_without_roles = {
+        "schema": "ai.agent_registry/v1",
+        "agents": [{
+            "agent_id": "local",
+            "name": "Local",
+            "provider": "local",
+            "interface": "api",
+            "capabilities": ["code_generation"],
+            "reasoning_tier": "tier_3",
+            "cost_class": "free_local",
+            "availability": "available",
+        }],
+    }
+    with pytest.raises(ValidationError):
+        validate(instance=payload_without_roles, schema=schema)
