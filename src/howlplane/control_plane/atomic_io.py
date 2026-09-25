@@ -110,3 +110,32 @@ def safe_load_json(file_path: Union[str, Path]) -> Dict[str, Any]:
 def safe_load_yaml(file_path: Union[str, Path]) -> Dict[str, Any]:
     """Safely loads and validates YAML artifact, failing closed on corruption."""
     return _safe_parse(file_path, yaml.safe_load, "YAML")
+
+
+def private_state_path(override_env: str, name: str) -> Path:
+    """`$<override_env>` if absolute, else `$XDG_STATE_HOME/howlplane/<name>` (default ~/.local/state)."""
+    override = os.environ.get(override_env)
+    if override and Path(override).is_absolute():
+        return Path(override)
+    base = os.environ.get("XDG_STATE_HOME")
+    if not base or not Path(base).is_absolute():
+        base = str(Path.home() / ".local" / "state")
+    return Path(base) / "howlplane" / name
+
+
+def load_schema_section(path: Path, schema: str, key: str) -> Dict[str, Any]:
+    """The `key` mapping of a JSON document with this `schema`, or {} when absent, foreign, or unreadable."""
+    try:
+        document = safe_load_json(path) if path.exists() else {}
+    except Exception:
+        return {}
+    if not isinstance(document, dict) or document.get("schema") != schema or not isinstance(document.get(key), dict):
+        return {}
+    return document[key]
+
+
+def write_private_json(path: Path, data: Any) -> None:
+    """Atomic JSON write readable only by the owner (directory 0700, file 0600)."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    atomic_write_json(path, data)
+    os.chmod(path, 0o600)

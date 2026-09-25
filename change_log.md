@@ -14,8 +14,28 @@ All notable changes to this project will be documented in this file.
   --preflight {off,warn,require}`.
 - `howlplane orchestrate --execution-budget ROLE=SECONDS` (default 300, max
   1800) and `resume --retry-timeouts`.
+- Workspace trust as a first-class, per-directory readiness fact.
+  `howlplane agents doctor --repo PATH [--live]` reports global and workspace
+  readiness separately. `howlplane factory prepare --repo PATH` is the
+  operator's explicit authorization. It records the scope (checkout plus one
+  stable Factory workspace root per repository), creates the Factory worktree,
+  and prepares trust only through supported mechanisms: Cursor's documented
+  `--trust` flag (stopped before inference), or Devin's own prompt answered by
+  the operator. `--revoke` removes only HowlPlane's record. See
+  `documentation/WORKSPACE_TRUST.md`.
+- Cursor (`cursor`, executable `agent`) is a built-in provider pool resource,
+  ordered last among hosted agents.
 
 ### Fixed
+
+- A trust refusal is now `WORKSPACE_TRUST_REQUIRED`, positively identified per
+  CLI, instead of a permission failure. It bars the agent from that workspace
+  only (checkpoint and reroute, no session-wide capability loss, no capacity
+  change). Factory preflight and routing skip agents that would meet a trust
+  prompt in the Factory worktree, and bounded canaries now live under the same
+  per-repository root. Agent CLIs always run with stdin closed.
+- `local_only` is consistent: orchestration no longer dispatches hosted agent
+  CLIs or lists their models in that mode, matching the doctor and provider pool.
 
 - Orchestration no longer treats `EXECUTION_BUDGET_EXCEEDED` as capacity
   exhaustion. HowlPlane's own assignment deadline expiring now marks only that

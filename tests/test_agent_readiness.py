@@ -87,6 +87,9 @@ def install(tmp_path, monkeypatch, agents=AGENTS, smoke="pass", overrides=None):
     monkeypatch.setenv("PATH", f"{bin_dir}:/usr/bin:/bin")
     monkeypatch.setenv("FAKE_LOG", str(log))
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    # Factory commands resolve their campaign worktree; keep it under this test.
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setattr(readiness, "hosted_probes_allowed", lambda: True)
     for agent in agents:
         branches = dict(LEVEL1[agent])
@@ -444,7 +447,8 @@ def test_untrusted_smoke_workspace_is_not_agent_wide_interactive_only(tmp_path, 
     install(tmp_path, monkeypatch, agents=[agent], smoke="untrusted")
     summary = by_agent(readiness.evaluate([agent], live=True, smoke_timeout=10))[agent]
     assert summary["live_smoke"]["status"] == "WORKSPACE_TRUST_REQUIRED"
-    assert summary["live_smoke"]["failure_class"] == "EXECUTION_PERMISSION_REQUIRED"
+    # Its own failure class: never a permission or engineering failure.
+    assert summary["live_smoke"]["failure_class"] == "WORKSPACE_TRUST_REQUIRED"
     assert "untrusted workspace" in summary["live_smoke"]["error"].lower() or "trust" in summary["live_smoke"]["error"].lower()
     assert summary["unattended_execution"] is None, "a directory's trust state must not mark the agent interactive-only"
     assert "workspace trust required" in readiness.render([summary])

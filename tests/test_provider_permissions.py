@@ -240,10 +240,11 @@ def test_readiness_distinct_from_mutation_capability():
 
 
 def test_provider_ordering_unchanged():
+    # Cursor was added as the last hosted choice; the established order is untouched.
     routine = TASK_SUITABILITY_PREFERENCES.get("routine", [])
-    assert routine == ["agy", "codex", "devin_cli", "claude_code", "local_ollama"]
+    assert routine == ["agy", "codex", "devin_cli", "claude_code", "cursor", "local_ollama"]
     code_heavy = TASK_SUITABILITY_PREFERENCES.get("code_heavy", [])
-    assert code_heavy == ["codex", "agy", "devin_cli", "claude_code", "local_ollama"]
+    assert code_heavy == ["codex", "agy", "devin_cli", "claude_code", "cursor", "local_ollama"]
 
 
 # --- Formatter authorization (HOWLFRAM-SLOPFIX-07) ---------------------------

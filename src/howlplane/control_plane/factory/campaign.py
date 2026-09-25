@@ -39,6 +39,16 @@ def factory_state_home() -> Path:
     return _xdg_path("XDG_STATE_HOME", Path.home() / ".local" / "state") / "howlplane" / "factory"
 
 
+def factory_workspace_root(repository: "RepositoryIdentity") -> Path:
+    """The one stable directory under which every Factory worktree of a repository lives.
+
+    Keeping the canonical target and every bounded canary below it lets an
+    operator authorize (and CLIs inherit trust for) the repository's Factory
+    workspaces once, instead of meeting a never-seen path on every run.
+    """
+    return factory_data_home() / "worktrees" / repository.campaign_id
+
+
 def _run_git(repo: Path, args: list[str]) -> str:
     try:
         result = subprocess.run(
@@ -154,14 +164,14 @@ def resolve_campaign(
         raw_target = (
             Path(target_repo).expanduser()
             if target_repo
-            else factory_data_home() / "worktrees" / canary_id / "target"
+            else factory_workspace_root(repository) / "canaries" / canary_id / "target"
         )
     else:
         raw_state = Path(state_dir).expanduser() if state_dir else factory_state_home() / repository.campaign_id
         if target_repo:
             raw_target = Path(target_repo).expanduser()
         else:
-            raw_target = factory_data_home() / "worktrees" / repository.campaign_id / "target"
+            raw_target = factory_workspace_root(repository) / "target"
             metadata = _metadata_for_state_dir(raw_state)
             if metadata and metadata.get("target_repo"):
                 raw_target = Path(metadata["target_repo"]).expanduser()

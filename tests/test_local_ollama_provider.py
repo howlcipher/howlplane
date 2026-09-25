@@ -475,7 +475,7 @@ class _AlwaysAvailableLocalBackend(OllamaLocalBackend):
 
 def _cloud_exhausted_local_available_pool() -> ProviderPoolManager:
     pool = ProviderPoolManager()
-    for p in ["codex", "agy", "devin_cli", "claude_code", "gemini_cli"]:
+    for p in ["codex", "agy", "devin_cli", "claude_code", "gemini_cli", "cursor"]:
         pool.set_status(p, ProviderAvailabilityStatus.SESSION_EXHAUSTED)
     pool.set_status("local_ollama", ProviderAvailabilityStatus.AVAILABLE)
     return pool

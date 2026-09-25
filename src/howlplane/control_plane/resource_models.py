@@ -82,6 +82,10 @@ class ProviderFailureClass(str, Enum):
     # This is distinct from the absolute execution budget: it is evidence that
     # this invocation is unusable, not evidence that the provider is offline.
     PROVIDER_STALLED = "PROVIDER_STALLED"
+    # The CLI refused this directory because it is not a trusted workspace. A
+    # fact about one folder, not the agent: it stays eligible elsewhere, and
+    # trust must be prepared (never auto-approved) before it can work here.
+    WORKSPACE_TRUST_REQUIRED = "WORKSPACE_TRUST_REQUIRED"
     UNKNOWN = "UNKNOWN"
 
 

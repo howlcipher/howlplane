@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, TextIO
 
-from howlplane.control_plane import agent_readiness
+from howlplane.control_plane import agent_readiness, workspace_trust
 from howlplane.control_plane.agent_execution import AgentBackendRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
 from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
@@ -44,6 +44,10 @@ CAPACITY_FAILURES = {"SESSION_LIMIT"}
 # provider's allowance: only this exact assignment is barred from running again
 # unchanged, and the agent stays eligible for other models, roles, and tasks.
 ATTEMPT_TIMEOUT_FAILURES = {"EXECUTION_BUDGET_EXCEEDED"}
+# The CLI refused this session's directory as untrusted. That bars the agent
+# from this workspace only: no role capacity, no session-wide capability loss,
+# and no readiness penalty for other directories.
+WORKSPACE_TRUST_FAILURES = {"WORKSPACE_TRUST_REQUIRED"}
 DEFAULT_EXECUTION_BUDGET_SECONDS = 300
 MAX_EXECUTION_BUDGET_SECONDS = 1800
 # Every session before v3 dispatched with a hardcoded 300s deadline.
@@ -345,14 +349,23 @@ def discover_models(agent: str) -> list[str]:
         return []
 
 
-def inventory(availability: dict[str, str]) -> dict[str, dict[str, Any]]:
-    """Session start inventory. Cached readiness evidence informs it; nothing here sends a prompt."""
+def inventory(availability: dict[str, str], repo: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Session start inventory. Cached readiness evidence informs it; nothing here sends a prompt.
+
+    `local_only` forbids hosted egress, and every agent here is a hosted CLI, so
+    none is dispatchable in that mode -- the same verdict the doctor and the
+    provider pool give. With a repository, each agent also carries its vendor
+    trust state for that workspace, read from local files only.
+    """
     readiness = agent_readiness.cached_summaries()
+    hosted = agent_readiness.hosted_probes_allowed()
     found = {}
     for agent in AGENTS:
         installed = shutil.which(BINARIES[agent]) is not None
         requested = availability.get(agent, "AUTO").upper()
         state = "RESERVED" if requested == "RESERVED" else "AVAILABLE" if installed and requested != "UNAVAILABLE" else "UNAVAILABLE"
+        if state == "AVAILABLE" and not hosted:
+            state = "UNAVAILABLE"
         evidence = readiness.get(agent)
         capabilities = unknown_capabilities("CLI metadata does not confirm unattended execution")
         if evidence and evidence["unattended_execution"] is not None:
@@ -370,11 +383,17 @@ def inventory(availability: dict[str, str]) -> dict[str, dict[str, Any]]:
             "installed": installed,
             "callable": installed,
             "state": state,
-            "models": discover_models(agent) if installed and requested != "RESERVED" else [],
+            "models": discover_models(agent) if installed and hosted and requested != "RESERVED" else [],
             "capabilities": capabilities,
             "capacity": {},
             "readiness": readiness_digest(evidence),
         }
+        if not hosted and installed:
+            found[agent]["unavailable_reason"] = agent_readiness.LOCAL_ONLY_DETAIL
+        if repo is not None and installed:
+            trust = workspace_trust.check(agent, repo)
+            found[agent]["workspace_trust"] = {key: trust.get(key) for key in (
+                "state", "workspace", "scope", "covering_path", "detail", "source", "checked_at")}
     return found
 
 
@@ -525,6 +544,10 @@ def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failu
     if failure in ATTEMPT_TIMEOUT_FAILURES:
         # Attempt evidence only; `record_timeout` bars the identical retry.
         return None
+    if failure in WORKSPACE_TRUST_FAILURES:
+        state["workspace_trust"] = {"state": workspace_trust.TRUST_REQUIRED, "workspace": doc.get("repository"),
+                                    "role": role, "source": "orchestrate session", "detected_at": at or now()}
+        return None
     if failure == "EXECUTION_PERMISSION_REQUIRED":
         record_capability_failure(doc, agent, failure, at)
     if failure in UNAVAILABLE_FAILURES:
@@ -603,10 +626,32 @@ def timed_out(doc: dict[str, Any], role: str, agent: str, model: str) -> bool:
     return any(item.get("signature") == signature for item in doc.get("timed_out_assignments", []))
 
 
+def workspace_trust_block(doc: dict[str, Any], agent: str) -> str | None:
+    """Why this session's workspace refuses the agent, or None. Scoped to the workspace, never the agent."""
+    record = agent_record(doc, agent)
+    trust = record.get("workspace_trust") or {}
+    if trust.get("state") != workspace_trust.TRUST_REQUIRED:
+        return None
+    if trust.get("source") == "vendor trust store" and trust.get("workspace"):
+        # A pre-dispatch verdict from local files: an operator may have prepared
+        # the workspace since (for example, before `resume`). A refusal the CLI
+        # itself returned this session stays binding: no retry in this folder.
+        current = workspace_trust.check(agent, trust["workspace"])
+        if current["state"] == workspace_trust.READY:
+            record["workspace_trust"] = {**trust, "state": current["state"], "covering_path": current["covering_path"],
+                                         "checked_at": current["checked_at"]}
+            return None
+    return f"workspace trust required for {trust.get('workspace') or doc.get('repository')} (run howlplane factory prepare)"
+
+
 def capability_skip_reason(doc: dict[str, Any], agent: str, role: str) -> str | None:
     state = agent_record(doc, agent)
     if state["state"] == "RESERVED":
         return "reserved"
+    trust_block = workspace_trust_block(doc, agent)
+    if trust_block:
+        # An explicit orchestrator choice cannot answer a vendor trust prompt.
+        return trust_block
     # A role hard failure outranks an explicit orchestrator choice: selecting an
     # agent is not consent to burn another call on capacity it just exhausted.
     if role in state["capacity"]:
@@ -752,11 +797,15 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     budget = {**default_execution_budget(), **parse_execution_budget(getattr(args, "execution_budget", None))}
     snapshot = evidence(repo)
     token = uuid.uuid4().hex
-    agents = inventory(availability)
+    agents = inventory(availability, Path(snapshot["root"]))
     model_states = {f"{agent}:{limit.rsplit(':', 1)[0]}": "EXHAUSTED"
                     for agent, record in agents.items() for limit in record["readiness"]["model_limits"]}
     if lead != "AUTO" and agents[lead]["state"] != "AVAILABLE":
-        raise ValueError("Selected orchestrator is not available for this session")
+        raise ValueError("Selected orchestrator is not available for this session"
+                         + (f" ({agents[lead]['unavailable_reason']})" if agents[lead].get("unavailable_reason") else ""))
+    if lead != "AUTO" and (agents[lead].get("workspace_trust") or {}).get("state") == workspace_trust.TRUST_REQUIRED:
+        raise ValueError(f"Selected orchestrator {AGENT_NAMES.get(lead, lead)} does not trust {snapshot['root']} yet; "
+                         "authorize and prepare it with `howlplane factory prepare`")
     return {
         "schema": SCHEMA, "schema_version": SCHEMA_VERSION, "id": uuid.uuid4().hex, "created_at": now(), "repository": snapshot["root"],
         "goal": redact(goal), "constraints": [redact(item) for item in args.constraint],
@@ -917,7 +966,10 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 record_timeout(doc, stage, agent, model, budget, assignment["timeout_source"], assignment["finished_at"])
                 if progress:
                     progress.attempt_timed_out(agent, stage, budget, before != after)
-            if assignment["failure"] is None or assignment["failure"] in UNAVAILABLE_FAILURES | MODEL_LIMIT_FAILURES | {"EXECUTION_PERMISSION_REQUIRED"}:
+            if assignment["failure"] in WORKSPACE_TRUST_FAILURES:
+                assignment["workspace"] = str(repo)
+                agent_readiness.record_workspace_trust(agent, str(repo), stage, "orchestrate session")
+            elif assignment["failure"] is None or assignment["failure"] in UNAVAILABLE_FAILURES | MODEL_LIMIT_FAILURES | {"EXECUTION_PERMISSION_REQUIRED"}:
                 agent_readiness.record_session_outcome(agent, model, assignment["failure"],
                                                        detail=f"{result.error_message or ''}\n{result.stderr}")
             if assignment["state"] == "SUCCEEDED":
@@ -947,7 +999,10 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             # candidate list must already exclude what this attempt proved.
             exclusion = record_failure(doc, agent, stage, model, assignment["failure"])
             if progress:
-                if assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED":
+                if assignment["failure"] in WORKSPACE_TRUST_FAILURES:
+                    progress._write("TRUST", f"{AGENT_NAMES.get(agent, agent)} requires workspace trust for {repo}; "
+                                             "rerouting (the agent stays eligible elsewhere)")
+                elif assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED":
                     progress.capability_downgrade(agent)
                 elif exclusion:
                     progress.role_excluded(agent, stage, exclusion)

@@ -43,6 +43,7 @@ from howlplane.control_plane.resource_models import (
     ResourceSelectionStatus,
 )
 from howlplane.control_plane.task_spec import DataClassSerializationMixin, TaskSpec
+from howlplane.control_plane.workspace_trust import result_is_trust_refusal
 from howlplane.control_plane.config_loader import (
     ProviderPolicySettings,
     ProviderResourceSettings,
@@ -65,10 +66,11 @@ LOCAL_INELIGIBLE_SKILLS = {
 LOCAL_INELIGIBLE_REVIEWER_ROLES = {"security-reviewer"}
 
 TASK_SUITABILITY_PREFERENCES: Dict[str, List[str]] = {
-    "routine": ["agy", "codex", "devin_cli", "claude_code", "local_ollama"],
-    "code_heavy": ["codex", "agy", "devin_cli", "claude_code", "local_ollama"],
-    "large_autonomous": ["devin_cli", "codex", "agy", "claude_code"],
-    "architecture_security": ["claude_code", "codex", "agy", "devin_cli"],
+    # Cursor joined last among hosted agents so existing preferences are unchanged.
+    "routine": ["agy", "codex", "devin_cli", "claude_code", "cursor", "local_ollama"],
+    "code_heavy": ["codex", "agy", "devin_cli", "claude_code", "cursor", "local_ollama"],
+    "large_autonomous": ["devin_cli", "codex", "agy", "claude_code", "cursor"],
+    "architecture_security": ["claude_code", "codex", "agy", "devin_cli", "cursor"],
 }
 
 EXHAUSTION_PATTERNS: Dict[str, List[str]] = {
@@ -115,6 +117,11 @@ EXHAUSTION_PATTERNS: Dict[str, List[str]] = {
         "resource exhausted",
         "usage quota has been exhausted",
         "weekly usage quota",
+    ],
+    "cursor": [
+        "usage limit",
+        "rate limit",
+        "quota exceeded",
     ],
     "local_ollama": ["connection refused", "not running", "server unavailable"],
 }
@@ -817,6 +824,12 @@ class ProviderPoolManager:
         # fall through to the transport branch below, where a provider genuinely
         # reporting that it could not reach its service is classified as
         # TRANSPORT_UNAVAILABLE and benched (HOWLFRAM-SLOPFIX-05).
+        # A vendor trust refusal opens the output before any work happens. It
+        # outranks a deadline only when positively identified for this CLI: a
+        # session that sat on its own trust prompt until our budget expired was
+        # blocked by the folder, not slow (see workspace_trust).
+        if result_is_trust_refusal(resource_id, result):
+            return ProviderFailureClass.WORKSPACE_TRUST_REQUIRED
         if (
             metadata.get(TIMEOUT_SOURCE_KEY) in (TIMEOUT_SOURCE_HARNESS, TIMEOUT_SOURCE_BUDGET)
             or metadata.get(BUDGET_DERIVED_KEY) is True
@@ -866,6 +879,8 @@ class ProviderPoolManager:
             "requires approval", "require approval", "permission denied",
             "requires permission", "execution permission required", "execution_permission_required",
             "needs approval", "approve bash execution",
+            # Trust prose that is not a positively identified refusal (above)
+            # keeps its conservative, pre-existing permission classification.
             "workspace trust required", "trust the current workspace", "pass --trust",
             "untrusted workspace",
         )):
@@ -949,6 +964,13 @@ class ProviderPoolManager:
 
         failure_class = self.classify_failure(resource_id, result)
         metadata = result.metadata or {}
+        if failure_class is ProviderFailureClass.WORKSPACE_TRUST_REQUIRED:
+            # One untrusted folder says nothing about the resource anywhere
+            # else: availability, cooldowns, and role eligibility are unchanged.
+            state.last_checked = now.isoformat()
+            state.observed_at = now.isoformat()
+            self._persist()
+            return failure_class
 
         state.consecutive_failures += 1
         state.last_failure_at = now.isoformat()
@@ -1335,6 +1357,11 @@ class ProviderPoolManager:
             if resource_id in excluded_ids:
                 exclude(profile, "ALREADY_ATTEMPTED", "failover_policy")
                 continue
+            trust_block = self._workspace_trust_block(resource_id, task)
+            if trust_block:
+                # Scoped to this task's workspace: the resource stays eligible elsewhere.
+                exclude(profile, "WORKSPACE_TRUST_REQUIRED", "workspace_trust", trust_block)
+                continue
             economics = EconomicClass(profile.economic_class or EconomicClass.UNKNOWN)
             if economics == EconomicClass.METERED_API and not self.policy.allow_paid_api:
                 exclude(profile, "PAID_API_FORBIDDEN", "economic_policy")
@@ -1395,6 +1422,14 @@ class ProviderPoolManager:
                 None if selected is not None else "NO_ELIGIBLE_AI_RESOURCE"
             ),
         )
+
+    @staticmethod
+    def _workspace_trust_block(resource_id: str, task: TaskSpec) -> Optional[str]:
+        workspace = getattr(task, "repository", None)
+        if not workspace or not Path(str(workspace)).is_absolute():
+            return None
+        from howlplane.control_plane.agent_readiness import workspace_blocked
+        return workspace_blocked(resource_id, workspace)
 
     def select_candidates(
         self,

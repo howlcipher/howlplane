@@ -170,12 +170,12 @@ def test_scenario_5_all_providers_exhausted_clean_stop(tmp_path: Path):
     dispatcher = ProgrammableDispatcherBackend(
         {
             p: (1, "", "Quota exceeded. Usage limit reached for account.")
-            for p in ["codex", "agy", "devin_cli", "claude_code", "gemini_cli"]
+            for p in ["codex", "agy", "devin_cli", "claude_code", "gemini_cli", "cursor"]
         } | {"local_ollama": (1, "", "ollama: command not found")},
         error_messages={"local_ollama": "OLLAMA_NOT_INSTALLED"},
     )
     pool = ProviderPoolManager()
-    for p in ["codex", "agy", "devin_cli", "claude_code", "gemini_cli", "local_ollama"]:
+    for p in ["codex", "agy", "devin_cli", "claude_code", "gemini_cli", "cursor", "local_ollama"]:
         pool.set_status(p, ProviderAvailabilityStatus.AVAILABLE)
 
     engine = ProductSynthesizer(provider_pool=pool, custom_backend=dispatcher)
@@ -247,7 +247,7 @@ def test_scenario_6_engineering_failure_does_not_exhaust_provider(tmp_path: Path
 def test_scenario_7_and_8_independent_review_diversity(tmp_path: Path):
     """Scenarios 7 & 8: Implementing provider != reviewer provider when multi-providers exist; reduced diversity reported when single provider."""
     pool = ProviderPoolManager()
-    for p in ["agy", "devin_cli", "local_ollama", "gemini_cli"]:
+    for p in ["agy", "devin_cli", "local_ollama", "gemini_cli", "cursor"]:
         pool.set_status(p, ProviderAvailabilityStatus.UNAVAILABLE)
     pool.set_status("codex", ProviderAvailabilityStatus.AVAILABLE)
     pool.set_status("claude_code", ProviderAvailabilityStatus.AVAILABLE)
@@ -265,7 +265,7 @@ def test_scenario_7_and_8_independent_review_diversity(tmp_path: Path):
 
     # Single provider remaining
     pool_single = ProviderPoolManager()
-    for p in ["claude_code", "devin_cli", "agy", "local_ollama", "gemini_cli"]:
+    for p in ["claude_code", "devin_cli", "agy", "local_ollama", "gemini_cli", "cursor"]:
         pool_single.set_status(p, ProviderAvailabilityStatus.UNAVAILABLE)
     pool_single.set_status("codex", ProviderAvailabilityStatus.AVAILABLE)
 

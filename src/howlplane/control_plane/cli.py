@@ -1453,6 +1453,9 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_agents_doctor.add_argument("--refresh", action="store_true", help="Ignore cached evidence and probe again")
     p_agents_doctor.add_argument("--smoke-timeout", type=int, default=agent_readiness.DEFAULT_SMOKE_TIMEOUT_SECONDS,
                                  metavar="SECONDS", help="Per-agent limit for the --live smoke (default: 60)")
+    p_agents_doctor.add_argument("--repo", metavar="PATH",
+                                 help="Also report workspace readiness (trust) for this directory; "
+                                      "with --live the read-only smoke runs there")
 
     # status
     subparsers.add_parser("status", parents=[common_parser], help="Show project status and verification plan")
@@ -1750,6 +1753,16 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_factory_doctor.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_factory_doctor.add_argument("--target-repo", help="Repository to resolve (advanced)")
     _add_readiness_arguments(p_factory_doctor)
+
+    p_prepare = factory_sub.add_parser(
+        "prepare", help="Authorize a repository for unattended Factory use and prepare agent workspace trust", **kwargs
+    )
+    p_prepare.add_argument("--agent", action="append", choices=list(agent_readiness.AGENT_ORDER),
+                           help="Limit preparation to one agent (repeatable)")
+    p_prepare.add_argument("--yes", action="store_true", help="Confirm the printed authorization scope non-interactively")
+    p_prepare.add_argument("--revoke", action="store_true",
+                           help="Remove HowlPlane's authorization for this repository (vendor trust is left untouched)")
+    _add_readiness_arguments(p_prepare)
 
     p_canary = factory_sub.add_parser(
         "canary", help="Run a single-item bounded canary (sugar for 'run --max-work-items 1')",
@@ -2832,24 +2845,44 @@ def _add_preflight_argument(parser: argparse.ArgumentParser) -> None:
 
 def cmd_agents(args: argparse.Namespace) -> int:
     if getattr(args, "agents_action", None) != "doctor":
-        print("Usage: howlplane agents doctor [--live] [--json]")
+        print("Usage: howlplane agents doctor [--repo PATH] [--live] [--json]")
         return 1
     return agent_readiness.command(args)
 
 
-def _factory_readiness(live: bool = False) -> dict:
+def _factory_workspace(args: argparse.Namespace) -> Optional[str]:
+    """The directory Factory workers will run in, without creating anything."""
+    from howlplane.control_plane.factory.campaign import CampaignError, resolve_campaign
+    if getattr(args, "state_dir", None) and getattr(args, "target_repo", None):
+        return str(Path(args.target_repo).expanduser().resolve())
+    try:
+        bounded = (getattr(args, "max_work_items", None) or 0) > 0 or getattr(args, "factory_action", None) == "canary"
+        return str(resolve_campaign(state_dir=getattr(args, "state_dir", None), target_repo=getattr(args, "target_repo", None),
+                                    prefer_active=True, bounded=bounded).target_dir)
+    except (CampaignError, OSError):
+        return None
+
+
+def _factory_readiness(live: bool = False, workspace: Optional[str] = None) -> dict:
+    """Agent readiness for Factory; with a workspace, trust there decides who can work."""
     from howlplane.control_plane.orchestration import default_execution_budget
-    summaries = agent_readiness.evaluate(live=live)
-    return {"readiness": agent_readiness.factory_readiness(summaries),
-            "execution_budget": default_execution_budget(), "agents": summaries}
+    summaries = agent_readiness.evaluate(live=live, workspace=workspace if live and workspace and Path(workspace).is_dir() else None)
+    report = agent_readiness.workspace_report(workspace) if workspace else None
+    return {"readiness": agent_readiness.factory_readiness(summaries, report),
+            "execution_budget": default_execution_budget(), "agents": summaries, "workspace": report}
 
 
 def _factory_preflight(args: argparse.Namespace) -> Optional[int]:
-    """Level-1 agent readiness before a campaign; `require` fails early when nothing can work unattended."""
+    """Level-1 agent and workspace readiness before a campaign.
+
+    No worker is dispatched until trust for the Factory workspace is known.
+    `require` refuses to start when no implementation worker can run there
+    unattended; agents that would meet a trust prompt are excluded, not fatal.
+    """
     mode = getattr(args, "preflight", "off")
     if mode == "off":
         return None
-    report = _factory_readiness()
+    report = _factory_readiness(workspace=_factory_workspace(args))
     readiness = report["readiness"]
     if readiness["status"] != "READY":
         print(agent_readiness.render_factory(readiness, report["execution_budget"]), end="", file=sys.stderr)
@@ -2862,7 +2895,7 @@ def _factory_preflight(args: argparse.Namespace) -> Optional[int]:
 def cmd_factory_doctor(args: argparse.Namespace) -> int:
     from howlplane.control_plane.factory.campaign import CampaignError
     from howlplane.control_plane.factory.service import _systemd_available, process_status
-    report = _factory_readiness(live=getattr(args, "live", False))
+    report = _factory_readiness(live=getattr(args, "live", False), workspace=_factory_workspace(args))
     blocked = 1 if report["readiness"]["status"] == "BLOCKED" else 0
     if getattr(args, "json", False):
         print(json.dumps({"schema": agent_readiness.SCHEMA, **report}, indent=2))
@@ -2912,6 +2945,9 @@ def cmd_factory(args: argparse.Namespace) -> int:
             return cmd_factory_start(args)
         if action == "logs":
             return cmd_factory_logs(args)
+        if action == "prepare":
+            from howlplane.control_plane.factory import prepare
+            return prepare.command(args)
         if action == "doctor":
             return cmd_factory_doctor(args)
         if action == "canary":

@@ -23,6 +23,11 @@ enabled = true
 [ai_resources.providers.devin_cli]
 enabled = false
 
+# Cursor Agent CLI (executable `agent`). Each workspace must be trusted first:
+# `howlplane factory prepare --repo <repo>` does that with Cursor's --trust flag.
+[ai_resources.providers.cursor]
+enabled = false
+
 [ai_resources.provider_policy]
 strategy = "adaptive_capacity"
 subscription_first = true
