@@ -23,10 +23,18 @@ enabled = true
 [ai_resources.providers.devin_cli]
 enabled = false
 
-# Cursor Agent CLI (executable `agent`). Each workspace must be trusted first:
-# `howlplane factory prepare --repo <repo>` does that with Cursor's --trust flag.
+# Cursor Agent CLI (executable `agent`). Under the default `prepare` trust policy
+# each workspace is trusted first with `howlplane factory prepare --repo <repo>`;
+# under `bypass` (below) no preparation is needed.
 [ai_resources.providers.cursor]
 enabled = false
+
+# Workspace trust policy for unattended agents (top-level table, not under
+# ai_resources): "strict", "prepare" (built-in default), or "bypass". Bypass
+# uses only audited vendor flags (Cursor --trust, Devin --respect-workspace-trust
+# false) and never bypasses HowlPlane governance. See documentation/WORKSPACE_TRUST.md.
+[workspace_trust]
+policy = "bypass"
 
 [ai_resources.provider_policy]
 strategy = "adaptive_capacity"

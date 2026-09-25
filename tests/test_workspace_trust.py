@@ -438,7 +438,9 @@ def test_orchestration_trust_failure_is_scoped_to_the_workspace(tmp_path, monkey
     assert record["capabilities"]["unattended_execution"] is not False
     assert record["capacity"] == {} and record["state"] == "AVAILABLE"
     assert record["workspace_trust"]["source"] == "orchestrate session"
-    assert set(record["workspace_trust"]) == {"state", "workspace", "role", "source", "detected_at"}
+    assert set(record["workspace_trust"]) == {"state", "workspace", "role", "source", "detected_at", "policy",
+                                              "mechanism"}
+    assert record["workspace_trust"]["policy"] == trust.PREPARE and record["workspace_trust"]["mechanism"] is None
     # An observed refusal is binding for the session even if the store now says trusted.
     assert "workspace trust required" in orchestration.capability_skip_reason(doc, "cursor", "review")
 
@@ -594,7 +596,13 @@ def test_agents_doctor_separates_global_and_workspace_readiness(stores, tmp_path
     assert agent_readiness.command(args) == 0
     out = capsys.readouterr().out
     assert out.index("GLOBAL READINESS") < out.index("WORKSPACE READINESS")
-    assert "Cursor: TRUST REQUIRED" in out and "Codex: READY" in out
+    workspace_section = out[out.index("WORKSPACE READINESS"):]
+    assert "Trust policy:   PREPARE (from environment)" in workspace_section
+    cursor_section = workspace_section[workspace_section.index("  Cursor\n"):]
+    assert "Vendor trust:        TRUST REQUIRED" in cursor_section
+    assert "Effective workspace: TRUST REQUIRED" in cursor_section
+    codex_section = workspace_section[workspace_section.index("  Codex\n"):]
+    assert "Vendor trust:        NOT ENFORCED" in codex_section and "Effective workspace: READY" in codex_section
     assert "Authorized:     NO" in out
     args.json = True
     agent_readiness.command(args)

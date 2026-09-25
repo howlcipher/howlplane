@@ -17,6 +17,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Union
 
+from howlplane.control_plane import workspace_trust
 from howlplane.control_plane.locking import LocalInferenceLock, LockError
 from howlplane.control_plane.provider_execution_profile import (
     MUTATION_TOOLS,
@@ -621,6 +622,27 @@ class SubprocessAgentBackend(AgentBackend):
             "claude_code", "codex", "cursor", "agy", "devin_cli"
         }:
             cmd_args[1:1] = ["--model", model_id]
+        # Workspace trust policy is resolved in one place and applied here, for
+        # every caller. Only an audited vendor flag is ever added (see
+        # workspace_trust.ADAPTERS); nothing answers a prompt, and stdin stays closed.
+        invocation_policy = kwargs.get("workspace_trust_policy") or workspace_trust.resolve_policy()["policy"]
+        cmd_args += workspace_trust.invocation_argv(self.agent_id, invocation_policy)
+        result = self._launch(cmd_args, target_cwd, role, timeout_seconds, env_vars, **kwargs)
+        if result.metadata is None:
+            result.metadata = {}
+        result.metadata["workspace_trust"] = {
+            "policy": invocation_policy, "mechanism": workspace_trust.mechanism(self.agent_id, invocation_policy)}
+        return result
+
+    def _launch(
+        self,
+        cmd_args: List[str],
+        target_cwd: Path,
+        role: str,
+        timeout_seconds: int,
+        env_vars: Optional[Dict[str, str]],
+        **kwargs,
+    ) -> AgentExecutionResult:
         cmd_str = _redact_command(" ".join(shlex.quote(c) for c in cmd_args))
 
         env = os.environ.copy()

@@ -15,6 +15,7 @@ import sys
 import time
 from typing import Optional
 
+from howlplane.control_plane import workspace_trust
 from howlplane.control_plane.atomic_io import atomic_write_json, safe_load_json
 from howlplane.control_plane.factory.campaign import CampaignError, FactoryCampaign
 from howlplane.control_plane.locking import LockError, SupervisorLock, get_process_create_time, is_process_record_active
@@ -136,6 +137,11 @@ def _command(campaign: FactoryCampaign, authority_profile: Optional[str], object
         command.extend(["--objective", objective])
     if max_work_items is not None:
         command.extend(["--max-work-items", str(max_work_items)])
+    # A user service does not inherit this environment: an explicit
+    # --workspace-trust must travel in argv. Otherwise the service reads config.
+    explicit_policy = workspace_trust.cli_policy()
+    if explicit_policy:
+        command.extend(["--workspace-trust", explicit_policy])
     return command
 
 

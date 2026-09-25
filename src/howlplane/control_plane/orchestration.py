@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import inspect
 import json
 import os
 from pathlib import Path
@@ -349,14 +350,17 @@ def discover_models(agent: str) -> list[str]:
         return []
 
 
-def inventory(availability: dict[str, str], repo: Path | None = None) -> dict[str, dict[str, Any]]:
+def inventory(availability: dict[str, str], repo: Path | None = None,
+              policy: str | None = None) -> dict[str, dict[str, Any]]:
     """Session start inventory. Cached readiness evidence informs it; nothing here sends a prompt.
 
     `local_only` forbids hosted egress, and every agent here is a hosted CLI, so
     none is dispatchable in that mode -- the same verdict the doctor and the
     provider pool give. With a repository, each agent also carries its vendor
-    trust state for that workspace, read from local files only.
+    trust state for that workspace, read from local files only, next to its
+    effective readiness under the session's workspace trust policy.
     """
+    policy = policy or workspace_trust.resolve_policy()["policy"]
     readiness = agent_readiness.cached_summaries()
     hosted = agent_readiness.hosted_probes_allowed()
     found = {}
@@ -392,8 +396,12 @@ def inventory(availability: dict[str, str], repo: Path | None = None) -> dict[st
             found[agent]["unavailable_reason"] = agent_readiness.LOCAL_ONLY_DETAIL
         if repo is not None and installed:
             trust = workspace_trust.check(agent, repo)
-            found[agent]["workspace_trust"] = {key: trust.get(key) for key in (
-                "state", "workspace", "scope", "covering_path", "detail", "source", "checked_at")}
+            verdict = workspace_trust.effective(agent, trust["state"], policy)
+            found[agent]["workspace_trust"] = {
+                **{key: trust.get(key) for key in (
+                    "state", "workspace", "scope", "covering_path", "detail", "source", "checked_at")},
+                "policy": policy, "effective_state": verdict["effective_state"],
+                "mechanism": verdict["mechanism"]}
     return found
 
 
@@ -545,8 +553,10 @@ def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failu
         # Attempt evidence only; `record_timeout` bars the identical retry.
         return None
     if failure in WORKSPACE_TRUST_FAILURES:
+        policy = session_trust_policy(doc)
         state["workspace_trust"] = {"state": workspace_trust.TRUST_REQUIRED, "workspace": doc.get("repository"),
-                                    "role": role, "source": "orchestrate session", "detected_at": at or now()}
+                                    "role": role, "source": "orchestrate session", "detected_at": at or now(),
+                                    "policy": policy, "mechanism": workspace_trust.mechanism(agent, policy)}
         return None
     if failure == "EXECUTION_PERMISSION_REQUIRED":
         record_capability_failure(doc, agent, failure, at)
@@ -626,22 +636,35 @@ def timed_out(doc: dict[str, Any], role: str, agent: str, model: str) -> bool:
     return any(item.get("signature") == signature for item in doc.get("timed_out_assignments", []))
 
 
+def session_trust_policy(doc: dict[str, Any]) -> str:
+    """The workspace trust policy this session dispatches under (resolved at setup and on resume)."""
+    return (doc.get("workspace_trust_policy") or {}).get("policy") or workspace_trust.resolve_policy()["policy"]
+
+
 def workspace_trust_block(doc: dict[str, Any], agent: str) -> str | None:
     """Why this session's workspace refuses the agent, or None. Scoped to the workspace, never the agent."""
     record = agent_record(doc, agent)
     trust = record.get("workspace_trust") or {}
     if trust.get("state") != workspace_trust.TRUST_REQUIRED:
         return None
+    policy = session_trust_policy(doc)
     if trust.get("source") == "vendor trust store" and trust.get("workspace"):
         # A pre-dispatch verdict from local files: an operator may have prepared
-        # the workspace since (for example, before `resume`). A refusal the CLI
-        # itself returned this session stays binding: no retry in this folder.
+        # the workspace since (for example, before `resume`).
         current = workspace_trust.check(agent, trust["workspace"])
         if current["state"] == workspace_trust.READY:
             record["workspace_trust"] = {**trust, "state": current["state"], "covering_path": current["covering_path"],
                                          "checked_at": current["checked_at"]}
             return None
-    return f"workspace trust required for {trust.get('workspace') or doc.get('repository')} (run howlplane factory prepare)"
+        if workspace_trust.effective(agent, current["state"], policy)["effective_state"] == workspace_trust.READY:
+            # The vendor still does not trust it; this policy's audited flag makes it usable.
+            return None
+    elif agent_readiness.binding_refusal(agent, trust, policy) is None:
+        # Refused without the flag this policy now supplies: that refusal says nothing about the new invocation.
+        return None
+    # A refusal the CLI returned under this same invocation stays binding: no retry in this folder.
+    return (f"workspace trust required for {trust.get('workspace') or doc.get('repository')} "
+            f"(policy {policy}; run howlplane factory prepare or choose --workspace-trust bypass)")
 
 
 def capability_skip_reason(doc: dict[str, Any], agent: str, role: str) -> str | None:
@@ -797,15 +820,17 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     budget = {**default_execution_budget(), **parse_execution_budget(getattr(args, "execution_budget", None))}
     snapshot = evidence(repo)
     token = uuid.uuid4().hex
-    agents = inventory(availability, Path(snapshot["root"]))
+    resolved_policy = workspace_trust.resolve_policy()
+    agents = inventory(availability, Path(snapshot["root"]), resolved_policy["policy"])
     model_states = {f"{agent}:{limit.rsplit(':', 1)[0]}": "EXHAUSTED"
                     for agent, record in agents.items() for limit in record["readiness"]["model_limits"]}
     if lead != "AUTO" and agents[lead]["state"] != "AVAILABLE":
         raise ValueError("Selected orchestrator is not available for this session"
                          + (f" ({agents[lead]['unavailable_reason']})" if agents[lead].get("unavailable_reason") else ""))
-    if lead != "AUTO" and (agents[lead].get("workspace_trust") or {}).get("state") == workspace_trust.TRUST_REQUIRED:
-        raise ValueError(f"Selected orchestrator {AGENT_NAMES.get(lead, lead)} does not trust {snapshot['root']} yet; "
-                         "authorize and prepare it with `howlplane factory prepare`")
+    if lead != "AUTO" and (agents[lead].get("workspace_trust") or {}).get("effective_state") == workspace_trust.TRUST_REQUIRED:
+        raise ValueError(f"Selected orchestrator {AGENT_NAMES.get(lead, lead)} does not trust {snapshot['root']} yet "
+                         f"(workspace trust policy {resolved_policy['policy']}); prepare it with `howlplane factory prepare` "
+                         "or choose `--workspace-trust bypass`")
     return {
         "schema": SCHEMA, "schema_version": SCHEMA_VERSION, "id": uuid.uuid4().hex, "created_at": now(), "repository": snapshot["root"],
         "goal": redact(goal), "constraints": [redact(item) for item in args.constraint],
@@ -814,7 +839,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         "role_models": role_models, "fallbacks": fallbacks,
         "failover": failover, "policy": policy, "status": "PLANNED", "stage": "planning",
         "model_states": model_states, "known_models": {}, "attempts": [], "tests": [], "reroutes": [],
-        "execution_budget": budget, "timed_out_assignments": [],
+        "execution_budget": budget, "timed_out_assignments": [], "workspace_trust_policy": resolved_policy,
         "verify_command": args.verify,
         "repository_evidence": snapshot, "lease": {"token": token, "pid": os.getpid(), "renewed_at": time.time()},
     }
@@ -842,8 +867,15 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         instructions += f" Use model {model} if the CLI supports selecting it; report actual model identity."
     task = TaskSpec(task_id=doc["id"], repository=str(repo), objective=doc["goal"], constraints=doc["constraints"])
     backend = AgentBackendRegistry.get_backend(agent)
+    extra: dict[str, Any] = {}
+    parameters = inspect.signature(backend.execute).parameters
+    if "workspace_trust_policy" in parameters or any(
+            item.kind == inspect.Parameter.VAR_KEYWORD for item in parameters.values()):
+        # Built-in CLI backends apply the session's trust policy; a custom
+        # backend with a fixed signature keeps its bounded contract.
+        extra["workspace_trust_policy"] = session_trust_policy(doc)
     return backend.execute(task, repo, role=role, prompt_override=instructions,
-                           timeout_seconds=execution_budget(doc, role), model_id=model)
+                           timeout_seconds=execution_budget(doc, role), model_id=model, **extra)
 
 
 def checkpoint(doc: dict[str, Any], path: Path, token: str, repo: Path) -> None:
@@ -923,7 +955,10 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 progress.reroute(doc["id"][:8], source_agent, agent, reason)
                 prev_reroute = None
             before = evidence(repo)
+            invocation_policy = session_trust_policy(doc)
             assignment = {"task_id": doc["id"][:8], "stage": stage, "agent": agent, "model": model, "started_at": now(), "fence": token, "state": "ASSIGNED",
+                          "workspace_trust": {"policy": invocation_policy,
+                                              "mechanism": workspace_trust.mechanism(agent, invocation_policy)},
                           "execution_budget_seconds": execution_budget(doc, stage), "selection_evidence": selection_evidence(doc, agent)}
             doc["attempts"].append(assignment)
             checkpoint(doc, path, token, repo)
@@ -968,7 +1003,8 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                     progress.attempt_timed_out(agent, stage, budget, before != after)
             if assignment["failure"] in WORKSPACE_TRUST_FAILURES:
                 assignment["workspace"] = str(repo)
-                agent_readiness.record_workspace_trust(agent, str(repo), stage, "orchestrate session")
+                agent_readiness.record_workspace_trust(agent, str(repo), stage, "orchestrate session",
+                                                       policy=invocation_policy)
             elif assignment["failure"] is None or assignment["failure"] in UNAVAILABLE_FAILURES | MODEL_LIMIT_FAILURES | {"EXECUTION_PERMISSION_REQUIRED"}:
                 agent_readiness.record_session_outcome(agent, model, assignment["failure"],
                                                        detail=f"{result.error_message or ''}\n{result.stderr}")
@@ -1175,6 +1211,14 @@ def command(args: argparse.Namespace) -> int:
                 doc.setdefault("timeout_retries", []).append({"cleared": doc["timed_out_assignments"], "at": now()})
                 doc["timed_out_assignments"] = []
             doc.pop("timeout_hint", None)
+            # Trust policy is re-resolved on resume (CLI, environment, config), so
+            # an operator can switch between strict and bypass for the rest of the session.
+            resolved_policy = workspace_trust.resolve_policy()
+            if (doc.get("workspace_trust_policy") or {}).get("policy") != resolved_policy["policy"]:
+                doc.setdefault("workspace_trust_policy_changes", []).append(
+                    {"from": (doc.get("workspace_trust_policy") or {}).get("policy"), "to": resolved_policy["policy"],
+                     "at": now()})
+            doc["workspace_trust_policy"] = resolved_policy
             requested_orchestrator = getattr(args, "orchestrator", None)
             if requested_orchestrator and requested_orchestrator != "AUTO" and doc["agents"].get(requested_orchestrator, {}).get("state") in {"AVAILABLE", "DEGRADED"}:
                 doc["requested_orchestrator"] = requested_orchestrator
@@ -1245,3 +1289,12 @@ def add_parser(subparsers: Any, common_parser: Any) -> None:
                              "This is HowlPlane's own time limit, not provider quota")
     parser.add_argument("--retry-timeouts", action="store_true",
                         help="On resume, allow assignments that hit their execution budget to run once more unchanged")
+    add_workspace_trust_argument(parser)
+
+
+def add_workspace_trust_argument(parser: Any) -> None:
+    """`--workspace-trust`: overrides `[workspace_trust] policy` for this command and what it launches."""
+    parser.add_argument("--workspace-trust", choices=list(workspace_trust.POLICIES), default=None,
+                        help="Workspace trust policy: strict (never bypass vendor trust), prepare (default; use "
+                             "trust prepared by `factory prepare`), or bypass (audited vendor flags so trust never "
+                             "blocks unattended work). Overrides [workspace_trust] policy")

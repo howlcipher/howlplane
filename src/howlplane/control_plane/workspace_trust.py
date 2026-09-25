@@ -28,6 +28,22 @@ Observed on the installed CLIs (2026-09-25):
 * Devin 3000.11.3 `-p` refuses an untrusted directory ("Refusing to run in an
   untrusted workspace"). Trust is a list of canonical paths and covers their
   descendants. Only its interactive prompt adds to that list.
+
+Workspace trust policy (`resolve_policy`) decides what an unattended invocation
+does about vendor trust. It is resolved once, here, and applied in the backend
+invocation layer, so doctor, orchestration, Factory, and execution all agree:
+
+* strict: never bypass. An untrusted workspace is ineligible until the vendor
+  itself trusts it.
+* prepare (built-in default): as strict at dispatch time, with vendor trust
+  prepared ahead of time through `howlplane factory prepare`.
+* bypass: supply each CLI's audited, documented invocation option so trust never
+  interrupts unattended work: Cursor `--trust` (which records Cursor trust) and
+  Devin `--respect-workspace-trust false` (which skips the check for that one
+  invocation and trusts nothing). A CLI without an audited mechanism gets none.
+
+Vendor trust, HowlPlane authorization, and a bypassed check are three separate
+facts; `effective` reports them side by side and never rewrites vendor state.
 """
 
 from __future__ import annotations
@@ -48,6 +64,12 @@ from howlplane.control_plane.atomic_io import load_schema_section, private_state
 SCHEMA = "howlplane.workspace_authorization/v1"
 READY, TRUST_REQUIRED, UNKNOWN, UNSUPPORTED, ERROR = "READY", "TRUST_REQUIRED", "UNKNOWN", "UNSUPPORTED", "ERROR"
 STATES = (READY, TRUST_REQUIRED, UNKNOWN, UNSUPPORTED, ERROR)
+# Vendor state reported for a CLI whose noninteractive mode has no trust check.
+NOT_ENFORCED = "NOT_ENFORCED"
+STRICT, PREPARE, BYPASS = "strict", "prepare", "bypass"
+POLICIES = (STRICT, PREPARE, BYPASS)
+DEFAULT_POLICY = PREPARE
+POLICY_ENV = "HOWLPLANE_WORKSPACE_TRUST"
 # A model name no CLI accepts: the vendor checks trust first, then rejects the
 # model, so a trust probe or `--trust` preparation never reaches inference.
 SENTINEL_MODEL = "howlplane-trust-probe-invalid-model"
@@ -77,24 +99,40 @@ class TrustAdapter:
     refusal_markers: tuple[str, ...] = ()
     # Phrases proving the trust check passed before the sentinel model was rejected.
     past_trust_markers: tuple[str, ...] = ()
+    # What the `bypass` policy may do, audited per CLI: "not_enforced" (nothing
+    # to bypass), "persistent_flag" (a documented flag that records vendor
+    # trust), "invocation_flag" (a documented flag that skips the check for one
+    # invocation only), or "unsupported" (no audited mechanism: fail closed).
+    bypass: str = "unsupported"
+    bypass_argv: tuple[str, ...] = ()
+    bypass_establishes_trust: bool = False
 
 
 ADAPTERS: dict[str, TrustAdapter] = {
     "codex": TrustAdapter("codex", "not_enforced", "none",
-                          "`codex exec` shows no workspace trust dialog (observed codex-cli 0.156.1)"),
+                          "`codex exec` shows no workspace trust dialog (observed codex-cli 0.156.1)",
+                          bypass="not_enforced"),
     "claude_code": TrustAdapter("claude_code", "not_enforced", "none",
-                                "`claude -p` skips the workspace trust dialog (claude --help)"),
+                                "`claude -p` skips the workspace trust dialog (claude --help)",
+                                bypass="not_enforced"),
     "agy": TrustAdapter("agy", "not_enforced", "none",
-                        "`agy -p` runs in an untrusted directory without prompting (observed agy 1.2.10)"),
+                        "`agy -p` runs in an untrusted directory without prompting (observed agy 1.2.10)",
+                        bypass="not_enforced"),
+    # `agent --help` (2026.09.23): "--trust  Trust the current workspace without
+    # prompting". Separate from --force/--yolo, which approve commands.
     "cursor": TrustAdapter("cursor", "ancestor", "cli_flag",
                            "trusted directory and its descendants, except via $HOME or very short paths;"
                            " prepared with the documented `--trust` flag",
                            ("workspace trust required", "pass --trust, --yolo, or -f if you trust this directory"),
-                           ("cannot use this model",)),
+                           ("cannot use this model",),
+                           bypass="persistent_flag", bypass_argv=("--trust",), bypass_establishes_trust=True),
+    # `devin --help` (3000.11.3): "pass --respect-workspace-trust false to skip
+    # the check". It adds nothing to Devin's trusted list.
     "devin_cli": TrustAdapter("devin_cli", "ancestor", "operator_pty",
                               "trusted directory and its descendants; only Devin's interactive prompt adds trust",
                               ("refusing to run in an untrusted workspace",),
-                              ("unknown model",)),
+                              ("unknown model",),
+                              bypass="invocation_flag", bypass_argv=("--respect-workspace-trust", "false")),
 }
 
 
@@ -116,6 +154,108 @@ def result_is_trust_refusal(agent: str, result: Any) -> bool:
     if getattr(result, "success", False):
         return False
     return any(is_trust_refusal(agent, getattr(result, stream, "") or "") for stream in ("stdout", "stderr"))
+
+
+# ---------------------------------------------------------------- policy
+_cli_policy: str | None = None
+
+
+def validate_policy(value: Any, source: str) -> str:
+    text = str(value).strip().lower() if value is not None else ""
+    if text not in POLICIES:
+        raise ValueError(f"Invalid workspace trust policy {value!r} from {source}; choose one of {', '.join(POLICIES)}")
+    return text
+
+
+def _configured_policy(loader: Any = None) -> Any:
+    """`[workspace_trust] policy` when the operator configured it, else None."""
+    if loader is None:
+        from howlplane.control_plane.config_loader import default_loader as loader
+    section = getattr(getattr(loader, "settings", None), "workspace_trust", None)
+    if section is None or "policy" not in section.model_fields_set:
+        return None
+    return section.policy
+
+
+def set_cli_policy(value: str | None) -> None:
+    """An explicit `--workspace-trust` for this process and everything it launches."""
+    global _cli_policy
+    if value is None:
+        return
+    _cli_policy = validate_policy(value, "--workspace-trust")
+    os.environ[POLICY_ENV] = _cli_policy
+
+
+def cli_policy() -> str | None:
+    """The explicit `--workspace-trust` of this process, if any."""
+    return _cli_policy
+
+
+def reset_cli_policy() -> None:
+    global _cli_policy
+    _cli_policy = None
+
+
+def resolve_policy(cli_value: str | None = None) -> dict[str, str]:
+    """The one workspace trust policy every subsystem uses, and where it came from.
+
+    Precedence: CLI option, then `HOWLPLANE_WORKSPACE_TRUST` (how a CLI option
+    reaches the processes HowlPlane launches), then `[workspace_trust] policy`
+    in HowlPlane configuration, then the built-in default (`prepare`).
+    """
+    if cli_value is not None:
+        return {"policy": validate_policy(cli_value, "--workspace-trust"), "source": "cli"}
+    if _cli_policy is not None:
+        return {"policy": _cli_policy, "source": "cli"}
+    env = os.environ.get(POLICY_ENV, "").strip()
+    if env:
+        return {"policy": validate_policy(env, POLICY_ENV), "source": "environment"}
+    configured = _configured_policy()
+    if configured is not None:
+        return {"policy": validate_policy(configured, "[workspace_trust] policy"), "source": "config"}
+    return {"policy": DEFAULT_POLICY, "source": "default"}
+
+
+def invocation_argv(agent: str, policy: str) -> list[str]:
+    """Audited vendor arguments for one unattended invocation; empty unless the policy is bypass."""
+    spec = ADAPTERS.get(agent)
+    if policy != BYPASS or spec is None or spec.bypass not in ("persistent_flag", "invocation_flag"):
+        return []
+    return list(spec.bypass_argv)
+
+
+def mechanism(agent: str, policy: str) -> str | None:
+    argv = invocation_argv(agent, policy)
+    return " ".join(argv) if argv else None
+
+
+def effective(agent: str, vendor_state: str, policy: str) -> dict[str, Any]:
+    """Whether an unattended invocation can run here under `policy`, next to the vendor's own verdict.
+
+    `vendor_state` is reported unchanged: a bypassed check is not trust.
+    """
+    spec = ADAPTERS.get(agent)
+    base = {"policy": policy, "mechanism": None}
+    if spec is None:
+        return {**base, "vendor_state": UNSUPPORTED, "effective_state": UNSUPPORTED,
+                "detail": "no audited workspace trust model for this agent"}
+    if spec.scope == "not_enforced":
+        return {**base, "vendor_state": NOT_ENFORCED, "effective_state": READY,
+                "detail": "noninteractive mode does not enforce workspace trust"}
+    if vendor_state == READY:
+        return {**base, "vendor_state": READY, "effective_state": READY, "detail": "the vendor trusts this workspace"}
+    flag = mechanism(agent, policy)
+    if flag:
+        detail = ("vendor trust is recorded by the CLI itself on first use" if spec.bypass_establishes_trust
+                  else "vendor trust not required for this invocation (check skipped, directory not trusted)")
+        return {**base, "vendor_state": vendor_state, "effective_state": READY, "mechanism": flag, "detail": detail}
+    if policy == STRICT:
+        detail = "strict policy: ineligible until the vendor trusts this workspace"
+    elif spec.method == "cli_flag":
+        detail = "prepare with `howlplane factory prepare` (automatic, no inference)"
+    else:
+        detail = "operator preparation required (`howlplane factory prepare` at a terminal)"
+    return {**base, "vendor_state": vendor_state, "effective_state": vendor_state, "detail": detail}
 
 
 # ---------------------------------------------------------------- vendor stores (read-only)
