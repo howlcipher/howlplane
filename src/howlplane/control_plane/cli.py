@@ -1456,6 +1456,7 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_agents_doctor.add_argument("--repo", metavar="PATH",
                                  help="Also report workspace readiness (trust) for this directory; "
                                       "with --live the read-only smoke runs there")
+    _add_workspace_trust_argument(p_agents_doctor)
 
     # status
     subparsers.add_parser("status", parents=[common_parser], help="Show project status and verification plan")
@@ -1661,6 +1662,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
              "Without this, authority-required work is parked rather than executed.",
     )
     p_run_once.add_argument("--json", action="store_true", help="Output JSON result")
+    _add_workspace_trust_argument(p_run_once)
 
     p_run = factory_sub.add_parser(
         "run", help="Run the factory supervisor loop until stopped", **kwargs
@@ -1705,6 +1707,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     )
     p_run.add_argument("--json", action="store_true", help="Output JSON result")
     _add_preflight_argument(p_run)
+    _add_workspace_trust_argument(p_run)
 
     p_status = factory_sub.add_parser(
         "status", help="Show factory supervisor state", **kwargs
@@ -1742,6 +1745,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_start.add_argument("--authority-profile", choices=["strict", "overnight-safe", "howlframe-overnight"],
                          help="Existing authority profile id (advanced)")
     p_start.add_argument("--json", action="store_true", help="Output JSON result")
+    _add_workspace_trust_argument(p_start)
 
     p_logs = factory_sub.add_parser("logs", help="Show recent Factory logs for this repository", **kwargs)
     p_logs.add_argument("--state-dir", help="Factory state directory (advanced)")
@@ -1753,6 +1757,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_factory_doctor.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_factory_doctor.add_argument("--target-repo", help="Repository to resolve (advanced)")
     _add_readiness_arguments(p_factory_doctor)
+    _add_workspace_trust_argument(p_factory_doctor)
 
     p_prepare = factory_sub.add_parser(
         "prepare", help="Authorize a repository for unattended Factory use and prepare agent workspace trust", **kwargs
@@ -1763,6 +1768,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_prepare.add_argument("--revoke", action="store_true",
                            help="Remove HowlPlane's authorization for this repository (vendor trust is left untouched)")
     _add_readiness_arguments(p_prepare)
+    _add_workspace_trust_argument(p_prepare)
 
     p_canary = factory_sub.add_parser(
         "canary", help="Run a single-item bounded canary (sugar for 'run --max-work-items 1')",
@@ -1795,6 +1801,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
         help="Bind delegated campaign authority for autonomous git/GitHub actions.",
     )
     p_canary.add_argument("--json", action="store_true", help="Output JSON result")
+    _add_workspace_trust_argument(p_canary)
 
 
 def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] = None) -> None:
@@ -2836,6 +2843,11 @@ def _add_readiness_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="Output JSON result")
 
 
+def _add_workspace_trust_argument(parser: argparse.ArgumentParser) -> None:
+    from howlplane.control_plane.orchestration import add_workspace_trust_argument
+    add_workspace_trust_argument(parser)
+
+
 def _add_preflight_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--preflight", choices=["off", "warn", "require"], default="off",
@@ -3402,6 +3414,12 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
         return 1
 
     try:
+        # One resolution point: an explicit --workspace-trust overrides config for
+        # this process and every agent, session, and service it launches.
+        from howlplane.control_plane import workspace_trust
+        workspace_trust.set_cli_policy(getattr(parsed_args, "workspace_trust", None))
+        # Fail fast on an invalid environment or config value, before any work starts.
+        workspace_trust.resolve_policy()
         return handler(parsed_args)
     except ControlPlaneError as err:
         print(str(err), file=sys.stderr)

@@ -452,7 +452,15 @@ def record_session_outcome(agent: str, model: str, failure: str | None, at: date
     _update_cache(agent, mutate)
 
 
-def record_workspace_trust(agent: str, workspace: str, role: str, source: str, at: datetime | None = None) -> None:
+def refusal_entry(agent: str, role: str, source: str, moment: datetime, policy: str | None = None) -> dict[str, Any]:
+    """One observed refusal, tagged with the trust policy and mechanism the refusing invocation used."""
+    policy = policy or workspace_trust.resolve_policy()["policy"]
+    return {"state": workspace_trust.TRUST_REQUIRED, "role": role, "source": source, "detected_at": iso(moment),
+            "policy": policy, "mechanism": workspace_trust.mechanism(agent, policy)}
+
+
+def record_workspace_trust(agent: str, workspace: str, role: str, source: str, at: datetime | None = None,
+                           policy: str | None = None) -> None:
     """A CLI refused one directory as untrusted: recorded against that directory only.
 
     Only the facts needed to act on it are kept (never output or transcripts).
@@ -460,10 +468,10 @@ def record_workspace_trust(agent: str, workspace: str, role: str, source: str, a
     if agent not in SPECS:
         return
     moment = at or now()
+    entry = refusal_entry(agent, role, source, moment, policy)
 
     def mutate(record: dict[str, Any]) -> None:
-        record.setdefault("workspaces", {})[str(workspace)] = {
-            "state": workspace_trust.TRUST_REQUIRED, "role": role, "source": source, "detected_at": iso(moment)}
+        record.setdefault("workspaces", {})[str(workspace)] = entry
 
     _update_cache(agent, mutate)
 
@@ -473,53 +481,80 @@ def clear_workspace_refusal(agent: str, workspace: str) -> None:
     _update_cache(agent, lambda record: (record.get("workspaces") or {}).pop(str(workspace), None))
 
 
-def workspace_status(agent: str, workspace: str | Path, live: bool = False,
-                     cache: dict[str, Any] | None = None) -> dict[str, Any]:
-    """One agent's readiness for one directory: vendor trust plus any refusal already observed there.
+def binding_refusal(agent: str, refusal: dict[str, Any] | None, policy: str) -> dict[str, Any] | None:
+    """An observed refusal still applies unless this policy invokes the CLI differently than it did then.
 
-    A refusal the CLI itself returned outranks the vendor store until preparation
-    or a passing workspace smoke clears it, so a wrong trust model can never
-    re-dispatch into a folder that already refused.
+    A refusal met without the bypass flag says nothing about an invocation that
+    carries it; a refusal met with the flag stays binding under every policy.
+    """
+    if not refusal:
+        return None
+    current = workspace_trust.mechanism(agent, policy)
+    return refusal if current is None or refusal.get("mechanism") == current else None
+
+
+def workspace_status(agent: str, workspace: str | Path, live: bool = False,
+                     cache: dict[str, Any] | None = None, policy: str | None = None) -> dict[str, Any]:
+    """One agent's readiness for one directory: vendor trust, any refusal observed there, and the policy verdict.
+
+    `state` is the vendor's own verdict (plus binding refusals) and is never
+    rewritten by policy; `effective_state` is whether an unattended invocation
+    can run here under `policy`. A refusal the CLI itself returned outranks the
+    vendor store until preparation or a passing workspace smoke clears it, so a
+    wrong trust model can never re-dispatch into a folder that already refused.
     """
     path = str(Path(workspace).expanduser().resolve())
+    policy = policy or workspace_trust.resolve_policy()["policy"]
     hosted = hosted_probes_allowed()
     vendor = (workspace_trust.probe(agent, path) if live and hosted and agent in workspace_trust.PROBE_ARGV
               else workspace_trust.check(agent, path))
     record = (cache if cache is not None else load_cache()).get(agent) or {}
-    refusal = (record.get("workspaces") or {}).get(path)
+    refusal = binding_refusal(agent, (record.get("workspaces") or {}).get(path), policy)
     smoke = (record.get("workspace_smokes") or {}).get(path)
     state = workspace_trust.TRUST_REQUIRED if refusal else vendor["state"]
-    return {"agent": agent, "workspace": path, "state": state, "ready": state == workspace_trust.READY,
+    verdict = workspace_trust.effective(agent, vendor["state"], policy)
+    if refusal:
+        # The CLI refused even the way this policy invokes it: no policy makes that usable.
+        verdict.update({"effective_state": workspace_trust.TRUST_REQUIRED,
+                        "detail": "the CLI refused this directory under this policy"})
+    return {"agent": agent, "workspace": path, "state": state,
+            "ready": verdict["effective_state"] == workspace_trust.READY,
+            "vendor_state": verdict["vendor_state"] if not refusal else workspace_trust.TRUST_REQUIRED,
+            "policy": policy, "effective_state": verdict["effective_state"], "mechanism": verdict["mechanism"],
+            "policy_detail": verdict["detail"],
             "vendor": vendor, "observed_refusal": refusal,
             "live_smoke": None if not smoke else {"status": smoke.get("status"), "verified_at": smoke.get("observed_at"),
                                                   "failure_class": smoke.get("failure_class")}}
 
 
-def workspace_blocked(agent: str, workspace: str | Path | None) -> str | None:
-    """Routing view: why `agent` must not be dispatched into `workspace`, or None."""
+def workspace_blocked(agent: str, workspace: str | Path | None, policy: str | None = None) -> str | None:
+    """Routing view: why `agent` must not be dispatched into `workspace` under the trust policy, or None."""
     if not workspace or agent not in workspace_trust.ADAPTERS:
         return None
     try:
-        status = workspace_status(agent, workspace)
+        status = workspace_status(agent, workspace, policy=policy)
     except OSError:
         return None
-    if status["state"] != workspace_trust.TRUST_REQUIRED:
+    if status["effective_state"] != workspace_trust.TRUST_REQUIRED:
         return None
     source = "refused earlier" if status["observed_refusal"] else status["vendor"]["detail"]
-    return f"workspace trust required for {status['workspace']} ({source})"
+    return f"workspace trust required for {status['workspace']} ({source}; policy {status['policy']})"
 
 
-def workspace_report(workspace: str | Path, agents: Iterable[str] | None = None, live: bool = False) -> dict[str, Any]:
+def workspace_report(workspace: str | Path, agents: Iterable[str] | None = None, live: bool = False,
+                     policy: str | None = None) -> dict[str, Any]:
     """Workspace readiness for the doctor and Factory preflight. Never sends a model prompt."""
     path = Path(workspace).expanduser().resolve()
     selected = [agent for agent in AGENT_ORDER if agents is None or agent in set(agents)]
     cache = load_cache()
     scope = workspace_trust.authorized_scope_for(path)
+    resolved = workspace_trust.resolve_policy(policy)
     return {"workspace": str(path), "exists": path.is_dir(), "authorized": scope is not None,
+            "workspace_trust_policy": resolved,
             "scope": None if scope is None else {
                 key: scope.get(key) for key in ("repo_root", "factory_root", "authorized_at", "strategy",
                                                         "last_verified_at")},
-            "agents": {agent: workspace_status(agent, path, live, cache) for agent in selected}}
+            "agents": {agent: workspace_status(agent, path, live, cache, resolved["policy"]) for agent in selected}}
 
 
 def active_limits(record: dict[str, Any], at: datetime | None = None) -> list[dict[str, Any]]:
@@ -630,9 +665,8 @@ def evaluate(agents: Iterable[str] | None = None, live: bool = False, refresh: b
             if workspace:
                 record.setdefault("workspace_smokes", {})[workspace] = smoke
                 if smoke["status"] == "WORKSPACE_TRUST_REQUIRED":
-                    record.setdefault("workspaces", {})[workspace] = {
-                        "state": workspace_trust.TRUST_REQUIRED, "role": "review", "source": "live smoke",
-                        "detected_at": iso(moment)}
+                    record.setdefault("workspaces", {})[workspace] = refusal_entry(agent, "review", "live smoke",
+                                                                                   moment)
                 elif smoke["status"] == "PASS":
                     record.get("workspaces", {}).pop(workspace, None)
                     # A pass in a real workspace is the strongest unattended evidence there is.
@@ -727,13 +761,14 @@ def yes_no(value: bool | None, true: str = "YES", false: str = "NO") -> str:
 
 TRUST_TEXT = {"READY": "READY", "TRUST_REQUIRED": "TRUST REQUIRED", "UNKNOWN": "UNKNOWN",
               "UNSUPPORTED": "UNSUPPORTED", "ERROR": "ERROR"}
+TRUST_TEXT[workspace_trust.NOT_ENFORCED] = "NOT ENFORCED"
 PREPARE_TEXT = {"none": "not needed (noninteractive mode has no trust prompt)",
                 "cli_flag": "automatic: documented --trust flag, no inference",
                 "operator_pty": "one-time: the operator answers the CLI's own prompt"}
 
 
 def _workspace_text(status: dict[str, Any]) -> str:
-    text = TRUST_TEXT.get(status["state"], status["state"])
+    text = TRUST_TEXT.get(status["vendor_state"], status["vendor_state"])
     vendor = status["vendor"]
     if status["observed_refusal"]:
         refusal = status["observed_refusal"]
@@ -748,11 +783,21 @@ def render_workspace(report: dict[str, Any]) -> list[str]:
     lines = ["WORKSPACE READINESS", f"  Workspace:      {report['workspace']}" + ("" if report["exists"] else " (not created yet)"),
              "  Authorized:     " + (f"YES — {scope['repo_root']} (factory root {scope['factory_root']})"
                                      if scope else "NO — run `howlplane factory prepare --repo <repo>`"), ""]
+    resolved = report.get("workspace_trust_policy") or {}
+    lines.insert(3, f"  Trust policy:   {str(resolved.get('policy', '')).upper()} (from {resolved.get('source')})")
     for agent, status in report["agents"].items():
         spec = workspace_trust.adapter(agent)
-        lines.append(f"  {SPECS[agent].name}: {_workspace_text(status)}")
+        lines.append(f"  {SPECS[agent].name}")
+        lines.append(f"    Vendor trust:        {_workspace_text(status)}")
+        lines.append(f"    Trust policy:        {status['policy'].upper()}")
+        lines.append(f"    Effective workspace: {TRUST_TEXT.get(status['effective_state'], status['effective_state'])}"
+                     f" — {status['policy_detail']}")
+        if status.get("mechanism"):
+            lines.append(f"    Mechanism:           {status['mechanism']}")
         if spec and spec.scope != "not_enforced":
-            lines.append(f"    Preparation: {PREPARE_TEXT[spec.method]}; scope: this directory and its descendants")
+            preparation = ("not required under BYPASS" if status["mechanism"]
+                           else f"{PREPARE_TEXT[spec.method]}; scope: this directory and its descendants")
+            lines.append(f"    Preparation:         {preparation}")
         if status.get("live_smoke"):
             lines.append(f"    Workspace smoke: {status['live_smoke']['status']} ({status['live_smoke']['verified_at']})")
     return lines
@@ -787,7 +832,12 @@ def render(summaries: list[dict[str, Any]], workspace: dict[str, Any] | None = N
             rows += [("", extra) for extra in capacity[1:]]
             rows.append(("Verified", summary["last_verified_at"] or "never"))
             if workspace and summary["agent"] in workspace["agents"]:
-                rows.append(("Workspace", TRUST_TEXT.get(workspace["agents"][summary["agent"]]["state"], "UNKNOWN")))
+                status = workspace["agents"][summary["agent"]]
+                rows += [("Vendor trust", TRUST_TEXT.get(status["vendor_state"], status["vendor_state"])),
+                         ("Trust policy", status["policy"].upper()),
+                         ("Workspace", TRUST_TEXT.get(status["effective_state"], status["effective_state"]))]
+                if status.get("mechanism"):
+                    rows.append(("Mechanism", status["mechanism"]))
         lines += [f"  {label + ':' if label else '':<15} {value}" for label, value in rows]
         lines.append("")
     if workspace:
@@ -809,11 +859,12 @@ def factory_readiness(summaries: list[dict[str, Any]], workspace: dict[str, Any]
     With a workspace report, an agent that would meet a trust prompt in the
     Factory workspace is not a worker there, however ready it is elsewhere.
     """
-    trust = (workspace or {}).get("agents", {})
+    per_agent = (workspace or {}).get("agents", {})
 
     def workspace_ok(summary: dict[str, Any]) -> bool:
-        status = trust.get(summary["agent"])
-        return status is None or status["state"] != workspace_trust.TRUST_REQUIRED
+        # Effective readiness under the trust policy decides; vendor trust alone never does.
+        status = per_agent.get(summary["agent"])
+        return status is None or status.get("effective_state", status["state"]) != workspace_trust.TRUST_REQUIRED
 
     def autonomous(summary: dict[str, Any]) -> bool:
         return (summary["installed"] and summary["authenticated"] is not False
@@ -839,6 +890,11 @@ def factory_readiness(summaries: list[dict[str, Any]], workspace: dict[str, Any]
         "live_smoke_passed": [s["name"] for s in summaries if s["live_smoke"]["status"] == "PASS"],
         "workspace": None if workspace is None else workspace["workspace"],
         "workspace_authorized": None if workspace is None else workspace["authorized"],
+        "workspace_trust_policy": None if workspace is None else (workspace.get("workspace_trust_policy") or {}).get(
+            "policy"),
+        "workspace_trust_bypassed": [SPECS[agent].name for agent, status in per_agent.items()
+                                     if status.get("mechanism") and status.get("effective_state") == workspace_trust.READY
+                                     and status.get("vendor_state") != workspace_trust.READY],
         # With a workspace, trust there is what gates Factory; a fresh-directory
         # smoke refusal only describes that throwaway directory.
         "workspace_trust_required": (gated if workspace is not None else
@@ -863,6 +919,9 @@ def render_factory(readiness: dict[str, Any], budget: dict[str, int]) -> str:
              f"  Known exhausted:        {names(readiness['known_exhausted'])}",
              f"  Live smoke passed:      {names(readiness['live_smoke_passed'])}",
              f"  Workspace trust gated:  {names(readiness['workspace_trust_required'])}",
+             *([f"  Trust policy:           {str(readiness['workspace_trust_policy']).upper()}",
+                f"  Trust check bypassed:   {names(readiness.get('workspace_trust_bypassed') or [])}"]
+               if readiness.get("workspace_trust_policy") else []),
              *([f"  Workspace:              {readiness['workspace']} (authorized: "
                 f"{'yes' if readiness['workspace_authorized'] else 'no'})"] if readiness.get("workspace") else []),
              "  Execution budget:       " + ", ".join(f"{role} {seconds}s" for role, seconds in budget.items())]

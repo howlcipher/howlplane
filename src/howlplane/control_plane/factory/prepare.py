@@ -44,8 +44,14 @@ def _installed(agent: str) -> bool:
     return shutil.which(agent_readiness.SPECS[agent].binary) is not None
 
 
-def scope_plan(repo: Path, agents: list[str]) -> dict[str, Any]:
-    """What preparing `repo` would authorize, before anything is written."""
+def scope_plan(repo: Path, agents: list[str], policy: str | None = None) -> dict[str, Any]:
+    """What preparing `repo` would authorize, before anything is written.
+
+    Under the `bypass` trust policy, an agent with an audited invocation flag
+    needs no vendor preparation: authorization is still recorded, but no
+    vendor CLI is run and no vendor trust is created here.
+    """
+    policy = policy or workspace_trust.resolve_policy()["policy"]
     repository = discover_repository(repo)
     campaign = resolve_campaign(repository.root, prefer_active=True)
     root = factory_workspace_root(repository)
@@ -61,14 +67,17 @@ def scope_plan(repo: Path, agents: list[str]) -> dict[str, Any]:
         if spec is None:
             continue
         needs = spec.scope != "not_enforced"
+        bypass = workspace_trust.mechanism(agent, policy)
         plan.append({
             "agent": agent, "name": agent_readiness.SPECS[agent].name, "installed": installed,
             "method": spec.method, "scope": spec.scope,
             "covers_new_worktrees": spec.scope in ("ancestor", "not_enforced"),
+            "bypass_mechanism": bypass if needs else None,
             "action": ("none needed" if not needs else "skipped: CLI not installed" if not installed
+                       else f"not required under BYPASS (each invocation passes {bypass})" if bypass
                        else agent_readiness.PREPARE_TEXT[spec.method]),
         })
-    return {"repository": repository, "campaign": campaign, "factory_root": root,
+    return {"repository": repository, "campaign": campaign, "factory_root": root, "policy": policy,
             "target": target, "workspaces": workspaces, "agents": plan}
 
 
@@ -77,13 +86,14 @@ def render_plan(plan: dict[str, Any]) -> str:
              "This authorizes HowlPlane to prepare and use, unattended:",
              f"  Repository checkout:     {plan['repository'].root}",
              f"  Factory workspace root:  {plan['factory_root']}",
-             f"  Factory worktree:        {plan['target']}", "",
+             f"  Factory worktree:        {plan['target']}",
+             f"  Workspace trust policy:  {plan['policy'].upper()}", "",
              "Agents:"]
     for item in plan["agents"]:
         inherit = ("new Factory worktrees under the root need no further preparation" if item["covers_new_worktrees"]
                    else "each new directory must be prepared")
         lines.append(f"  {item['name']}: {item['action']}")
-        if item["scope"] != "not_enforced" and item["installed"]:
+        if item["scope"] != "not_enforced" and item["installed"] and not item["bypass_mechanism"]:
             lines.append(f"    Trust applies to the directories above and their descendants; {inherit}.")
     lines += ["", "Nothing outside these paths is authorized. Vendor trust prompts are never answered by HowlPlane."]
     return "\n".join(lines) + "\n"
@@ -145,7 +155,7 @@ def command(args: argparse.Namespace) -> int:
     results: dict[str, list[dict[str, Any]]] = {}
     for item in plan["agents"]:
         agent = item["agent"]
-        if item["scope"] == "not_enforced" or not item["installed"]:
+        if item["scope"] == "not_enforced" or not item["installed"] or item["bypass_mechanism"]:
             continue
         if not hosted:
             results[agent] = [{**workspace_trust.check(agent, path), "detail": agent_readiness.LOCAL_ONLY_DETAIL}
@@ -164,7 +174,7 @@ def command(args: argparse.Namespace) -> int:
     target = str(plan["target"])
     summaries = agent_readiness.evaluate(live=getattr(args, "live", False), workspace=target if getattr(
         args, "live", False) else None)
-    report = agent_readiness.workspace_report(target)
+    report = agent_readiness.workspace_report(target, policy=plan["policy"])
     readiness = agent_readiness.factory_readiness(summaries, report)
     if as_json:
         print(json.dumps({"schema": workspace_trust.SCHEMA, "repo_root": str(repository.root),

@@ -49,6 +49,9 @@ def _resource_local_config(local_data: dict) -> dict:
     extracted = {key: source[key] for key in supported if key in source}
     if "roles" in local_data and "roles" not in extracted:
         extracted["roles"] = local_data["roles"]
+    # One canonical top-level table, read by `workspace_trust.resolve_policy`.
+    if "workspace_trust" in local_data:
+        extracted["workspace_trust"] = local_data["workspace_trust"]
     return extracted
 
 
@@ -173,6 +176,17 @@ class ProviderPolicySettings(BaseModel):
         return self
 
 
+class WorkspaceTrustSettings(BaseModel):
+    """Unattended workspace trust policy; see documentation/WORKSPACE_TRUST.md."""
+
+    policy: Literal["strict", "prepare", "bypass"] = "prepare"
+
+    @field_validator("policy", mode="before")
+    @classmethod
+    def normalize_policy(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
+
+
 class AppSettings(BaseSettings):
     operating_mode: Literal["local_only", "connected"] = "local_only"
     llm_model: str = "ollama/qwen3:30b-instruct"
@@ -191,6 +205,7 @@ class AppSettings(BaseSettings):
     providers: Dict[str, ProviderResourceSettings] = Field(default_factory=dict)
     provider_policy: ProviderPolicySettings = ProviderPolicySettings()
     roles: dict = Field(default_factory=dict)
+    workspace_trust: WorkspaceTrustSettings = WorkspaceTrustSettings()
     active_mcps: list = []
     mcp_servers: dict = {}
 

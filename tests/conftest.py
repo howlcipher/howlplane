@@ -251,6 +251,24 @@ def _isolate_workspace_trust(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _pin_workspace_trust_policy(monkeypatch):
+    """Tests run under the built-in `prepare` policy unless they choose another.
+
+    The operator's real config (for example `policy = "bypass"`) must never
+    change what the suite asserts. Policy tests override or delete this.
+    """
+    from howlplane.control_plane import workspace_trust
+    workspace_trust.reset_cli_policy()
+    monkeypatch.setenv(workspace_trust.POLICY_ENV, workspace_trust.PREPARE)
+    configured = workspace_trust._configured_policy
+    # Only an explicitly supplied loader is read; the operator's own config never is.
+    monkeypatch.setattr(workspace_trust, "_configured_policy",
+                        lambda loader=None: None if loader is None else configured(loader))
+    yield
+    workspace_trust.reset_cli_policy()
+
+
+@pytest.fixture(autouse=True)
 def _pin_connected_operating_mode(monkeypatch):
     """Tests run as a connected install unless they opt into `local_only`.
 
