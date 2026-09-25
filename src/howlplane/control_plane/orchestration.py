@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, TextIO
 
+from howlplane.control_plane import agent_readiness
 from howlplane.control_plane.agent_execution import AgentBackendRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
 from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
@@ -27,15 +28,26 @@ from howlplane.control_plane.task_spec import TaskSpec
 SCHEMA = "howlplane.orchestration/v1"
 # v1: no capability evidence. v2: every agent carries `capabilities` and a
 # role-keyed `capacity` record; load migrates v1 by replaying recorded failures.
-SCHEMA_VERSION = 2
+# v3: an execution-budget stop is attempt evidence (`timed_out_assignments`),
+# never role capacity; load converts v2's budget EXHAUSTED entries.
+SCHEMA_VERSION = 3
 AGENTS = ("claude_code", "codex", "cursor", "agy", "devin_cli")
+ROLES = ("planning", "implementation", "review", "acceptance")
 AGENT_STATES = {"AVAILABLE", "DEGRADED", "UNAVAILABLE", "RESERVED"}
 UNAVAILABLE_FAILURES = {"MISSING_EXECUTABLE", "AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE"}
 MODEL_LIMIT_FAILURES = {"QUOTA_EXHAUSTED", "SESSION_LIMIT", "RATE_LIMITED"}
 # Hard failures bar the same agent from the same role for the rest of the
 # session, whatever model it would try next. Capacity failures are EXHAUSTED;
 # the others are deterministic role failures that another model rarely fixes.
-CAPACITY_FAILURES = {"EXECUTION_BUDGET_EXCEEDED", "SESSION_LIMIT"}
+CAPACITY_FAILURES = {"SESSION_LIMIT"}
+# HowlPlane's own per-assignment deadline expired. That says nothing about the
+# provider's allowance: only this exact assignment is barred from running again
+# unchanged, and the agent stays eligible for other models, roles, and tasks.
+ATTEMPT_TIMEOUT_FAILURES = {"EXECUTION_BUDGET_EXCEEDED"}
+DEFAULT_EXECUTION_BUDGET_SECONDS = 300
+MAX_EXECUTION_BUDGET_SECONDS = 1800
+# Every session before v3 dispatched with a hardcoded 300s deadline.
+LEGACY_EXECUTION_BUDGET_SECONDS = 300
 ROLE_FAILURES = {
     "EXECUTION_PERMISSION_REQUIRED", "ENGINEERING_FAILURE", "NO_REPOSITORY_CHANGE", "MALFORMED_OUTPUT",
     "CAPABILITY_FAILURE", "POLICY_FAILURE", "VERIFICATION_FAILURE", "PROVIDER_STALLED",
@@ -144,6 +156,15 @@ class SessionProgress:
             self._write("CAPABILITY", f"{name} {role} capacity marked exhausted for this session ({entry['reason']})")
         else:
             self._write("CAPABILITY", f"{name} excluded from {role} for this session after {entry['reason']}")
+
+    def attempt_timed_out(self, agent: str, role: str, budget: int, partial: bool) -> None:
+        self.last_change_at = self.clock()
+        detail = "; partial changes kept for the next worker" if partial else ""
+        self._write("TIMEOUT", f"{AGENT_NAMES.get(agent, agent)} {role} stopped at the {budget}s execution budget "
+                               f"(attempt only; capacity unchanged){detail}")
+
+    def selection(self, agent: str, role: str, evidence: str) -> None:
+        self._write("SELECT", f"{AGENT_NAMES.get(agent, agent)} for {role}: {evidence}")
 
     def route_skip(self, agent: str, reason: str = "unattended execution unavailable") -> None:
         self._write("ROUTE", f"{AGENT_NAMES.get(agent, agent)} skipped: {reason}")
@@ -318,45 +339,66 @@ def now() -> str:
 
 def discover_models(agent: str) -> list[str]:
     """Read only advertised lists. A silent CLI default remains UNKNOWN."""
-    commands = {
-        "cursor": ["agent", "--list-models"],
-        "agy": ["agy", "models"],
-        "devin_cli": ["devin", "models", "list"],
-    }
-    command = commands.get(agent)
-    if not command or not shutil.which(command[0]):
-        return []
     try:
-        result = subprocess.run(command, text=True, capture_output=True, timeout=8)
-    except (OSError, subprocess.TimeoutExpired):
+        return agent_readiness.routing_models(agent)
+    except (OSError, ValueError):
         return []
-    if result.returncode:
-        return []
-    models = []
-    for line in result.stdout.splitlines():
-        candidate = line.strip().split()[0] if line.strip() else ""
-        if candidate == "auto":
-            continue
-        if re.fullmatch(r"[\w][\w.:-]{1,79}", candidate) and candidate.lower() not in {"model", "models", "name", "available"}:
-            models.append(candidate)
-    return list(dict.fromkeys(models))
 
 
 def inventory(availability: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """Session start inventory. Cached readiness evidence informs it; nothing here sends a prompt."""
+    readiness = agent_readiness.cached_summaries()
     found = {}
     for agent in AGENTS:
         installed = shutil.which(BINARIES[agent]) is not None
         requested = availability.get(agent, "AUTO").upper()
+        state = "RESERVED" if requested == "RESERVED" else "AVAILABLE" if installed and requested != "UNAVAILABLE" else "UNAVAILABLE"
+        evidence = readiness.get(agent)
+        capabilities = unknown_capabilities("CLI metadata does not confirm unattended execution")
+        if evidence and evidence["unattended_execution"] is not None:
+            capabilities.update({"unattended_execution": evidence["unattended_execution"],
+                                 "reason": f"agent readiness: {evidence['unattended_source']}",
+                                 "evidence_time": evidence["last_verified_at"], "scope": "readiness cache"})
+        if state == "AVAILABLE" and evidence:
+            # Only fresh, negative, agent-wide evidence removes an agent; UNKNOWN never does.
+            if evidence["authenticated"] is False or evidence["capacity"]["state"] in {"QUOTA_EXHAUSTED", "SESSION_EXHAUSTED", "RATE_LIMITED"}:
+                state = "UNAVAILABLE"
+            elif capabilities["unattended_execution"] is False:
+                state = "DEGRADED"
         found[agent] = {
             "backend": BINARIES[agent],
             "installed": installed,
             "callable": installed,
-            "state": "RESERVED" if requested == "RESERVED" else "AVAILABLE" if installed and requested != "UNAVAILABLE" else "UNAVAILABLE",
+            "state": state,
             "models": discover_models(agent) if installed and requested != "RESERVED" else [],
-            "capabilities": unknown_capabilities("CLI metadata does not confirm unattended execution"),
+            "capabilities": capabilities,
             "capacity": {},
+            "readiness": readiness_digest(evidence),
         }
     return found
+
+
+def readiness_digest(evidence: dict[str, Any] | None) -> dict[str, Any]:
+    """The routing-relevant slice of cached readiness, kept on the session record."""
+    if not evidence:
+        return {"live_smoke": "NOT_RUN", "verified_at": None, "capacity_state": "UNKNOWN", "model_limits": []}
+    return {"live_smoke": evidence["live_smoke"]["status"], "verified_at": evidence["live_smoke"]["verified_at"],
+            "capacity_state": evidence["capacity"]["state"],
+            "model_limits": [f"{item['model']}:{item['state']}" for item in evidence["capacity"]["limits"] if item.get("model")]}
+
+
+def selection_evidence(doc: dict[str, Any], agent: str) -> str:
+    """Observable facts behind an AUTO choice; no subjective ranking."""
+    state = agent_record(doc, agent)
+    unattended = state["capabilities"]["unattended_execution"]
+    readiness = state.get("readiness") or readiness_digest(None)
+    smoke = readiness.get("live_smoke", "NOT_RUN")
+    age = agent_readiness.age_seconds(readiness.get("verified_at"))
+    smoke_text = {"NOT_RUN": "not run", "STALE": "stale"}.get(smoke, smoke.lower())
+    if smoke == "PASS" and age is not None:
+        smoke_text = f"passed {agent_readiness._duration(age)} ago"
+    return (f"unattended {({True: 'verified', False: 'interactive-only (explicit override)', None: 'unverified'})[unattended]}"
+            f" · live smoke {smoke_text} · capacity {readiness.get('capacity_state', 'UNKNOWN')}")
 
 
 class SessionStateInvalid(ValueError):
@@ -415,9 +457,14 @@ def normalize_session(doc: Any) -> list[str]:
     if not isinstance(version, int) or not 1 <= version <= SCHEMA_VERSION:
         raise SessionStateInvalid(f"Unsupported session schema version {version!r}")
     for key, default in (("constraints", []), ("role_models", {}), ("fallbacks", {}), ("model_states", {}),
-                         ("known_models", {}), ("tests", []), ("reroutes", []), ("capability_notices", [])):
+                         ("known_models", {}), ("tests", []), ("reroutes", []), ("capability_notices", []),
+                         ("timed_out_assignments", []), ("execution_budget", {})):
         if not isinstance(doc.get(key), type(default)):
             doc[key] = default
+    try:
+        doc["execution_budget"] = {**default_execution_budget(), **validate_execution_budget(doc["execution_budget"])}
+    except ValueError as error:
+        raise SessionStateInvalid(str(error)) from error
     doc["lease"].setdefault("pid", 0)
     doc["lease"].setdefault("renewed_at", 0)
     for agent in list(doc["agents"]):
@@ -433,10 +480,26 @@ def normalize_session(doc: Any) -> list[str]:
         agent, role = attempt["agent"], attempt["stage"]
         if agent not in AGENTS:
             continue
-        if attempt.get("state") == "SUCCEEDED":
+        # v2 already holds the replayed outcome of every other attempt.
+        if attempt.get("state") == "SUCCEEDED" and version == 1:
             agent_record(doc, agent)["capacity"].pop(role, None)
-        elif attempt.get("failure"):
+        elif attempt.get("failure") in ATTEMPT_TIMEOUT_FAILURES:
+            record_timeout(doc, role, agent, attempt["model"], LEGACY_EXECUTION_BUDGET_SECONDS,
+                           attempt.get("timeout_source"), attempt.get("finished_at"))
+        elif attempt.get("failure") and version == 1:
             record_failure(doc, agent, role, attempt["model"], attempt["failure"], attempt.get("finished_at"))
+    # v2 recorded a budget stop as role capacity EXHAUSTED. It was attempt
+    # evidence all along: keep it as such and undo the degradation it caused.
+    for agent in AGENTS:
+        state = agent_record(doc, agent)
+        for role, entry in list(state["capacity"].items()):
+            if entry["reason"] in ATTEMPT_TIMEOUT_FAILURES:
+                del state["capacity"][role]
+                record_timeout(doc, role, agent, entry.get("model", "UNKNOWN"), LEGACY_EXECUTION_BUDGET_SECONDS,
+                               None, entry.get("evidence_time"))
+        if (state["state"] == "DEGRADED" and not state["capacity"]
+                and state["capabilities"]["unattended_execution"] is not False):
+            state["state"] = "AVAILABLE"
     doc["schema_version"] = SCHEMA_VERSION
     doc.setdefault("migrations", []).append({"from": version, "to": SCHEMA_VERSION, "at": now()})
     return [f"Session manifest normalized from schema v{version} → v{SCHEMA_VERSION}"]
@@ -459,6 +522,9 @@ def record_capability_success(doc: dict[str, Any], agent: str) -> None:
 def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failure: str, at: str | None = None) -> dict[str, Any] | None:
     """Apply one failed attempt to session evidence. Returns the role exclusion it created, if any."""
     state = agent_record(doc, agent)
+    if failure in ATTEMPT_TIMEOUT_FAILURES:
+        # Attempt evidence only; `record_timeout` bars the identical retry.
+        return None
     if failure == "EXECUTION_PERMISSION_REQUIRED":
         record_capability_failure(doc, agent, failure, at)
     if failure in UNAVAILABLE_FAILURES:
@@ -478,8 +544,63 @@ def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failu
 
 
 def capacity_reason(entry: dict[str, Any]) -> str:
-    return {"EXECUTION_BUDGET_EXCEEDED": "execution budget exhausted", "SESSION_LIMIT": "session limit reached"}.get(
-        entry["reason"], f"failed earlier this session ({entry['reason']})")
+    return {"SESSION_LIMIT": "session limit reached"}.get(entry["reason"], f"failed earlier this session ({entry['reason']})")
+
+
+def default_execution_budget() -> dict[str, int]:
+    return {role: DEFAULT_EXECUTION_BUDGET_SECONDS for role in ROLES}
+
+
+def validate_execution_budget(budget: dict[str, Any]) -> dict[str, int]:
+    """A finite per-role deadline. Anything outside 1..MAX is refused, never clamped."""
+    checked = {}
+    for role, seconds in budget.items():
+        if role not in ROLES:
+            raise ValueError(f"Unknown execution budget role {role!r}")
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or not 1 <= seconds <= MAX_EXECUTION_BUDGET_SECONDS:
+            raise ValueError(f"Execution budget for {role} must be 1..{MAX_EXECUTION_BUDGET_SECONDS} seconds")
+        checked[role] = seconds
+    return checked
+
+
+def parse_execution_budget(values: list[str] | None) -> dict[str, int]:
+    """Parse repeatable `role=seconds` (or a bare `seconds` for every role)."""
+    parsed: dict[str, int] = {}
+    for value in values or []:
+        role, _, seconds = value.rpartition("=")
+        if not seconds.strip().isdigit():
+            raise ValueError("Expected --execution-budget role=seconds or seconds")
+        for target in ([role.strip()] if role else ROLES):
+            parsed[target] = int(seconds)
+    return validate_execution_budget(parsed)
+
+
+def execution_budget(doc: dict[str, Any], role: str) -> int:
+    return doc.get("execution_budget", {}).get(role, DEFAULT_EXECUTION_BUDGET_SECONDS)
+
+
+def timeout_signature(doc: dict[str, Any], role: str, agent: str, model: str, budget: int | None = None) -> str:
+    """Identity of an assignment. Changing its scope, worker, model, or deadline yields a new one."""
+    import hashlib
+    identity = {"goal": doc["goal"], "constraints": doc["constraints"], "role": role, "agent": agent, "model": model,
+                "budget": execution_budget(doc, role) if budget is None else budget}
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def record_timeout(doc: dict[str, Any], role: str, agent: str, model: str, budget: int,
+                   source: str | None = None, at: str | None = None) -> None:
+    signature = timeout_signature(doc, role, agent, model, budget)
+    ledger = doc.setdefault("timed_out_assignments", [])
+    if any(item.get("signature") == signature for item in ledger):
+        return
+    ledger.append({"signature": signature, "stage": role, "agent": agent, "model": model,
+                   "execution_budget_seconds": budget, "timeout_source": source, "at": at or now()})
+
+
+def timed_out(doc: dict[str, Any], role: str, agent: str, model: str) -> bool:
+    """True when this exact assignment already hit its deadline and would run again unchanged."""
+    signature = timeout_signature(doc, role, agent, model)
+    return any(item.get("signature") == signature for item in doc.get("timed_out_assignments", []))
 
 
 def capability_skip_reason(doc: dict[str, Any], agent: str, role: str) -> str | None:
@@ -513,6 +634,10 @@ def exclusions(doc: dict[str, Any], role: str) -> list[dict[str, str]]:
                 reason = "unavailable"
             elif role == "acceptance":
                 reason = "not the session orchestrator"
+            elif any(item["stage"] == role and item["agent"] == agent and timed_out(doc, role, agent, item["model"])
+                     for item in doc.get("timed_out_assignments", [])):
+                reason = (f"timed out at the {execution_budget(doc, role)}s execution budget; a retry needs a changed "
+                          "budget, model, or scope (capacity unaffected)")
             else:
                 reason = "no usable model remains"
         found.append({"agent": agent, "reason": reason})
@@ -555,7 +680,7 @@ def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
         else:
             models = discovered or ["UNKNOWN"]
         for model in models[:2]:
-            if doc["model_states"].get(f"{agent}:{model}") != "EXHAUSTED":
+            if doc["model_states"].get(f"{agent}:{model}") != "EXHAUSTED" and not timed_out(doc, role, agent, model):
                 selected.append((agent, model))
     fallback = [] if role == "acceptance" else doc.get("fallbacks", {}).get(role, [])
     if fallback:
@@ -565,7 +690,7 @@ def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
             if agents[agent]["state"] == "AVAILABLE" and skip_reason in (None, "explicit override") and (
                 model == "UNKNOWN" or model in agents[agent]["models"]
                 or model in doc.get("known_models", {}).get(agent, [])
-            ) and doc["model_states"].get(item) != "EXHAUSTED":
+            ) and doc["model_states"].get(item) != "EXHAUSTED" and not timed_out(doc, role, agent, model):
                 selected.append((agent, model))
         rank = {item: index for index, item in enumerate(fallback)}
         selected.sort(key=lambda pair: rank.get(f"{pair[0]}:{pair[1]}", len(rank)))
@@ -624,9 +749,12 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     fallbacks: dict[str, list[str]] = {}
     for role, agent, model in triples(fallback_text):
         fallbacks.setdefault(role, []).append(f"{agent}:{model}")
+    budget = {**default_execution_budget(), **parse_execution_budget(getattr(args, "execution_budget", None))}
     snapshot = evidence(repo)
     token = uuid.uuid4().hex
     agents = inventory(availability)
+    model_states = {f"{agent}:{limit.rsplit(':', 1)[0]}": "EXHAUSTED"
+                    for agent, record in agents.items() for limit in record["readiness"]["model_limits"]}
     if lead != "AUTO" and agents[lead]["state"] != "AVAILABLE":
         raise ValueError("Selected orchestrator is not available for this session")
     return {
@@ -636,7 +764,8 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         "orchestrator": lead, "agents": agents, "strategy": strategy,
         "role_models": role_models, "fallbacks": fallbacks,
         "failover": failover, "policy": policy, "status": "PLANNED", "stage": "planning",
-        "model_states": {}, "known_models": {}, "attempts": [], "tests": [], "reroutes": [],
+        "model_states": model_states, "known_models": {}, "attempts": [], "tests": [], "reroutes": [],
+        "execution_budget": budget, "timed_out_assignments": [],
         "verify_command": args.verify,
         "repository_evidence": snapshot, "lease": {"token": token, "pid": os.getpid(), "renewed_at": time.time()},
     }
@@ -657,11 +786,15 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         instructions += "Implement the goal and run relevant local tests. Inspect existing partial changes first."
     else:
         instructions += "Produce a bounded implementation plan and acceptance criteria. Do not edit files."
+    if any(item.get("stage") == role and item.get("state") == "TIMED_OUT" and item.get("partial_changes") for item in doc["attempts"]):
+        instructions += (" An earlier attempt at this role reached its execution budget and left partial changes: "
+                         "inspect and continue them rather than starting over.")
     if model != "UNKNOWN":
         instructions += f" Use model {model} if the CLI supports selecting it; report actual model identity."
     task = TaskSpec(task_id=doc["id"], repository=str(repo), objective=doc["goal"], constraints=doc["constraints"])
     backend = AgentBackendRegistry.get_backend(agent)
-    return backend.execute(task, repo, role=role, prompt_override=instructions, timeout_seconds=300, model_id=model)
+    return backend.execute(task, repo, role=role, prompt_override=instructions,
+                           timeout_seconds=execution_budget(doc, role), model_id=model)
 
 
 def checkpoint(doc: dict[str, Any], path: Path, token: str, repo: Path) -> None:
@@ -730,6 +863,10 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 pending = [pair for pair in eligible() if pair not in attempted]
                 if not pending:
                     break
+                # After a deadline stop, prefer a different worker; the timed-out
+                # agent's other models stay eligible, just behind the rest.
+                slow = {item["agent"] for item in doc["timed_out_assignments"] if item["stage"] == stage}
+                pending.sort(key=lambda pair: pair[0] in slow)
                 agent, model = pending[0]
             attempted.append((agent, model))
             if prev_reroute and progress:
@@ -737,10 +874,12 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 progress.reroute(doc["id"][:8], source_agent, agent, reason)
                 prev_reroute = None
             before = evidence(repo)
-            assignment = {"task_id": doc["id"][:8], "stage": stage, "agent": agent, "model": model, "started_at": now(), "fence": token, "state": "ASSIGNED"}
+            assignment = {"task_id": doc["id"][:8], "stage": stage, "agent": agent, "model": model, "started_at": now(), "fence": token, "state": "ASSIGNED",
+                          "execution_budget_seconds": execution_budget(doc, stage), "selection_evidence": selection_evidence(doc, agent)}
             doc["attempts"].append(assignment)
             checkpoint(doc, path, token, repo)
             if progress:
+                progress.selection(agent, stage, assignment["selection_evidence"])
                 progress.assignment(doc["id"][:8], agent, stage)
                 progress._write("START", f"{AGENT_NAMES.get(agent, agent)} started {stage}")
                 with progress.waiting():
@@ -768,6 +907,19 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             if result.success and stage == "acceptance" and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
+            if assignment["failure"] in ATTEMPT_TIMEOUT_FAILURES:
+                metadata = getattr(result, "metadata", None) or {}
+                budget = execution_budget(doc, stage)
+                assignment.update({"state": "TIMED_OUT", "execution_budget_seconds": budget,
+                                   "timeout_source": metadata.get("timeout_source"),
+                                   "budget_derived": metadata.get("budget_derived") is True,
+                                   "partial_changes": before != after})
+                record_timeout(doc, stage, agent, model, budget, assignment["timeout_source"], assignment["finished_at"])
+                if progress:
+                    progress.attempt_timed_out(agent, stage, budget, before != after)
+            if assignment["failure"] is None or assignment["failure"] in UNAVAILABLE_FAILURES | MODEL_LIMIT_FAILURES | {"EXECUTION_PERMISSION_REQUIRED"}:
+                agent_readiness.record_session_outcome(agent, model, assignment["failure"],
+                                                       detail=f"{result.error_message or ''}\n{result.stderr}")
             if assignment["state"] == "SUCCEEDED":
                 record_capability_success(doc, agent)
                 if stage == "planning":
@@ -825,11 +977,19 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             if stage == "review":
                 doc["audit"] = "AUDIT BLOCKED: independent reviewers exhausted" if attempted else "AUDIT BLOCKED: no independent reviewer"
             doc["exclusions"] = {"stage": stage, "agents": exclusions(doc, stage)}
+            stage_timeouts = [item for item in doc["timed_out_assignments"] if item["stage"] == stage]
+            if stage_timeouts:
+                doc["timeout_hint"] = (f"{len(stage_timeouts)} {stage} attempt(s) reached the {execution_budget(doc, stage)}s "
+                                       "execution budget. Decompose the goal, or resume with "
+                                       f"--execution-budget {stage}=<seconds> (max {MAX_EXECUTION_BUDGET_SECONDS}) "
+                                       "or --retry-timeouts.")
             checkpoint(doc, path, token, repo)
             if progress:
                 for item in doc["exclusions"]["agents"]:
                     progress.excluded(item["agent"], item["reason"])
                 reason = doc.get("audit") or f"No eligible {stage} workers remain"
+                if doc.get("timeout_hint"):
+                    progress._write("TIMEOUT", doc["timeout_hint"])
                 progress.blocked("AUDIT BLOCKED" if stage == "review" else "HANDOFF REQUIRED", reason, f"howlplane orchestrate resume --repo {repo}")
             return report(doc)
         if stage == "implementation":
@@ -890,6 +1050,10 @@ def report(doc: dict[str, Any]) -> int:
     print(f"Recovery: {json.dumps(doc.get('reconciliation', {}))}")
     if doc.get("validation_gap"):
         print(f"Validation gap: {doc['validation_gap']}")
+    if doc.get("timed_out_assignments"):
+        print(f"Timed-out assignments: {json.dumps([{key: item.get(key) for key in ('stage', 'agent', 'model', 'execution_budget_seconds')} for item in doc['timed_out_assignments']])}")
+    if doc.get("timeout_hint") and doc["status"] in TERMINAL:
+        print(f"Timeout guidance: {doc['timeout_hint']}")
     if doc.get("exclusions") and doc["status"] in TERMINAL:
         print(f"Excluded {doc['exclusions']['stage']} workers: {json.dumps(doc['exclusions']['agents'])}")
     print(f"Failures: {json.dumps([{'stage': a['stage'], 'agent': a['agent'], 'model': a['model'], 'failure': a.get('failure')} for a in doc['attempts'] if a.get('failure')])}")
@@ -947,6 +1111,15 @@ def command(args: argparse.Namespace) -> int:
                     raise ValueError("Session has a live coordinator lease")
             doc["lease"] = {"token": uuid.uuid4().hex, "pid": os.getpid(), "renewed_at": time.time()}
             reconcile(doc, repo)
+            budget_change = parse_execution_budget(getattr(args, "execution_budget", None))
+            if budget_change:
+                doc["execution_budget"].update(budget_change)
+                doc.setdefault("budget_changes", []).append({"budget": budget_change, "at": now()})
+            if getattr(args, "retry_timeouts", False) and doc["timed_out_assignments"]:
+                # An explicit operator retry: clear the ledger once, keep the record.
+                doc.setdefault("timeout_retries", []).append({"cleared": doc["timed_out_assignments"], "at": now()})
+                doc["timed_out_assignments"] = []
+            doc.pop("timeout_hint", None)
             requested_orchestrator = getattr(args, "orchestrator", None)
             if requested_orchestrator and requested_orchestrator != "AUTO" and doc["agents"].get(requested_orchestrator, {}).get("state") in {"AVAILABLE", "DEGRADED"}:
                 doc["requested_orchestrator"] = requested_orchestrator
@@ -1011,3 +1184,9 @@ def add_parser(subparsers: Any, common_parser: Any) -> None:
     parser.add_argument("--policy", choices=["PLAN + EXECUTE + INDEPENDENT AUDIT", "PLAN + EXECUTE", "PLAN ONLY"])
     parser.add_argument("--constraint", action="append", default=[])
     parser.add_argument("--verify", nargs="+", help="Explicit verification command and arguments")
+    parser.add_argument("--execution-budget", action="append", metavar="ROLE=SECONDS",
+                        help=f"Per-assignment deadline for a role, or SECONDS for every role (default "
+                             f"{DEFAULT_EXECUTION_BUDGET_SECONDS}, max {MAX_EXECUTION_BUDGET_SECONDS}; repeatable). "
+                             "This is HowlPlane's own time limit, not provider quota")
+    parser.add_argument("--retry-timeouts", action="store_true",
+                        help="On resume, allow assignments that hit their execution budget to run once more unchanged")

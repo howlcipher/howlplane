@@ -867,6 +867,7 @@ class ProviderPoolManager:
             "requires permission", "execution permission required", "execution_permission_required",
             "needs approval", "approve bash execution",
             "workspace trust required", "trust the current workspace", "pass --trust",
+            "untrusted workspace",
         )):
             return ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
         if any(marker in combined for marker in (

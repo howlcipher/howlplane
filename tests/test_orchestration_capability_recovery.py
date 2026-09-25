@@ -118,8 +118,8 @@ def test_manifest_missing_capabilities_normalizes_to_unknown_not_available(tmp_p
 
     notes = module.normalize_session(doc)
 
-    assert notes == ["Session manifest normalized from schema v1 → v2"]
-    assert doc["schema_version"] == 2
+    assert notes == [f"Session manifest normalized from schema v1 → v{module.SCHEMA_VERSION}"]
+    assert doc["schema_version"] == module.SCHEMA_VERSION
     for agent in module.AGENTS:
         assert doc["agents"][agent]["capabilities"]["unattended_execution"] is None
         assert doc["agents"][agent]["capacity"] == {}
@@ -136,10 +136,10 @@ def test_capability_access_on_unnormalized_record_never_raises_key_error(tmp_pat
     assert module.capability_skip_reason(doc, "agy", "implementation") is None
     module.record_capability_success(doc, "codex")
     module.record_capability_failure(doc, "claude_code", "EXECUTION_PERMISSION_REQUIRED")
-    module.record_failure(doc, "agy", "implementation", "m1", "EXECUTION_BUDGET_EXCEEDED")
+    module.record_failure(doc, "agy", "implementation", "m1", "ENGINEERING_FAILURE")
     assert doc["agents"]["codex"]["capabilities"]["unattended_execution"] is True
     assert doc["agents"]["claude_code"]["capabilities"]["unattended_execution"] is False
-    assert doc["agents"]["agy"]["capacity"]["implementation"]["state"] == "EXHAUSTED"
+    assert doc["agents"]["agy"]["capacity"]["implementation"]["state"] == "FAILED"
 
 
 @pytest.mark.parametrize("corrupt", [
@@ -170,8 +170,8 @@ def test_unrecoverable_manifest_returns_structured_session_state_invalid(tmp_pat
 
 
 @pytest.mark.parametrize("agent", module.AGENTS)
-def test_execution_budget_exceeded_bars_immediate_reassignment(tmp_path, monkeypatch, capsys, agent):
-    """Even as the explicitly requested orchestrator, the next model is not tried in the same role."""
+def test_execution_budget_exceeded_times_out_the_attempt_and_falls_back_to_another_worker(tmp_path, monkeypatch, capsys, agent):
+    """A deadline stop is attempt evidence: another worker takes over and capacity is untouched."""
     repo = repository(tmp_path)
     install_all(tmp_path, monkeypatch)
     calls = []
@@ -186,10 +186,16 @@ def test_execution_budget_exceeded_bars_immediate_reassignment(tmp_path, monkeyp
     assert calls[0] == (agent, "m1")
     assert [name for name, _ in calls].count(agent) == 1
     doc = module.active_sessions(module.state_root(), repo, include_terminal=True)[0]
-    entry = doc["agents"][agent]["capacity"]["planning"]
-    assert (entry["state"], entry["reason"], entry["scope"]) == ("EXHAUSTED", "EXECUTION_BUDGET_EXCEEDED", "session")
+    assert doc["agents"][agent]["capacity"] == {}
+    assert doc["model_states"] == {}
+    timed_out = doc["attempts"][0]
+    assert (timed_out["state"], timed_out["failure"], timed_out["timeout_source"]) == (
+        "TIMED_OUT", "EXECUTION_BUDGET_EXCEEDED", "harness")
+    assert [(item["stage"], item["agent"], item["model"], item["execution_budget_seconds"])
+            for item in doc["timed_out_assignments"]] == [("planning", agent, "m1", 300)]
     stderr = capsys.readouterr().err
-    assert f"{module.AGENT_NAMES[agent]} planning capacity marked exhausted for this session" in stderr
+    assert f"{module.AGENT_NAMES[agent]} planning stopped at the 300s execution budget (attempt only; capacity unchanged)" in stderr
+    assert "capacity marked exhausted" not in stderr
     assert_reroutes_match_assignments(stderr)
 
 
@@ -199,7 +205,7 @@ def test_candidates_are_recomputed_after_hard_failure_including_configured_fallb
     doc = module.setup(arguments(repo, orchestrator="AUTO", fallbacks="implementation:agy:m1,implementation:codex:m1"), repo)
     assert ("agy", "m1") in module.candidates(doc, "implementation")
 
-    module.record_failure(doc, "agy", "implementation", "m1", "EXECUTION_BUDGET_EXCEEDED")
+    module.record_failure(doc, "agy", "implementation", "m1", "ENGINEERING_FAILURE")
 
     options = module.candidates(doc, "implementation")
     assert all(agent != "agy" for agent, _ in options)
@@ -259,7 +265,7 @@ def test_observed_sequence_resumes_old_manifest_without_retrying_exhausted_worke
     assert calls == [("implementation", "devin_cli"), ("acceptance", "codex")]
     captured = capsys.readouterr()
     assert "capabilities" not in captured.out + captured.err
-    assert "MIGRATE" in captured.err and "schema v1 → v2" in captured.err
+    assert "MIGRATE" in captured.err and f"schema v1 → v{module.SCHEMA_VERSION}" in captured.err
     resumed = module.active_sessions(module.state_root(), repo, include_terminal=True)[0]
     assert resumed["status"] == "COMPLETE"
     assert resumed["goal"] == goal
@@ -267,8 +273,11 @@ def test_observed_sequence_resumes_old_manifest_without_retrying_exhausted_worke
     assert resumed["attempts"][len(prior_attempts) - 1]["failure"] == "INTERRUPTED_OR_STALE_LEASE"
     assert resumed["reroutes"][:len(prior_reroutes)] == prior_reroutes
     agents = resumed["agents"]
-    assert agents["agy"]["capacity"]["implementation"]["reason"] == "EXECUTION_BUDGET_EXCEEDED"
-    assert agents["claude_code"]["capacity"]["implementation"]["state"] == "EXHAUSTED"
+    # The old budget stops replay as attempt evidence, never as role capacity.
+    assert "implementation" not in agents["agy"]["capacity"]
+    assert "implementation" not in agents["claude_code"]["capacity"]
+    assert {(item["agent"], item["model"]) for item in resumed["timed_out_assignments"]} == {
+        ("claude_code", "UNKNOWN"), ("agy", "m1")}
     assert agents["cursor"]["capacity"]["implementation"]["reason"] == "ENGINEERING_FAILURE"
     assert agents["codex"]["capacity"]["implementation"]["reason"] == "NO_REPOSITORY_CHANGE"
     # Replayed history carries negatives only; Codex's recorded planning success
@@ -303,7 +312,8 @@ def test_observed_sequence_live_run_reroutes_truthfully_and_never_repeats_agy(tm
     stderr = capsys.readouterr().err
     assert_reroutes_match_assignments(stderr)
     assert "] REROUTE     " in stderr and "AGY → Devin (EXECUTION_BUDGET_EXCEEDED)" in stderr
-    assert "AGY implementation capacity marked exhausted for this session" in stderr
+    assert "AGY implementation stopped at the 300s execution budget (attempt only; capacity unchanged)" in stderr
+    assert "capacity marked exhausted" not in stderr
     assert "supersecret" not in stderr
     retained = module.state_root().glob("*.json")
     assert all("supersecret" not in path.read_text() for path in retained)
@@ -311,7 +321,8 @@ def test_observed_sequence_live_run_reroutes_truthfully_and_never_repeats_agy(tm
 
 def test_all_workers_exhausted_hands_off_with_exclusions_instead_of_cycling(tmp_path, monkeypatch, capsys):
     repo = repository(tmp_path)
-    install_all(tmp_path, monkeypatch)
+    # One advertised model each, so the timed-out AGY assignment has no untried variant.
+    install_all(tmp_path, monkeypatch, models=("m1",))
     persist(observed_v1_session(repo, devin_cli="RESERVED"))
     monkeypatch.setattr(module, "execute_assignment", lambda *args: pytest.fail("no eligible worker may be dispatched"))
 
@@ -321,12 +332,14 @@ def test_all_workers_exhausted_hands_off_with_exclusions_instead_of_cycling(tmp_
     assert "Status: HANDOFF REQUIRED" in captured.out
     assert "Excluded implementation workers" in captured.out
     excluded = "\n".join(events(captured.err, "EXCLUDED"))
-    assert "AGY: execution budget exhausted" in excluded
-    assert "Claude: execution budget exhausted" in excluded
+    assert "AGY: timed out at the 300s execution budget; a retry needs a changed budget, model, or scope" in excluded
+    assert "Claude: unattended execution unavailable" in excluded
     assert "Cursor: failed earlier this session (ENGINEERING_FAILURE)" in excluded
     assert "Codex: failed earlier this session (NO_REPOSITORY_CHANGE)" in excluded
     assert "Devin: reserved" in excluded
     assert "No eligible implementation workers remain" in captured.err
+    assert "--execution-budget implementation=<seconds>" in captured.err
+    assert "Timeout guidance:" in captured.out
     assert not events(captured.err, "ASSIGN")
     doc = module.active_sessions(module.state_root(), repo, include_terminal=True)[0]
     assert doc["agents"]["devin_cli"]["state"] == "RESERVED"
@@ -336,10 +349,10 @@ def test_hard_failure_evidence_survives_resume_of_current_schema(tmp_path, monke
     repo = repository(tmp_path)
     install_all(tmp_path, monkeypatch)
     doc = module.setup(arguments(repo, orchestrator="agy", policy="PLAN ONLY"), repo)
-    module.record_failure(doc, "agy", "planning", "m1", "EXECUTION_BUDGET_EXCEEDED")
-    doc["attempts"].append(attempt("planning", "agy", "m1", "REVOKED", "EXECUTION_BUDGET_EXCEEDED"))
+    module.record_failure(doc, "agy", "planning", "m1", "ENGINEERING_FAILURE")
+    doc["attempts"].append(attempt("planning", "agy", "m1", "REVOKED", "ENGINEERING_FAILURE"))
     path = persist(doc)
-    assert json.loads(path.read_text())["agents"]["agy"]["capacity"]["planning"]["state"] == "EXHAUSTED"
+    assert json.loads(path.read_text())["agents"]["agy"]["capacity"]["planning"]["state"] == "FAILED"
     calls = []
     monkeypatch.setattr(module, "execute_assignment",
                         lambda document, role, agent, model, cwd: calls.append(agent) or accepted(agent, role))

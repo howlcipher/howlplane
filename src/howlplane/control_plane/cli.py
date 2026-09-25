@@ -24,7 +24,7 @@ _src = str(Path(_repo_root) / "src")
 if _src not in sys.path:
     sys.path.insert(0, _src)
 
-from howlplane.control_plane import __version__
+from howlplane.control_plane import __version__, agent_readiness
 from howlplane.control_plane.agent_registry import AgentRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
 from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
@@ -1441,6 +1441,19 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     # doctor
     subparsers.add_parser("doctor", parents=[common_parser], help="Run deterministic workspace health diagnostics")
 
+    # agents
+    p_agents = subparsers.add_parser("agents", parents=[common_parser], help="Inspect supported agent CLIs")
+    agents_sub = p_agents.add_subparsers(dest="agents_action")
+    p_agents_doctor = agents_sub.add_parser(
+        "doctor", help="Verify each agent CLI's readiness, unattended execution, models, and capacity visibility"
+    )
+    _add_readiness_arguments(p_agents_doctor)
+    p_agents_doctor.add_argument("--agent", action="append", choices=list(agent_readiness.AGENT_ORDER),
+                                 help="Limit to one agent (repeatable)")
+    p_agents_doctor.add_argument("--refresh", action="store_true", help="Ignore cached evidence and probe again")
+    p_agents_doctor.add_argument("--smoke-timeout", type=int, default=agent_readiness.DEFAULT_SMOKE_TIMEOUT_SECONDS,
+                                 metavar="SECONDS", help="Per-agent limit for the --live smoke (default: 60)")
+
     # status
     subparsers.add_parser("status", parents=[common_parser], help="Show project status and verification plan")
 
@@ -1688,6 +1701,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
              "Without this, authority-required work is parked rather than executed.",
     )
     p_run.add_argument("--json", action="store_true", help="Output JSON result")
+    _add_preflight_argument(p_run)
 
     p_status = factory_sub.add_parser(
         "status", help="Show factory supervisor state", **kwargs
@@ -1713,6 +1727,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_start = factory_sub.add_parser("start", help="Start a persistent Factory campaign for this repository", **kwargs)
     p_start.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_start.add_argument("--target-repo", help="Factory target worktree (advanced)")
+    _add_preflight_argument(p_start)
     p_start.add_argument("--product-repo", help="Product repository slug to weight portfolio shares toward")
     p_start.add_argument("--target", choices=["repo", "self", "ecosystem"], default="repo")
     p_start.add_argument("--workspace", help="Workspace YAML for ecosystem mode")
@@ -1734,6 +1749,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_factory_doctor = factory_sub.add_parser("doctor", help="Check whether Factory can start safely", **kwargs)
     p_factory_doctor.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_factory_doctor.add_argument("--target-repo", help="Repository to resolve (advanced)")
+    _add_readiness_arguments(p_factory_doctor)
 
     p_canary = factory_sub.add_parser(
         "canary", help="Run a single-item bounded canary (sugar for 'run --max-work-items 1')",
@@ -2526,6 +2542,9 @@ def cmd_factory_run(args: argparse.Namespace) -> int:
     import signal
     import threading
 
+    refused = _factory_preflight(args)
+    if refused is not None:
+        return refused
     campaign = _resolve_factory_campaign(args, prepare=True)
     if campaign is not None:
         _select_factory_authority(args, campaign)
@@ -2749,6 +2768,9 @@ def cmd_factory_start(args: argparse.Namespace) -> int:
     """Normal persistent Factory entrypoint over the existing run loop."""
     from howlplane.control_plane.factory.service import start_process
 
+    refused = _factory_preflight(args)
+    if refused is not None:
+        return refused
     campaign = _resolve_factory_campaign(args, prepare=True, force_resolve=True)
     profile = _select_factory_authority(args, campaign)
     # Bind the selected existing envelope before detaching. This keeps the
@@ -2795,14 +2817,62 @@ def cmd_factory_logs(args: argparse.Namespace) -> int:
     return recent_logs(campaign, follow=getattr(args, "follow", False), lines=getattr(args, "lines", 80))
 
 
+def _add_readiness_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--live", action="store_true",
+                        help="Also send one tiny non-mutating prompt per eligible agent (consumes a little quota)")
+    parser.add_argument("--json", action="store_true", help="Output JSON result")
+
+
+def _add_preflight_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--preflight", choices=["off", "warn", "require"], default="off",
+        help="Check agent readiness before starting: warn, or refuse when no autonomous worker is usable",
+    )
+
+
+def cmd_agents(args: argparse.Namespace) -> int:
+    if getattr(args, "agents_action", None) != "doctor":
+        print("Usage: howlplane agents doctor [--live] [--json]")
+        return 1
+    return agent_readiness.command(args)
+
+
+def _factory_readiness(live: bool = False) -> dict:
+    from howlplane.control_plane.orchestration import default_execution_budget
+    summaries = agent_readiness.evaluate(live=live)
+    return {"readiness": agent_readiness.factory_readiness(summaries),
+            "execution_budget": default_execution_budget(), "agents": summaries}
+
+
+def _factory_preflight(args: argparse.Namespace) -> Optional[int]:
+    """Level-1 agent readiness before a campaign; `require` fails early when nothing can work unattended."""
+    mode = getattr(args, "preflight", "off")
+    if mode == "off":
+        return None
+    report = _factory_readiness()
+    readiness = report["readiness"]
+    if readiness["status"] != "READY":
+        print(agent_readiness.render_factory(readiness, report["execution_budget"]), end="", file=sys.stderr)
+    if mode == "require" and readiness["status"] == "BLOCKED":
+        print("Factory preflight: no autonomous implementation worker is usable; not starting.", file=sys.stderr)
+        return 1
+    return None
+
+
 def cmd_factory_doctor(args: argparse.Namespace) -> int:
     from howlplane.control_plane.factory.campaign import CampaignError
     from howlplane.control_plane.factory.service import _systemd_available, process_status
+    report = _factory_readiness(live=getattr(args, "live", False))
+    blocked = 1 if report["readiness"]["status"] == "BLOCKED" else 0
+    if getattr(args, "json", False):
+        print(json.dumps({"schema": agent_readiness.SCHEMA, **report}, indent=2))
+        return blocked
     try:
         campaign = _resolve_factory_campaign(args)
         if campaign is None:
             print("Factory doctor: explicit state and target configuration accepted.")
-            return 0
+            print(agent_readiness.render_factory(report["readiness"], report["execution_budget"]), end="")
+            return blocked
         target_state = "missing"
         if campaign.target_dir.exists():
             try:
@@ -2818,8 +2888,8 @@ def cmd_factory_doctor(args: argparse.Namespace) -> int:
         print(f"State directory: {campaign.state_dir}")
         print(f"Process: {process_status(campaign)}")
         print(f"Backend: {'systemd user service' if _systemd_available() else 'portable detached process'}")
-        print("Provider readiness: deferred to supervisor startup")
-        return 0
+        print(agent_readiness.render_factory(report["readiness"], report["execution_budget"]), end="")
+        return blocked
     except CampaignError as exc:
         print(f"Factory doctor: cannot start safely: {exc}")
         return 1
@@ -3258,6 +3328,7 @@ HANDLERS = {
     "report": cmd_metrics,
     "check-boundary": cmd_boundary,
     "doctor": cmd_doctor,
+    "agents": cmd_agents,
     "howlframe-audit": cmd_howlframe_audit,
     "approve": cmd_approve,
     "reject": cmd_reject,

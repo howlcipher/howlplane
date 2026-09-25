@@ -217,6 +217,16 @@ def _scrub_inherited_git_repository_selection(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_agent_readiness_cache(monkeypatch, tmp_path):
+    """Keep every test away from the operator's real agent readiness cache.
+
+    Orchestration reads readiness evidence for routing and writes real session
+    outcomes back to it; a test must neither see nor pollute live evidence.
+    """
+    monkeypatch.setenv("HOWLPLANE_AGENT_READINESS_FILE", str(tmp_path / "agent_readiness.json"))
+
+
+@pytest.fixture(autouse=True)
 def setup_test_environment(request, monkeypatch):
     """
     Ensures deterministic compiler discovery and fake agent availability

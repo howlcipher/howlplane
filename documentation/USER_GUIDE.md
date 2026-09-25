@@ -26,6 +26,10 @@ howlplane providers --json
 # Run system and toolchain preflight diagnostics:
 howlplane doctor
 
+# Verify each agent CLI (Codex, Claude Code, Cursor, AGY, Devin); --live sends one tiny prompt each:
+howlplane agents doctor
+howlplane agents doctor --live --json
+
 # Execute deterministic verification on the current project:
 howlplane verify
 ```
