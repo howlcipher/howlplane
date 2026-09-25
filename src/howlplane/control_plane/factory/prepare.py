@@ -169,7 +169,7 @@ def command(args: argparse.Namespace) -> int:
     if as_json:
         print(json.dumps({"schema": workspace_trust.SCHEMA, "repo_root": str(repository.root),
                           "factory_root": str(plan["factory_root"]), "target": target,
-                          "trust": results, "workspace": report, "readiness": readiness}, indent=2))
+                          "preparation": results, "workspace": report, "readiness": readiness}, indent=2))
     else:
         print("\nTRUST PREPARATION")
         if not results:

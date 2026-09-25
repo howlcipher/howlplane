@@ -483,14 +483,14 @@ def workspace_status(agent: str, workspace: str | Path, live: bool = False,
     """
     path = str(Path(workspace).expanduser().resolve())
     hosted = hosted_probes_allowed()
-    trust = (workspace_trust.probe(agent, path) if live and hosted and agent in workspace_trust.PROBE_ARGV
-             else workspace_trust.check(agent, path))
+    vendor = (workspace_trust.probe(agent, path) if live and hosted and agent in workspace_trust.PROBE_ARGV
+              else workspace_trust.check(agent, path))
     record = (cache if cache is not None else load_cache()).get(agent) or {}
     refusal = (record.get("workspaces") or {}).get(path)
     smoke = (record.get("workspace_smokes") or {}).get(path)
-    state = workspace_trust.TRUST_REQUIRED if refusal else trust["state"]
+    state = workspace_trust.TRUST_REQUIRED if refusal else vendor["state"]
     return {"agent": agent, "workspace": path, "state": state, "ready": state == workspace_trust.READY,
-            "trust": trust, "observed_refusal": refusal,
+            "vendor": vendor, "observed_refusal": refusal,
             "live_smoke": None if not smoke else {"status": smoke.get("status"), "verified_at": smoke.get("observed_at"),
                                                   "failure_class": smoke.get("failure_class")}}
 
@@ -505,7 +505,7 @@ def workspace_blocked(agent: str, workspace: str | Path | None) -> str | None:
         return None
     if status["state"] != workspace_trust.TRUST_REQUIRED:
         return None
-    source = "refused earlier" if status["observed_refusal"] else status["trust"]["detail"]
+    source = "refused earlier" if status["observed_refusal"] else status["vendor"]["detail"]
     return f"workspace trust required for {status['workspace']} ({source})"
 
 
@@ -734,13 +734,13 @@ PREPARE_TEXT = {"none": "not needed (noninteractive mode has no trust prompt)",
 
 def _workspace_text(status: dict[str, Any]) -> str:
     text = TRUST_TEXT.get(status["state"], status["state"])
-    trust = status["trust"]
+    vendor = status["vendor"]
     if status["observed_refusal"]:
         refusal = status["observed_refusal"]
         return f"{text} — the CLI refused this directory ({refusal['source']}, {refusal['detected_at']})"
-    if trust.get("trusted_by") and trust["trusted_by"] != status["workspace"]:
-        return f"{text} — inherited from {trust['trusted_by']}"
-    return f"{text} — {trust.get('detail')}" if trust.get("detail") else text
+    if vendor.get("trusted_by") and vendor["trusted_by"] != status["workspace"]:
+        return f"{text} — inherited from {vendor['trusted_by']}"
+    return f"{text} — {vendor.get('detail')}" if vendor.get("detail") else text
 
 
 def render_workspace(report: dict[str, Any]) -> list[str]:

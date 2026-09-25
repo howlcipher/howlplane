@@ -538,9 +538,9 @@ def test_prepare_authorizes_creates_the_worktree_and_prepares_supported_trust(st
     root = factory_workspace_root(discover_repository(repo))
     assert report["factory_root"] == str(root)
     assert Path(report["target"]).is_dir() and root in Path(report["target"]).parents
-    assert {entry["state"] for entry in report["trust"]["cursor"]} == {"READY"}
+    assert {entry["state"] for entry in report["preparation"]["cursor"]} == {"READY"}
     # Devin needs its own prompt answered at a terminal; without one it is reported, not faked.
-    assert {entry["state"] for entry in report["trust"]["devin_cli"]} == {"TRUST_REQUIRED"}
+    assert {entry["state"] for entry in report["preparation"]["devin_cli"]} == {"TRUST_REQUIRED"}
     assert report["workspace"]["agents"]["cursor"]["state"] == "READY"
     assert report["workspace"]["agents"]["devin_cli"]["state"] == "TRUST_REQUIRED"
     assert report["readiness"]["status"] in ("READY", "DEGRADED")
