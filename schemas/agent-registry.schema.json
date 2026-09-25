@@ -29,19 +29,32 @@
           },
           "interface": {
             "type": "string",
-            "enum": ["cli", "headless_cli", "api", "ide"]
+            "enum": [
+              "cli",
+              "headless_cli",
+              "api",
+              "ide"
+            ]
           },
           "capabilities": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "available_tools": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "string"
+            }
           },
           "reasoning_tier": {
             "type": "string",
-            "enum": ["tier_1", "tier_2", "tier_3"]
+            "enum": [
+              "tier_1",
+              "tier_2",
+              "tier_3"
+            ]
           },
           "supports_repository_access": {
             "type": "boolean"
@@ -57,33 +70,104 @@
           },
           "cost_class": {
             "type": "string",
-            "enum": ["free_local", "subscription_included", "paid_api"]
+            "enum": [
+              "free_local",
+              "subscription_included",
+              "paid_api"
+            ]
           },
           "availability": {
             "type": "string",
-            "enum": ["available", "degraded", "unavailable"]
+            "enum": [
+              "available",
+              "degraded",
+              "unavailable"
+            ]
           },
           "operator_preference": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "notes": {
             "type": "string"
+          },
+          "provider_id": {
+            "type": "string",
+            "description": "Organization serving the model. Coarser than resource_id: one provider may serve several resources."
+          },
+          "interface_id": {
+            "type": "string",
+            "description": "Access contract used to reach the provider, for example claude_code_subscription or local_runtime."
+          },
+          "resource_id": {
+            "type": "string",
+            "description": "Operator configurable unit of capacity. This is the identity the provider pool keys capacity state on."
+          },
+          "model_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exact model observed, or null when it has not been observed. Null means unobserved, never a default."
+          },
+          "locality": {
+            "type": "string",
+            "enum": [
+              "HOSTED",
+              "LOCAL",
+              "UNKNOWN"
+            ],
+            "description": "Where execution happens. Governs egress policy."
+          },
+          "economic_class": {
+            "type": "string",
+            "enum": [
+              "SUBSCRIPTION",
+              "METERED_API",
+              "LOCAL",
+              "UNKNOWN"
+            ],
+            "description": "How use is paid for. Distinct from cost_class, which is the legacy coarse form."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Roles this agent may fill. Load bearing: select_resource excludes a candidate with ROLE_NOT_SUPPORTED when the requested role is not a member, so an omitted or truncated list silently narrows or widens what the agent may be selected for."
+          },
+          "supports_structured_output": {
+            "type": "boolean"
+          },
+          "supports_tool_calling": {
+            "type": "boolean"
+          },
+          "model_configurable": {
+            "type": "boolean",
+            "description": "Whether the operator may override model_id for this agent."
           }
         },
         "required": [
           "agent_id",
+          "availability",
+          "capabilities",
+          "cost_class",
+          "interface",
           "name",
           "provider",
-          "interface",
-          "capabilities",
           "reasoning_tier",
-          "cost_class",
-          "availability"
+          "roles"
         ],
         "additionalProperties": false
       }
     }
   },
-  "required": ["schema", "agents"],
+  "required": [
+    "schema",
+    "agents"
+  ],
   "additionalProperties": false
 }

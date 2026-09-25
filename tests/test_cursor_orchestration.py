@@ -193,8 +193,11 @@ def test_cursor_hard_failure_degrades_session_auto_eligibility(tmp_path, monkeyp
     doc = module.active_sessions(module.state_root(), repo, include_terminal=True)[0]
     cursor = doc["agents"]["cursor"]
     assert cursor["state"] == "DEGRADED"
-    assert cursor["capabilities"]["unattended_execution"] is False
-    assert cursor["capabilities"]["reason"] == "ENGINEERING_FAILURE"
+    assert cursor["capacity"]["planning"]["state"] == "FAILED"
+    assert cursor["capacity"]["planning"]["reason"] == "ENGINEERING_FAILURE"
+    assert all(agent != "cursor" for agent, _ in module.candidates(doc, "planning"))
+    # An engineering failure is not evidence about unattended permission.
+    assert cursor["capabilities"]["unattended_execution"] is None
 
 
 def test_identical_cursor_hard_failure_not_immediately_retried(tmp_path, monkeypatch, capsys):
