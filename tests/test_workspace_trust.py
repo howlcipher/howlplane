@@ -81,7 +81,7 @@ def test_trusted_root_covers_fresh_child_worktrees_but_not_siblings(agent, store
     (tmp_path / "elsewhere").mkdir()
     trust_both(stores, root)
     inherited = trust.check(agent, root / "target")
-    assert inherited["state"] == trust.READY and inherited["trusted_by"] == str(root.resolve())
+    assert inherited["state"] == trust.READY and inherited["covering_path"] == str(root.resolve())
     # A worktree created after preparation (not on disk yet) inherits too.
     assert trust.check(agent, root / "canaries" / "c1" / "target")["state"] == trust.READY
     assert trust.check(agent, tmp_path / "elsewhere")["state"] == trust.TRUST_REQUIRED
@@ -141,7 +141,7 @@ def test_deleted_and_recreated_slot_keeps_inherited_trust_but_exact_trust_is_sta
     slot = root / "slot-01"
     slot.mkdir(parents=True)
     cursor_trust(stores, slot)
-    assert trust.check("cursor", slot)["trusted_by"] == str(slot.resolve())
+    assert trust.check("cursor", slot)["covering_path"] == str(slot.resolve())
     slot.rmdir()
     # Exact-path trust names a directory that no longer exists: nothing else inherits it.
     assert trust.check("cursor", tmp_path / "root" / "slot-02")["state"] == trust.TRUST_REQUIRED

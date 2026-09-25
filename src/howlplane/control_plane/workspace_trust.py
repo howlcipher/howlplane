@@ -148,11 +148,13 @@ def _cursor_marker(path: Path) -> Path:
 
 def check_cursor(path: Path) -> dict[str, Any]:
     if _cursor_marker(path).is_file():
-        return {"state": READY, "trusted_by": str(path), "detail": "workspace trust marker present"}
+        return {"state": READY, "covering_path": str(path), "detail": "workspace trust marker present"}
     for ancestor in path.parents:
         if _cursor_marker(ancestor).is_file() and _cursor_inheritable(ancestor):
-            return {"state": READY, "trusted_by": str(ancestor), "detail": "inherited from a trusted ancestor"}
-    return {"state": TRUST_REQUIRED, "trusted_by": None, "detail": "no trust marker for this directory or an eligible ancestor"}
+            return {"state": READY, "covering_path": str(ancestor),
+                    "detail": "inherited from a trusted ancestor"}
+    return {"state": TRUST_REQUIRED, "covering_path": None,
+            "detail": "no trust marker for this directory or an eligible ancestor"}
 
 
 def devin_trust_file() -> Path:
@@ -165,22 +167,26 @@ def devin_trust_file() -> Path:
     return base / "devin" / "cli" / "trusted_workspaces.json"
 
 
+# Devin's own key for its list of trusted directories.
+DEVIN_LIST_KEY = "trusted_paths"
+
+
 def check_devin(path: Path) -> dict[str, Any]:
     store = devin_trust_file()
     if not store.is_file():
-        return {"state": TRUST_REQUIRED, "trusted_by": None, "detail": "Devin has no trusted workspaces yet"}
+        return {"state": TRUST_REQUIRED, "covering_path": None, "detail": "Devin has no trusted workspaces yet"}
     try:
-        trusted = json.loads(store.read_text(encoding="utf-8")).get("trusted_paths", [])
+        listed = json.loads(store.read_text(encoding="utf-8")).get(DEVIN_LIST_KEY, [])
     except (OSError, ValueError, AttributeError) as exc:
-        return {"state": ERROR, "trusted_by": None, "detail": f"Devin trust store unreadable: {type(exc).__name__}"}
+        return {"state": ERROR, "covering_path": None, "detail": f"Devin trust store unreadable: {type(exc).__name__}"}
     canonical = os.path.realpath(path)
-    for entry in trusted if isinstance(trusted, list) else []:
+    for entry in listed if isinstance(listed, list) else []:
         if not isinstance(entry, str) or not entry:
             continue
         root = os.path.realpath(entry)
         if canonical == root or canonical.startswith(root.rstrip(os.sep) + os.sep):
-            return {"state": READY, "trusted_by": root, "detail": "inside a Devin-trusted workspace"}
-    return {"state": TRUST_REQUIRED, "trusted_by": None, "detail": "not inside any Devin-trusted workspace"}
+            return {"state": READY, "covering_path": root, "detail": "inside a Devin-trusted workspace"}
+    return {"state": TRUST_REQUIRED, "covering_path": None, "detail": "not inside any Devin-trusted workspace"}
 
 
 STORE_CHECKS: dict[str, Callable[[Path], dict[str, Any]]] = {"cursor": check_cursor, "devin_cli": check_devin}
@@ -192,17 +198,17 @@ def check(agent: str, workspace: str | Path) -> dict[str, Any]:
     path = Path(workspace).expanduser().resolve()
     base = {"agent": agent, "workspace": str(path), "checked_at": now(), "source": "vendor trust store"}
     if spec is None:
-        return {**base, "state": UNSUPPORTED, "scope": None, "method": None, "trusted_by": None,
+        return {**base, "state": UNSUPPORTED, "scope": None, "method": None, "covering_path": None,
                 "detail": "no workspace trust model known for this agent", "source": None}
     base.update({"scope": spec.scope, "method": spec.method})
     if spec.scope == "not_enforced":
-        return {**base, "state": READY, "trusted_by": None, "detail": spec.note, "source": "observed CLI behavior"}
+        return {**base, "state": READY, "covering_path": None, "detail": spec.note, "source": "observed CLI behavior"}
     try:
         # A directory not created yet (a Factory worktree about to be added)
         # gets the verdict its ancestors give it, exactly as the CLI would.
         return {**base, **STORE_CHECKS[agent](path)}
     except OSError as exc:
-        return {**base, "state": ERROR, "trusted_by": None, "detail": f"trust check failed: {type(exc).__name__}"}
+        return {**base, "state": ERROR, "covering_path": None, "detail": f"trust check failed: {type(exc).__name__}"}
 
 
 def _run(argv: list[str], cwd: Path, timeout: float = PROBE_TIMEOUT_SECONDS) -> tuple[int, str]:
@@ -243,7 +249,7 @@ def probe(agent: str, workspace: str | Path, runner: Callable[[list[str], Path],
     else:
         state, detail = UNKNOWN, "the CLI response did not identify its trust decision"
     return {"agent": agent, "workspace": str(path), "checked_at": now(), "source": "CLI trust probe",
-            "scope": spec.scope, "method": spec.method, "state": state, "trusted_by": None, "detail": detail}
+            "scope": spec.scope, "method": spec.method, "state": state, "covering_path": None, "detail": detail}
 
 
 # ---------------------------------------------------------------- HowlPlane authorization registry

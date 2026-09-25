@@ -393,7 +393,7 @@ def inventory(availability: dict[str, str], repo: Path | None = None) -> dict[st
         if repo is not None and installed:
             trust = workspace_trust.check(agent, repo)
             found[agent]["workspace_trust"] = {key: trust.get(key) for key in (
-                "state", "workspace", "scope", "trusted_by", "detail", "source", "checked_at")}
+                "state", "workspace", "scope", "covering_path", "detail", "source", "checked_at")}
     return found
 
 
@@ -638,7 +638,7 @@ def workspace_trust_block(doc: dict[str, Any], agent: str) -> str | None:
         # itself returned this session stays binding: no retry in this folder.
         current = workspace_trust.check(agent, trust["workspace"])
         if current["state"] == workspace_trust.READY:
-            record["workspace_trust"] = {**trust, "state": current["state"], "trusted_by": current["trusted_by"],
+            record["workspace_trust"] = {**trust, "state": current["state"], "covering_path": current["covering_path"],
                                          "checked_at": current["checked_at"]}
             return None
     return f"workspace trust required for {trust.get('workspace') or doc.get('repository')} (run howlplane factory prepare)"

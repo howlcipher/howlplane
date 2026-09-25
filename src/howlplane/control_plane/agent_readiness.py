@@ -738,8 +738,8 @@ def _workspace_text(status: dict[str, Any]) -> str:
     if status["observed_refusal"]:
         refusal = status["observed_refusal"]
         return f"{text} — the CLI refused this directory ({refusal['source']}, {refusal['detected_at']})"
-    if vendor.get("trusted_by") and vendor["trusted_by"] != status["workspace"]:
-        return f"{text} — inherited from {vendor['trusted_by']}"
+    if vendor.get("covering_path") and vendor["covering_path"] != status["workspace"]:
+        return f"{text} — inherited from {vendor['covering_path']}"
     return f"{text} — {vendor.get('detail')}" if vendor.get("detail") else text
 
 
@@ -811,19 +811,19 @@ def factory_readiness(summaries: list[dict[str, Any]], workspace: dict[str, Any]
     """
     trust = (workspace or {}).get("agents", {})
 
-    def trusted_here(summary: dict[str, Any]) -> bool:
+    def workspace_ok(summary: dict[str, Any]) -> bool:
         status = trust.get(summary["agent"])
         return status is None or status["state"] != workspace_trust.TRUST_REQUIRED
 
     def autonomous(summary: dict[str, Any]) -> bool:
         return (summary["installed"] and summary["authenticated"] is not False
-                and summary["unattended_execution"] is not False and trusted_here(summary)
+                and summary["unattended_execution"] is not False and workspace_ok(summary)
                 and summary["capacity"]["state"] not in ("QUOTA_EXHAUSTED", "SESSION_EXHAUSTED", "RATE_LIMITED"))
     implementers = [s["name"] for s in summaries if autonomous(s) and s["mutation_capable"] is not False]
     reviewers = [s["name"] for s in summaries if autonomous(s)]
     independent_audit = any(auditor != implementer for implementer in implementers for auditor in reviewers)
     verified = [s["name"] for s in summaries if autonomous(s) and s["unattended_execution"] is True]
-    gated = [s["name"] for s in summaries if s["installed"] and not trusted_here(s)]
+    gated = [s["name"] for s in summaries if s["installed"] and not workspace_ok(s)]
     # Trust-gated agents do not block a campaign others can run, but it is degraded.
     status = "BLOCKED" if not implementers else (
         "READY" if independent_audit and set(verified) >= set(reviewers) and not gated else "DEGRADED")
