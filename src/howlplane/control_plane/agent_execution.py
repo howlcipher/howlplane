@@ -635,9 +635,11 @@ class SubprocessAgentBackend(AgentBackend):
         # Factory implementation attempts pass a watchdog callback below.
         if watchdog_callback is None:
             try:
+                # stdin is closed: an unattended CLI must never wait on a prompt
+                # (workspace trust, permissions) typed at the operator's terminal.
                 completed = subprocess.run(
                     args=cmd_args, cwd=str(target_cwd), capture_output=True,
-                    text=True, env=env, timeout=timeout_seconds,
+                    text=True, env=env, timeout=timeout_seconds, stdin=subprocess.DEVNULL,
                 )
                 elapsed = round(time.time() - start_t, 3)
                 return self._build_result(
@@ -657,7 +659,7 @@ class SubprocessAgentBackend(AgentBackend):
             # the output used to make that decision.
             process = subprocess.Popen(
                 args=cmd_args, cwd=str(target_cwd), stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, env=env,
+                stderr=subprocess.PIPE, env=env, stdin=subprocess.DEVNULL,
             )
             selector = selectors.DefaultSelector()
             assert process.stdout is not None and process.stderr is not None

@@ -31,7 +31,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from howlplane.control_plane.atomic_io import atomic_write_json, safe_load_json
+from howlplane.control_plane import workspace_trust
+from howlplane.control_plane.atomic_io import load_schema_section, private_state_path, write_private_json
 from howlplane.control_plane.config_loader import ProviderPolicySettings
 
 SCHEMA = "howlplane.agent_readiness/v1"
@@ -51,16 +52,15 @@ LIMIT_SECONDS = {
 }
 FAILURE_TO_CAPACITY = {"QUOTA_EXHAUSTED": "QUOTA_EXHAUSTED", "SESSION_LIMIT": "SESSION_EXHAUSTED", "RATE_LIMITED": "RATE_LIMITED"}
 EMAIL = re.compile(r"[\w.%+-]+@[\w-]+(?:\.[\w-]+)+")
-# Cursor and Devin refuse an untrusted directory until someone trusts it
-# interactively. That is a fact about the directory, not the agent: a smoke in
-# a fresh directory proves only that new workspaces need trusting first.
-WORKSPACE_TRUST_MARKERS = ("workspace trust required", "untrusted workspace", "trust the contents of this directory",
-                           "pass --trust")
+# Cursor and Devin refuse an untrusted directory until it is trusted. That is a
+# fact about the directory, not the agent: a smoke in a fresh directory proves
+# only that new workspaces need preparing first. The refusal markers live in
+# one place, `workspace_trust.ADAPTERS`.
 
 
-def is_workspace_trust_refusal(text: str) -> bool:
-    lowered = (text or "").lower()
-    return any(marker in lowered for marker in WORKSPACE_TRUST_MARKERS)
+def is_workspace_trust_refusal(text: str, agent: str | None = None) -> bool:
+    agents = [agent] if agent else list(workspace_trust.ADAPTERS)
+    return any(workspace_trust.is_trust_refusal(name, text) for name in agents)
 
 
 # Some CLIs (Cursor's `agent`) colorize output even when it is piped.
@@ -349,26 +349,38 @@ def _find_key(document: Any, key: str) -> Any:
     return None
 
 
-def run_smoke(agent: str, timeout: int, at: datetime) -> dict[str, Any]:
-    """One bounded, non-mutating invocation through HowlPlane's real backend path."""
+def run_smoke(agent: str, timeout: int, at: datetime, workspace: str | None = None) -> dict[str, Any]:
+    """One bounded, non-mutating invocation through HowlPlane's real backend path.
+
+    Without a workspace it runs in a fresh temporary directory (global
+    readiness). With one it runs read-only in that directory, proving whether
+    the agent can work there unattended.
+    """
     from howlplane.control_plane.agent_execution import AgentBackendRegistry
     from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
     from howlplane.control_plane.task_spec import TaskSpec
 
     backend = AgentBackendRegistry.get_backend(agent)
-    with tempfile.TemporaryDirectory(prefix="howl-smoke-") as workspace:
-        task = TaskSpec(task_id="agent-doctor-smoke", repository=workspace, objective="Readiness smoke test")
+
+    def invoke(directory: str) -> tuple[Any, float]:
+        task = TaskSpec(task_id="agent-doctor-smoke", repository=directory, objective="Readiness smoke test")
         started = time.monotonic()
-        result = backend.execute(task, workspace, role="review", prompt_override=SMOKE_PROMPT, timeout_seconds=timeout)
-        latency = round(time.monotonic() - started, 2)
+        outcome = backend.execute(task, directory, role="review", prompt_override=SMOKE_PROMPT, timeout_seconds=timeout)
+        return outcome, round(time.monotonic() - started, 2)
+
+    if workspace:
+        result, latency = invoke(workspace)
+    else:
+        with tempfile.TemporaryDirectory(prefix="howl-smoke-") as scratch:
+            result, latency = invoke(scratch)
     text = f"{result.stdout}\n{result.stderr}"
     failure = None if result.success else ProviderPoolManager.classify_result(agent, result).value
     if result.success and SMOKE_TOKEN in result.stdout:
         status = "PASS"
     elif result.success:
         status, failure = "FAIL", "MALFORMED_OUTPUT"
-    elif is_workspace_trust_refusal(text):
-        status = "WORKSPACE_TRUST_REQUIRED"
+    elif failure == "WORKSPACE_TRUST_REQUIRED" or is_workspace_trust_refusal(text, agent):
+        status, failure = "WORKSPACE_TRUST_REQUIRED", "WORKSPACE_TRUST_REQUIRED"
     elif failure == "EXECUTION_PERMISSION_REQUIRED":
         status = "BLOCKED_PERMISSION"
     elif failure == "EXECUTION_BUDGET_EXCEEDED":
@@ -383,31 +395,15 @@ def run_smoke(agent: str, timeout: int, at: datetime) -> dict[str, Any]:
 
 # ---------------------------------------------------------------- cache
 def cache_path() -> Path:
-    override = os.environ.get("HOWLPLANE_AGENT_READINESS_FILE")
-    if override and Path(override).is_absolute():
-        return Path(override)
-    base = os.environ.get("XDG_STATE_HOME")
-    if not base or not Path(base).is_absolute():
-        base = str(Path.home() / ".local" / "state")
-    return Path(base) / "howlplane" / "agent_readiness.json"
+    return private_state_path("HOWLPLANE_AGENT_READINESS_FILE", "agent_readiness.json")
 
 
 def load_cache() -> dict[str, Any]:
-    path = cache_path()
-    try:
-        document = safe_load_json(path) if path.exists() else {}
-    except Exception:
-        return {}
-    if not isinstance(document, dict) or document.get("schema") != SCHEMA or not isinstance(document.get("agents"), dict):
-        return {}
-    return document["agents"]
+    return load_schema_section(cache_path(), SCHEMA, "agents")
 
 
 def save_cache(agents: dict[str, Any]) -> None:
-    path = cache_path()
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    atomic_write_json(path, {"schema": SCHEMA, "agents": agents})
-    os.chmod(path, 0o600)
+    write_private_json(cache_path(), {"schema": SCHEMA, "agents": agents})
 
 
 def _update_cache(agent: str, mutate: Callable[[dict[str, Any]], None]) -> None:
@@ -431,7 +427,8 @@ def limit_entry(state: str, scope: str, model: str | None, source: str, at: date
 def record_session_outcome(agent: str, model: str, failure: str | None, at: datetime | None = None,
                            detail: str = "") -> None:
     """Feed a real orchestrate outcome back as readiness evidence, at the scope it proves."""
-    if agent not in SPECS or (failure == "EXECUTION_PERMISSION_REQUIRED" and is_workspace_trust_refusal(detail)):
+    if agent not in SPECS or failure == "WORKSPACE_TRUST_REQUIRED" or (
+            failure == "EXECUTION_PERMISSION_REQUIRED" and is_workspace_trust_refusal(detail, agent)):
         # An untrusted directory says nothing about the agent in trusted ones.
         return
     moment = at or now()
@@ -453,6 +450,76 @@ def record_session_outcome(agent: str, model: str, failure: str | None, at: date
         # EXECUTION_BUDGET_EXCEEDED and every other failure prove nothing about capacity.
 
     _update_cache(agent, mutate)
+
+
+def record_workspace_trust(agent: str, workspace: str, role: str, source: str, at: datetime | None = None) -> None:
+    """A CLI refused one directory as untrusted: recorded against that directory only.
+
+    Only the facts needed to act on it are kept (never output or transcripts).
+    """
+    if agent not in SPECS:
+        return
+    moment = at or now()
+
+    def mutate(record: dict[str, Any]) -> None:
+        record.setdefault("workspaces", {})[str(workspace)] = {
+            "state": workspace_trust.TRUST_REQUIRED, "role": role, "source": source, "detected_at": iso(moment)}
+
+    _update_cache(agent, mutate)
+
+
+def clear_workspace_refusal(agent: str, workspace: str) -> None:
+    """Preparation re-verified trust for this directory; an older refusal no longer applies."""
+    _update_cache(agent, lambda record: (record.get("workspaces") or {}).pop(str(workspace), None))
+
+
+def workspace_status(agent: str, workspace: str | Path, live: bool = False,
+                     cache: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One agent's readiness for one directory: vendor trust plus any refusal already observed there.
+
+    A refusal the CLI itself returned outranks the vendor store until preparation
+    or a passing workspace smoke clears it, so a wrong trust model can never
+    re-dispatch into a folder that already refused.
+    """
+    path = str(Path(workspace).expanduser().resolve())
+    hosted = hosted_probes_allowed()
+    trust = (workspace_trust.probe(agent, path) if live and hosted and agent in workspace_trust.PROBE_ARGV
+             else workspace_trust.check(agent, path))
+    record = (cache if cache is not None else load_cache()).get(agent) or {}
+    refusal = (record.get("workspaces") or {}).get(path)
+    smoke = (record.get("workspace_smokes") or {}).get(path)
+    state = workspace_trust.TRUST_REQUIRED if refusal else trust["state"]
+    return {"agent": agent, "workspace": path, "state": state, "ready": state == workspace_trust.READY,
+            "trust": trust, "observed_refusal": refusal,
+            "live_smoke": None if not smoke else {"status": smoke.get("status"), "verified_at": smoke.get("observed_at"),
+                                                  "failure_class": smoke.get("failure_class")}}
+
+
+def workspace_blocked(agent: str, workspace: str | Path | None) -> str | None:
+    """Routing view: why `agent` must not be dispatched into `workspace`, or None."""
+    if not workspace or agent not in workspace_trust.ADAPTERS:
+        return None
+    try:
+        status = workspace_status(agent, workspace)
+    except OSError:
+        return None
+    if status["state"] != workspace_trust.TRUST_REQUIRED:
+        return None
+    source = "refused earlier" if status["observed_refusal"] else status["trust"]["detail"]
+    return f"workspace trust required for {status['workspace']} ({source})"
+
+
+def workspace_report(workspace: str | Path, agents: Iterable[str] | None = None, live: bool = False) -> dict[str, Any]:
+    """Workspace readiness for the doctor and Factory preflight. Never sends a model prompt."""
+    path = Path(workspace).expanduser().resolve()
+    selected = [agent for agent in AGENT_ORDER if agents is None or agent in set(agents)]
+    cache = load_cache()
+    authorization = workspace_trust.authorization_for(path)
+    return {"workspace": str(path), "exists": path.is_dir(), "authorized": authorization is not None,
+            "authorization": None if authorization is None else {
+                key: authorization.get(key) for key in ("repo_root", "factory_root", "authorized_at", "strategy",
+                                                        "last_verified_at")},
+            "agents": {agent: workspace_status(agent, path, live, cache) for agent in selected}}
 
 
 def active_limits(record: dict[str, Any], at: datetime | None = None) -> list[dict[str, Any]]:
@@ -514,16 +581,20 @@ def summarize(agent: str, record: dict[str, Any], at: datetime | None = None) ->
         "capacity": capacity,
         "last_verified_at": max(filter(None, (local.get("observed_at"), auth.get("observed_at"),
                                               smoke.get("observed_at"))), default=None),
+        "workspace_refusals": dict(record.get("workspaces") or {}),
     }
 
 
 def evaluate(agents: Iterable[str] | None = None, live: bool = False, refresh: bool = False,
              smoke_timeout: int = DEFAULT_SMOKE_TIMEOUT_SECONDS,
-             smoke_runner: Callable[[str, int, datetime], dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+             smoke_runner: Callable[..., dict[str, Any]] | None = None,
+             workspace: str | None = None) -> list[dict[str, Any]]:
     """Refresh what is stale (or everything with `refresh`), then summarize.
 
     Without `live` no prompt is sent. With it, at most one smoke runs per
     eligible agent, and a fresh PASS is reused instead of spending another call.
+    With a `workspace`, the live smoke runs read-only in that directory instead
+    of a temporary one, and its verdict is kept against that directory.
     """
     selected = [agent for agent in AGENT_ORDER if agents is None or agent in set(agents)]
     cache = load_cache()
@@ -542,15 +613,33 @@ def evaluate(agents: Iterable[str] | None = None, live: bool = False, refresh: b
             record = cache[agent]
             if not record["local"].get("installed") or record["auth"].get("authenticated") is False:
                 continue
-            smoke = record.get("live_smoke") or {}
+            smoke = (record.get("workspace_smokes") or {}).get(workspace) if workspace else record.get("live_smoke")
+            smoke = smoke or {}
             if refresh or smoke.get("status") != "PASS" or not fresh(smoke, "live_smoke", moment):
                 due.append(agent)
         runner = smoke_runner or run_smoke
+
+        def smoke_for(agent: str) -> dict[str, Any]:
+            return runner(agent, smoke_timeout, moment, workspace=workspace) if workspace else runner(
+                agent, smoke_timeout, moment)
+
         with ThreadPoolExecutor(max_workers=max(1, len(due))) as pool:
-            outcomes = dict(zip(due, pool.map(lambda agent: runner(agent, smoke_timeout, moment), due)))
+            outcomes = dict(zip(due, pool.map(smoke_for, due)))
         for agent, smoke in outcomes.items():
             record = cache[agent]
-            record["live_smoke"] = smoke
+            if workspace:
+                record.setdefault("workspace_smokes", {})[workspace] = smoke
+                if smoke["status"] == "WORKSPACE_TRUST_REQUIRED":
+                    record.setdefault("workspaces", {})[workspace] = {
+                        "state": workspace_trust.TRUST_REQUIRED, "role": "review", "source": "live smoke",
+                        "detected_at": iso(moment)}
+                elif smoke["status"] == "PASS":
+                    record.get("workspaces", {}).pop(workspace, None)
+                    # A pass in a real workspace is the strongest unattended evidence there is.
+                    record["unattended"] = {"observed_at": iso(moment), "value": True,
+                                            "source": "live smoke in workspace"}
+            else:
+                record["live_smoke"] = smoke
             failure = smoke.get("failure_class")
             if failure in FAILURE_TO_CAPACITY:
                 model = smoke.get("model_reported")
@@ -577,11 +666,15 @@ def routing_models(agent: str) -> list[str]:
     spec = SPECS.get(agent)
     if spec is None or not spec.route_listed_models:
         return []
+    # `local_only` forbids the hosted model listing here exactly as in the doctor.
+    hosted = hosted_probes_allowed()
+    if not hosted:
+        return []
     cache = load_cache()
     record = cache.setdefault(agent, {})
     moment = now()
-    if not local_fresh(spec, record.get("local"), moment) or record["local"]["models"]["status"] != "LISTED":
-        record["local"] = probe_local(spec, moment)
+    if not local_fresh(spec, record.get("local"), moment, hosted) or record["local"]["models"]["status"] != "LISTED":
+        record["local"] = probe_local(spec, moment, hosted)
         try:
             save_cache(cache)
         except OSError:
@@ -602,7 +695,8 @@ def _smoke_text(summary: dict[str, Any]) -> str:
     if smoke["last_status"] == "BLOCKED_PERMISSION":
         return f"BLOCKED — permission required{when}"
     if smoke["last_status"] == "WORKSPACE_TRUST_REQUIRED":
-        return f"BLOCKED — workspace trust required{when} (each new directory must be trusted interactively once)"
+        return (f"BLOCKED — workspace trust required{when} (the smoke's fresh directory is untrusted;"
+                " check a real workspace with --repo)")
     return f"{smoke['last_status']}{when} ({smoke.get('failure_class') or 'no detail'})"
 
 
@@ -631,8 +725,41 @@ def yes_no(value: bool | None, true: str = "YES", false: str = "NO") -> str:
     return "UNKNOWN" if value is None else true if value else false
 
 
-def render(summaries: list[dict[str, Any]]) -> str:
-    lines = ["HOWLPLANE AGENT DOCTOR", ""]
+TRUST_TEXT = {"READY": "READY", "TRUST_REQUIRED": "TRUST REQUIRED", "UNKNOWN": "UNKNOWN",
+              "UNSUPPORTED": "UNSUPPORTED", "ERROR": "ERROR"}
+PREPARE_TEXT = {"none": "not needed (noninteractive mode has no trust prompt)",
+                "cli_flag": "automatic: documented --trust flag, no inference",
+                "operator_pty": "one-time: the operator answers the CLI's own prompt"}
+
+
+def _workspace_text(status: dict[str, Any]) -> str:
+    text = TRUST_TEXT.get(status["state"], status["state"])
+    trust = status["trust"]
+    if status["observed_refusal"]:
+        refusal = status["observed_refusal"]
+        return f"{text} — the CLI refused this directory ({refusal['source']}, {refusal['detected_at']})"
+    if trust.get("trusted_by") and trust["trusted_by"] != status["workspace"]:
+        return f"{text} — inherited from {trust['trusted_by']}"
+    return f"{text} — {trust.get('detail')}" if trust.get("detail") else text
+
+
+def render_workspace(report: dict[str, Any]) -> list[str]:
+    authorization = report["authorization"]
+    lines = ["WORKSPACE READINESS", f"  Workspace:      {report['workspace']}" + ("" if report["exists"] else " (not created yet)"),
+             "  Authorized:     " + (f"YES — {authorization['repo_root']} (factory root {authorization['factory_root']})"
+                                     if authorization else "NO — run `howlplane factory prepare --repo <repo>`"), ""]
+    for agent, status in report["agents"].items():
+        spec = workspace_trust.adapter(agent)
+        lines.append(f"  {SPECS[agent].name}: {_workspace_text(status)}")
+        if spec and spec.scope != "not_enforced":
+            lines.append(f"    Preparation: {PREPARE_TEXT[spec.method]}; scope: this directory and its descendants")
+        if status.get("live_smoke"):
+            lines.append(f"    Workspace smoke: {status['live_smoke']['status']} ({status['live_smoke']['verified_at']})")
+    return lines
+
+
+def render(summaries: list[dict[str, Any]], workspace: dict[str, Any] | None = None) -> str:
+    lines = ["HOWLPLANE AGENT DOCTOR", "", "GLOBAL READINESS", ""]
     for summary in summaries:
         lines.append(summary["name"])
         rows: list[tuple[str, str]] = [("Backend", summary["backend"]),
@@ -659,28 +786,47 @@ def render(summaries: list[dict[str, Any]]) -> str:
             rows.append(("Capacity", capacity[0]))
             rows += [("", extra) for extra in capacity[1:]]
             rows.append(("Verified", summary["last_verified_at"] or "never"))
+            if workspace and summary["agent"] in workspace["agents"]:
+                rows.append(("Workspace", TRUST_TEXT.get(workspace["agents"][summary["agent"]]["state"], "UNKNOWN")))
         lines += [f"  {label + ':' if label else '':<15} {value}" for label, value in rows]
         lines.append("")
+    if workspace:
+        lines += render_workspace(workspace)
     return "\n".join(lines).rstrip() + "\n"
 
 
-def document(summaries: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"schema": SCHEMA, "generated_at": iso(now()), "agents": summaries}
+def document(summaries: list[dict[str, Any]], workspace: dict[str, Any] | None = None) -> dict[str, Any]:
+    body = {"schema": SCHEMA, "generated_at": iso(now()), "agents": summaries}
+    if workspace:
+        body["workspace"] = workspace
+    return body
 
 
 # ---------------------------------------------------------------- factory preflight
-def factory_readiness(summaries: list[dict[str, Any]]) -> dict[str, Any]:
-    """Can an unattended campaign run: an autonomous implementer plus an independent auditor?"""
+def factory_readiness(summaries: list[dict[str, Any]], workspace: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Can an unattended campaign run: an autonomous implementer plus an independent auditor?
+
+    With a workspace report, an agent that would meet a trust prompt in the
+    Factory workspace is not a worker there, however ready it is elsewhere.
+    """
+    trust = (workspace or {}).get("agents", {})
+
+    def trusted_here(summary: dict[str, Any]) -> bool:
+        status = trust.get(summary["agent"])
+        return status is None or status["state"] != workspace_trust.TRUST_REQUIRED
+
     def autonomous(summary: dict[str, Any]) -> bool:
         return (summary["installed"] and summary["authenticated"] is not False
-                and summary["unattended_execution"] is not False
+                and summary["unattended_execution"] is not False and trusted_here(summary)
                 and summary["capacity"]["state"] not in ("QUOTA_EXHAUSTED", "SESSION_EXHAUSTED", "RATE_LIMITED"))
     implementers = [s["name"] for s in summaries if autonomous(s) and s["mutation_capable"] is not False]
     reviewers = [s["name"] for s in summaries if autonomous(s)]
     independent_audit = any(auditor != implementer for implementer in implementers for auditor in reviewers)
     verified = [s["name"] for s in summaries if autonomous(s) and s["unattended_execution"] is True]
+    gated = [s["name"] for s in summaries if s["installed"] and not trusted_here(s)]
+    # Trust-gated agents do not block a campaign others can run, but it is degraded.
     status = "BLOCKED" if not implementers else (
-        "READY" if independent_audit and set(verified) >= set(reviewers) else "DEGRADED")
+        "READY" if independent_audit and set(verified) >= set(reviewers) and not gated else "DEGRADED")
     return {
         "status": status,
         "implementation_capable": implementers,
@@ -691,8 +837,13 @@ def factory_readiness(summaries: list[dict[str, Any]]) -> dict[str, Any]:
         "known_exhausted": [f"{s['name']}: {item['state']}" + (f" ({item['model']})" if item.get("model") else "")
                             for s in summaries for item in s["capacity"]["limits"]],
         "live_smoke_passed": [s["name"] for s in summaries if s["live_smoke"]["status"] == "PASS"],
-        "workspace_trust_required": [s["name"] for s in summaries
-                                     if s["live_smoke"].get("last_status") == "WORKSPACE_TRUST_REQUIRED"],
+        "workspace": None if workspace is None else workspace["workspace"],
+        "workspace_authorized": None if workspace is None else workspace["authorized"],
+        # With a workspace, trust there is what gates Factory; a fresh-directory
+        # smoke refusal only describes that throwaway directory.
+        "workspace_trust_required": (gated if workspace is not None else
+                                     [s["name"] for s in summaries
+                                      if s["live_smoke"].get("last_status") == "WORKSPACE_TRUST_REQUIRED"]),
         "unverified": [name for name in reviewers if name not in verified],
         "independent_audit_available": independent_audit,
     }
@@ -712,6 +863,8 @@ def render_factory(readiness: dict[str, Any], budget: dict[str, int]) -> str:
              f"  Known exhausted:        {names(readiness['known_exhausted'])}",
              f"  Live smoke passed:      {names(readiness['live_smoke_passed'])}",
              f"  Workspace trust gated:  {names(readiness['workspace_trust_required'])}",
+             *([f"  Workspace:              {readiness['workspace']} (authorized: "
+                f"{'yes' if readiness['workspace_authorized'] else 'no'})"] if readiness.get("workspace") else []),
              "  Execution budget:       " + ", ".join(f"{role} {seconds}s" for role, seconds in budget.items())]
     return "\n".join(lines) + "\n"
 
@@ -726,7 +879,14 @@ def command(args: Any) -> int:
     live = getattr(args, "live", False)
     if live and not hosted_probes_allowed():
         print(f"--live {LOCAL_ONLY_DETAIL}; reporting local evidence only.", file=sys.stderr)
+    repo = getattr(args, "repo", None)
+    workspace = str(Path(repo).expanduser().resolve()) if repo else None
+    if workspace and not Path(workspace).is_dir():
+        print(f"--repo {repo}: not a directory.")
+        return 1
     summaries = evaluate(selected, live=live, refresh=getattr(args, "refresh", False),
-                         smoke_timeout=getattr(args, "smoke_timeout", DEFAULT_SMOKE_TIMEOUT_SECONDS))
-    print(json.dumps(document(summaries), indent=2) if getattr(args, "json", False) else render(summaries), end="" if not getattr(args, "json", False) else "\n")
+                         smoke_timeout=getattr(args, "smoke_timeout", DEFAULT_SMOKE_TIMEOUT_SECONDS), workspace=workspace)
+    report = workspace_report(workspace, selected, live=live) if workspace else None
+    print(json.dumps(document(summaries, report), indent=2) if getattr(args, "json", False) else render(summaries, report),
+          end="" if not getattr(args, "json", False) else "\n")
     return 0

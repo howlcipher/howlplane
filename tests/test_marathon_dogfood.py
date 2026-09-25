@@ -51,7 +51,7 @@ def test_marathon_dogfood_runs_selected_benchmarks(tmp_path: Path):
 
 def test_marathon_stops_when_all_providers_exhausted(tmp_path: Path):
     pool = ProviderPoolManager()
-    for agent in ["agy", "codex", "claude_code", "devin_cli", "local_ollama", "gemini_cli"]:
+    for agent in ["agy", "codex", "claude_code", "devin_cli", "local_ollama", "gemini_cli", "cursor"]:
         pool.set_status(agent, ProviderAvailabilityStatus.SESSION_EXHAUSTED)
 
     engine = MarathonDogfoodEngine(

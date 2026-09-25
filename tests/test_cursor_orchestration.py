@@ -146,8 +146,8 @@ def test_cursor_backend_classifies_missing_executable_as_backend_unavailable(tmp
     assert classified.value == "MISSING_EXECUTABLE"
 
 
-def test_cursor_backend_classifies_workspace_trust_block_as_permission_failure(tmp_path, monkeypatch):
-    """A workspace-trust prompt must be classified as an unattended-execution limitation."""
+def test_cursor_backend_classifies_workspace_trust_block_as_workspace_trust(tmp_path, monkeypatch):
+    """Cursor's trust refusal is a fact about the folder: its own class, not a permission failure."""
     script = (
         "echo 'Workspace Trust Required' >&2; "
         "echo 'Pass --trust, --yolo, or -f if you trust this directory' >&2; "
@@ -160,7 +160,7 @@ def test_cursor_backend_classifies_workspace_trust_block_as_permission_failure(t
     assert "Workspace Trust Required" in (outcome.stderr or "")
 
     classified = module.ProviderPoolManager.classify_result("cursor", outcome)
-    assert classified.value == "EXECUTION_PERMISSION_REQUIRED"
+    assert classified.value == "WORKSPACE_TRUST_REQUIRED"
 
 
 def test_cursor_backend_classifies_spawn_failure_as_missing_executable(tmp_path, monkeypatch):

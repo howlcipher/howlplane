@@ -1649,6 +1649,7 @@ class GovernedTaskOrchestrator:
             ProviderFailureClass.MISSING_EXECUTABLE,
             ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED,
             ProviderFailureClass.PROVIDER_STALLED,
+            ProviderFailureClass.WORKSPACE_TRUST_REQUIRED,
         }
 
     def _map_failure_class_to_orchestrator_class(
@@ -1670,6 +1671,9 @@ class GovernedTaskOrchestrator:
             "MISSING_EXECUTABLE",
             "EXECUTION_PERMISSION_REQUIRED",
             "PROVIDER_STALLED",
+            # Unusable in this workspace until trust is prepared; another
+            # provider may take the work now.
+            "WORKSPACE_TRUST_REQUIRED",
         }:
             return FAILURE_CLASS_PROVIDER_UNAVAILABLE
         return FAILURE_CLASS_ENGINEERING

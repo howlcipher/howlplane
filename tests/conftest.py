@@ -1,5 +1,7 @@
+import json
 import os
 from pathlib import Path
+import re
 import shutil
 import tempfile
 import pytest
@@ -224,6 +226,38 @@ def _isolate_agent_readiness_cache(monkeypatch, tmp_path):
     outcomes back to it; a test must neither see nor pollute live evidence.
     """
     monkeypatch.setenv("HOWLPLANE_AGENT_READINESS_FILE", str(tmp_path / "agent_readiness.json"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_workspace_trust(monkeypatch, tmp_path_factory):
+    """Keep every test away from real vendor trust stores and HowlPlane authorizations.
+
+    Fake agent CLIs do not enforce trust, so by default the pytest base
+    directory is trusted (as an operator-prepared root would be) and existing
+    routing tests are unaffected. Trust tests point these at their own stores.
+    """
+    base = tmp_path_factory.getbasetemp().resolve()
+    # Outside the test's own tmp_path: tests assert on exactly what they create there.
+    stores = tmp_path_factory.mktemp("trust-stores")
+    slug = re.sub(r"^-+|-+$", "", re.sub(r"-+", "-", re.sub(r"[^a-zA-Z0-9]", "-", str(base))))
+    marker = stores / "cursor-data" / "projects" / slug
+    marker.mkdir(parents=True)
+    (marker / ".workspace-trusted").write_text(json.dumps({"workspacePath": str(base), "trustMethod": "test"}))
+    devin_store = stores / "devin_trusted_workspaces.json"
+    devin_store.write_text(json.dumps({"trusted_paths": [str(base)]}))
+    monkeypatch.setenv("CURSOR_DATA_DIR", str(stores / "cursor-data"))
+    monkeypatch.setenv("HOWLPLANE_DEVIN_TRUST_FILE", str(devin_store))
+    monkeypatch.setenv("HOWLPLANE_WORKSPACE_AUTHORIZATION_FILE", str(stores / "workspace_authorizations.json"))
+
+
+@pytest.fixture(autouse=True)
+def _pin_connected_operating_mode(monkeypatch):
+    """Tests run as a connected install unless they opt into `local_only`.
+
+    The built-in default is `local_only`, and the operator's real config would
+    otherwise decide hosted routing for the whole suite (CI has none).
+    """
+    monkeypatch.setattr("howlplane.control_plane.agent_readiness.hosted_probes_allowed", lambda: True)
 
 
 @pytest.fixture(autouse=True)

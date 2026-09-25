@@ -29,6 +29,9 @@ howlplane doctor
 # Verify each agent CLI (Codex, Claude Code, Cursor, AGY, Devin); --live sends one tiny prompt each:
 howlplane agents doctor
 howlplane agents doctor --live --json
+# Workspace readiness (trust) for one repository, then authorize it for unattended Factory use:
+howlplane agents doctor --repo /path/to/repo
+howlplane factory prepare --repo /path/to/repo
 
 # Execute deterministic verification on the current project:
 howlplane verify
