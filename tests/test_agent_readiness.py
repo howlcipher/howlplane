@@ -392,7 +392,7 @@ def test_factory_doctor_json_reports_readiness_and_fails_when_blocked(tmp_path, 
     assert cli.cmd_factory_doctor(factory_args()) == 1
     report = json.loads(capsys.readouterr().out)
     assert report["readiness"]["status"] == "BLOCKED"
-    assert report["execution_budget"]["implementation"] == 300
+    assert report["execution_budget"]["implementation"] == 600
 
     install(tmp_path, monkeypatch)
     assert cli.cmd_factory_doctor(factory_args()) == 0

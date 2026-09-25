@@ -132,7 +132,7 @@ def test_agy_derived_print_timeout_keeps_agy_capacity_and_eligibility(tmp_path, 
     # Nothing reached provider capacity evidence either.
     assert not agent_readiness.load_cache().get("agy", {}).get("limits")
     stderr = capsys.readouterr().err
-    assert "AGY implementation stopped at the 300s execution budget (attempt only; capacity unchanged); partial changes kept" in stderr
+    assert "AGY implementation stopped at the 600s execution budget (attempt only; capacity unchanged); partial changes kept" in stderr
     assert "EXHAUSTED" not in stderr and "capacity marked exhausted" not in stderr
 
 
@@ -160,7 +160,8 @@ def test_partial_changes_from_a_timed_out_attempt_are_handed_to_the_next_worker(
 
 
 def timed_out_session(repo):
-    doc = module.setup(arguments(repo, orchestrator="agy", policy="PLAN + EXECUTE", **only("agy")), repo)
+    doc = module.setup(arguments(repo, orchestrator="agy", policy="PLAN + EXECUTE",
+                                 execution_budget=["implementation=300"], **only("agy")), repo)
     doc["stage"], doc["status"] = "implementation", "IMPLEMENTATION"
     doc["orchestrator"] = "agy"
     doc["attempts"].append({"task_id": "t", "stage": "implementation", "agent": "agy", "model": "m1",
@@ -278,7 +279,7 @@ def test_v2_budget_exhaustion_migrates_to_attempt_evidence(tmp_path, monkeypatch
     assert doc["agents"]["codex"]["capacity"]["implementation"]["reason"] == "SESSION_LIMIT"
     assert doc["agents"]["claude_code"]["state"] == "DEGRADED"
     assert doc["agents"]["claude_code"]["capacity"] == {}
-    assert doc["execution_budget"] == module.default_execution_budget()
+    assert doc["execution_budget"] == {role: module.LEGACY_EXECUTION_BUDGET_SECONDS for role in module.ROLES}
 
 
 # Selection evidence

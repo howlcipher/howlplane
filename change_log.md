@@ -12,8 +12,11 @@ All notable changes to this project will be documented in this file.
   with per-field lifetimes, feeds AUTO routing without per-assignment probes,
   and backs a `factory doctor` readiness report and `factory run/start
   --preflight {off,warn,require}`.
-- `howlplane orchestrate --execution-budget ROLE=SECONDS` (default 300, max
-  1800) and `resume --retry-timeouts`.
+- `howlplane orchestrate --execution-budget ROLE=SECONDS` (default planning/review/acceptance 300, implementation 600, max 1800) and `resume --retry-timeouts`.
+- Resumable orchestration handoffs: sessions in `HANDOFF REQUIRED`, `INTERRUPTED`, or recoverable `BLOCKED` states can be resumed directly via `howlplane orchestrate resume`.
+- External repair reconciliation: manual repository fixes on pause are detected on resume and verified directly, bypassing redundant worker dispatch.
+- `NO_CHANGE_REQUIRED` outcome for intentional existing-WIP requests with passing verification, preventing provider cycling.
+- Resumability reporting (`Resumable: yes/no` and JSON `"resumable": true/false`) in `orchestrate inspect` and `report`.
 - Workspace trust as a first-class, per-directory readiness fact.
   `howlplane agents doctor --repo PATH [--live]` reports global and workspace
   readiness separately. `howlplane factory prepare --repo PATH` is the
@@ -28,6 +31,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Orchestration `HANDOFF REQUIRED` is now an active, resumable paused state instead of being treated as terminal, allowing operator intervention or parameter updates to resume in place.
+- Truthful CLI guidance: `SessionProgress` only displays `RESUME` commands when the session is verified resumable.
 - A trust refusal is now `WORKSPACE_TRUST_REQUIRED`, positively identified per
   CLI, instead of a permission failure. It bars the agent from that workspace
   only (checkpoint and reroute, no session-wide capability loss, no capacity
