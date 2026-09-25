@@ -3,7 +3,29 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Added
+
+- `howlplane agents doctor [--live] [--json]` verifies every supported agent
+  CLI: installation, version, auth, advertised models, and unattended execution
+  through HowlPlane's own invocation (`--live`: one tiny prompt each). Capacity
+  is reported only where a CLI exposes it, otherwise UNKNOWN. Evidence is cached
+  with per-field lifetimes, feeds AUTO routing without per-assignment probes,
+  and backs a `factory doctor` readiness report and `factory run/start
+  --preflight {off,warn,require}`.
+- `howlplane orchestrate --execution-budget ROLE=SECONDS` (default 300, max
+  1800) and `resume --retry-timeouts`.
+
 ### Fixed
+
+- Orchestration no longer treats `EXECUTION_BUDGET_EXCEEDED` as capacity
+  exhaustion. HowlPlane's own assignment deadline expiring now marks only that
+  attempt `TIMED_OUT`, records its timeout provenance and partial changes, and
+  bars only the identical assignment from rerunning unchanged, including after
+  resume. The agent stays eligible for other models, roles, and tasks.
+  Quota, session, and rate limits keep their model or role scope. Schema v3
+  migrates v2 sessions that recorded a budget stop as role capacity.
+- Model discovery no longer mistakes Devin family headers or AGY's
+  "Fetching" banner for model IDs, and reads Cursor's ANSI-colored list.
 
 - Route unsuccessful factory execution-budget attempts to another eligible
   worker without treating the factory's initial selection as an owner pin or
