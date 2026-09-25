@@ -19,7 +19,7 @@ Hard failures are recorded per agent and role before a replacement is chosen. `S
 
 ### Execution budget is not provider capacity
 
-Every assignment runs under HowlPlane's own execution budget. That is a per-role wall-clock deadline: 300 seconds by default for planning, implementation, review, and acceptance, with a hard maximum of 1800. AGY's `--print-timeout` is derived from the same deadline minus 15 seconds of headroom. Set the budget with `--execution-budget ROLE=SECONDS` or `--execution-budget SECONDS` (all roles), on a new session or on `resume`. Values outside 1 to 1800 are refused, never clamped. Raising every budget is not the default fix: prefer decomposing a goal that does not fit.
+Every assignment runs under HowlPlane's own execution budget. That is a per-role wall-clock deadline: 300 seconds by default for planning, review, and acceptance, and 600 seconds by default for implementation (justified by dogfooding across multi-file implementation tasks), with a hard maximum of 1800. AGY's `--print-timeout` is derived from the same deadline minus 15 seconds of headroom. Set the budget with `--execution-budget ROLE=SECONDS` or `--execution-budget SECONDS` (all roles), on a new session or on `resume`. Values outside 1 to 1800 are refused, never clamped. Raising every budget is not the default fix: prefer decomposing a goal that does not fit.
 
 An `EXECUTION_BUDGET_EXCEEDED` result means only that this assignment did not finish in time. It is not quota, session, rate, or model exhaustion:
 
@@ -33,6 +33,39 @@ An `EXECUTION_BUDGET_EXCEEDED` result means only that this assignment did not fi
 | `EXECUTION_PERMISSION_REQUIRED` | Unattended execution unavailable (interactive-only) | The agent this session |
 
 After a timeout, the repository is checkpointed. Partial changes are recorded, and the next worker is told to inspect and continue them. Another worker is preferred for the same role. The timed-out agent stays eligible for other roles and other models, just behind other workers for this role. The same goal, constraints, role, agent, model, and budget never run again unchanged, including after `resume`. A retry needs a meaningful change: a different agent or model, a changed goal or constraints, a changed budget (`resume --execution-budget implementation=600`), or an explicit operator retry (`resume --retry-timeouts`, which clears the timeout ledger once and records that it did). When a stage runs out of workers after timeouts, the handoff and report include timeout guidance instead of claiming anything was exhausted.
+
+### Session lifecycle and resumability
+
+Orchestration sessions classify states into distinct lifecycle categories:
+
+- **Successfully terminal:** `COMPLETE`, `COMPLETE WITH WARNINGS`. These represent finished sessions and cannot resume.
+- **Paused / resumable:** `HANDOFF REQUIRED`, `INTERRUPTED`, and recoverable `BLOCKED` states (such as exhausted independent reviewers, worker timeouts, rate limits, or pending workspace trust repair). `HANDOFF REQUIRED` signifies that autonomous progress stopped safely because external intervention, repository repairs, or changed execution parameters are required. It does NOT mean the session record is dead.
+- **Truly terminal failures:** `SESSION_STATE_INVALID`, operator discard, or unrecoverable `BLOCKED` states (such as a read-only review or acceptance role mutating the repository). These fail closed and cannot resume.
+
+Resuming a paused or handoff session re-acquires a coordinator lease, reconciles repository state against checkpoint evidence, applies updated execution parameters, and continues without restarting planning unless reconciliation demonstrates planning is invalidated:
+
+```bash
+howlplane orchestrate resume --repo /path/to/repo
+howlplane orchestrate resume --repo /path/to/repo --execution-budget implementation=600
+```
+
+#### External repair and reconciliation
+
+When a previous session paused at `HANDOFF REQUIRED` due to verification failures, a developer or external process may fix the repository directly. On resume:
+
+1. HowlPlane detects the external changes since the checkpoint.
+2. If the repository now passes configured deterministic verification, the session does not force an unneeded implementation worker to produce a fake change.
+3. The session advances directly to independent audit, orchestrator acceptance, and completion.
+
+#### Existing-WIP mode and NO_CHANGE_REQUIRED
+
+When an orchestration goal explicitly targets existing uncommitted changes (such as `"Finalize and validate existing uncommitted work"`), an implementation worker that inspects the repository and verifies the existing code is correct may report `IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED`.
+
+When backed by objective evidence (uncommitted repository changes exist and deterministic validation passes), HowlPlane records the outcome as `NO_CHANGE_REQUIRED` and advances to independent audit rather than cycling through other providers with `NO_REPOSITORY_CHANGE` failures. Ordinary requests on clean repositories fail closed.
+
+#### Inspection and guidance
+
+Both `howlplane orchestrate report` and `howlplane orchestrate inspect` explicitly report `Resumable: yes` or `Resumable: no`. Machine-readable `inspect --json` provides `"resumable": true` or `false` on each session object. CLI progress output never displays `RESUME howlplane orchestrate resume ...` unless the session is in a verified resumable state.
 
 Session manifests live in `$XDG_STATE_HOME/howlplane/orchestrate` (or `~/.local/state/howlplane/orchestrate`). Files are mode 0600 in a mode 0700 directory and use atomic replacement. The manifest records a lease fence, assignments, failures, model states, capability and capacity evidence, Git evidence hashes, and validation results. It carries a `schema_version`. On resume, the manifest is normalized before use: a version 1 manifest (created before capability evidence existed) gains UNKNOWN capabilities and replays its recorded hard failures, never positive availability, and an agent it never recorded is UNAVAILABLE. A version 2 manifest recorded execution-budget stops as role capacity `EXHAUSTED`. Version 3 converts those into timed-out assignments at the 300-second budget every earlier session used. It then restores an agent that nothing else had degraded, and keeps all other capacity and capability evidence. A manifest that cannot be normalized without guessing is left untouched and reported as `SESSION_STATE_INVALID`. On resume, Git evidence is read again and overrides stale manifest claims. The same worktree cannot have overlapping active sessions; use a distinct Git worktree for another session. `inspect --json` includes retained terminal sessions.
 

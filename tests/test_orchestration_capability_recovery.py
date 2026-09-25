@@ -312,7 +312,7 @@ def test_observed_sequence_live_run_reroutes_truthfully_and_never_repeats_agy(tm
     stderr = capsys.readouterr().err
     assert_reroutes_match_assignments(stderr)
     assert "] REROUTE     " in stderr and "AGY → Devin (EXECUTION_BUDGET_EXCEEDED)" in stderr
-    assert "AGY implementation stopped at the 300s execution budget (attempt only; capacity unchanged)" in stderr
+    assert "AGY implementation stopped at the 600s execution budget (attempt only; capacity unchanged)" in stderr
     assert "capacity marked exhausted" not in stderr
     assert "supersecret" not in stderr
     retained = module.state_root().glob("*.json")

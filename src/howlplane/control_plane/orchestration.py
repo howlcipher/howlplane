@@ -49,6 +49,12 @@ ATTEMPT_TIMEOUT_FAILURES = {"EXECUTION_BUDGET_EXCEEDED"}
 # from this workspace only: no role capacity, no session-wide capability loss,
 # and no readiness penalty for other directories.
 WORKSPACE_TRUST_FAILURES = {"WORKSPACE_TRUST_REQUIRED"}
+DEFAULT_EXECUTION_BUDGETS: dict[str, int] = {
+    "planning": 300,
+    "implementation": 600,
+    "review": 300,
+    "acceptance": 300,
+}
 DEFAULT_EXECUTION_BUDGET_SECONDS = 300
 MAX_EXECUTION_BUDGET_SECONDS = 1800
 # Every session before v3 dispatched with a hardcoded 300s deadline.
@@ -61,7 +67,73 @@ ROLE_FAILURES = {
 REQUIRED_KEYS = ("id", "created_at", "goal", "orchestrator", "strategy", "failover", "policy", "stage", "status",
                  "agents", "attempts", "lease", "repository_evidence")
 BINARIES = {"claude_code": "claude", "codex": "codex", "cursor": "agent", "agy": "agy", "devin_cli": "devin"}
-TERMINAL = {"COMPLETE", "COMPLETE WITH WARNINGS", "BLOCKED", "HANDOFF REQUIRED"}
+
+SUCCESSFULLY_TERMINAL_STATUSES = frozenset({"COMPLETE", "COMPLETE WITH WARNINGS"})
+RESUMABLE_STATUSES = frozenset({
+    "HANDOFF REQUIRED", "INTERRUPTED", "PLANNED", "PLANNING", "IMPLEMENTATION", "REVIEW", "ACCEPTANCE",
+})
+TRULY_TERMINAL_STATUSES = frozenset({"SESSION_STATE_INVALID"})
+# Kept for compatibility with any external imports:
+TERMINAL = frozenset({"COMPLETE", "COMPLETE WITH WARNINGS", "SESSION_STATE_INVALID"})
+
+
+def is_resumable(status_or_doc: str | dict[str, Any], reason: str | None = None) -> bool:
+    """Return True if an orchestration session can be resumed safely."""
+    if isinstance(status_or_doc, dict):
+        doc = status_or_doc
+        status = str(doc.get("status", "")).upper()
+        if reason is None:
+            reason = doc.get("audit") or doc.get("failure") or (doc.get("exclusions") or {}).get("stage")
+    else:
+        status = str(status_or_doc).upper()
+
+    if status in SUCCESSFULLY_TERMINAL_STATUSES:
+        return False
+    if status in TRULY_TERMINAL_STATUSES:
+        return False
+    if status in RESUMABLE_STATUSES:
+        return True
+    if status == "BLOCKED":
+        reason_str = str(reason or "")
+        if "read-only role changed the repository" in reason_str:
+            return False
+        if "needs_validation" in reason_str:
+            return False
+        if any(keyword in reason_str for keyword in (
+            "independent reviewer",
+            "reviewers exhausted",
+            "workers remain",
+            "budget",
+            "workspace trust",
+            "quota",
+            "rate limit",
+            "timeout",
+        )):
+            return True
+        if reason_str.startswith("AUDIT BLOCKED"):
+            return True
+        return False
+    return False
+
+
+def is_final(status_or_doc: str | dict[str, Any], reason: str | None = None) -> bool:
+    """Return True if an orchestration session has reached a final, non-resumable state."""
+    return not is_resumable(status_or_doc, reason)
+
+
+def is_existing_wip_context(goal: str, constraints: list[str] | None = None) -> bool:
+    """Return True if goal or constraints indicate working with existing WIP or changes."""
+    text = f"{goal} {' '.join(constraints or [])}".lower()
+    indicators = (
+        "work in progress", "work-in-progress", "wip",
+        "existing change", "existing changes", "existing work",
+        "current change", "current changes", "current repository change",
+        "current repository changes", "uncommitted",
+        "intentional work", "finalize", "validate existing",
+        "audit existing", "inspect existing"
+    )
+    return any(term in text for term in indicators)
+
 # A value stops at a quote or backslash so redacting serialized JSON cannot
 # consume the string delimiter and corrupt the manifest.
 SECRET = re.compile(r"(?i)(bearer\s+|(?:token|password|secret|api[_-]?key)[=: ]+)([^\s,;\x22\\]+)|\b(?:sk-|ghp_|gho_|github_pat_)[\w-]{8,}")
@@ -206,7 +278,7 @@ class SessionProgress:
     def blocked(self, status: str, reason: str, next_step: str | None = None) -> None:
         self.last_change_at = self.clock()
         self._write(status, reason)
-        if next_step:
+        if next_step and is_resumable(self.document):
             self._write("RESUME", next_step)
 
     def complete(self, status: str) -> None:
@@ -333,7 +405,7 @@ def active_sessions(root: Path, repo: Path, include_terminal: bool = False) -> l
     sessions = []
     for path in root.glob("[0-9a-f]*.json"):
         doc = safe_load_json(path)
-        if isinstance(doc, dict) and doc.get("schema") == SCHEMA and doc.get("repository") == str(repo) and (include_terminal or doc.get("status") not in TERMINAL):
+        if isinstance(doc, dict) and doc.get("schema") == SCHEMA and doc.get("repository") == str(repo) and (include_terminal or is_resumable(doc)):
             sessions.append(doc)
     return sorted(sessions, key=lambda item: str(item.get("created_at", "")), reverse=True)
 
@@ -488,10 +560,13 @@ def normalize_session(doc: Any) -> list[str]:
                          ("timed_out_assignments", []), ("execution_budget", {})):
         if not isinstance(doc.get(key), type(default)):
             doc[key] = default
-    try:
-        doc["execution_budget"] = {**default_execution_budget(), **validate_execution_budget(doc["execution_budget"])}
-    except ValueError as error:
-        raise SessionStateInvalid(str(error)) from error
+    if version < 3:
+        doc["execution_budget"] = {role: LEGACY_EXECUTION_BUDGET_SECONDS for role in ROLES}
+    else:
+        try:
+            doc["execution_budget"] = {**default_execution_budget(), **validate_execution_budget(doc["execution_budget"])}
+        except ValueError as error:
+            raise SessionStateInvalid(str(error)) from error
     doc["lease"].setdefault("pid", 0)
     doc["lease"].setdefault("renewed_at", 0)
     for agent in list(doc["agents"]):
@@ -581,7 +656,7 @@ def capacity_reason(entry: dict[str, Any]) -> str:
 
 
 def default_execution_budget() -> dict[str, int]:
-    return {role: DEFAULT_EXECUTION_BUDGET_SECONDS for role in ROLES}
+    return dict(DEFAULT_EXECUTION_BUDGETS)
 
 
 def validate_execution_budget(budget: dict[str, Any]) -> dict[str, int]:
@@ -609,7 +684,19 @@ def parse_execution_budget(values: list[str] | None) -> dict[str, int]:
 
 
 def execution_budget(doc: dict[str, Any], role: str) -> int:
-    return doc.get("execution_budget", {}).get(role, DEFAULT_EXECUTION_BUDGET_SECONDS)
+    return doc.get("execution_budget", {}).get(role, DEFAULT_EXECUTION_BUDGETS.get(role, DEFAULT_EXECUTION_BUDGET_SECONDS))
+
+
+def parse_role_model_triples(value: str) -> list[tuple[str, str, str]]:
+    if not value or value == "AUTO":
+        return []
+    result = []
+    for item in value.split(","):
+        parts = item.strip().split(":", 2)
+        if len(parts) != 3 or parts[0] not in ROLES or parts[1] not in AGENTS:
+            raise ValueError("Expected role:agent:model")
+        result.append((parts[0], parts[1], parts[2]))
+    return result
 
 
 def timeout_signature(doc: dict[str, Any], role: str, agent: str, model: str, budget: int | None = None) -> str:
@@ -801,21 +888,11 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         raise ValueError("Unsupported execution policy")
     if any(value.upper() not in {"AUTO", "RESERVED", "UNAVAILABLE"} for value in availability.values()):
         raise ValueError("Unsupported agent availability")
-    def triples(value: str) -> list[tuple[str, str, str]]:
-        if value == "AUTO":
-            return []
-        result = []
-        for item in value.split(","):
-            parts = item.strip().split(":", 2)
-            if len(parts) != 3 or parts[0] not in {"planning", "implementation", "review", "acceptance"} or parts[1] not in AGENTS:
-                raise ValueError("Expected role:agent:model")
-            result.append((parts[0], parts[1], parts[2]))
-        return result
     role_models: dict[str, dict[str, str]] = {}
-    for role, agent, model in triples(model_text):
+    for role, agent, model in parse_role_model_triples(model_text):
         role_models.setdefault(role, {})[agent] = model
     fallbacks: dict[str, list[str]] = {}
-    for role, agent, model in triples(fallback_text):
+    for role, agent, model in parse_role_model_triples(fallback_text):
         fallbacks.setdefault(role, []).append(f"{agent}:{model}")
     budget = {**default_execution_budget(), **parse_execution_budget(getattr(args, "execution_budget", None))}
     snapshot = evidence(repo)
@@ -858,6 +935,10 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         instructions += "As session orchestrator, inspect implementation, tests, and independent audit. Do not edit files. End with exactly ACCEPTANCE_STATUS: ACCEPTED only if evidence supports the goal; otherwise end with ACCEPTANCE_STATUS: REJECTED."
     elif role == "implementation":
         instructions += "Implement the goal and run relevant local tests. Inspect existing partial changes first."
+        if is_existing_wip_context(doc["goal"], doc.get("constraints", [])):
+            instructions += (" Treat current repository changes as intentional work in progress. "
+                             "If existing changes completely satisfy the goal and no further edits are required, "
+                             "verify them against local tests and report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED.")
     else:
         instructions += "Produce a bounded implementation plan and acceptance criteria. Do not edit files."
     if any(item.get("stage") == role and item.get("state") == "TIMED_OUT" and item.get("partial_changes") for item in doc["attempts"]):
@@ -933,7 +1014,23 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
         attempted: list[tuple[str, str]] = []
         retry: tuple[str, str] | None = None
         prev_reroute: tuple[str, str] | None = None
-        while True:
+
+        if stage == "implementation":
+            if doc.get("implementer"):
+                # Implementation already completed or previously succeeded
+                succeeded = True
+            elif doc.get("reconciliation", {}).get("needs_validation") and doc.get("verify_command"):
+                check = subprocess.run(["git", "-C", str(repo), "diff", "--check"], capture_output=True, text=True, timeout=30)
+                if check.returncode == 0:
+                    verified = subprocess.run(doc["verify_command"], cwd=repo, capture_output=True, text=True, timeout=300)
+                    if verified.returncode == 0:
+                        doc["implementer"] = "external"
+                        doc["tests"].append({"command": "git diff --check", "exit_code": check.returncode, "output": redact(check.stderr[:500])})
+                        doc["tests"].append({"command": doc["verify_command"], "exit_code": verified.returncode, "output": redact((verified.stdout + verified.stderr)[-1000:])})
+                        doc["reconciliation"]["needs_validation"] = False
+                        succeeded = True
+
+        while not succeeded:
             # Candidates are recomputed from session evidence after every
             # failure, so the next assignment (and the REROUTE naming it) never
             # reflects a list selected before the failure was recorded.
@@ -979,9 +1076,33 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                                "error": redact((result.error_message or result.stderr)[:200])})
             no_change_detail = ""
             if result.success and stage == "implementation" and before == after:
-                assignment["state"] = "REVOKED"
-                assignment["failure"] = "NO_REPOSITORY_CHANGE"
-                no_change_detail = " (no repository delta detected)"
+                is_wip = is_existing_wip_context(doc["goal"], doc.get("constraints", []))
+                has_repo_wip = bool(before.get("status", "").strip())
+                stdout_text = result.stdout or ""
+                reports_no_change = bool(
+                    re.search(r"\b(?:IMPLEMENTATION_STATUS:\s*)?NO_CHANGE_REQUIRED\b", stdout_text, re.IGNORECASE)
+                    or re.search(r"\bno (?:further |additional )?changes? (?:are )?(?:needed|required)\b", stdout_text, re.IGNORECASE)
+                    or re.search(r"\bexisting (?:changes|work) (?:already )?(?:satisfies?|satisfy|completes?|complete)\b", stdout_text, re.IGNORECASE)
+                )
+                accepted_no_change = False
+                if has_repo_wip and (is_wip or reports_no_change):
+                    check = subprocess.run(["git", "-C", str(repo), "diff", "--check"], capture_output=True, text=True, timeout=30)
+                    verified_ok = True
+                    if doc.get("verify_command"):
+                        verified = subprocess.run(doc["verify_command"], cwd=repo, capture_output=True, text=True, timeout=300)
+                        verified_ok = (verified.returncode == 0)
+                    if check.returncode == 0 and verified_ok:
+                        accepted_no_change = True
+                        assignment["state"] = "SUCCEEDED"
+                        assignment["failure"] = None
+                        assignment["outcome"] = "NO_CHANGE_REQUIRED"
+                        if progress:
+                            progress._write("WIP", f"{AGENT_NAMES.get(agent, agent)} verified existing WIP: NO_CHANGE_REQUIRED")
+
+                if not accepted_no_change:
+                    assignment["state"] = "REVOKED"
+                    assignment["failure"] = "NO_REPOSITORY_CHANGE"
+                    no_change_detail = " (no repository delta detected)"
             if stage in {"review", "acceptance"} and before != after:
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "READ_ONLY_ROLE_MUTATED_REPOSITORY"
@@ -1069,7 +1190,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 doc["audit"] = "AUDIT BLOCKED: independent reviewers exhausted" if attempted else "AUDIT BLOCKED: no independent reviewer"
             doc["exclusions"] = {"stage": stage, "agents": exclusions(doc, stage)}
             stage_timeouts = [item for item in doc["timed_out_assignments"] if item["stage"] == stage]
-            if stage_timeouts:
+            if stage_timeouts and is_resumable(doc):
                 doc["timeout_hint"] = (f"{len(stage_timeouts)} {stage} attempt(s) reached the {execution_budget(doc, stage)}s "
                                        "execution budget. Decompose the goal, or resume with "
                                        f"--execution-budget {stage}=<seconds> (max {MAX_EXECUTION_BUDGET_SECONDS}) "
@@ -1081,7 +1202,8 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 reason = doc.get("audit") or f"No eligible {stage} workers remain"
                 if doc.get("timeout_hint"):
                     progress._write("TIMEOUT", doc["timeout_hint"])
-                progress.blocked("AUDIT BLOCKED" if stage == "review" else "HANDOFF REQUIRED", reason, f"howlplane orchestrate resume --repo {repo}")
+                resume_cmd = f"howlplane orchestrate resume --repo {repo}" if is_resumable(doc) else None
+                progress.blocked("AUDIT BLOCKED" if stage == "review" else "HANDOFF REQUIRED", reason, resume_cmd)
             return report(doc)
         if stage == "implementation":
             if progress:
@@ -1093,6 +1215,8 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             if check.returncode:
                 doc["status"] = "HANDOFF REQUIRED"
                 checkpoint(doc, path, token, repo)
+                if progress:
+                    progress.blocked("HANDOFF REQUIRED", "Repository diff validation failed", f"howlplane orchestrate resume --repo {repo}" if is_resumable(doc) else None)
                 return report(doc)
             if doc.get("verify_command"):
                 command = doc["verify_command"]
@@ -1108,6 +1232,8 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 if verified.returncode:
                     doc["status"] = "HANDOFF REQUIRED"
                     checkpoint(doc, path, token, repo)
+                    if progress:
+                        progress.blocked("HANDOFF REQUIRED", "Configured validation failed", f"howlplane orchestrate resume --repo {repo}" if is_resumable(doc) else None)
                     return report(doc)
                 if doc.get("reconciliation"):
                     doc["reconciliation"]["needs_validation"] = False
@@ -1115,6 +1241,8 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 doc["status"] = "HANDOFF REQUIRED"
                 doc["validation_gap"] = "Partial or recovered changes require an explicit --verify command"
                 checkpoint(doc, path, token, repo)
+                if progress:
+                    progress.blocked("HANDOFF REQUIRED", doc["validation_gap"], f"howlplane orchestrate resume --repo {repo} --verify <command>" if is_resumable(doc) else None)
                 return report(doc)
             checkpoint(doc, path, token, repo)
     doc["status"] = "COMPLETE WITH WARNINGS" if doc.get("reconciliation") else "COMPLETE"
@@ -1131,21 +1259,22 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
 def report(doc: dict[str, Any]) -> int:
     print("HOWL ORCHESTRATION REPORT")
     print(f"Session: {doc['id']}\nGoal: {doc['goal']}\nStatus: {doc['status']}")
+    print(f"Resumable: {'yes' if is_resumable(doc) else 'no'}")
     print(f"Orchestrator: {doc['orchestrator']}\nImplementer: {doc.get('implementer', 'none')}")
     print(f"Policy: {doc['policy']}\nConstraints: {', '.join(doc['constraints']) or 'none'}")
     print(f"Assignments: {len(doc['attempts'])}\nReroutes: {len(doc['reroutes'])}")
     print(f"Repository head: {doc['repository_evidence']['head']}")
     print(f"Repository status: {doc['repository_evidence']['status'] or 'clean'}")
     print(f"Tests: {json.dumps(doc['tests'])}")
-    print(f"Independent audit: {doc.get('audit', 'completed' if doc['stage'] == 'review' and doc['status'] in TERMINAL else 'not requested or incomplete')}")
+    print(f"Independent audit: {doc.get('audit', 'completed' if doc['stage'] == 'review' and (is_final(doc) or doc['status'] == 'HANDOFF REQUIRED') else 'not requested or incomplete')}")
     print(f"Recovery: {json.dumps(doc.get('reconciliation', {}))}")
     if doc.get("validation_gap"):
         print(f"Validation gap: {doc['validation_gap']}")
     if doc.get("timed_out_assignments"):
         print(f"Timed-out assignments: {json.dumps([{key: item.get(key) for key in ('stage', 'agent', 'model', 'execution_budget_seconds')} for item in doc['timed_out_assignments']])}")
-    if doc.get("timeout_hint") and doc["status"] in TERMINAL:
+    if doc.get("timeout_hint") and is_resumable(doc):
         print(f"Timeout guidance: {doc['timeout_hint']}")
-    if doc.get("exclusions") and doc["status"] in TERMINAL:
+    if doc.get("exclusions") and (is_final(doc) or doc["status"] == "HANDOFF REQUIRED"):
         print(f"Excluded {doc['exclusions']['stage']} workers: {json.dumps(doc['exclusions']['agents'])}")
     print(f"Failures: {json.dumps([{'stage': a['stage'], 'agent': a['agent'], 'model': a['model'], 'failure': a.get('failure')} for a in doc['attempts'] if a.get('failure')])}")
     return 0 if doc["status"] in {"COMPLETE", "COMPLETE WITH WARNINGS"} else 2
@@ -1177,7 +1306,24 @@ def command(args: argparse.Namespace) -> int:
                 raise ValueError("Unknown session action")
         if operation == "inspect":
             sessions = active_sessions(root, repo, include_terminal=True)
-            print(json.dumps(sessions if args.json else sessions[:1], indent=2))
+            for s in sessions:
+                s["resumable"] = is_resumable(s)
+            if args.json:
+                print(json.dumps(sessions, indent=2))
+            else:
+                target = sessions[:1] if sessions else []
+                if not target:
+                    print("No orchestration sessions found")
+                else:
+                    for s in target:
+                        print("HOWL ORCHESTRATION SESSION")
+                        print(f"Session: {s['id']}")
+                        print(f"Goal: {s.get('goal', '')}")
+                        print(f"Status: {s.get('status', '')}")
+                        print(f"Resumable: {'yes' if s.get('resumable') else 'no'}")
+                        print(f"Stage: {s.get('stage', '')}")
+                        if s.get("implementer"):
+                            print(f"Implementer: {s['implementer']}")
             return 0
         if operation == "discard":
             for doc in active:
@@ -1211,6 +1357,7 @@ def command(args: argparse.Namespace) -> int:
                 doc.setdefault("timeout_retries", []).append({"cleared": doc["timed_out_assignments"], "at": now()})
                 doc["timed_out_assignments"] = []
             doc.pop("timeout_hint", None)
+            doc.pop("exclusions", None)
             # Trust policy is re-resolved on resume (CLI, environment, config), so
             # an operator can switch between strict and bypass for the rest of the session.
             resolved_policy = workspace_trust.resolve_policy()
@@ -1224,6 +1371,22 @@ def command(args: argparse.Namespace) -> int:
                 doc["requested_orchestrator"] = requested_orchestrator
                 doc["selected_orchestrator"] = requested_orchestrator
                 doc["orchestrator"] = requested_orchestrator
+            for agent in AGENTS:
+                opt = getattr(args, agent, None)
+                if opt:
+                    current_state = doc["agents"].get(agent, {}).get("state")
+                    if opt == "RESERVED":
+                        doc["agents"][agent]["state"] = "RESERVED"
+                    elif opt in {"AVAILABLE", "AUTO"} and current_state == "RESERVED":
+                        installed = shutil.which(BINARIES[agent]) is not None
+                        doc["agents"][agent]["state"] = "AVAILABLE" if installed else "UNAVAILABLE"
+            if getattr(args, "models", None):
+                for role, agent, model in parse_role_model_triples(args.models):
+                    doc["role_models"].setdefault(role, {})[agent] = model
+            if getattr(args, "strategy", None):
+                doc["strategy"] = args.strategy
+            if getattr(args, "verify", None):
+                doc["verify_command"] = args.verify
             path = path_for(root, doc["id"])
             secure_write(path, doc)
             if doc["policy"] == "PLAN ONLY" and doc.get("reconciliation", {}).get("needs_validation"):
