@@ -1623,6 +1623,16 @@ def register_exploration_subparsers(subparsers: Any, parents: Optional[List[Any]
     p_trc.add_argument("--json", action="store_true", help="Output JSON result")
 
 
+def _positive_int(value: str) -> int:
+    try:
+        val = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer") from None
+    if val <= 0:
+        raise argparse.ArgumentTypeError(f"{value} must be greater than 0")
+    return val
+
+
 def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = None) -> None:
     kwargs = {"parents": parents} if parents else {}
     p_factory = subparsers.add_parser(
@@ -1802,6 +1812,20 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     )
     p_canary.add_argument("--json", action="store_true", help="Output JSON result")
     _add_workspace_trust_argument(p_canary)
+
+    p_queue = factory_sub.add_parser(
+        "queue", help="Run finite factory over an explicit task queue", **kwargs
+    )
+    p_queue.add_argument("queue_file", help="Path to task queue JSON file")
+    p_queue.add_argument("--dry-run", action="store_true", help="Report planned execution without launching")
+    p_queue.add_argument("--ledger", help="Explicit path to factory queue ledger file")
+    p_queue.add_argument("--retry", action="append", default=[], help="Retry a previously failed or interrupted task ID (repeatable)")
+    p_queue.add_argument("--max-tasks", type=_positive_int, default=None, help="Stop after dispatching this many tasks")
+    p_queue.add_argument("--stop-on-failure", action="store_true", help="Stop after any task failure")
+    p_queue.add_argument("--quiet", action="store_true", help="Suppress progress output")
+    p_queue.add_argument("--no-progress", action="store_true", help="Disable live progress display")
+    p_queue.add_argument("--heartbeat", type=float, default=30.0, help="Heartbeat interval in seconds")
+    p_queue.add_argument("--json", action="store_true", help="Output JSON result")
 
 
 def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] = None) -> None:
@@ -2967,6 +2991,9 @@ def cmd_factory(args: argparse.Namespace) -> int:
             if not getattr(args, "until", None):
                 args.until = None
             return cmd_factory_run(args)
+        if action == "queue":
+            from howlplane.control_plane.factory import task_queue
+            return task_queue.command(args)
         print("Unknown factory action.")
         return 1
     except (OSError, ValueError) as exc:
