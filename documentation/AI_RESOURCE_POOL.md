@@ -125,7 +125,9 @@ the underlying engineering result as capacity exhaustion.
 
 With `operating_mode = "local_only"`, hosted resources are marked not probed
 before adapter lookup. There is no hosted health request, readiness probe,
-planning, generation, or review. Local Ollama is a normal registered resource,
+planning, generation, or review. `howlplane orchestrate`, its AUTO model
+discovery, the agent doctor, and Factory preflight apply the same rule: no
+hosted agent CLI is dispatched or has its models listed in `local_only` mode. Local Ollama is a normal registered resource,
 not a magical fallback, and is selected only for roles/capabilities it supplies.
 Its current profile supports bounded planning, synthesis, and eligible review,
 but not repository implementation because it has no repository execution
@@ -175,6 +177,14 @@ advertised models, unattended execution through HowlPlane's own invocation
 (`--live`, one tiny prompt each), and capacity only where the CLI reports it.
 Orchestration routing and `factory doctor` consume its cache. See
 [AGENT_DOCTOR.md](AGENT_DOCTOR.md).
+
+The built-in resources include Cursor (resource ID `cursor`, backend: Cursor
+Agent CLI, executable `agent`). It is ordered last among hosted agents so
+existing preferences are unchanged, and an operator configuration that lists
+providers explicitly must enable it (`[ai_resources.providers.cursor]`).
+Selection also excludes a resource whose CLI would meet a workspace trust prompt
+in the task's repository (`WORKSPACE_TRUST_REQUIRED`, scoped to that workspace
+only). See [WORKSPACE_TRUST.md](WORKSPACE_TRUST.md).
 
 `howlplane doctor` validates configuration and runs non-generative readiness checks.
 Hosted CLI checks inspect executable presence only; generation capacity and

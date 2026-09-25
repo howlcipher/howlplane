@@ -12,8 +12,12 @@ howlplane agents doctor                  # level 1 only: free, no prompt is sent
 howlplane agents doctor --json           # machine-readable, schema howlplane.agent_readiness/v1
 howlplane agents doctor --live           # also one tiny smoke prompt per eligible agent
 howlplane agents doctor --agent agy --refresh
+howlplane agents doctor --repo /path/to/repo [--live]   # adds WORKSPACE READINESS for that directory
 howlplane factory doctor [--live] [--json]
+howlplane factory prepare --repo /path/to/repo           # authorize and prepare workspace trust
 ```
+
+Global readiness (below) is about the agent. Workspace readiness is about one directory: whether the CLI will run there without a trust prompt. See [WORKSPACE_TRUST.md](WORKSPACE_TRUST.md).
 
 ## Evidence levels
 
@@ -46,7 +50,8 @@ Each dimension is reported independently. Nothing is collapsed into one AVAILABL
 * **Unattended:** `YES`, `INTERACTIVE_ONLY` (a smoke or session hit a permission prompt), or `UNVERIFIED`.
 * **Live smoke:** `PASS`, `FAIL`, `BLOCKED_PERMISSION`, `WORKSPACE_TRUST_REQUIRED`, `TIMED_OUT`, `STALE`, or `NOT_RUN`.
 
-`WORKSPACE_TRUST_REQUIRED` is scoped to a directory. Cursor's `agent` and Devin refuse any directory nobody has trusted interactively yet, and the smoke's fresh temporary directory is always one. The refusal therefore leaves Unattended as `UNVERIFIED` rather than `INTERACTIVE_ONLY`, and it is never written back as an agent-wide capability, whether it came from a smoke or from orchestration. It does warn that a fresh worktree, such as one Factory creates, must be trusted before these agents can work in it unattended. `factory doctor` lists them as workspace trust gated.
+`WORKSPACE_TRUST_REQUIRED` is scoped to a directory and is its own failure class. Cursor's `agent` and Devin refuse any directory that has not been trusted, and the smoke's fresh temporary directory is always one. The refusal therefore leaves Unattended as `UNVERIFIED` rather than `INTERACTIVE_ONLY`, and it is never written back as an agent-wide capability, whether it came from a smoke or from orchestration. Use `--repo` to check a real workspace, and `howlplane factory prepare` to authorize and prepare one ([WORKSPACE_TRUST.md](WORKSPACE_TRUST.md)).
+* **Workspace** (with `--repo`): `READY`, `TRUST REQUIRED`, `UNKNOWN`, `UNSUPPORTED`, or `ERROR`, read from each vendor's own trust store without any prompt.
 * **Capacity:** provider-pool states (`AVAILABLE`, `RATE_LIMITED`, `SESSION_EXHAUSTED`, `QUOTA_EXHAUSTED`, `UNKNOWN`), with a `scope` of `model` or `agent`, a `source`, and an expiry.
 
 `UNKNOWN` is a real answer, not a failure. If a CLI does not expose remaining allowance, the doctor prints `Capacity: UNKNOWN — CLI does not expose remaining allowance`. Percentages such as `five_hour_remaining_percent` and `weekly_remaining_percent` are filled in only from structured CLI output, never estimated from elapsed time or inferred from a failure. None of the currently installed CLIs exposes its allowance through a free command.
@@ -76,7 +81,7 @@ A fresh `PASS` satisfies `--live` without another call. Use `--refresh` to probe
 
 ## How routing uses it
 
-`howlplane orchestrate` reads the cache when a session starts. It never runs a probe or a smoke per assignment. Before unattended work is assigned, an agent needs to be installed, not known to be logged out, not known to be interactive-only, and not under an unexpired agent-wide limit. A missing or stale smoke does not block assignment; it only shows as `unverified` in the selection evidence. Real orchestration outcomes feed back into the cache at the scope they prove: a success confirms unattended execution, a permission prompt marks the agent interactive-only, and a quota, session, or rate limit is recorded at model scope when the model is known.
+`howlplane orchestrate` reads the cache when a session starts. It never runs a probe or a smoke per assignment. Before unattended work is assigned, an agent needs to be installed, not known to be logged out, not known to be interactive-only, not under an unexpired agent-wide limit, and trusted in the session's workspace. The Factory provider pool applies the same workspace check per task repository. In `local_only` mode no hosted agent is dispatched or has its models listed, on any path. A missing or stale smoke does not block assignment; it only shows as `unverified` in the selection evidence. Real orchestration outcomes feed back into the cache at the scope they prove: a success confirms unattended execution, a permission prompt marks the agent interactive-only, a trust refusal is recorded against that workspace only, and a quota, session, or rate limit is recorded at model scope when the model is known.
 
 ## Factory preflight
 
@@ -87,7 +92,10 @@ A fresh `PASS` satisfies `--live` without another call. Use `--refresh` to probe
 * interactive-only, unavailable, and capacity-unknown agents
 * known limits, and agents that passed a smoke
 * the default execution budgets
+* the Factory worktree, whether it is authorized, and which agents are workspace trust gated there
 
 The overall result is `READY` when every usable agent is verified and an independent auditor exists. It is `DEGRADED` when work can run but some evidence is unverified or no independent audit is possible. It is `BLOCKED`, with exit code 1, when no autonomous implementation worker is usable. UNKNOWN capacity is listed but never counted as unavailable.
 
-`howlplane factory run` and `factory start` accept `--preflight {off,warn,require}`, default `off`. `warn` prints the readiness report when it is not READY. `require` also refuses to start a BLOCKED campaign.
+Trust-gated agents are not workers in the Factory worktree. If some are gated and others can still implement and review, the campaign is `DEGRADED`. If every implementation-capable agent is gated, it is `BLOCKED`.
+
+`howlplane factory run` and `factory start` accept `--preflight {off,warn,require}`, default `off`. With `warn` or `require`, workspace trust for the campaign's worktree is checked before any worker is dispatched. `warn` prints the readiness report when it is not READY. `require` also refuses to start a BLOCKED campaign.

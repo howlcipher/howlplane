@@ -54,6 +54,15 @@
             <li>
                     <a class="function" href="#safe_load_yaml">safe_load_yaml</a>
             </li>
+            <li>
+                    <a class="function" href="#private_state_path">private_state_path</a>
+            </li>
+            <li>
+                    <a class="function" href="#load_schema_section">load_schema_section</a>
+            </li>
+            <li>
+                    <a class="function" href="#write_private_json">write_private_json</a>
+            </li>
     </ul>
 
 
@@ -193,6 +202,35 @@ or corrupt file in place, and malformed state artifacts fail closed.</p>
 </span><span id="L-110"><a href="#L-110"><span class="linenos">110</span></a><span class="k">def</span><span class="w"> </span><span class="nf">safe_load_yaml</span><span class="p">(</span><span class="n">file_path</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
 </span><span id="L-111"><a href="#L-111"><span class="linenos">111</span></a><span class="w">    </span><span class="sd">"""Safely loads and validates YAML artifact, failing closed on corruption."""</span>
 </span><span id="L-112"><a href="#L-112"><span class="linenos">112</span></a>    <span class="k">return</span> <span class="n">_safe_parse</span><span class="p">(</span><span class="n">file_path</span><span class="p">,</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">,</span> <span class="s2">"YAML"</span><span class="p">)</span>
+</span><span id="L-113"><a href="#L-113"><span class="linenos">113</span></a>
+</span><span id="L-114"><a href="#L-114"><span class="linenos">114</span></a>
+</span><span id="L-115"><a href="#L-115"><span class="linenos">115</span></a><span class="k">def</span><span class="w"> </span><span class="nf">private_state_path</span><span class="p">(</span><span class="n">override_env</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+</span><span id="L-116"><a href="#L-116"><span class="linenos">116</span></a><span class="w">    </span><span class="sd">"""`$&lt;override_env&gt;` if absolute, else `$XDG_STATE_HOME/howlplane/&lt;name&gt;` (default ~/.local/state)."""</span>
+</span><span id="L-117"><a href="#L-117"><span class="linenos">117</span></a>    <span class="n">override</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">override_env</span><span class="p">)</span>
+</span><span id="L-118"><a href="#L-118"><span class="linenos">118</span></a>    <span class="k">if</span> <span class="n">override</span> <span class="ow">and</span> <span class="n">Path</span><span class="p">(</span><span class="n">override</span><span class="p">)</span><span class="o">.</span><span class="n">is_absolute</span><span class="p">():</span>
+</span><span id="L-119"><a href="#L-119"><span class="linenos">119</span></a>        <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">override</span><span class="p">)</span>
+</span><span id="L-120"><a href="#L-120"><span class="linenos">120</span></a>    <span class="n">base</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"XDG_STATE_HOME"</span><span class="p">)</span>
+</span><span id="L-121"><a href="#L-121"><span class="linenos">121</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">base</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">Path</span><span class="p">(</span><span class="n">base</span><span class="p">)</span><span class="o">.</span><span class="n">is_absolute</span><span class="p">():</span>
+</span><span id="L-122"><a href="#L-122"><span class="linenos">122</span></a>        <span class="n">base</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">".local"</span> <span class="o">/</span> <span class="s2">"state"</span><span class="p">)</span>
+</span><span id="L-123"><a href="#L-123"><span class="linenos">123</span></a>    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">base</span><span class="p">)</span> <span class="o">/</span> <span class="s2">"howlplane"</span> <span class="o">/</span> <span class="n">name</span>
+</span><span id="L-124"><a href="#L-124"><span class="linenos">124</span></a>
+</span><span id="L-125"><a href="#L-125"><span class="linenos">125</span></a>
+</span><span id="L-126"><a href="#L-126"><span class="linenos">126</span></a><span class="k">def</span><span class="w"> </span><span class="nf">load_schema_section</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">schema</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+</span><span id="L-127"><a href="#L-127"><span class="linenos">127</span></a><span class="w">    </span><span class="sd">"""The `key` mapping of a JSON document with this `schema`, or {} when absent, foreign, or unreadable."""</span>
+</span><span id="L-128"><a href="#L-128"><span class="linenos">128</span></a>    <span class="k">try</span><span class="p">:</span>
+</span><span id="L-129"><a href="#L-129"><span class="linenos">129</span></a>        <span class="n">document</span> <span class="o">=</span> <span class="n">safe_load_json</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="p">{}</span>
+</span><span id="L-130"><a href="#L-130"><span class="linenos">130</span></a>    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+</span><span id="L-131"><a href="#L-131"><span class="linenos">131</span></a>        <span class="k">return</span> <span class="p">{}</span>
+</span><span id="L-132"><a href="#L-132"><span class="linenos">132</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">document</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="ow">or</span> <span class="n">document</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"schema"</span><span class="p">)</span> <span class="o">!=</span> <span class="n">schema</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">document</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">),</span> <span class="nb">dict</span><span class="p">):</span>
+</span><span id="L-133"><a href="#L-133"><span class="linenos">133</span></a>        <span class="k">return</span> <span class="p">{}</span>
+</span><span id="L-134"><a href="#L-134"><span class="linenos">134</span></a>    <span class="k">return</span> <span class="n">document</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+</span><span id="L-135"><a href="#L-135"><span class="linenos">135</span></a>
+</span><span id="L-136"><a href="#L-136"><span class="linenos">136</span></a>
+</span><span id="L-137"><a href="#L-137"><span class="linenos">137</span></a><span class="k">def</span><span class="w"> </span><span class="nf">write_private_json</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="L-138"><a href="#L-138"><span class="linenos">138</span></a><span class="w">    </span><span class="sd">"""Atomic JSON write readable only by the owner (directory 0700, file 0600)."""</span>
+</span><span id="L-139"><a href="#L-139"><span class="linenos">139</span></a>    <span class="n">path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="mo">0o700</span><span class="p">)</span>
+</span><span id="L-140"><a href="#L-140"><span class="linenos">140</span></a>    <span class="n">atomic_write_json</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+</span><span id="L-141"><a href="#L-141"><span class="linenos">141</span></a>    <span class="n">os</span><span class="o">.</span><span class="n">chmod</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="mo">0o600</span><span class="p">)</span>
 </span></pre></div>
 
 
@@ -396,6 +434,86 @@ Ensures parent directories exist and syncs to disk before replacement.</p>
 
 
             <div class="docstring"><p>Safely loads and validates YAML artifact, failing closed on corruption.</p>
+</div>
+
+
+                </section>
+                <section id="private_state_path">
+                            <input id="private_state_path-view-source" class="view-source-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
+<div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">private_state_path</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">override_env</span><span class="p">:</span> <span class="nb">str</span>, </span><span class="param"><span class="n">name</span><span class="p">:</span> <span class="nb">str</span></span><span class="return-annotation">) -> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span>:</span></span>
+
+                <label class="view-source-button" for="private_state_path-view-source"><span>View Source</span></label>
+
+    </div>
+    <a class="headerlink" href="#private_state_path"></a>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="private_state_path-116"><a href="#private_state_path-116"><span class="linenos">116</span></a><span class="k">def</span><span class="w"> </span><span class="nf">private_state_path</span><span class="p">(</span><span class="n">override_env</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+</span><span id="private_state_path-117"><a href="#private_state_path-117"><span class="linenos">117</span></a><span class="w">    </span><span class="sd">"""`$&lt;override_env&gt;` if absolute, else `$XDG_STATE_HOME/howlplane/&lt;name&gt;` (default ~/.local/state)."""</span>
+</span><span id="private_state_path-118"><a href="#private_state_path-118"><span class="linenos">118</span></a>    <span class="n">override</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">override_env</span><span class="p">)</span>
+</span><span id="private_state_path-119"><a href="#private_state_path-119"><span class="linenos">119</span></a>    <span class="k">if</span> <span class="n">override</span> <span class="ow">and</span> <span class="n">Path</span><span class="p">(</span><span class="n">override</span><span class="p">)</span><span class="o">.</span><span class="n">is_absolute</span><span class="p">():</span>
+</span><span id="private_state_path-120"><a href="#private_state_path-120"><span class="linenos">120</span></a>        <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">override</span><span class="p">)</span>
+</span><span id="private_state_path-121"><a href="#private_state_path-121"><span class="linenos">121</span></a>    <span class="n">base</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"XDG_STATE_HOME"</span><span class="p">)</span>
+</span><span id="private_state_path-122"><a href="#private_state_path-122"><span class="linenos">122</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">base</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">Path</span><span class="p">(</span><span class="n">base</span><span class="p">)</span><span class="o">.</span><span class="n">is_absolute</span><span class="p">():</span>
+</span><span id="private_state_path-123"><a href="#private_state_path-123"><span class="linenos">123</span></a>        <span class="n">base</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">".local"</span> <span class="o">/</span> <span class="s2">"state"</span><span class="p">)</span>
+</span><span id="private_state_path-124"><a href="#private_state_path-124"><span class="linenos">124</span></a>    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">base</span><span class="p">)</span> <span class="o">/</span> <span class="s2">"howlplane"</span> <span class="o">/</span> <span class="n">name</span>
+</span></pre></div>
+
+
+            <div class="docstring"><p><code>$&lt;override_env&gt;</code> if absolute, else <code>$XDG_STATE_HOME/howlplane/&lt;name&gt;</code> (default ~/.local/state).</p>
+</div>
+
+
+                </section>
+                <section id="load_schema_section">
+                            <input id="load_schema_section-view-source" class="view-source-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
+<div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">load_schema_section</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">path</span><span class="p">:</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span>, </span><span class="param"><span class="n">schema</span><span class="p">:</span> <span class="nb">str</span>, </span><span class="param"><span class="n">key</span><span class="p">:</span> <span class="nb">str</span></span><span class="return-annotation">) -> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span>:</span></span>
+
+                <label class="view-source-button" for="load_schema_section-view-source"><span>View Source</span></label>
+
+    </div>
+    <a class="headerlink" href="#load_schema_section"></a>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="load_schema_section-127"><a href="#load_schema_section-127"><span class="linenos">127</span></a><span class="k">def</span><span class="w"> </span><span class="nf">load_schema_section</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">schema</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+</span><span id="load_schema_section-128"><a href="#load_schema_section-128"><span class="linenos">128</span></a><span class="w">    </span><span class="sd">"""The `key` mapping of a JSON document with this `schema`, or {} when absent, foreign, or unreadable."""</span>
+</span><span id="load_schema_section-129"><a href="#load_schema_section-129"><span class="linenos">129</span></a>    <span class="k">try</span><span class="p">:</span>
+</span><span id="load_schema_section-130"><a href="#load_schema_section-130"><span class="linenos">130</span></a>        <span class="n">document</span> <span class="o">=</span> <span class="n">safe_load_json</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="p">{}</span>
+</span><span id="load_schema_section-131"><a href="#load_schema_section-131"><span class="linenos">131</span></a>    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+</span><span id="load_schema_section-132"><a href="#load_schema_section-132"><span class="linenos">132</span></a>        <span class="k">return</span> <span class="p">{}</span>
+</span><span id="load_schema_section-133"><a href="#load_schema_section-133"><span class="linenos">133</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">document</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="ow">or</span> <span class="n">document</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"schema"</span><span class="p">)</span> <span class="o">!=</span> <span class="n">schema</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">document</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">),</span> <span class="nb">dict</span><span class="p">):</span>
+</span><span id="load_schema_section-134"><a href="#load_schema_section-134"><span class="linenos">134</span></a>        <span class="k">return</span> <span class="p">{}</span>
+</span><span id="load_schema_section-135"><a href="#load_schema_section-135"><span class="linenos">135</span></a>    <span class="k">return</span> <span class="n">document</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+</span></pre></div>
+
+
+            <div class="docstring"><p>The <code>key</code> mapping of a JSON document with this <code>schema</code>, or {} when absent, foreign, or unreadable.</p>
+</div>
+
+
+                </section>
+                <section id="write_private_json">
+                            <input id="write_private_json-view-source" class="view-source-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
+<div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">write_private_json</span><span class="signature pdoc-code condensed">(<span class="param"><span class="n">path</span><span class="p">:</span> <span class="n">pathlib</span><span class="o">.</span><span class="n">Path</span>, </span><span class="param"><span class="n">data</span><span class="p">:</span> <span class="n">Any</span></span><span class="return-annotation">) -> <span class="kc">None</span>:</span></span>
+
+                <label class="view-source-button" for="write_private_json-view-source"><span>View Source</span></label>
+
+    </div>
+    <a class="headerlink" href="#write_private_json"></a>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="write_private_json-138"><a href="#write_private_json-138"><span class="linenos">138</span></a><span class="k">def</span><span class="w"> </span><span class="nf">write_private_json</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="write_private_json-139"><a href="#write_private_json-139"><span class="linenos">139</span></a><span class="w">    </span><span class="sd">"""Atomic JSON write readable only by the owner (directory 0700, file 0600)."""</span>
+</span><span id="write_private_json-140"><a href="#write_private_json-140"><span class="linenos">140</span></a>    <span class="n">path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="mo">0o700</span><span class="p">)</span>
+</span><span id="write_private_json-141"><a href="#write_private_json-141"><span class="linenos">141</span></a>    <span class="n">atomic_write_json</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+</span><span id="write_private_json-142"><a href="#write_private_json-142"><span class="linenos">142</span></a>    <span class="n">os</span><span class="o">.</span><span class="n">chmod</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="mo">0o600</span><span class="p">)</span>
+</span></pre></div>
+
+
+            <div class="docstring"><p>Atomic JSON write readable only by the owner (directory 0700, file 0600).</p>
 </div>
 
 
