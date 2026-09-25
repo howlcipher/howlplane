@@ -120,3 +120,18 @@ def test_docs_target_builds_into_staging_before_swapping_live_dirs():
     last_mv_idx = max(mv_indices)
     assert final_rm_idx is not None, "Makefile should clean up staging dir after moving"
     assert rm_tmp_idx < build_idx < swap_rm_idx < last_mv_idx < final_rm_idx, "Staging build before removal and move sequence must be correct"
+
+
+def test_ecosystem_navigation_cross_links_howlforge_and_howlinstinct():
+    repo_root = Path(__file__).resolve().parents[1]
+    index_html = (repo_root / "docs" / "index.html").read_text(encoding="utf-8")
+
+    drawer = index_html.split('<aside id="eco-drawer"', 1)[1].split("</aside>", 1)[0]
+    footer_nav = index_html.split('<nav class="footer-nav"', 1)[1].split("</nav>", 1)[0]
+    for project, label in (("howlInstinct", "HOWLINSTINCT"), ("howlforge", "HOWLFORGE")):
+        assert f'href="https://howlcipher.github.io/{project}/"' in drawer
+        assert label in drawer
+        assert f'href="https://howlcipher.github.io/{project}/"' in footer_nav
+
+    assert drawer.count("drawer-node-card") == 14
+    assert "● 14 ECOSYSTEM NODES" in drawer
