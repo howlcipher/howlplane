@@ -55,3 +55,6 @@ tokens are redacted.
 3. **Evidence Ledger (`logs/control_plane/evidence_ledger.jsonl`)**
    - Append-only structured log of control plane events and verification runs.
    - Automatically sanitized: all API keys, bearer tokens, credentials, and email addresses are redacted prior to persistence.
+4. **Factory Queue Ledger (`~/.local/state/howlplane/factory_queue/<queue-hash>.jsonl`)**
+   - Append-only record of which orchestration session each queue task revision became, how it ended, and which revisions were superseded.
+   - Holds ids, fingerprints, statuses, and paths only; redacted before writing; never transmitted.

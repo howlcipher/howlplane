@@ -40,6 +40,7 @@ Orchestration sessions classify states into distinct lifecycle categories:
 
 - **Successfully terminal:** `COMPLETE`, `COMPLETE WITH WARNINGS`. These represent finished sessions and cannot resume.
 - **Paused / resumable:** `HANDOFF REQUIRED`, `INTERRUPTED`, and recoverable `BLOCKED` states (such as exhausted independent reviewers, worker timeouts, rate limits, or pending workspace trust repair). `HANDOFF REQUIRED` signifies that autonomous progress stopped safely because external intervention, repository repairs, or changed execution parameters are required. It does NOT mean the session record is dead.
+- **Superseded:** `SUPERSEDED`. `orchestration.supersede` retires one resumable session in favor of replacement work, for example when a Factory queue task is edited into a new revision (see `FACTORY_QUEUE.md`). Unlike `discard`, it keeps the manifest and records the reason, the replacement, and the previous status. The session is no longer resumable and no longer owns its worktree. A session with a live coordinator lease is refused.
 - **Truly terminal failures:** `SESSION_STATE_INVALID`, operator discard, or unrecoverable `BLOCKED` states (such as a read-only review or acceptance role mutating the repository). These fail closed and cannot resume.
 
 Resuming a paused or handoff session re-acquires a coordinator lease, reconciles repository state against checkpoint evidence, applies updated execution parameters, and continues without restarting planning unless reconciliation demonstrates planning is invalidated:
