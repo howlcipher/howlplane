@@ -1671,6 +1671,10 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
         help="Bind delegated campaign authority for autonomous git/GitHub actions. "
              "Without this, authority-required work is parked rather than executed.",
     )
+    p_run_once.add_argument(
+        "--canary", action="store_true",
+        help="Run synthetic routing canaries instead of real backlog missions.",
+    )
     p_run_once.add_argument("--json", action="store_true", help="Output JSON result")
     _add_workspace_trust_argument(p_run_once)
 
@@ -1715,6 +1719,10 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
         help="Bind delegated campaign authority for autonomous git/GitHub actions. "
              "Without this, authority-required work is parked rather than executed.",
     )
+    p_run.add_argument(
+        "--canary", action="store_true",
+        help="Run synthetic routing canaries instead of real backlog missions.",
+    )
     p_run.add_argument("--json", action="store_true", help="Output JSON result")
     _add_preflight_argument(p_run)
     _add_workspace_trust_argument(p_run)
@@ -1754,6 +1762,10 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
                          help="Named first-run authority choice")
     p_start.add_argument("--authority-profile", choices=["strict", "overnight-safe", "howlframe-overnight", "howl-ecosystem-standard"],
                          help="Existing authority profile id (advanced)")
+    p_start.add_argument(
+        "--canary", action="store_true",
+        help="Run synthetic routing canaries instead of real backlog missions.",
+    )
     p_start.add_argument("--json", action="store_true", help="Output JSON result")
     _add_workspace_trust_argument(p_start)
 
@@ -2459,7 +2471,7 @@ def _ready_mission_path(repo_path: Path) -> Optional[Path]:
     return None
 
 
-def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
+def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None, *, canary_mode: bool = False):
     from datetime import datetime, timezone
     from pathlib import Path
     import getpass
@@ -2474,6 +2486,12 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
     )
     from howlplane.control_plane.authority_profile import get_profile
     from howlplane.control_plane.backlog_source import BacklogSource
+    from howlplane.control_plane.factory.canary import (
+        CanaryDispatcherAdapter,
+        CanaryEngine,
+        CanaryProviderPool,
+        canary_evidence_for_workspace,
+    )
     from howlplane.control_plane.factory.dispatcher import MarathonDispatcherAdapter, RepositoryAuthorityError
     from howlplane.control_plane.factory.repo_proposal import CapabilityStore, RepoProposalStore
     from howlplane.control_plane.factory.supervisor import FactorySupervisor
@@ -2572,6 +2590,32 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
         return backlog
 
     def _discovery():
+        if canary_mode:
+            if target.mode == FactoryTargetMode.ECOSYSTEM:
+                if target.workspace is None:
+                    return []
+                return canary_evidence_for_workspace(target.workspace)
+            # Single-repo canary: verify routing for the one configured target.
+            repo_slug = detect_repo_slug(target_repo) or str(target_repo)
+            return [
+                {
+                    "origin": "owner_direction",
+                    "repository": repo_slug,
+                    "title": f"Factory routing canary for {repo_slug}",
+                    "description": (
+                        "Verify that the Factory dispatches a work item to the correct "
+                        f"repository-specific managed worktree for {repo_slug} without mutating "
+                        "the operator checkout."
+                    ),
+                    "identity_keys": [f"factory-canary:{repo_slug}"],
+                    "evidence_refs": [],
+                    "evidence_fingerprints": [f"factory-canary:{repo_slug}"],
+                    "source_file_rank": 0,
+                    "source_rank": 0,
+                    "kind": "factory_routing_canary",
+                    "trusted_provenance": True,
+                }
+            ]
         if target.mode == FactoryTargetMode.ECOSYSTEM:
             if target.workspace is None:
                 return []
@@ -2584,7 +2628,11 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
         repo = detect_repo_slug(target_repo) or str(target_repo)
         return _discover_repo(target_repo, repo)
 
-    provider_pool = ProviderPoolManager.from_config(probe_on_start=False)
+    provider_pool = (
+        CanaryProviderPool()
+        if canary_mode
+        else ProviderPoolManager.from_config(probe_on_start=False)
+    )
 
     # Bind operator-selected delegated authority once.  Without an authority
     # profile the engine truthfully parks anything requiring authority rather
@@ -2622,24 +2670,45 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
             )
         return candidate
 
-    engine = _new_engine(target_repo, detect_repo_slug(target_repo) or "")
-    workspace_engines: Dict[str, Any] = {}
+    if canary_mode:
+        canary_engines: Dict[str, CanaryEngine] = {}
+        canary_allowed_roots: List[Path] = []
+        if target.mode == FactoryTargetMode.ECOSYSTEM and workspace_resolver is not None:
+            canary_allowed_roots = [rt.target_dir for rt in workspace_resolver.repositories]
+            for repository_target in workspace_resolver.repositories:
+                canary_engines[repository_target.slug] = CanaryEngine(
+                    target_repo=repository_target.target_dir,
+                    repo_slug=repository_target.slug,
+                    allowed_marker_parents=canary_allowed_roots,
+                )
+        else:
+            canary_allowed_roots = [target_repo]
+            repo_slug = detect_repo_slug(target_repo) or str(target_repo)
+            canary_engines[repo_slug] = CanaryEngine(
+                target_repo=target_repo,
+                repo_slug=repo_slug,
+                allowed_marker_parents=canary_allowed_roots,
+            )
+        dispatcher: Any = CanaryDispatcherAdapter(engines=canary_engines)
+    else:
+        engine = _new_engine(target_repo, detect_repo_slug(target_repo) or "")
+        workspace_engines: Dict[str, Any] = {}
 
-    def _engine_for_work_item(work_item: Any):
-        if target.mode != FactoryTargetMode.ECOSYSTEM or workspace_resolver is None:
-            return engine
-        repository_target = workspace_resolver.resolve(work_item.repository)
-        slug = repository_target.slug
-        if envelope is not None and slug not in envelope.authorized_repositories:
-            raise RepositoryAuthorityError(slug)
-        if slug not in workspace_engines:
-            workspace_engines[slug] = _new_engine(repository_target.target_dir, slug)
-        return workspace_engines[slug]
+        def _engine_for_work_item(work_item: Any):
+            if target.mode != FactoryTargetMode.ECOSYSTEM or workspace_resolver is None:
+                return engine
+            repository_target = workspace_resolver.resolve(work_item.repository)
+            slug = repository_target.slug
+            if envelope is not None and slug not in envelope.authorized_repositories:
+                raise RepositoryAuthorityError(slug)
+            if slug not in workspace_engines:
+                workspace_engines[slug] = _new_engine(repository_target.target_dir, slug)
+            return workspace_engines[slug]
 
-    dispatcher = MarathonDispatcherAdapter(
-        engine_factory=lambda: engine,
-        work_item_engine_factory=_engine_for_work_item,
-    )
+        dispatcher = MarathonDispatcherAdapter(
+            engine_factory=lambda: engine,
+            work_item_engine_factory=_engine_for_work_item,
+        )
 
     return FactorySupervisor(
         state_store=state_store,
@@ -2663,7 +2732,7 @@ def cmd_factory_run_once(args: argparse.Namespace) -> int:
     campaign = _resolve_factory_campaign(args, prepare=True)
     if campaign is not None:
         _select_factory_authority(args, campaign)
-    supervisor = _build_factory_supervisor(args)
+    supervisor = _build_factory_supervisor(args, canary_mode=getattr(args, "canary", False))
     result = supervisor.run_once()
     status = supervisor.status()
     if getattr(args, "json", False):
@@ -2691,7 +2760,7 @@ def cmd_factory_run(args: argparse.Namespace) -> int:
     if campaign is not None:
         _select_factory_authority(args, campaign)
     wake = threading.Event()
-    supervisor = _build_factory_supervisor(args, sleep=wake.wait)
+    supervisor = _build_factory_supervisor(args, sleep=wake.wait, canary_mode=getattr(args, "canary", False))
 
     def request_stop(signum, _frame):
         supervisor.request_stop(f"signal_{signal.Signals(signum).name.lower()}")
@@ -2939,10 +3008,12 @@ def cmd_factory_start(args: argparse.Namespace) -> int:
     # Bind the selected existing envelope before detaching. This keeps the
     # operator choice durable even if the new backend exits before its first
     # tick, while still using the same supervisor builder and authority path.
-    _build_factory_supervisor(args)
+    _build_factory_supervisor(args, canary_mode=getattr(args, "canary", False))
     start_kwargs = {}
     if getattr(args, "max_work_items", None) is not None:
         start_kwargs["max_work_items"] = args.max_work_items
+    if getattr(args, "canary", False):
+        start_kwargs["canary"] = True
     started, record = start_process(
         campaign,
         profile,
@@ -3112,10 +3183,19 @@ def cmd_factory(args: argparse.Namespace) -> int:
         if action == "doctor":
             return cmd_factory_doctor(args)
         if action == "canary":
-            args.max_work_items = 1
+            args.canary = True
+            if args.target == "repo":
+                args.target = "ecosystem"
+            if not getattr(args, "workspace", None):
+                args.workspace = "factory/howl-workspace.yaml"
+            if args.target == "ecosystem" and args.workspace and not getattr(args, "max_work_items", None):
+                from howlplane.control_plane.factory.target import Workspace
+                args.max_work_items = len(Workspace.from_file(args.workspace).repositories)
+            elif not getattr(args, "max_work_items", None):
+                args.max_work_items = 1
             if not getattr(args, "until", None):
                 args.until = None
-            return cmd_factory_run(args)
+            return cmd_factory_start(args)
         if action == "queue":
             from howlplane.control_plane.factory import task_queue
             return task_queue.command(args)

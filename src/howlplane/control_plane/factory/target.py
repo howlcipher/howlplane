@@ -22,6 +22,7 @@ from howlplane.control_plane.atomic_io import atomic_write_json, safe_load_json
 from howlplane.control_plane.factory.campaign import (
     FactoryCampaign,
     RepositoryIdentity,
+    canonical_path,
     discover_repository,
     factory_data_home,
     prepare_campaign,
@@ -66,11 +67,11 @@ class Workspace:
         repos: List[WorkspaceRepository] = []
         for entry in data.get("repositories") or []:
             if isinstance(entry, str):
-                repos.append(WorkspaceRepository(path=Path(entry).expanduser().resolve()))
+                repos.append(WorkspaceRepository(path=canonical_path(entry)))
             else:
                 repos.append(
                     WorkspaceRepository(
-                        path=Path(entry.get("path", ".")).expanduser().resolve(),
+                        path=canonical_path(entry.get("path", ".")),
                         repository=entry.get("repository", ""),
                         roles=list(entry.get("roles") or []),
                         priority_hint=float(entry.get("priority_hint", 1.0)),
@@ -140,7 +141,7 @@ class WorkspaceRepositoryResolver:
     def __init__(self, workspace: Workspace, master_campaign_id: str, master_state_dir: Path):
         self.workspace = workspace
         self.master_campaign_id = master_campaign_id
-        self.master_state_dir = Path(master_state_dir).resolve()
+        self.master_state_dir = canonical_path(master_state_dir)
         self._targets: Dict[str, RepositoryExecutionTarget] = {}
         for repository in workspace.repositories:
             identity = discover_repository(repository.path)
@@ -158,15 +159,15 @@ class WorkspaceRepositoryResolver:
             if declared_slug in self._targets:
                 raise WorkspaceResolutionError(f"Ambiguous workspace repository identity: {declared_slug}")
             key = _repository_key(declared_slug)
-            state_dir = self.master_state_dir / "repositories" / key
-            target_dir = (
+            state_dir = canonical_path(self.master_state_dir / "repositories" / key)
+            target_dir = canonical_path(
                 factory_data_home()
                 / "worktrees"
                 / self.master_campaign_id
                 / "repositories"
                 / key
                 / "target"
-            ).resolve()
+            )
             campaign = resolve_campaign(
                 identity.root,
                 state_dir=state_dir,
@@ -219,7 +220,10 @@ class WorkspaceRepositoryResolver:
                     "source_common_git_dir",
                     "target_repo",
                 )
-                if any(existing.get(key) != metadata[key] for key in immutable):
+                if any(
+                    canonical_path(existing.get(key, "")) != canonical_path(metadata[key])
+                    for key in immutable
+                ):
                     raise WorkspaceResolutionError(
                         f"Cross-project repository execution state reuse refused for {target.slug}"
                     )

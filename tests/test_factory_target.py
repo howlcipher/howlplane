@@ -6,6 +6,7 @@ Unit tests for the generalized Factory target/workspace abstraction.
 
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -248,19 +249,26 @@ def test_workspace_resolver_prepares_distinct_repository_targets_and_metadata(tm
         assert target.target_dir != target.identity.root
 
 
+def _prepare_twice(workspace, master_state):
+    from howlplane.control_plane.factory.target import WorkspaceRepositoryResolver
+
+    first = WorkspaceRepositoryResolver(workspace, "master-campaign", master_state)
+    first.prepare_all()
+    second = WorkspaceRepositoryResolver(workspace, "master-campaign", master_state)
+    second.prepare_all()
+    first_targets = {target.slug: target.target_dir for target in first.repositories}
+    second_targets = {target.slug: target.target_dir for target in second.repositories}
+    assert first_targets == second_targets
+    return first_targets
+
+
 def test_workspace_resolver_restart_reconstructs_same_targets(tmp_path, monkeypatch):
-    from howlplane.control_plane.factory.target import Workspace, WorkspaceRepositoryResolver
+    from howlplane.control_plane.factory.target import Workspace
 
     set_xdg_paths(monkeypatch, tmp_path)
     workspace = Workspace.from_dict({"repositories": _workspace_repositories(tmp_path, ["howl", "howlplane"])})
-    first = WorkspaceRepositoryResolver(workspace, "master-campaign", tmp_path / "master-state")
-    first.prepare_all()
-    second = WorkspaceRepositoryResolver(workspace, "master-campaign", tmp_path / "master-state")
-    second.prepare_all()
-
-    assert {target.slug: target.target_dir for target in first.repositories} == {
-        target.slug: target.target_dir for target in second.repositories
-    }
+    targets = _prepare_twice(workspace, tmp_path / "master-state")
+    assert len(targets) == 2
 
 
 def test_workspace_resolver_rejects_unknown_and_mismatched_git_identity(tmp_path, monkeypatch):
@@ -287,3 +295,52 @@ def test_workspace_resolver_rejects_unknown_and_mismatched_git_identity(tmp_path
             "master-campaign",
             tmp_path / "other-state",
         )
+
+
+def test_canonical_path_resolves_symlinks(tmp_path):
+    from howlplane.control_plane.factory.campaign import canonical_path
+
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    link_dir = tmp_path / "link"
+    link_dir.symlink_to(real_dir, target_is_directory=True)
+
+    assert canonical_path(link_dir) == real_dir.resolve()
+
+
+def test_canonical_path_normalizes_home_var_home_alias_when_present():
+    """On Bazzite/atomic hosts /home/<user> and /var/home/<user> alias the same directory.
+
+    This test is a no-op elsewhere, but it provides regression coverage for the
+    most recent live Factory failure: cross-project metadata reuse caused by
+    path spelling differences between shell and systemd child processes.
+    """
+    from howlplane.control_plane.factory.campaign import canonical_path
+
+    classic = Path("/home/howlcipher")
+    var_home = Path("/var/home/howlcipher")
+    if not classic.exists() or not var_home.exists():
+        pytest.skip("no /home and /var/home aliases on this system")
+    try:
+        if not classic.samefile(var_home):
+            pytest.skip("/home and /var/home are not the same directory")
+    except OSError:
+        pytest.skip("cannot compare /home and /var/home")
+
+    sample = classic / ".local" / "share" / "howlplane"
+    assert canonical_path(var_home / ".local" / "share" / "howlplane") == sample
+    assert canonical_path(classic / ".local" / "share" / "howlplane") == sample
+
+
+def test_workspace_resolver_restart_accepts_equivalent_path_spelling(tmp_path, monkeypatch):
+    """Restart must not treat a path alias as a different repository's metadata."""
+    from howlplane.control_plane.factory.target import Workspace
+
+    real_home, linked_home = _set_symlinked_xdg_home(tmp_path, monkeypatch)
+    # Simulate one process spelling the data home via the real path and another
+    # via the symlinked path; canonicalization must make them identical.
+    monkeypatch.setenv("XDG_DATA_HOME", str(real_home / "data"))
+
+    workspace = Workspace.from_dict({"repositories": _workspace_repositories(tmp_path, ["howl"])})
+    targets = _prepare_twice(workspace, tmp_path / "master-state")
+    assert len(targets) == 1

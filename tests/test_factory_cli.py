@@ -121,7 +121,7 @@ def test_factory_status_displays_authority_repository_blocker(tmp_path, capsys):
 def test_factory_status_creates_default_state(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(
         "howlplane.control_plane.cli._build_factory_supervisor",
-        lambda args, sleep=None: FakeSupervisor(),
+        lambda args, sleep=None, canary_mode=False: FakeSupervisor(),
     )
     code = main(["factory", "status", "--state-dir", str(tmp_path / "state")])
     captured = capsys.readouterr()
@@ -145,7 +145,7 @@ def test_factory_run_once_invokes_tick(tmp_path, monkeypatch):
     supervisor = FakeSupervisor()
     monkeypatch.setattr(
         "howlplane.control_plane.cli._build_factory_supervisor",
-        lambda args, sleep=None: supervisor,
+        lambda args, sleep=None, canary_mode=False: supervisor,
     )
     code = main(["factory", "run-once", "--state-dir", str(tmp_path / "state"), "--authority", "safe"])
     assert code == 0
@@ -156,7 +156,7 @@ def test_factory_run_invokes_loop(tmp_path, monkeypatch):
     supervisor = FakeSupervisor()
     monkeypatch.setattr(
         "howlplane.control_plane.cli._build_factory_supervisor",
-        lambda args, sleep=None: supervisor,
+        lambda args, sleep=None, canary_mode=False: supervisor,
     )
     code = main(["factory", "run", "--state-dir", str(tmp_path / "state"), "--until", "0.1"])
     assert code == 0

@@ -32,7 +32,7 @@ from howlplane.control_plane.factory.work_item import (
 )
 
 NOW = datetime(2026, 8, 30, 12, 0, 0, tzinfo=timezone.utc)
-PRODUCT = "howlcipher/howlframe"
+PRODUCT = "howlcipher/grocery-optimizer"
 SELF = "howlcipher/howlplane"
 
 
@@ -151,7 +151,7 @@ def test_maintenance_counts_against_the_same_budget_as_self_improvement():
     assert outcome.item is None
 
 
-def test_non_product_repository_is_capped_so_howlframe_keeps_its_share():
+def test_non_product_repository_is_capped_so_product_keeps_its_share():
     policy = FactoryPolicy()
     recent = window(*[(SELF, "existing_backlog")] * policy.max_non_product_in_window)
     item = ready(WorkItemOrigin.EXISTING_BACKLOG, repository=SELF)

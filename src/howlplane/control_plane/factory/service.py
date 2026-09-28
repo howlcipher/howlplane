@@ -17,7 +17,7 @@ from typing import Optional
 
 from howlplane.control_plane import workspace_trust
 from howlplane.control_plane.atomic_io import atomic_write_json, safe_load_json
-from howlplane.control_plane.factory.campaign import CampaignError, FactoryCampaign
+from howlplane.control_plane.factory.campaign import CampaignError, FactoryCampaign, canonical_path
 from howlplane.control_plane.locking import LockError, SupervisorLock, get_process_create_time, is_process_record_active
 
 
@@ -146,10 +146,13 @@ def _command(
     objective: Optional[str],
     max_work_items: Optional[int] = None,
     campaign_arguments: Optional[list[str]] = None,
+    canary: bool = False,
 ) -> list[str]:
     command = [sys.executable, "-m", "howlplane.control_plane.cli", "factory", "run",
                "--state-dir", str(campaign.state_dir), "--target-repo", str(campaign.target_dir),
                "--resume-stopped", *(campaign_arguments or _campaign_arguments())]
+    if canary:
+        command.append("--canary")
     if authority_profile:
         command.extend(["--authority-profile", authority_profile])
     if objective:
@@ -173,6 +176,7 @@ def start_process(
     target: str = "repo",
     workspace: Optional[str] = None,
     product_repo: Optional[str] = None,
+    canary: bool = False,
 ) -> tuple[bool, FactoryProcessRecord]:
     """Start exactly one supervisor, preferring a usable user systemd manager."""
     command = _command(
@@ -181,6 +185,7 @@ def start_process(
         objective,
         max_work_items,
         _campaign_arguments(target, workspace, product_repo),
+        canary=canary,
     )
     launch_lock = SupervisorLock(campaign.state_dir, command="howlplane factory start")
     try:
@@ -200,13 +205,20 @@ def start_process(
         log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         now = datetime.now(timezone.utc).isoformat()
         _p4 = Path(__file__).resolve().parents[4]
-        controller = str(_p4 if (_p4 / "pyproject.toml").exists() else Path(__file__).resolve().parents[3])
+        controller = _p4 if (_p4 / "pyproject.toml").exists() else Path(__file__).resolve().parents[3]
+        controller = canonical_path(controller)
+        pythonpath_entries = [str(controller)]
+        if (controller / "src").is_dir():
+            pythonpath_entries.insert(0, str(controller / "src"))
+        pythonpath = os.pathsep.join(pythonpath_entries + [os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)
         if _systemd_available():
             unit = _unit_name(campaign)
             result = subprocess.run(
                 ["systemd-run", "--user", "--unit", unit, "--collect", "--same-dir",
+                 f"--setenv=PYTHONPATH={pythonpath}",
+                 f"--setenv=PYTHONUNBUFFERED=1",
                  "--property=Restart=on-failure", "--property=RestartSec=30", *command],
-                cwd=controller, text=True,
+                cwd=str(controller), text=True,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, timeout=20,
             )
             if result.returncode:

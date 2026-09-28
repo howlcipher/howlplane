@@ -56,9 +56,9 @@ INTROSPECTIVE_ORIGINS = frozenset(
 
 @dataclass(frozen=True)
 class FactoryPolicy:
-    """Portfolio shares. Owner-tunable, defaulted to HowlFrame-weighted."""
+    """Portfolio shares. Owner-tunable, defaulted to the ecosystem product repository."""
 
-    product_repository: str = "howlcipher/howlframe"
+    product_repository: str = "howlcipher/grocery-optimizer"
     portfolio_window: int = 10
     # At most this many of the last `portfolio_window` dispatches may be
     # against a repository other than the product one.

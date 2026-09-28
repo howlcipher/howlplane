@@ -26,9 +26,72 @@ class CampaignError(ValueError):
     """Raised when a campaign cannot be safely resolved."""
 
 
+def _canonical_user_home() -> Path:
+    """Return the canonical home directory root for this user.
+
+    Atomic/Bazzite-style systems expose the same home directory through both
+    ``/home/<user>`` and ``/var/home/<user>``.  ``Path.resolve()`` does not
+    collapse the two because neither is a symlink of the other.  A shell
+    session may set ``HOME=/home/<user>`` while a systemd user service sees
+    ``/var/home/<user>``.  This function picks one stable spelling so every
+    Factory path derived from ``Path.home()`` is identical in both contexts.
+    """
+    home = Path.home().resolve()
+    user = home.name
+    var_home = Path(f"/var/home/{user}")
+    classic_home = Path(f"/home/{user}")
+    # Prefer the classic /home spelling when the two resolve to the same
+    # physical directory, which is the common atomic-desktop arrangement.
+    try:
+        if var_home.exists() and classic_home.exists() and var_home.samefile(classic_home):
+            return classic_home
+    except OSError:
+        pass
+    return home
+
+
+_CANONICAL_HOME: Optional[Path] = None
+
+
+def canonical_path(path: Union[str, Path]) -> Path:
+    """Return a stable, absolute, symlink-resolved path.
+
+    Resolves symlinks and normalizes the /home/<user> vs /var/home/<user>
+    alias pair so the same physical location is always represented by the
+    same string.  All Factory metadata paths are canonicalized before they
+    are stored or compared.
+    """
+    global _CANONICAL_HOME
+    if _CANONICAL_HOME is None:
+        _CANONICAL_HOME = _canonical_user_home()
+
+    p = Path(path).expanduser().resolve()
+
+    # Fast path: already canonical.
+    try:
+        p.relative_to(_CANONICAL_HOME)
+        return p
+    except ValueError:
+        pass
+
+    # If the resolved path lives under an aliased home spelling, rewrite it
+    # to the canonical home spelling.
+    user = _CANONICAL_HOME.name
+    for alias in (Path(f"/home/{user}"), Path(f"/var/home/{user}")):
+        if alias == _CANONICAL_HOME or not alias.exists():
+            continue
+        try:
+            rel = p.relative_to(alias)
+            return _CANONICAL_HOME / rel
+        except ValueError:
+            continue
+    return p
+
+
 def _xdg_path(variable: str, fallback: Path) -> Path:
     value = os.environ.get(variable)
-    return Path(value).expanduser() if value else fallback
+    path = Path(value).expanduser() if value else fallback
+    return canonical_path(path)
 
 
 def factory_data_home() -> Path:
@@ -106,7 +169,7 @@ def discover_repository(start_dir: Optional[Union[str, Path]] = None) -> Reposit
         root = find_git_repo_root(start_dir)
     except TargetRepositoryNotFoundError as exc:
         raise CampaignError(str(exc)) from exc
-    root = root.resolve()
+    root = canonical_path(root)
     remote = _canonical_remote(_optional_git(root, ["remote", "get-url", "origin"]))
     default_branch = _optional_git(root, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
     if default_branch.startswith("origin/"):
@@ -115,7 +178,7 @@ def discover_repository(start_dir: Optional[Union[str, Path]] = None) -> Reposit
         default_branch = _optional_git(root, ["branch", "--show-current"]) or "main"
     commit = _run_git(root, ["rev-parse", "HEAD"])
     dirty = bool(_optional_git(root, ["status", "--porcelain", "--untracked-files=normal"]))
-    common = Path(_run_git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).resolve()
+    common = canonical_path(Path(_run_git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"])))
     # A canonical local root is included even with a remote: independent clones
     # must never share mutable Factory state by accident.
     raw_identity = json.dumps({"root": str(root), "remote": remote}, sort_keys=True)
@@ -162,19 +225,19 @@ def resolve_campaign(
         canary_id = generate_bounded_campaign_id(repository)
         raw_state = factory_state_home() / canary_id
         raw_target = (
-            Path(target_repo).expanduser()
+            canonical_path(target_repo)
             if target_repo
             else factory_workspace_root(repository) / "canaries" / canary_id / "target"
         )
     else:
-        raw_state = Path(state_dir).expanduser() if state_dir else factory_state_home() / repository.campaign_id
+        raw_state = canonical_path(state_dir) if state_dir else factory_state_home() / repository.campaign_id
         if target_repo:
-            raw_target = Path(target_repo).expanduser()
+            raw_target = canonical_path(target_repo)
         else:
             raw_target = factory_workspace_root(repository) / "target"
             metadata = _metadata_for_state_dir(raw_state)
             if metadata and metadata.get("target_repo"):
-                raw_target = Path(metadata["target_repo"]).expanduser()
+                raw_target = canonical_path(metadata["target_repo"])
     state_root = factory_state_home().absolute() if not state_dir else raw_state.absolute().parent
     managed_target_root = (factory_data_home() / "worktrees").absolute()
     target_root = (
@@ -184,8 +247,8 @@ def resolve_campaign(
     )
     _refuse_symlink(raw_state.absolute(), state_root)
     _refuse_symlink(raw_target.absolute(), target_root)
-    resolved_state = raw_state.resolve()
-    resolved_target = raw_target.resolve()
+    resolved_state = canonical_path(raw_state)
+    resolved_target = canonical_path(raw_target)
     if not prefer_active:
         return FactoryCampaign(repository, resolved_state, resolved_target)
     candidates = _list_campaign_state_dirs(repository)
@@ -203,16 +266,17 @@ def resolve_campaign(
     if chosen is not None:
         metadata = _metadata_for_state_dir(chosen)
         target = _target_dir_from_metadata(metadata, resolved_target)
-        return FactoryCampaign(repository, chosen.resolve(), target)
+        return FactoryCampaign(repository, canonical_path(chosen), target)
     # Multiple stopped historical campaigns exist; fall back to the canonical/default state dir.
     return FactoryCampaign(repository, resolved_state, resolved_target)
 
 
 def _matches_repository(metadata: dict, repository: RepositoryIdentity) -> bool:
+    recorded_root = canonical_path(metadata.get("repository_root", "")) if metadata.get("repository_root") else None
     return (
         metadata.get("schema") == "howlplane.factory.campaign/v1"
         and metadata.get("campaign_id") == repository.campaign_id
-        and metadata.get("repository_root") == str(repository.root)
+        and recorded_root == repository.root
         and metadata.get("remote") == repository.remote
     )
 
@@ -234,8 +298,8 @@ def _is_process_active_for_state_dir(state_dir: Path) -> bool:
         try:
             idx = cmd.index("--state-dir")
             if idx + 1 < len(cmd):
-                cmd_state = Path(cmd[idx + 1]).resolve()
-                if cmd_state != state_dir.resolve():
+                cmd_state = canonical_path(cmd[idx + 1])
+                if cmd_state != canonical_path(state_dir):
                     return False
         except (ValueError, IndexError):
             pass
@@ -262,7 +326,7 @@ def _is_process_active_for_state_dir(state_dir: Path) -> bool:
         if proc_cmdline.is_file():
             try:
                 content = proc_cmdline.read_bytes().decode("utf-8", errors="ignore")
-                if str(state_dir.resolve()) not in content:
+                if str(canonical_path(state_dir)) not in content:
                     return False
             except OSError:
                 pass
@@ -290,7 +354,7 @@ def campaign_from_state_dir(state_dir: Union[str, Path]) -> Optional[FactoryCamp
     Useful when the caller has supplied an explicit --state-dir and may not be
     inside the source repository.
     """
-    path = Path(state_dir).expanduser().resolve()
+    path = canonical_path(state_dir)
     metadata = _metadata_for_state_dir(path)
     if not metadata:
         return None
@@ -320,7 +384,7 @@ def _refuse_symlink(path: Path, owned_root: Path) -> None:
 
 def _target_dir_from_metadata(metadata: Optional[dict], fallback: Path) -> Path:
     if metadata and metadata.get("target_repo"):
-        return Path(metadata["target_repo"]).expanduser().resolve()
+        return canonical_path(metadata["target_repo"])
     return fallback
 
 
@@ -350,7 +414,7 @@ def _validate_metadata(campaign: FactoryCampaign) -> None:
             raise CampaignError("Campaign metadata does not belong to this repository; refusing cross-project reuse")
     for key in ("repository_root", "source_common_git_dir", "target_repo"):
         value = data.get(key)
-        if not value or Path(value).expanduser().resolve() != Path(expected[key]).expanduser().resolve():
+        if not value or canonical_path(value) != canonical_path(expected[key]):
             raise CampaignError("Campaign metadata does not belong to this repository; refusing cross-project reuse")
 
 
@@ -361,12 +425,12 @@ def _validate_target(campaign: FactoryCampaign) -> bool:
     if target.is_symlink():
         raise CampaignError(f"Factory target must not be a symlink: {target}")
     try:
-        common = Path(_run_git(target, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).resolve()
+        common = canonical_path(Path(_run_git(target, ["rev-parse", "--path-format=absolute", "--git-common-dir"])))
     except CampaignError as exc:
         raise CampaignError(f"Factory target exists but is not a healthy Git worktree: {target}") from exc
     if common != campaign.repository.common_git_dir:
         raise CampaignError("Factory target belongs to a different repository; refusing to reuse it")
-    if target.resolve() == campaign.repository.root:
+    if canonical_path(target) == campaign.repository.root:
         raise CampaignError("Factory target collides with the user checkout; refusing to mutate it")
     return True
 
