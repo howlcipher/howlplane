@@ -296,7 +296,7 @@ Before starting the campaign, verify:
    remote.
 4. Each repository contains its mission file:
    - `howl/docs/DOGFOOD_MISSION_001.md`
-   - `howlplane/docs/DOGFOOD_MISSION_001.md`
+   - `howlplane/documentation/DOGFOOD_MISSION_001.md`
    - `howlframe/docs/DOGFOOD_MISSION_001.md`
    - `grocery-optimizer/docs/MISSION_001.md`
 5. `howlcipher/grocery-optimizer` is configured as the product repository via
