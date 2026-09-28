@@ -432,3 +432,75 @@ def test_is_baseline_restored_ignores_legitimate_control_plane_artifacts(tmp_pat
     log.write_text("provider log\n", encoding="utf-8")
     restored, reason = is_baseline_restored(repo, baseline)
     assert restored, reason
+
+
+def test_new_directory_contents_survive_rollback_as_replayable_evidence(tmp_path):
+    """Regression: Grocery Mission 001 lost Codex's backend/ and frontend/.
+
+    Porcelain collapses a new directory to `dir/`, which produced no patch, so
+    rollback deleted work the retained evidence never held.
+    """
+    repo = _init_git_repo(tmp_path / "repo")
+    baseline = capture_baseline(repo)
+    (repo / "backend" / "app").mkdir(parents=True)
+    (repo / "backend" / "app" / "main.py").write_text("VALUE = 42\n", encoding="utf-8")
+    (repo / "backend" / "logo.bin").write_bytes(b"\x00\x01\xffbinary")
+    (repo / "backend" / ".gitignore").write_text("*.pyc\n", encoding="utf-8")
+    (repo / "backend" / "cache.pyc").write_bytes(b"ignored")
+
+    delta = capture_delta(repo, baseline)
+    assert "backend/" in delta.files_added  # rollback still removes the whole tree
+    assert "diff --git a/backend/app/main.py b/backend/app/main.py" in delta.diff_content
+    assert "diff --git a/backend/logo.bin b/backend/logo.bin" in delta.diff_content
+    assert "cache.pyc" not in delta.diff_content
+
+    patch = tmp_path / "partial.patch"
+    patch.write_text(delta.diff_content, encoding="utf-8")
+    assert restore_repository_to_baseline(repo, baseline, delta) == (True, None)
+    assert not (repo / "backend").exists()
+
+    subprocess.run(["git", "apply", str(patch)], cwd=repo, check=True)
+    assert (repo / "backend" / "app" / "main.py").read_text(encoding="utf-8") == "VALUE = 42\n"
+    assert (repo / "backend" / "logo.bin").read_bytes() == b"\x00\x01\xffbinary"
+
+
+def test_task_change_fingerprint_is_cheap_metadata_and_tracks_changes(tmp_path):
+    from howlplane.control_plane.git_baseline import task_change_fingerprint
+
+    repo = _init_git_repo(tmp_path / "repo")
+    (repo / "notes").mkdir()
+    (repo / "notes" / "mine.txt").write_text("pre-existing\n", encoding="utf-8")
+    baseline = capture_baseline(repo)
+    clean = task_change_fingerprint(repo, baseline)
+    # Pre-existing dirt churning is not this attempt's progress.
+    (repo / "notes" / "mine.txt").write_text("user keeps editing\n", encoding="utf-8")
+    assert task_change_fingerprint(repo, baseline) == clean
+
+    (repo / "backend").mkdir()
+    big = repo / "backend" / "model.bin"
+    big.write_bytes(b"\0" * (8 * 1024 * 1024))
+    first = task_change_fingerprint(repo, baseline)
+    assert first != clean
+    assert task_change_fingerprint(repo, baseline) == first  # deterministic
+    os.utime(big, ns=(1, 1))
+    assert task_change_fingerprint(repo, baseline) != first
+    # Oversized files stay out of patch evidence but are still rolled back.
+    delta = capture_delta(repo, baseline)
+    assert "backend/model.bin" not in delta.diff_content
+    assert restore_repository_to_baseline(repo, baseline, delta)[0] is True
+    assert not (repo / "backend").exists()
+
+
+def test_embedded_repository_contents_are_evidence_and_progress(tmp_path):
+    from howlplane.control_plane.git_baseline import task_change_fingerprint
+
+    repo = _init_git_repo(tmp_path / "repo")
+    baseline = capture_baseline(repo)
+    (repo / "fe" / "src").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=repo / "fe", check=True)
+    before = task_change_fingerprint(repo, baseline)
+    (repo / "fe" / "src" / "App.tsx").write_text("export const App = 1;\n", encoding="utf-8")
+    assert task_change_fingerprint(repo, baseline) != before
+    delta = capture_delta(repo, baseline)
+    assert "diff --git a/fe/src/App.tsx b/fe/src/App.tsx" in delta.diff_content
+    assert ".git/" not in delta.diff_content

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
+import os
 import re
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
@@ -501,7 +502,14 @@ class ProviderPoolManager:
         """Builds a pool from canonical plus operator-local configuration."""
         from howlplane.control_plane.config_loader import default_loader
 
-        capacity_path = Path.home() / ".config" / "howlplane" / "provider_capacity.json"
+        # HOWLPLANE_PROVIDER_CAPACITY_FILE lets an isolated process (the test
+        # suite, a disposable acceptance run) keep its capacity evidence away
+        # from the operator's live provider state.
+        override = os.environ.get("HOWLPLANE_PROVIDER_CAPACITY_FILE")
+        capacity_path = (
+            Path(override) if override
+            else Path.home() / ".config" / "howlplane" / "provider_capacity.json"
+        )
         return cls.from_settings(
             default_loader.settings,
             state_path=capacity_path,
@@ -1019,6 +1027,11 @@ class ProviderPoolManager:
                 ProviderFailureClass.TRANSPORT_UNAVAILABLE,
                 ProviderFailureClass.PROVIDER_UNAVAILABLE,
                 ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED,
+                # A stall is a property of one attempt, not of the provider's
+                # capacity. Without an expiry it pinned the provider
+                # UNAVAILABLE indefinitely, so the whole pool waited on the
+                # longest real quota (Grocery Mission 001).
+                ProviderFailureClass.PROVIDER_STALLED,
             }
             cooldown = None
             if failure_class is ProviderFailureClass.SESSION_LIMIT:

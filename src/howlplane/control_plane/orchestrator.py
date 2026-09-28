@@ -42,6 +42,7 @@ from howlplane.control_plane.git_baseline import (
     capture_baseline,
     capture_delta,
     restore_repository_to_baseline,
+    task_change_fingerprint,
 )
 from howlplane.control_plane.git_integration import run_git
 from howlplane.control_plane.howlframe_runner import HowlFrameAuditRunner, get_dogfood_mode, DEFAULT_INSTRUCTION_BUDGET
@@ -242,10 +243,23 @@ class OrchestrationConfig:
     # Global safety ceiling. Normal traversal tries every eligible resource at
     # most once; this only limits pathological or unexpectedly huge inventories.
     max_provider_failover_attempts: int = 8
-    # A provider is stalled only after this period with no meaningful semantic
-    # progress. Raw CLI output and supervisor heartbeats are liveness evidence,
-    # not progress. The absolute timeout remains final.
-    provider_stall_timeout_seconds: int = 120
+    # Provider liveness thresholds. None of them can extend the hard execution
+    # budget (`timeout_seconds`), which is enforced first and always wins.
+    #
+    # Silence timeout: stalled after this long with no liveness evidence at all
+    # -- no genuinely new (deduplicated, noise-normalized) output, no measured
+    # process-tree CPU, and no engineering progress. Before this remediation
+    # the same field was a 120s clock on semantic progress alone, which killed
+    # providers that were visibly working (Grocery Mission 001).
+    provider_stall_timeout_seconds: int = 180
+    # No-progress timeout: stalled after this long without engineering
+    # progress (repository delta or recognized tool/test/build event), however
+    # much output or CPU it shows. Bounds noisy or spinning hung providers.
+    provider_no_progress_timeout_seconds: int = 360
+    # Post-change grace: after a source change, tests, builds, and review of
+    # the edit may produce no further file changes. Progress and silence are
+    # tolerated for this long after the most recent source change.
+    provider_post_change_grace_seconds: int = 420
     provider_watchdog_interval_seconds: float = 0.25
     # Optional resolver that overrides AgentBackendRegistry.get_backend. Useful
     # in deterministic tests to inject per-resource fake backends.
@@ -273,6 +287,26 @@ class OrchestrationConfig:
     # instead of the live checkout, so untracked control plane evidence cannot
     # change a verification result (HOWLFRAM-SLOPFIX-07S).
     verification_isolation: bool = True
+
+    def __post_init__(self) -> None:
+        for name in (
+            "provider_stall_timeout_seconds",
+            "provider_no_progress_timeout_seconds",
+            "provider_post_change_grace_seconds",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+                raise ValueError(f"{name} must be a positive number of seconds, got {value!r}")
+        # Each window bounds a weaker kind of evidence than the one before it,
+        # so they must nest: silence <= no-progress <= post-change grace.
+        if self.provider_no_progress_timeout_seconds < self.provider_stall_timeout_seconds:
+            raise ValueError(
+                "provider_no_progress_timeout_seconds must be >= provider_stall_timeout_seconds"
+            )
+        if self.provider_post_change_grace_seconds < self.provider_no_progress_timeout_seconds:
+            raise ValueError(
+                "provider_post_change_grace_seconds must be >= provider_no_progress_timeout_seconds"
+            )
 
 
 def compute_remediation_timeout(
@@ -1097,15 +1131,24 @@ class GovernedTaskOrchestrator:
         failure_class: Optional[Any],
         delta: Optional[RepositoryDelta],
     ) -> bool:
-        """Reports whether a budget-stopped attempt left work worth governing.
+        """Reports whether a harness-stopped attempt left work worth governing.
 
         A provider we stopped at our own deadline never claimed completion, but
         that says nothing about what it had already written. When such an
         attempt leaves a non-empty task-attributable delta, the artifact is a
         candidate -- neither trustworthy nor disposable -- and belongs in review
         and verification rather than the bin (HOWLFRAM-SLOPFIX-05).
+
+        A liveness-watchdog stop is the same kind of event: the harness ended
+        the attempt, the provider claimed nothing. Grocery Mission 001's Codex
+        attempt was stopped as PROVIDER_STALLED with a real backend and
+        frontend in the tree, and rollback discarded both. Its delta is kept
+        under the same retention and governance rules as a budget stop.
         """
-        if failure_class != ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED:
+        if failure_class not in (
+            ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED,
+            ProviderFailureClass.PROVIDER_STALLED,
+        ):
             return False
         return delta is not None and not delta.is_empty
 
@@ -1114,6 +1157,7 @@ class GovernedTaskOrchestrator:
         resource_id: str,
         attempt: int,
         delta: RepositoryDelta,
+        failure_class: Optional[str] = None,
     ) -> Dict[str, Any]:
         """The provenance every budget-stopped artifact carries.
 
@@ -1124,7 +1168,7 @@ class GovernedTaskOrchestrator:
         return {
             "provider_completion_claim": False,
             "origin": CANDIDATE_ORIGIN_TIMED_OUT,
-            "failure_class": ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED.value,
+            "failure_class": failure_class or ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED.value,
             "resource_id": resource_id,
             "attempt": attempt,
             "files_added": list(delta.files_added),
@@ -1154,7 +1198,8 @@ class GovernedTaskOrchestrator:
             "candidate_captured": True,
             "requires_governance": True,
             **self._timed_out_artifact_provenance(
-                resource_id, attempt_record["attempt"], delta
+                resource_id, attempt_record["attempt"], delta,
+                attempt_record.get("failure_class"),
             ),
             "schema": TIMEOUT_CANDIDATE_SCHEMA_VERSION,
         }
@@ -1213,7 +1258,8 @@ class GovernedTaskOrchestrator:
             "eligibility": SALVAGE_ELIGIBLE,
             "promotion_status": SALVAGE_RETAINED,
             **self._timed_out_artifact_provenance(
-                resource_id, attempt_record["attempt"], delta
+                resource_id, attempt_record["attempt"], delta,
+                attempt_record.get("failure_class"),
             ),
             "patch_path": f"{attempt_record['evidence_dir']}/retained_salvage.patch",
             "patch_sha256": hashlib.sha256(
@@ -2652,17 +2698,21 @@ class GovernedTaskOrchestrator:
                     } if attempts_dir.is_dir() else set()
 
                     impl_agent_id = getattr(impl_backend, "agent_id", None) or current_impl_resource_id
-                    # capture_delta already owns the task baseline and control
-                    # plane exclusions. Reusing it keeps watchdog progress from
-                    # treating journals, scratch, locks, or .task_runs as work.
+                    # Shares capture_delta's porcelain parsing and control-plane
+                    # exclusions, so journals, scratch, locks, and .task_runs
+                    # never count as work, but hashes metadata rather than
+                    # content: it runs on the watchdog path and must stay cheap
+                    # for large new trees.
                     def repository_fingerprint() -> str:
-                        delta = capture_delta(self.target_repo, baseline)
-                        return hashlib.sha256(delta.diff_content.encode("utf-8")).hexdigest()
+                        return task_change_fingerprint(self.target_repo, baseline)
 
                     observe_provider = ProviderStreamObserver(
                         impl_agent_id,
                         self.config.provider_stall_timeout_seconds,
                         repository_fingerprint,
+                        no_progress_timeout_seconds=self.config.provider_no_progress_timeout_seconds,
+                        post_change_grace_seconds=self.config.provider_post_change_grace_seconds,
+                        hard_budget_seconds=self.config.timeout_seconds,
                     )
 
                     with progress.operation(
@@ -2672,6 +2722,7 @@ class GovernedTaskOrchestrator:
                         details="started",
                         suppress_completion=True,
                         deadline_seconds=self.config.timeout_seconds,
+                        status_provider=observe_provider.liveness_state,
                     ):
                         execute_kwargs: Dict[str, Any] = {
                             "task": task_spec,

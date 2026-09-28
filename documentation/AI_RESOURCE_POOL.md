@@ -121,6 +121,70 @@ model; unobserved hosted CLI models remain JSON `null`. Marathon failover also
 records the prior resource ID on the resulting trajectory, without reclassifying
 the underlying engineering result as capacity exhaustion.
 
+## Provider liveness and stall detection
+
+An implementation attempt is watched by `ProviderStreamObserver`, which keeps
+separate evidence instead of one clock:
+
+| Signal | Source | Counts as |
+| --- | --- | --- |
+| Novel output | New stdout/stderr lines after ANSI, spinner, timer, and digit normalization, deduplicated | Liveness only |
+| Process activity | Linux `/proc` CPU time of the provider process tree, at least 2 CPU seconds within a 60s window (idle event loops and spinners stay below it) | Liveness only; `unavailable` elsewhere |
+| Engineering progress | Change in a metadata fingerprint (path, size, mtime) of the task-attributable tree, checked at most every 2s and always before a verdict; start-of-line tool, patch, `exec`, test, lint, and build control records, deduplicated by shape and preceding line so a reprinted record counts once | Progress |
+
+Verdicts, in order: a trusted terminal provider signal (quota, session limit,
+authentication, provider unavailable) fails over immediately; the hard
+execution budget (`timeout_seconds`) is checked next and always wins, recorded
+as `EXECUTION_BUDGET_EXCEEDED`; then `PROVIDER_STALLED` fires on the first of:
+
+| Threshold | Setting | Default |
+| --- | --- | --- |
+| `silence`: no liveness or progress at all | `provider_stall_timeout_seconds` | 180s |
+| `no_progress`: output or CPU but no engineering progress | `provider_no_progress_timeout_seconds` | 360s |
+| `post_change_grace`: bounded window after the latest source change for tests, builds, and review of the edit | `provider_post_change_grace_seconds` | 420s |
+
+`provider_stall_timeout_seconds` was previously a 120s clock on recognized
+semantic events alone. It now means the silence timeout. Repeated or ticking
+output cannot keep a hung provider alive (silence), and unique noise or a
+spinning process cannot either (no-progress). None of these windows extends
+the hard budget. Stall diagnostics record elapsed time, budget, time since new
+output, process activity, and progress, the last progress event, whether the
+source changed, and the threshold that fired. The 30s implementation heartbeat
+appends the current state: `OUTPUT ACTIVE`, `SOURCE CHANGED`,
+`POST-CHANGE VALIDATION`, `NO OUTPUT`, `NO MEANINGFUL PROGRESS`, or
+`HARD BUDGET`.
+
+A stall is a property of one attempt, not of capacity: it records a bounded
+`cooldown_seconds` retry, not an open-ended `UNAVAILABLE`. A terminal
+provider screen that arrives with the budget deadline is still classified as
+the terminal condition, not as a budget timeout.
+
+The provider runs as its own process group. Watchdog, budget, and normal exit
+all terminate the whole group (TERM, then KILL after a 2s grace), so no test
+watcher, dev server, or build it started can keep writing to the repository
+after rollback.
+
+Known bounded limits: a hung provider whose background writer keeps changing
+tracked or new files, or whose process tree burns sustained CPU, is treated as
+alive and is stopped by the no-progress window or the hard budget rather than
+the silence window. Windows must nest: silence <= no-progress <= post-change
+grace, enforced at configuration time.
+
+### Partial work across failover
+
+Failover uses clean-attempt isolation. A failed attempt's task-attributable
+delta is rolled back before the next provider starts, so a successor never
+sees or builds on unfinished work and owns its result alone. The delta is not
+discarded: a harness-stopped attempt (`EXECUTION_BUDGET_EXCEEDED` or
+`PROVIDER_STALLED`) with a non-empty delta is retained as replay-verified
+salvage and can be promoted at a terminal exit into full review and
+verification, never accepted as complete. Its provenance keeps `origin`
+`timed_out` (harness-stopped) and records the actual `failure_class`. Patch
+evidence enumerates every non-ignored file inside new untracked directories
+(including embedded repositories), and binary files are stored as git binary
+hunks, so the retained patch replays what was removed. A single new file over
+2 MiB is left out of patch evidence; it is still removed on rollback.
+
 ## Local-only and independent review
 
 With `operating_mode = "local_only"`, hosted resources are marked not probed

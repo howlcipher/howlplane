@@ -229,6 +229,17 @@ def _isolate_agent_readiness_cache(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_provider_capacity(monkeypatch, tmp_path):
+    """Keep every test away from the operator's live provider capacity state.
+
+    `ProviderPoolManager.from_config()` persists quota, cooldown, and stall
+    state that a running Factory campaign reads. CLI-level tests reach it, and
+    before this fixture the suite rewrote the real file.
+    """
+    monkeypatch.setenv("HOWLPLANE_PROVIDER_CAPACITY_FILE", str(tmp_path / "provider_capacity.json"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_workspace_trust(monkeypatch, tmp_path_factory):
     """Keep every test away from real vendor trust stores and HowlPlane authorizations.
 

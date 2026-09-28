@@ -833,6 +833,18 @@ def test_fourth_eligible_provider_is_reached_under_global_ceiling(tmp_path: Path
     ]
 
 
+def _first_then_healthy(first: AgentBackend, side_effect=None) -> Callable[[str], AgentBackend]:
+    """resource_a is `first`; resource_b is a healthy fake that completes the task."""
+    healthy = _FakeBackendResolver({
+        "resource_b": {"success": True, "side_effect": side_effect or _edit_feature_to_true},
+    })
+
+    def resolver(resource_id: str) -> AgentBackend:
+        return first if resource_id == "resource_a" else healthy(resource_id)
+
+    return resolver
+
+
 def test_semantically_stalled_noisy_provider_fails_over_to_healthy_provider(tmp_path: Path):
     """Changing terminal bytes cannot keep a Factory implementation attempt alive."""
     repo = _init_test_repo(tmp_path / "repo")
@@ -843,15 +855,8 @@ def test_semantically_stalled_noisy_provider_fails_over_to_healthy_provider(tmp_
             "import sys,time\nwhile True:\n print('⠋ Working', flush=True); time.sleep(.02)",
         ],
     )
-    healthy = _FakeBackendResolver({
-        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
-    })
-
-    def resolver(resource_id: str) -> AgentBackend:
-        return noisy if resource_id == "resource_a" else healthy(resource_id)
-
     result = _run_failover_task(
-        repo, resolver, max_attempts=2,
+        repo, _first_then_healthy(noisy), max_attempts=2,
         provider_stall_timeout_seconds=0.2,
         provider_watchdog_interval_seconds=0.05,
     )
@@ -862,6 +867,112 @@ def test_semantically_stalled_noisy_provider_fails_over_to_healthy_provider(tmp_
     ]
     assert result.implementation_attempts[0]["failure_class"] == "PROVIDER_STALLED"
     assert _read_file(repo, "src/feature.py").endswith("True\n")
+
+
+def _stalls_after_writing_new_package(resource_id: str) -> SubprocessAgentBackend:
+    """Writes a new multi-file directory, then hangs silently (Grocery Codex shape)."""
+    program = (
+        "import pathlib,time\n"
+        "pkg = pathlib.Path('backend/app')\n"
+        "pkg.mkdir(parents=True)\n"
+        "(pkg / '__init__.py').write_text('')\n"
+        "(pkg / 'main.py').write_text('VALUE = 42\\n')\n"
+        "time.sleep(60)\n"
+    )
+    return SubprocessAgentBackend(
+        resource_id, sys.executable,
+        lambda *_args, **_kwargs: [sys.executable, "-u", "-c", program],
+    )
+
+
+def test_stalled_productive_attempt_is_retained_and_successor_starts_clean(tmp_path: Path):
+    """Failover semantics are clean-attempt isolation without losing partial work.
+
+    The stalled attempt's new directory is preserved file-by-file in replayable
+    evidence, rolled out of the tree, and never visible to the successor, which
+    owns the final result on its own.
+    """
+    repo = _init_test_repo(tmp_path / "repo")
+    stalled = _stalls_after_writing_new_package("resource_a")
+    successor_saw: List[bool] = []
+
+    def _check_clean_then_succeed(task, cwd: Path, prompt) -> None:
+        successor_saw.append((cwd / "backend").exists())
+        _edit_feature_to_true(task, cwd, prompt)
+
+    result = _run_failover_task(
+        repo, _first_then_healthy(stalled, _check_clean_then_succeed), max_attempts=2,
+        provider_stall_timeout_seconds=0.3,
+        provider_no_progress_timeout_seconds=0.6,
+        provider_post_change_grace_seconds=0.9,
+        provider_watchdog_interval_seconds=0.05,
+    )
+
+    assert result.final_state == "complete"
+    first = result.implementation_attempts[0]
+    assert first["failure_class"] == "PROVIDER_STALLED"
+    assert first["watchdog_diagnostics"]["source_changed"] is True
+    assert first["watchdog_diagnostics"]["threshold_fired"] in {"silence", "post_change_grace"}
+    retained = _retained(result, "01-resource_a")
+    assert retained["retained"] is True
+    assert retained["failure_class"] == "PROVIDER_STALLED"
+    assert retained["provider_completion_claim"] is False
+    patch = (Path(result.run_dir) / retained["patch_path"]).read_text(encoding="utf-8")
+    assert "backend/app/main.py" in patch and "VALUE = 42" in patch
+    assert successor_saw == [False]
+    assert not (repo / "backend").exists()
+    assert _read_file(repo, "src/feature.py").endswith("True\n")
+
+
+def test_stalled_provider_cooldown_expires(tmp_path: Path):
+    """A stall must not pin a provider UNAVAILABLE forever and drain the pool."""
+    repo = _init_test_repo(tmp_path / "repo")
+    pool_holder: Dict[str, Any] = {}
+    noisy = SubprocessAgentBackend(
+        "resource_a", sys.executable,
+        lambda *_args, **_kwargs: [sys.executable, "-u", "-c", "import time; time.sleep(30)"],
+    )
+    result = _run_failover_task(
+        repo, _first_then_healthy(noisy), max_attempts=2, pool_hook=_capture_pool(pool_holder),
+        provider_stall_timeout_seconds=0.2,
+        provider_watchdog_interval_seconds=0.05,
+    )
+
+    assert result.implementation_attempts[0]["failure_class"] == "PROVIDER_STALLED"
+    status = pool_holder["pool"].get_resource_status("resource_a")
+    assert status.retry_after is not None
+    retry_at = datetime.fromisoformat(status.retry_after)
+    assert retry_at - datetime.now(timezone.utc) <= timedelta(
+        seconds=pool_holder["pool"].policy.cooldown_seconds
+    )
+
+
+def test_liveness_thresholds_must_be_positive():
+    for field_name in (
+        "provider_stall_timeout_seconds",
+        "provider_no_progress_timeout_seconds",
+        "provider_post_change_grace_seconds",
+    ):
+        with pytest.raises(ValueError, match=field_name):
+            OrchestrationConfig(**{field_name: 0})
+
+
+def test_liveness_defaults_are_bounded_and_legacy_field_is_the_silence_timeout():
+    config = OrchestrationConfig()
+    assert config.provider_stall_timeout_seconds == 180
+    assert config.provider_no_progress_timeout_seconds == 360
+    assert config.provider_post_change_grace_seconds == 420
+    # Every liveness window is shorter than the hard ceiling for implementation.
+    assert config.provider_post_change_grace_seconds < 600
+    legacy = OrchestrationConfig(provider_stall_timeout_seconds=120)
+    assert legacy.provider_stall_timeout_seconds == 120
+
+
+def test_liveness_windows_must_nest():
+    with pytest.raises(ValueError, match="provider_no_progress_timeout_seconds"):
+        OrchestrationConfig(provider_stall_timeout_seconds=400)
+    with pytest.raises(ValueError, match="provider_post_change_grace_seconds"):
+        OrchestrationConfig(provider_post_change_grace_seconds=300)
 
 
 def test_recovered_first_provider_does_not_dead_end_failover(tmp_path: Path):

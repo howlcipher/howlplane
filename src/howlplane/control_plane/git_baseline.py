@@ -8,6 +8,7 @@ from changes produced during agent implementation.
 """
 
 import base64
+import hashlib
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 import os
@@ -385,13 +386,119 @@ def is_baseline_restored(
     return True, None
 
 
+# Upper bound on files enumerated inside one new untracked directory. A tree
+# larger than this (an unignored dependency install, say) is still removed on
+# rollback via its directory entry; only its patch evidence is truncated.
+MAX_UNTRACKED_DIRECTORY_FILES = 5000
+
+
+def _expand_untracked_entry(repo_root: Path, rel_path: str) -> List[str]:
+    """Lists the non-ignored files a porcelain untracked entry stands for.
+
+    `git status --porcelain` collapses a new directory to one `dir/` entry.
+    `files_added` keeps that entry so rollback still removes the whole tree,
+    but patch evidence must carry every file inside it: the Grocery Mission 001
+    Codex attempt created `backend/` and `frontend/`, and its preserved patch
+    held neither because a directory entry produced no diff.
+    """
+    if not rel_path.endswith("/"):
+        return [rel_path]
+    listed = _run_git_cmd(
+        repo_root, ["ls-files", "--others", "--exclude-standard", "-z", "--", rel_path]
+    )
+    if listed.returncode != 0:
+        return []
+    files: List[str] = []
+    for path in sorted((listed.stdout or "").split("\0")):
+        if not path or is_internal_control_plane_path(path):
+            continue
+        if path.endswith("/"):
+            # An embedded repository (scaffolders often `git init`) is opaque
+            # to ls-files; enumerate its working files directly.
+            files.extend(_walk_embedded_repository(repo_root, path))
+        else:
+            files.append(path)
+        if len(files) >= MAX_UNTRACKED_DIRECTORY_FILES:
+            break
+    return files[:MAX_UNTRACKED_DIRECTORY_FILES]
+
+
+def _walk_embedded_repository(repo_root: Path, rel_dir: str) -> List[str]:
+    found: List[str] = []
+    base = repo_root / rel_dir
+    for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+        dirnames[:] = sorted(d for d in dirnames if d != ".git")
+        for name in sorted(filenames):
+            found.append((Path(dirpath) / name).relative_to(repo_root).as_posix())
+            if len(found) >= MAX_UNTRACKED_DIRECTORY_FILES:
+                return found
+    return found
+
+
+# Patch evidence never embeds a single new file larger than this. Such a file
+# (a database, model, or archive) is still removed on rollback with its tree.
+MAX_UNTRACKED_EVIDENCE_FILE_BYTES = 2 * 1024 * 1024
+
+
+def task_change_fingerprint(repo_dir: Union[str, Path], baseline: GitBaseline) -> str:
+    """A cheap, deterministic identity of the task-attributable working tree.
+
+    Liveness polling needs to know *whether* the tree changed, not the patch,
+    so this hashes git's status plus each changed file's size and mtime
+    instead of reading file contents. It stays fast for large untracked trees
+    and never blocks the watchdog on a multi-hundred-megabyte file.
+    """
+    root = Path(repo_dir).resolve()
+    status_out = _run_git_cmd(root, ["status", "--porcelain", "--untracked-files=all"]).stdout or ""
+    untracked, modified, deleted, added = _parse_porcelain_lines(status_out)
+    # Pre-existing dirt is excluded exactly as capture_delta excludes it: it
+    # belongs to someone else, so its churn is not this attempt's progress.
+    pre_existing = set(baseline.pre_existing_untracked) | set(baseline.pre_existing_modified)
+    digest = hashlib.sha256()
+    count = 0
+    pre_existing_dirs = tuple(path for path in pre_existing if path.endswith("/"))
+    changed = {
+        path for path in (untracked | modified | deleted | added) - pre_existing
+        if not path.startswith(pre_existing_dirs)
+    }
+    for rel_path in sorted(changed):
+        digest.update(rel_path.encode("utf-8", "surrogateescape") + b"\0")
+        if rel_path.endswith("/"):
+            paths = _walk_embedded_repository(root, rel_path)
+        else:
+            paths = [rel_path]
+        for path in paths:
+            try:
+                st = (root / path).lstat()
+                digest.update(f"{path}:{st.st_size}:{st.st_mtime_ns}\0".encode("utf-8", "surrogateescape"))
+            except OSError:
+                digest.update(f"{path}:missing\0".encode("utf-8", "surrogateescape"))
+            count += 1
+            if count >= 4 * MAX_UNTRACKED_DIRECTORY_FILES:
+                return digest.hexdigest()
+    return digest.hexdigest()
+
+
 def _generate_untracked_diff(repo_root: Path, rel_path: str) -> str:
     """Generates synthetic unified diff for newly created untracked file."""
     f = repo_root / rel_path
     if not f.is_file():
         return ""
     try:
-        lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+        if f.stat().st_size > MAX_UNTRACKED_EVIDENCE_FILE_BYTES:
+            return ""
+        raw = f.read_bytes()
+    except OSError:
+        return ""
+    if b"\0" in raw:
+        # A text rendering of binary content is not replayable. Git's own
+        # binary patch is, and `git apply` accepts it alongside text hunks.
+        binary = _run_git_cmd(
+            repo_root, ["diff", "--no-index", "--binary", "--", "/dev/null", rel_path]
+        )
+        return binary.stdout if binary.returncode in (0, 1) else ""
+    try:
+        lines = raw.decode("utf-8", errors="replace").splitlines()
     except Exception:
         return ""
     hdr = [f"diff --git a/{rel_path} b/{rel_path}", "new file mode 100644", "--- /dev/null", f"+++ b/{rel_path}", f"@@ -0,0 +1,{len(lines)} @@"]
@@ -421,9 +528,13 @@ def capture_delta(repo_dir: Union[str, Path], baseline: GitBaseline) -> Reposito
 
     for nf in task_added:
         if nf in cur_untracked:
-            ch = _generate_untracked_diff(root, nf)
-            if ch.strip():
-                diffs.append(ch.strip())
+            for untracked_file in _expand_untracked_entry(root, nf):
+                ch = _generate_untracked_diff(root, untracked_file)
+                if ch.strip():
+                    # A git binary hunk is terminated by a blank line; keep
+                    # it even when this is the last hunk in the patch.
+                    terminator = "\n" if "GIT binary patch" in ch else ""
+                    diffs.append(ch.strip() + terminator)
 
     full_diff = "\n\n".join(diffs) if diffs else ""
     ins = sum(1 for l in full_diff.splitlines() if l.startswith("+") and not l.startswith("+++"))

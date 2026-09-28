@@ -133,7 +133,33 @@ def trusted_terminal_provider_signal(stdout: str, stderr: str) -> Optional[Dict[
 _ANSI = re.compile(r"(?:\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_])")
 _SPINNER = re.compile(r"[⠁⠂⠄⡀⢀⠠⠐⠈⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]")
 _ELAPSED = re.compile(r"\b(?:\d{1,2}:){1,2}\d{2}\b")
-_TOOL_EVENT = re.compile(r"(?:tool(?:\s+(?:invocation|call|completion|result))?|(?:writing|wrote|edited|updated|created|modified)\s+(?:file|source)|checkpoint|apply[_ ]patch|running\s+(?:tests?|build)|tests?\s+passed)", re.I)
+# Deterministic engineering-progress markers. Each pattern is anchored to the
+# start of a complete normalized control line from a provider CLI -- tool and
+# patch records, Codex `exec` records and their results, and test, lint, or
+# build summaries -- so ordinary prose ("tooling", "a checkpoint later",
+# "2 failed requests") never matches. A match is progress, not completion;
+# unrecognized output is only liveness.
+_TOOL_EVENT = re.compile(
+    r"^(?:"
+    r"tool (?:invocation|call|result|completion)\b"
+    r"|(?:writing|wrote|edited|updated|created|modified) (?:file|source)\b"
+    r"|\*\*\* (?:add|update|delete) file: "
+    r"|apply[_ ]patch\b"
+    r"|exec$"
+    r"|succeeded in \d+ ?m?s\b"
+    r"|exited -?\d+ in \d+"
+    r"|running (?:tests?|build)\b"
+    r"|(?:=+ )?\d+ (?:passed|failed)(?:,| in |$| =)"
+    r"|tests? +\d+ (?:passed|failed)\b"
+    r"|all checks passed!?$"
+    r"|build (?:succeeded|failed|completed?)\b"
+    r")",
+    re.I,
+)
+# Counters, percentages, byte counts, and hashes change on every redraw of a
+# stuck screen.  Collapsing digits before deduplication stops a ticking
+# heartbeat from registering as genuinely new output.
+_DIGITS = re.compile(r"\d+")
 
 
 def normalize_terminal_text(text: str) -> str:
@@ -144,41 +170,351 @@ def normalize_terminal_text(text: str) -> str:
     return "\n".join(" ".join(line.split()) for line in reduced.splitlines() if line.strip())
 
 
-class ProviderStreamObserver:
-    """Separates process and output liveness from engineering progress."""
-    def __init__(self, provider_id: str, stall_timeout_seconds: float,
-                 repository_fingerprint: Callable[[], str], clock: Callable[[], float] = time.monotonic) -> None:
-        self.provider_id, self.stall_timeout_seconds, self.repository_fingerprint, self.clock = provider_id, stall_timeout_seconds, repository_fingerprint, clock
-        now = clock()
-        self.last_process_activity_at = self.last_output_activity_at = self.last_meaningful_progress_at = now
-        self.last_semantic_event, self._stdout_length, self._stderr_length = "provider_started", 0, 0
-        self._repository_state = repository_fingerprint()
-        self._semantic_fingerprints: Deque[str] = deque(maxlen=32)
-        self._terminal_buffer: Deque[str] = deque(maxlen=32)
+def process_tree_cpu_seconds(pid: int) -> Optional[float]:
+    """Total CPU seconds consumed by a process and its descendants, or None.
 
-    def _diagnostics(self, now: float) -> Dict[str, Any]:
-        return {"last_process_activity_at": self.last_process_activity_at, "last_output_activity_at": self.last_output_activity_at, "last_meaningful_progress_at": self.last_meaningful_progress_at, "semantic_stall_age_seconds": round(now - self.last_meaningful_progress_at, 3), "last_semantic_event": self.last_semantic_event, "raw_output_activity": self.last_output_activity_at > self.last_meaningful_progress_at}
+    Linux-only (`/proc`).  Reaped-children time (cutime/cstime) is included so
+    a finished test or build subprocess still counts.  Returns None when the
+    measurement is unavailable, which callers must treat as "unknown", never as
+    activity.
+    """
+    try:
+        ticks = float(os.sysconf("SC_CLK_TCK"))
+    except (AttributeError, ValueError, OSError):
+        return None
+    total, pending, seen = 0.0, [pid], set()
+    measured = False
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        try:
+            stat = Path(f"/proc/{current}/stat").read_text()
+            fields = stat[stat.rindex(")") + 2:].split()
+            total += sum(int(value) for value in fields[11:15]) / ticks
+            measured = True
+            tasks = list(Path(f"/proc/{current}/task").iterdir())
+        except (OSError, ValueError, IndexError):
+            continue
+        for task in tasks:
+            try:
+                pending.extend(int(child) for child in (task / "children").read_text().split())
+            except (OSError, ValueError):
+                continue
+    return total if measured else None
+
+
+LIVENESS_OUTPUT_ACTIVE = "OUTPUT ACTIVE"
+LIVENESS_SOURCE_CHANGED = "SOURCE CHANGED"
+LIVENESS_POST_CHANGE_VALIDATION = "POST-CHANGE VALIDATION"
+LIVENESS_NO_OUTPUT = "NO OUTPUT"
+LIVENESS_NO_MEANINGFUL_PROGRESS = "NO MEANINGFUL PROGRESS"
+LIVENESS_HARD_BUDGET = "HARD BUDGET"
+STALL_THRESHOLD_SILENCE = "silence"
+STALL_THRESHOLD_NO_PROGRESS = "no_progress"
+STALL_THRESHOLD_POST_CHANGE_GRACE = "post_change_grace"
+
+
+class ProviderStreamObserver:
+    """Separates provider liveness from engineering progress.
+
+    Liveness (is the provider responsive?) comes from genuinely new output and
+    measured process-tree CPU.  Progress (is work advancing?) comes from
+    repository deltas and recognized tool/test/build events.  A provider is
+    stalled when it shows no liveness for `stall_timeout_seconds` (silence), or
+    no progress for `no_progress_timeout_seconds`, extended to
+    `post_change_grace_seconds` after a source change so post-edit validation
+    is not mistaken for a hang.  Neither threshold can extend the hard
+    execution budget, which the backend enforces before asking this observer.
+    """
+
+    #: CPU seconds the process tree must accrue to count as one unit of liveness.
+    CPU_LIVENESS_SECONDS = 2.0
+    #: ...within this trailing window: a sustained rate of about 3.3%, above an
+    #: idle event loop or spinner, below any real tool, build, or test run.
+    CPU_WINDOW_SECONDS = 60.0
+    #: `capture_delta` runs git and reads new files; bound how often.
+    FINGERPRINT_INTERVAL_SECONDS = 2.0
+    _SEEN_LIMIT = 512
+
+    def __init__(self, provider_id: str, stall_timeout_seconds: float,
+                 repository_fingerprint: Callable[[], str], clock: Callable[[], float] = time.monotonic,
+                 *, no_progress_timeout_seconds: Optional[float] = None,
+                 post_change_grace_seconds: Optional[float] = None,
+                 hard_budget_seconds: Optional[float] = None,
+                 cpu_reader: Callable[[int], Optional[float]] = process_tree_cpu_seconds) -> None:
+        self.provider_id, self.repository_fingerprint, self.clock = provider_id, repository_fingerprint, clock
+        self.stall_timeout_seconds = float(stall_timeout_seconds)
+        self.no_progress_timeout_seconds = float(
+            no_progress_timeout_seconds if no_progress_timeout_seconds is not None
+            else max(self.stall_timeout_seconds, 3 * self.stall_timeout_seconds)
+        )
+        self.post_change_grace_seconds = float(
+            post_change_grace_seconds if post_change_grace_seconds is not None
+            else self.no_progress_timeout_seconds
+        )
+        self.hard_budget_seconds = hard_budget_seconds
+        self.cpu_reader = cpu_reader
+        now = clock()
+        self.started_at = self.last_observed_at = now
+        self.last_novel_output_at: Optional[float] = None
+        self.last_process_activity_at: Optional[float] = None
+        self.last_progress_at = now
+        self.last_source_change_at: Optional[float] = None
+        self.last_progress_event = "provider_started"
+        self._pid: Optional[int] = None
+        self._cpu_mark: Optional[float] = None
+        self._cpu_mark_at = now
+        self._cpu_measurable = False
+        self._stdout_length = self._stderr_length = 0
+        self._repository_state = self._safe_fingerprint()
+        self._fingerprint_checked_at = now
+        self._output_seen: set = set()
+        self._output_order: Deque[str] = deque()
+        self._progress_seen: set = set()
+        self._progress_order: Deque[str] = deque()
+        self._terminal_buffer: Deque[str] = deque(maxlen=32)
+        self._previous_shape = ""
+
+    # Legacy attribute names retained for readers of earlier evidence.
+    @property
+    def last_meaningful_progress_at(self) -> float:
+        return self.last_progress_at
+
+    @property
+    def last_semantic_event(self) -> str:
+        return self.last_progress_event
+
+    def bind_process(self, pid: int) -> None:
+        """Attach the launched provider pid so process-tree CPU can be measured."""
+        self._pid = pid
+        self._cpu_mark, self._cpu_mark_at = self.cpu_reader(pid), self.clock()
+        self._cpu_measurable = self._cpu_mark is not None
+
+    def _safe_fingerprint(self) -> Optional[str]:
+        try:
+            return self.repository_fingerprint()
+        except Exception:
+            # An unreadable tree is not evidence of change in either direction.
+            return None
+
+    def _remember(self, key: str, seen: set, order: Deque[str]) -> bool:
+        if key in seen:
+            return False
+        seen.add(key)
+        order.append(key)
+        if len(order) > self._SEEN_LIMIT:
+            seen.discard(order.popleft())
+        return True
+
+    def _last_liveness_at(self) -> float:
+        return max(t for t in (self.started_at, self.last_novel_output_at,
+                               self.last_process_activity_at, self.last_progress_at) if t is not None)
+
+    def _progress_limit(self) -> tuple:
+        if self.last_source_change_at is not None and self.last_progress_at == self.last_source_change_at:
+            if self.post_change_grace_seconds > self.no_progress_timeout_seconds:
+                return self.post_change_grace_seconds, STALL_THRESHOLD_POST_CHANGE_GRACE
+        return self.no_progress_timeout_seconds, STALL_THRESHOLD_NO_PROGRESS
+
+    def _in_post_change_grace(self, now: float) -> bool:
+        return (self.last_source_change_at is not None
+                and now - self.last_source_change_at < self.post_change_grace_seconds)
+
+    def liveness_state(self, now: Optional[float] = None) -> str:
+        """One operator-facing label for the current provider condition."""
+        now = self.clock() if now is None else now
+        if self.hard_budget_seconds is not None and now - self.started_at >= self.hard_budget_seconds:
+            return LIVENESS_HARD_BUDGET
+        if now - self.last_progress_at >= self.stall_timeout_seconds:
+            if self._in_post_change_grace(now):
+                return LIVENESS_POST_CHANGE_VALIDATION
+            if now - self._last_liveness_at() >= self.stall_timeout_seconds:
+                return LIVENESS_NO_OUTPUT
+            return LIVENESS_NO_MEANINGFUL_PROGRESS
+        if self.last_progress_event == "source_delta_changed":
+            return LIVENESS_SOURCE_CHANGED
+        if self._in_post_change_grace(now):
+            return LIVENESS_POST_CHANGE_VALIDATION
+        if self.last_novel_output_at is not None and now - self.last_novel_output_at < self.stall_timeout_seconds:
+            return LIVENESS_OUTPUT_ACTIVE
+        return LIVENESS_NO_OUTPUT
+
+    def _diagnostics(self, now: float, threshold: Optional[str] = None,
+                     threshold_seconds: Optional[float] = None) -> Dict[str, Any]:
+        def since(t: Optional[float]) -> Optional[float]:
+            return None if t is None else round(now - t, 3)
+        return {
+            "elapsed_seconds": round(now - self.started_at, 3),
+            "hard_budget_seconds": self.hard_budget_seconds,
+            "seconds_since_novel_output": since(self.last_novel_output_at),
+            "seconds_since_process_activity": (
+                since(self.last_process_activity_at) if self._cpu_measurable else "unavailable"
+            ),
+            "seconds_since_progress": since(self.last_progress_at),
+            "seconds_since_source_change": since(self.last_source_change_at),
+            "last_progress_event": self.last_progress_event,
+            "source_changed": self.last_source_change_at is not None,
+            "threshold_fired": threshold,
+            "threshold_seconds": threshold_seconds,
+            "silence_timeout_seconds": self.stall_timeout_seconds,
+            "no_progress_timeout_seconds": self.no_progress_timeout_seconds,
+            "post_change_grace_seconds": self.post_change_grace_seconds,
+            "liveness_state": self.liveness_state(now),
+            # Earlier keys, kept so older readers of attempt evidence still work.
+            "last_observed_at": self.last_observed_at,
+            "last_output_activity_at": self.last_novel_output_at,
+            "last_meaningful_progress_at": self.last_progress_at,
+            "semantic_stall_age_seconds": round(now - self.last_progress_at, 3),
+            "last_semantic_event": self.last_progress_event,
+            "raw_output_activity": (
+                self.last_novel_output_at is not None and self.last_novel_output_at > self.last_progress_at
+            ),
+        }
+
+    def _observe_output(self, now: float, new_text: str) -> Optional[Dict[str, Any]]:
+        normalized = normalize_terminal_text(new_text)
+        if not normalized:
+            return None
+        self._terminal_buffer.extend(normalized.splitlines())
+        terminal = trusted_terminal_provider_signal("\n".join(self._terminal_buffer), "")
+        if terminal is not None:
+            terminal["diagnostics"] = self._diagnostics(now)
+            return terminal
+        for line in normalized.splitlines():
+            shape = _DIGITS.sub("#", line)[:200]
+            if self._remember(shape, self._output_seen, self._output_order):
+                self.last_novel_output_at = now
+            if _TOOL_EVENT.search(line):
+                # Progress identity ignores counters but keeps the preceding
+                # line: a rerun of a different command is new progress, while
+                # a loop reprinting the same record ("attempt N") is not.
+                key = f"{self._previous_shape}\n{shape}"
+                if self._remember(key, self._progress_seen, self._progress_order):
+                    self.last_progress_at = now
+                    self.last_progress_event = f"{self.provider_id}_semantic_output:{line[:160]}"
+            self._previous_shape = shape
+        return None
+
+    def _observe_process(self, now: float) -> None:
+        if self._pid is None:
+            return
+        cpu = self.cpu_reader(self._pid)
+        if cpu is None:
+            return
+        self._cpu_measurable = True
+        if self._cpu_mark is None or cpu < self._cpu_mark:
+            self._cpu_mark, self._cpu_mark_at = cpu, now
+        elif cpu - self._cpu_mark >= self.CPU_LIVENESS_SECONDS:
+            self._cpu_mark, self._cpu_mark_at, self.last_process_activity_at = cpu, now, now
+        elif now - self._cpu_mark_at >= self.CPU_WINDOW_SECONDS:
+            # Idle trickle (an event loop, a spinner) never accrues a full CPU
+            # second inside the window, so it never counts as liveness.
+            self._cpu_mark, self._cpu_mark_at = cpu, now
+
+    def _observe_repository(self, now: float, force: bool = False) -> None:
+        if not force and now - self._fingerprint_checked_at < self.FINGERPRINT_INTERVAL_SECONDS:
+            return
+        self._fingerprint_checked_at = now
+        state = self._safe_fingerprint()
+        if state is not None and state != self._repository_state:
+            self._repository_state = state
+            self.last_progress_at = self.last_source_change_at = now
+            self.last_progress_event = "source_delta_changed"
 
     def __call__(self, stdout: str, stderr: str, _elapsed: float) -> Optional[Dict[str, Any]]:
-        now = self.clock(); self.last_process_activity_at = now
-        new_text = stdout[self._stdout_length:] + "\n" + stderr[self._stderr_length:]
+        now = self.clock()
+        self.last_observed_at = now
+        new_stdout, new_stderr = stdout[self._stdout_length:], stderr[self._stderr_length:]
         self._stdout_length, self._stderr_length = len(stdout), len(stderr)
-        if new_text:
-            self.last_output_activity_at = now
-            normalized = normalize_terminal_text(new_text)
-            self._terminal_buffer.extend(normalized.splitlines())
-            terminal = trusted_terminal_provider_signal("\n".join(self._terminal_buffer), "")
+        if new_stdout or new_stderr:
+            terminal = self._observe_output(now, new_stdout + "\n" + new_stderr)
             if terminal is not None:
-                terminal["diagnostics"] = self._diagnostics(now); return terminal
-            semantic = next((f"{self.provider_id}_semantic_output:{line[:160]}" for line in normalized.splitlines() if _TOOL_EVENT.search(line)), None)
-            if semantic and semantic not in self._semantic_fingerprints:
-                self._semantic_fingerprints.append(semantic); self.last_meaningful_progress_at = now; self.last_semantic_event = semantic
-        repository_state = self.repository_fingerprint()
-        if repository_state != self._repository_state:
-            self._repository_state = repository_state; self.last_meaningful_progress_at = now; self.last_semantic_event = "source_delta_changed"
-        if now - self.last_meaningful_progress_at >= self.stall_timeout_seconds:
-            return {"reason": WATCHDOG_TERMINATION_STALL, "diagnostics": self._diagnostics(now)}
+                return terminal
+        self._observe_process(now)
+        self._observe_repository(now)
+        if self._stall_verdict(now) is None:
+            return None
+        # Never terminate on a stale view of the tree: an edit made since the
+        # last throttled fingerprint is progress and must be seen first.
+        self._observe_repository(now, force=True)
+        return self._stall_verdict(now)
+
+    def _stall_verdict(self, now: float) -> Optional[Dict[str, Any]]:
+        silence_age = now - self._last_liveness_at()
+        if silence_age >= self.stall_timeout_seconds and not self._in_post_change_grace(now):
+            return {"reason": WATCHDOG_TERMINATION_STALL,
+                    "diagnostics": self._diagnostics(now, STALL_THRESHOLD_SILENCE, self.stall_timeout_seconds)}
+        limit, threshold = self._progress_limit()
+        if now - self.last_progress_at >= limit:
+            return {"reason": WATCHDOG_TERMINATION_STALL,
+                    "diagnostics": self._diagnostics(now, threshold, limit)}
         return None
+
+
+def _read_ready_pipes(selector: "selectors.BaseSelector", output: Dict[str, bytearray], timeout: float) -> bool:
+    """Append whatever the provider's pipes have ready; unregister closed ones.
+
+    Returns False when nothing was ready within `timeout`.
+    """
+    ready = selector.select(timeout=timeout)
+    for key, _ in ready:
+        data = os.read(key.fileobj.fileno(), 65536)
+        if data:
+            output[key.data].extend(data)
+        else:
+            selector.unregister(key.fileobj)
+    return bool(ready)
+
+
+_PROCESS_GROUPS_SUPPORTED = hasattr(os, "killpg") and hasattr(os, "getpgid")
+
+
+def _terminate_process_group(process: "subprocess.Popen", grace_seconds: float = 2.0) -> None:
+    """Stop a provider and every process in its group: TERM, then KILL.
+
+    Safe to call repeatedly and after the leader has exited, when surviving
+    descendants may still hold the group. Falls back to the leader alone where
+    process groups are unavailable.
+    """
+    import signal
+
+    def signal_group(sig: int) -> bool:
+        try:
+            os.killpg(process.pid, sig)
+            return True
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+
+    if not _PROCESS_GROUPS_SUPPORTED:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=grace_seconds)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        return
+    if not signal_group(signal.SIGTERM):
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        return
+    deadline = time.time() + grace_seconds
+    try:
+        process.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        pass
+    # Descendants get the remainder of the grace period, then KILL.
+    while time.time() < deadline:
+        try:
+            os.killpg(process.pid, 0)
+        except (ProcessLookupError, OSError):
+            break
+        time.sleep(0.05)
+    signal_group(signal.SIGKILL)
+    process.wait()
 
 # Fallback phrases for a provider that reports an approval or trust block in
 # prose without populating a structured denial record. Deliberately narrow:
@@ -679,9 +1015,14 @@ class SubprocessAgentBackend(AgentBackend):
             # until the process exits.  Polling pipes lets a trusted watchdog
             # terminate a known-dead session promptly while retaining exactly
             # the output used to make that decision.
+            # The provider leads its own process group so termination reaches
+            # every descendant it spawned (test watchers, dev servers, builds).
+            # A survivor could otherwise keep writing to the repository after
+            # rollback and contaminate the next provider's attempt.
             process = subprocess.Popen(
                 args=cmd_args, cwd=str(target_cwd), stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, env=env, stdin=subprocess.DEVNULL,
+                start_new_session=_PROCESS_GROUPS_SUPPORTED,
             )
             selector = selectors.DefaultSelector()
             assert process.stdout is not None and process.stderr is not None
@@ -689,38 +1030,64 @@ class SubprocessAgentBackend(AgentBackend):
             selector.register(process.stderr, selectors.EVENT_READ, "stderr")
             output = {"stdout": bytearray(), "stderr": bytearray()}
             watchdog_result: Optional[Dict[str, Any]] = None
-            while process.poll() is None:
-                for key, _ in selector.select(timeout=watchdog_interval):
-                    data = os.read(key.fileobj.fileno(), 65536)
-                    if data:
-                        output[key.data].extend(data)
-                    else:
-                        selector.unregister(key.fileobj)
-                if watchdog_callback is not None:
-                    observed = watchdog_callback(
-                        output["stdout"].decode("utf-8", errors="replace"),
-                        output["stderr"].decode("utf-8", errors="replace"),
-                        time.time() - start_t,
-                    )
-                    if observed:
-                        watchdog_result = dict(observed)
-                        process.terminate()
-                        try:
-                            process.wait(timeout=2)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
+            budget_exceeded = False
+            bind_process = getattr(watchdog_callback, "bind_process", None)
+            try:
+                if callable(bind_process):
+                    bind_process(process.pid)
+                while process.poll() is None:
+                    _read_ready_pipes(selector, output, watchdog_interval)
+                    # The hard budget is the delegated authority ceiling. It is
+                    # checked before any liveness verdict, so an overrun is
+                    # classified as a budget timeout rather than a stall and no
+                    # liveness evidence can extend it.
+                    if time.time() - start_t >= timeout_seconds:
+                        if process.poll() is not None:
+                            break  # it finished on its own at the deadline
+                        # A terminal provider screen that arrived with the
+                        # deadline is still the more specific truth: a quota
+                        # must not be recorded as a short transient timeout.
+                        terminal = trusted_terminal_provider_signal(
+                            output["stdout"][-8192:].decode("utf-8", errors="replace"),
+                            output["stderr"][-8192:].decode("utf-8", errors="replace"),
+                        )
+                        _terminate_process_group(process)
+                        if terminal is not None:
+                            watchdog_result = terminal
+                        else:
+                            budget_exceeded = True
                         break
-                if time.time() - start_t >= timeout_seconds:
-                    process.kill()
-                    raise subprocess.TimeoutExpired(cmd_args, timeout_seconds,
-                                                    output=bytes(output["stdout"]),
-                                                    stderr=bytes(output["stderr"]))
-            # Drain residual bytes after normal or watchdog termination.
-            for key, _ in selector.select(timeout=0):
-                data = os.read(key.fileobj.fileno(), 65536)
-                if data:
-                    output[key.data].extend(data)
+                    if watchdog_callback is not None:
+                        observed = watchdog_callback(
+                            output["stdout"].decode("utf-8", errors="replace"),
+                            output["stderr"].decode("utf-8", errors="replace"),
+                            time.time() - start_t,
+                        )
+                        if observed:
+                            # A provider that exited while the verdict was
+                            # being formed finished on its own; its real exit
+                            # status wins over a termination it never received.
+                            if process.poll() is not None:
+                                break
+                            watchdog_result = dict(observed)
+                            _terminate_process_group(process)
+                            break
+            finally:
+                # Normal exit, verdict, budget, or an exception in this loop
+                # (including an operator interrupt): no descendant outlives
+                # the attempt.
+                _terminate_process_group(process)
+            # Drain residual bytes after normal or watchdog termination. Read
+            # until each pipe is exhausted, not one chunk, so a provider that
+            # exits with more than one buffer of output keeps all of it.
+            for _ in range(4096):
+                if not _read_ready_pipes(selector, output, 0):
+                    break
+            if budget_exceeded:
+                selector.close()
+                raise subprocess.TimeoutExpired(cmd_args, timeout_seconds,
+                                                output=bytes(output["stdout"]),
+                                                stderr=bytes(output["stderr"]))
             selector.close()
             completed_stdout = output["stdout"].decode("utf-8", errors="replace")
             completed_stderr = output["stderr"].decode("utf-8", errors="replace")

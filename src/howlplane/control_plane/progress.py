@@ -12,7 +12,7 @@ from pathlib import Path
 import sys
 import threading
 import time
-from typing import Any, Dict, Iterator, Optional, TextIO, Union
+from typing import Any, Callable, Dict, Iterator, Optional, TextIO, Union
 
 from howlplane.control_plane.atomic_io import atomic_write_json
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
@@ -108,6 +108,7 @@ class TaskProgressTracker:
         self.run_dir = Path(run_dir).resolve() if run_dir else None
         self.stream = stream if stream is not None else sys.stderr
         self.heartbeat_interval = max(0.0, float(heartbeat_interval))
+        self._status_provider: Optional[Callable[[], Optional[str]]] = None
         self.enabled = enabled
 
         self._lock = threading.Lock()
@@ -204,17 +205,20 @@ class TaskProgressTracker:
         completion_message: Optional[str] = None,
         suppress_completion: bool = False,
         deadline_seconds: Optional[int] = None,
+        status_provider: Optional[Callable[[], Optional[str]]] = None,
     ) -> Iterator[None]:
         self.transition(
             phase=phase, resource_id=resource_id, role=role, details=details,
             cycle=cycle, deadline_seconds=deadline_seconds,
         )
+        self._status_provider = status_provider
         self._start_ticker()
         t0 = time.time()
         try:
             yield
         finally:
             self._stop_ticker()
+            self._status_provider = None
             dur = time.time() - t0
             p_str = phase.value if isinstance(phase, TaskPhase) else str(phase)
             with self._lock:
@@ -270,12 +274,25 @@ class TaskProgressTracker:
             f"Elapsed: {format_elapsed(elapsed_seconds)}"
         )
         if reason == "provider_stalled" and diagnostics:
-            stall_age = diagnostics.get("semantic_stall_age_seconds", elapsed_seconds)
+            def age(key: str) -> str:
+                value = diagnostics.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    return format_elapsed(float(value))
+                return "never" if value is None else str(value)
+
+            budget = diagnostics.get("hard_budget_seconds")
+            threshold_seconds = diagnostics.get("threshold_seconds")
             self._write_stream(
                 "[HowlPlane] STALL DIAGNOSTICS | "
-                f"semantic_age={format_elapsed(float(stall_age))} | "
-                f"raw_output={'yes' if diagnostics.get('raw_output_activity') else 'no'} | "
-                f"last_semantic_event={diagnostics.get('last_semantic_event', 'unknown')}"
+                f"threshold={diagnostics.get('threshold_fired', 'unknown')}"
+                + (f" ({format_elapsed(float(threshold_seconds))})" if isinstance(threshold_seconds, (int, float)) else "")
+                + f" | elapsed={age('elapsed_seconds')}"
+                + (f" / budget {format_elapsed(float(budget))}" if isinstance(budget, (int, float)) else "")
+                + f" | since_new_output={age('seconds_since_novel_output')}"
+                f" | since_process_activity={age('seconds_since_process_activity')}"
+                f" | since_progress={age('seconds_since_progress')}"
+                f" | last_progress_event={diagnostics.get('last_progress_event', diagnostics.get('last_semantic_event', 'unknown'))}"
+                f" | source_changed={'yes' if diagnostics.get('source_changed') else 'no'}"
             )
 
     def record_terminal(
@@ -354,9 +371,22 @@ class TaskProgressTracker:
                 )
 
                 tag = f"{p_str} | {r_str}" if r_str else p_str
+                status = self._status_label()
                 self._write_stream(
                     f"[HowlPlane] {tag} | elapsed {dur_str}{deadline_str} | still working"
+                    + (f" | {status}" if status else "")
                 )
+
+    def _status_label(self) -> Optional[str]:
+        """The current operation's liveness label, if it supplied one."""
+        provider = self._status_provider
+        if provider is None:
+            return None
+        try:
+            label = provider()
+        except Exception:
+            return None
+        return str(label) if label else None
 
     def _write_stream(self, text: str) -> None:
         if self.enabled and self.stream:
