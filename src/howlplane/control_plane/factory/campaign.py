@@ -175,8 +175,15 @@ def resolve_campaign(
             metadata = _metadata_for_state_dir(raw_state)
             if metadata and metadata.get("target_repo"):
                 raw_target = Path(metadata["target_repo"]).expanduser()
-    _refuse_symlink(raw_state.absolute())
-    _refuse_symlink(raw_target.absolute())
+    state_root = factory_state_home().absolute() if not state_dir else raw_state.absolute().parent
+    managed_target_root = (factory_data_home() / "worktrees").absolute()
+    target_root = (
+        managed_target_root
+        if raw_target.absolute().is_relative_to(managed_target_root)
+        else raw_target.absolute().parent
+    )
+    _refuse_symlink(raw_state.absolute(), state_root)
+    _refuse_symlink(raw_target.absolute(), target_root)
     resolved_state = raw_state.resolve()
     resolved_target = raw_target.resolve()
     if not prefer_active:
@@ -296,10 +303,16 @@ def campaign_from_state_dir(state_dir: Union[str, Path]) -> Optional[FactoryCamp
     )
 
 
-def _refuse_symlink(path: Path) -> None:
-    """Reject a managed path containing a symlink after its owned root."""
+def _refuse_symlink(path: Path, owned_root: Path) -> None:
+    """Reject symlinks at or below the Factory-owned root."""
+    path = path.absolute()
+    owned_root = owned_root.absolute()
+    try:
+        path.relative_to(owned_root)
+    except ValueError as exc:
+        raise CampaignError(f"Factory-managed path escapes its owned root: {path}") from exc
     current = path
-    while current != current.parent:
+    while current != owned_root.parent:
         if current.exists() and current.is_symlink():
             raise CampaignError(f"Factory-managed path contains a symlink and is refused: {current}")
         current = current.parent
@@ -356,8 +369,8 @@ def _validate_target(campaign: FactoryCampaign) -> bool:
 
 def prepare_campaign(campaign: FactoryCampaign) -> FactoryCampaign:
     """Persist metadata and create or validate the one managed worktree."""
-    _refuse_symlink(campaign.state_dir)
-    _refuse_symlink(campaign.target_dir)
+    _refuse_symlink(campaign.state_dir, campaign.state_dir.parent)
+    _refuse_symlink(campaign.target_dir, campaign.target_dir.parent)
     campaign.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     _validate_metadata(campaign)
     if not _validate_target(campaign):

@@ -403,6 +403,49 @@ def test_factory_cli_parses_max_work_items_and_canary():
     assert start_args.max_work_items == 3
 
 
+def test_ready_mission_path_uses_structured_mission_state(tmp_path):
+    from howlplane.control_plane.cli import _ready_mission_path
+
+    mission = tmp_path / "docs" / "DOGFOOD_MISSION_002.md"
+    mission.parent.mkdir()
+    mission.write_text("# Mission 002\n", encoding="utf-8")
+    state = tmp_path / ".dogfood" / "mission_state.json"
+    state.parent.mkdir()
+    state.write_text(
+        json.dumps({"status": "READY", "next_mission": "docs/DOGFOOD_MISSION_002.md"}),
+        encoding="utf-8",
+    )
+
+    assert _ready_mission_path(tmp_path) == mission
+
+
+def test_ready_mission_path_rejects_state_path_outside_repository(tmp_path):
+    from howlplane.control_plane.cli import _ready_mission_path
+
+    state = tmp_path / ".dogfood" / "mission_state.json"
+    state.parent.mkdir()
+    outside = tmp_path.parent / f"{tmp_path.name}.md"
+    state.write_text(
+        json.dumps({"status": "READY", "next_mission": f"../{outside.name}"}),
+        encoding="utf-8",
+    )
+    outside.write_text("outside\n", encoding="utf-8")
+
+    assert _ready_mission_path(tmp_path) is None
+
+
+def test_ready_mission_path_selects_next_ready_numbered_product_mission(tmp_path):
+    from howlplane.control_plane.cli import _ready_mission_path
+
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "MISSION_001.md").write_text("Status: complete.\n", encoding="utf-8")
+    ready = docs / "MISSION_002.md"
+    ready.write_text("Status: specification ready, implementation not started.\n", encoding="utf-8")
+
+    assert _ready_mission_path(tmp_path) == ready
+
+
 def test_detached_factory_command_preserves_ecosystem_configuration(tmp_path):
     from howlplane.control_plane.factory.campaign import FactoryCampaign, RepositoryIdentity
     from howlplane.control_plane.factory.service import _campaign_arguments, _command

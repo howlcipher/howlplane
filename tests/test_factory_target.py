@@ -128,6 +128,39 @@ def test_campaign_worktree_leaves_dirty_user_checkout_untouched(tmp_path, monkey
     assert (campaign.target_dir / "README.md").read_text(encoding="utf-8") == "initial\n"
 
 
+def test_campaign_allows_symlink_above_factory_owned_root(tmp_path, monkeypatch):
+    from howlplane.control_plane.factory.campaign import resolve_campaign
+
+    repo = make_git_repo(tmp_path)
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    linked_home = tmp_path / "linked-home"
+    linked_home.symlink_to(real_home, target_is_directory=True)
+    monkeypatch.setenv("XDG_STATE_HOME", str(linked_home / "state"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(linked_home / "data"))
+
+    campaign = resolve_campaign(repo)
+
+    assert campaign.state_dir.is_relative_to(real_home)
+    assert campaign.target_dir.is_relative_to(real_home)
+
+
+def test_campaign_refuses_symlink_below_factory_owned_root(tmp_path, monkeypatch):
+    from howlplane.control_plane.factory.campaign import CampaignError, discover_repository, resolve_campaign
+
+    repo = make_git_repo(tmp_path)
+    set_xdg_paths(monkeypatch, tmp_path)
+    identity = discover_repository(repo)
+    workspace_root = tmp_path / "data" / "howlplane" / "worktrees"
+    workspace_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (workspace_root / identity.campaign_id).symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(CampaignError, match="contains a symlink"):
+        resolve_campaign(repo)
+
+
 def test_campaign_identity_distinguishes_same_basename_repositories(tmp_path, monkeypatch):
     from howlplane.control_plane.factory.campaign import resolve_campaign
 

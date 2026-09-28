@@ -2412,6 +2412,31 @@ def _select_factory_authority(args: argparse.Namespace, campaign: Any) -> Option
     return _select_factory_authority(args, campaign)
 
 
+def _ready_mission_path(repo_path: Path) -> Optional[Path]:
+    mission_state = repo_path / ".dogfood" / "mission_state.json"
+    if mission_state.is_file():
+        try:
+            state = safe_load_json(mission_state)
+        except Exception:
+            return None
+        if state.get("status") != "READY" or not state.get("next_mission"):
+            return None
+        mission_ref = Path(str(state["next_mission"]))
+        if mission_ref.is_absolute() or ".." in mission_ref.parts:
+            return None
+        mission_path = repo_path / mission_ref
+        if mission_path.is_symlink() or not mission_path.resolve().is_relative_to(repo_path.resolve()):
+            return None
+        return mission_path if mission_path.is_file() else None
+    for mission_path in sorted((repo_path / "docs").glob("MISSION_[0-9][0-9][0-9].md")):
+        if mission_path.is_symlink():
+            continue
+        heading = mission_path.read_text(encoding="utf-8", errors="replace")[:512]
+        if "Status: specification ready, implementation not started." in heading:
+            return mission_path
+    return None
+
+
 def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
     from datetime import datetime, timezone
     from pathlib import Path
@@ -2492,21 +2517,7 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
             }
             for item in (selection.eligible if selection is not None else [])
         ]
-        mission_path = None
-        mission_state = repo_path / ".dogfood" / "mission_state.json"
-        if mission_state.is_file():
-            try:
-                state = safe_load_json(mission_state)
-                if state.get("status") == "READY" and state.get("next_mission"):
-                    mission_path = repo_path / state["next_mission"]
-            except Exception:
-                mission_path = None
-        if mission_path is None:
-            product_mission = repo_path / "docs" / "MISSION_001.md"
-            if product_mission.is_file():
-                heading = product_mission.read_text(encoding="utf-8", errors="replace")[:512]
-                if "Status: specification ready, implementation not started." in heading:
-                    mission_path = product_mission
+        mission_path = _ready_mission_path(repo_path)
         if mission_path is not None and mission_path.is_file():
             relative = str(mission_path.relative_to(repo_path))
             backlog.append({
