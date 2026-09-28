@@ -151,14 +151,27 @@ def test_maintenance_counts_against_the_same_budget_as_self_improvement():
     assert outcome.item is None
 
 
-def test_non_product_repository_is_capped_so_product_keeps_its_share():
+def test_non_product_repository_is_capped_when_product_work_is_ready():
+    """Case A: non-product cap protects product work when product is dispatchable."""
+    policy = FactoryPolicy()
+    recent = window(*[(SELF, "existing_backlog")] * policy.max_non_product_in_window)
+    non_product = ready(WorkItemOrigin.EXISTING_BACKLOG, repository=SELF)
+    product = ready(WorkItemOrigin.EXISTING_BACKLOG, repository=PRODUCT)
+
+    outcome = select([non_product, product], recent, policy, now=NOW)
+    assert outcome.item is product
+    assert any(w["reason"] == "non_product_repository_cap" for w in outcome.withheld)
+
+
+def test_non_product_repository_runs_when_no_product_work_is_ready():
+    """Deadlock fix: with no dispatchable product work, the cap must not starve the factory."""
     policy = FactoryPolicy()
     recent = window(*[(SELF, "existing_backlog")] * policy.max_non_product_in_window)
     item = ready(WorkItemOrigin.EXISTING_BACKLOG, repository=SELF)
 
     outcome = select([item], recent, policy, now=NOW)
-    assert outcome.item is None
-    assert outcome.withheld[0]["reason"] == "non_product_repository_cap"
+    assert outcome.item is item
+    assert outcome.reason == "selected"
 
 
 def test_product_repository_work_is_never_capped_by_the_repository_rule():
@@ -267,3 +280,88 @@ def test_target_repository_parameterized_policy_dispatches_beyond_window_cap():
     assert outcome.item is not None
     assert outcome.reason == "selected"
     assert len(outcome.withheld) == 0
+
+
+# ---------------------------------------------------------------------------
+# Non-product cap semantics: protect product work only when it can run
+# (campaign 626fbc7d... deadlocked for 933 ticks with 18 capped candidates).
+# ---------------------------------------------------------------------------
+
+def _parked(origin, repository, state):
+    item = ready(origin, repository=repository, keys=[repository, "parked", str(state)])
+    item.transition_to(state)
+    return item
+
+
+def test_case_b_product_awaiting_owner_leaves_non_product_eligible():
+    policy = FactoryPolicy()
+    recent = window(*[(SELF, "existing_backlog")] * policy.max_non_product_in_window)
+    mission = _parked(WorkItemOrigin.OWNER_DIRECTION, PRODUCT, WorkItemState.AWAITING_OWNER)
+    useful = ready(WorkItemOrigin.EXISTING_BACKLOG, repository=SELF)
+
+    outcome = select([mission, useful], recent, policy, now=NOW)
+    assert outcome.item is useful
+    assert outcome.withheld == []
+
+
+def test_case_c_product_blocked_leaves_non_product_eligible():
+    policy = FactoryPolicy()
+    recent = window(*[(SELF, "existing_backlog")] * policy.max_non_product_in_window)
+    blocked = _parked(WorkItemOrigin.EXISTING_BACKLOG, PRODUCT, WorkItemState.BLOCKED)
+    useful = ready(WorkItemOrigin.OBSERVED_DEFECT, repository="howlcipher/howlframe")
+
+    outcome = select([blocked, useful], recent, policy, now=NOW)
+    assert outcome.item is useful
+
+
+def test_case_d_product_ready_after_non_product_run_gets_the_capacity():
+    """Non-product work ran while the product waited; once product work is
+    READY again the cap reserves the next slot for it, even though a
+    higher-priority non-product defect is ready."""
+    policy = FactoryPolicy()
+    recent = window(*[(SELF, "existing_backlog")] * policy.max_non_product_in_window)
+    defect = ready(WorkItemOrigin.OBSERVED_DEFECT, repository=SELF)
+    product = ready(WorkItemOrigin.EXISTING_BACKLOG, repository=PRODUCT)
+
+    outcome = select([defect, product], recent, policy, now=NOW)
+    assert outcome.item is product
+    assert [w["reason"] for w in outcome.withheld] == ["non_product_repository_cap"]
+
+
+def test_case_d_approved_owner_mission_preempts_immediately():
+    policy = FactoryPolicy()
+    recent = window(*[(SELF, "existing_backlog")] * policy.portfolio_window)
+    mission = ready(WorkItemOrigin.OWNER_DIRECTION, repository=PRODUCT)
+    other = ready(WorkItemOrigin.OBSERVED_DEFECT, repository=SELF)
+
+    assert select([other, mission], recent, policy, now=NOW).item is mission
+
+
+def test_product_held_by_another_cap_does_not_reserve_capacity():
+    """A READY product item that its own cap holds cannot use the reserved
+    slot, so it must not freeze non-product work either."""
+    policy = FactoryPolicy()
+    recent = window(
+        *[(SELF, "self_improvement")] * policy.max_introspective_in_window,
+        *[(SELF, "existing_backlog")] * (policy.max_non_product_in_window - policy.max_introspective_in_window),
+    )
+    product_self = ready(WorkItemOrigin.SELF_IMPROVEMENT, repository=PRODUCT)
+    useful = ready(WorkItemOrigin.EXISTING_BACKLOG, repository=SELF)
+
+    outcome = select([product_self, useful], recent, policy, now=NOW)
+    assert outcome.item is useful
+    assert [w["reason"] for w in outcome.withheld] == ["self_improvement_cap"]
+
+
+def test_case_e_nothing_legitimate_is_executable_idles():
+    policy = FactoryPolicy()
+    recent = window(*[(SELF, "self_improvement")] * policy.max_introspective_in_window)
+    mission = _parked(WorkItemOrigin.OWNER_DIRECTION, PRODUCT, WorkItemState.AWAITING_OWNER)
+    introspective = ready(WorkItemOrigin.SELF_IMPROVEMENT, repository=SELF)
+
+    outcome = select([mission, introspective], recent, policy, now=NOW)
+    assert outcome.item is None
+    assert outcome.no_valuable_work is True
+    assert outcome.reason == "all_candidates_capped"
+
+    assert select([mission], recent, policy, now=NOW).reason == "no_dispatchable_work"

@@ -1549,7 +1549,76 @@ class MarathonDogfoodEngine:
             repository_override=work_item.repository,
             dispatch_id=dispatch_id,
             run_mode=run_mode,
+            resume_task_id=getattr(work_item, "resume_orchestration_task_id", None),
         )
+
+    def _boundary_fully_delegated(self, boundary: Dict[str, Any]) -> bool:
+        """True when the active envelope already delegates every parked trigger.
+
+        NEVER_DELEGATABLE boundaries and an implementation that changed nothing
+        are never delegated: the first is code policy, the second has nothing
+        to authorize.
+        """
+        from howlplane.control_plane.authority_envelope import (
+            AuthorityDecision,
+            evaluate_action_against_envelope,
+        )
+        from howlplane.control_plane.human_boundary import NEVER_DELEGATABLE_BOUNDARIES
+
+        # Review acceptance is a human judgment. An envelope that lists git
+        # actions does not authorize skipping independent review.
+        review_gates = {
+            "independent_review_unavailable",
+            "non_independent_review",
+            "review_incomplete",
+        }
+        triggers = boundary.get("triggers") or []
+        if not triggers or self.authority_envelope is None or boundary.get("implementation_no_changes"):
+            return False
+        for trigger in triggers:
+            if trigger in NEVER_DELEGATABLE_BOUNDARIES or trigger in review_gates:
+                return False
+            decision, _ = evaluate_action_against_envelope(
+                self.authority_envelope, trigger, self.repo_slug or self.target_repo.name
+            )
+            if decision != AuthorityDecision.DELEGATED_AUTHORITY_ALLOW:
+                return False
+        return True
+
+    def _resume_parked_orchestration(self, task_id: str, orchestrator: Any) -> Any:
+        """Continue an approved, parked orchestration run in its own run directory.
+
+        The approval-time repository fingerprint is enforced by
+        HumanLifecycleManager.resume (stale approvals raise). A completed resume
+        reports no delta of its own, so the delta is recomputed from the run's
+        recorded baseline for governed integration.
+        """
+        from howlplane.control_plane.git_baseline import GitBaseline
+        from howlplane.control_plane.human_boundary import HumanLifecycleManager
+
+        result = HumanLifecycleManager.resume(
+            target_repo=self.target_repo, task_id=task_id, orchestrator=orchestrator, ledger=self.ledger,
+        )
+        if getattr(result, "final_state", None) == "complete" and getattr(result, "final_delta", None) is None:
+            baseline_file = Path(result.run_dir or self.target_repo / ".task_runs" / task_id) / "baseline.json"
+            if baseline_file.is_file():
+                baseline = GitBaseline.from_dict(json.loads(baseline_file.read_text(encoding="utf-8")))
+                result.final_delta = capture_delta(self.target_repo, baseline)
+        return result
+
+    @staticmethod
+    def _implementation_no_changes_summary(result: Any) -> Optional[str]:
+        """Summary when every implementation attempt exited without changes, else None."""
+        attempts = list(getattr(result, "implementation_attempts", None) or [])
+        if not attempts:
+            return None
+        parts = []
+        for attempt in attempts:
+            delta = attempt.get("delta") or {}
+            if any(delta.get(key) for key in ("files_added", "files_modified", "files_deleted")):
+                return None
+            parts.append(f"{attempt.get('resource_id')}: {attempt.get('failure_class') or 'no changes'}")
+        return "; ".join(parts)
 
     def _execute_governed_engineering_improvement(
         self,
@@ -1570,6 +1639,7 @@ class MarathonDogfoodEngine:
         repository_override: Optional[str] = None,
         dispatch_id: Optional[str] = None,
         run_mode: str = "continuous",
+        resume_task_id: Optional[str] = None,
     ) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """
         Executes a bounded engineering task through the REAL governed
@@ -1730,6 +1800,7 @@ class MarathonDogfoodEngine:
         result = None
         attempt_index = 0
         previous_provider: Optional[str] = None
+        delegated_resume_attempted = False
 
         while True:
             attempt_index += 1
@@ -1760,18 +1831,35 @@ class MarathonDogfoodEngine:
                 attempt_baseline = None
 
             orchestrator = self._orchestrator_factory(orch_config)
-            try:
-                result = orchestrator.run(gap_probe, planned_actions)
-            except Exception as exc:  # noqa: BLE001 - real provider/orchestrator failures must not crash the campaign
-                git_rec.failure_reason = f"orchestrator_exception: {exc}"
-                self._record_attempt(
-                    campaign_state, state_dir, task_id, provider, attempt_index,
-                    result="ENGINEERING_FAILURE", failure_class=FAILURE_CLASS_ENGINEERING,
-                    exit_code=None, error_digest=str(exc), delta_reconciled=False,
-                    duration=time.time() - attempt_started,
-                )
-                self._persist_git_record(git_rec, campaign_state, state_dir)
-                return False, git_rec.to_dict()
+            if resume_task_id:
+                # Continue the same approved run instead of starting a new one
+                # (owner approval via `howlplane factory approve`, or a boundary
+                # the active envelope already delegates). A resume never fails
+                # over: it is that run or nothing.
+                resuming, resume_task_id = resume_task_id, None
+                try:
+                    result = self._resume_parked_orchestration(resuming, orchestrator)
+                except Exception as exc:  # noqa: BLE001 - a refused resume fails closed with its reason
+                    git_rec.failure_reason = f"orchestration_resume_failed:{type(exc).__name__}: {exc}"
+                    self._persist_git_record(git_rec, campaign_state, state_dir)
+                    record = git_rec.to_dict()
+                    record["failure_class"] = FAILURE_CLASS_ENGINEERING
+                    record["failure_code"] = "orchestration_resume_failed"
+                    record["resumed_orchestration_task_id"] = resuming
+                    return False, record
+            else:
+                try:
+                    result = orchestrator.run(gap_probe, planned_actions)
+                except Exception as exc:  # noqa: BLE001 - real provider/orchestrator failures must not crash the campaign
+                    git_rec.failure_reason = f"orchestrator_exception: {exc}"
+                    self._record_attempt(
+                        campaign_state, state_dir, task_id, provider, attempt_index,
+                        result="ENGINEERING_FAILURE", failure_class=FAILURE_CLASS_ENGINEERING,
+                        exit_code=None, error_digest=str(exc), delta_reconciled=False,
+                        duration=time.time() - attempt_started,
+                    )
+                    self._persist_git_record(git_rec, campaign_state, state_dir)
+                    return False, git_rec.to_dict()
 
             if campaign_state is not None and result.trajectory_id:
                 campaign_state.record_trajectory(result.trajectory_id)
@@ -1863,11 +1951,48 @@ class MarathonDogfoodEngine:
 
             if event is None and not budget_retry:
                 # Engineering failure or authority block: do not fail over.
-                git_rec.failure_reason = f"orchestrator_final_state:{result.final_state}"
+                boundary = None
+                if result.final_state == "awaiting_human" and result.run_dir:
+                    from howlplane.control_plane.factory.owner_command import describe_parked_orchestration
+                    boundary = describe_parked_orchestration(Path(result.run_dir))
+                if boundary and not delegated_resume_attempted and self._boundary_fully_delegated(boundary):
+                    # The operator's envelope already authorizes every trigger:
+                    # record that delegated approval and resume the same run
+                    # rather than asking the owner a second time.
+                    from howlplane.control_plane.human_boundary import HumanLifecycleManager
+                    profile_id = getattr(self.authority_envelope, "profile_id", "unknown")
+                    delegated_resume_attempted = True
+                    try:
+                        HumanLifecycleManager.approve(
+                            target_repo=self.target_repo,
+                            task_id=boundary["orchestration_task_id"],
+                            reason=f"delegated by authority profile {profile_id}",
+                            operator_source=f"factory_delegated_authority:{profile_id}",
+                        )
+                    except Exception as exc:  # noqa: BLE001 - fall back to the owner gate
+                        boundary["delegated_approval_error"] = f"{type(exc).__name__}: {exc}"
+                    else:
+                        resume_task_id = boundary["orchestration_task_id"]
+                        continue
+                no_changes = (
+                    self._implementation_no_changes_summary(result)
+                    if result.final_state == "failed" else None
+                )
+                if boundary:
+                    triggers = boundary.get("triggers") or ["awaiting_human"]
+                    git_rec.failure_reason = f"orchestrator_awaiting_human:{','.join(triggers)}"
+                elif no_changes:
+                    git_rec.failure_reason = f"implementation_no_changes: {no_changes}"
+                else:
+                    git_rec.failure_reason = f"orchestrator_final_state:{result.final_state}"
                 self._persist_git_record(git_rec, campaign_state, state_dir)
                 record = git_rec.to_dict()
                 record["failure_class"] = result.failure_class or failure_class
-                record["failure_code"] = "orchestrator_terminal_state"
+                record["failure_code"] = (
+                    "implementation_no_changes" if no_changes else "orchestrator_terminal_state"
+                )
+                if boundary:
+                    record["human_boundary"] = boundary
                 return False, record
 
             # `gap_probe.preferred_agent` holds this loop's *current* provider,

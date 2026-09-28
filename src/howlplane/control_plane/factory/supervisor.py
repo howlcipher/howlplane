@@ -13,6 +13,14 @@ logger = logging.getLogger("howlplane.factory.supervisor")
 
 from howlplane.control_plane.atomic_io import atomic_write_json, atomic_write_text, safe_load_json
 from howlplane.control_plane.factory.dispatcher import DispatchOutcome, MarathonDispatcherAdapter
+from howlplane.control_plane.factory.mission_authorization import (
+    AUTHORIZATION_ORIGIN_SUCCESSOR,
+    TRUST_SUCCESSOR,
+    MissionAuthorizationStore,
+    SuccessorProvenanceStore,
+    evaluate_mission_trust,
+    evidence_fingerprint_for_mission,
+)
 from howlplane.control_plane.factory.portfolio import FactoryPolicy, select
 from howlplane.control_plane.factory.repo_proposal import (
     CapabilityRecord,
@@ -29,7 +37,7 @@ from howlplane.control_plane.factory.supervisor_state import (
     SupervisorStateStore,
 )
 from howlplane.control_plane.factory.work_item import WorkItem, WorkItemState, WorkItemStore, WorkItemOrigin
-from howlplane.control_plane.factory.work_item import work_item_fingerprint
+from howlplane.control_plane.factory.work_item import repository_tag, work_item_fingerprint
 
 
 DEFAULT_TICK_INTERVAL_SECONDS = 10.0
@@ -70,8 +78,17 @@ class FactorySupervisor:
         state_dir: Optional[Union[str, Path]] = None,
         lock: Optional[Any] = None,
         max_work_items: Optional[int] = None,
+        mission_authorization_store: Optional[MissionAuthorizationStore] = None,
+        successor_provenance_store: Optional[SuccessorProvenanceStore] = None,
+        successor_inspector: Optional[Callable[[WorkItem, Dict[str, Any]], List[Dict[str, Any]]]] = None,
     ):
         self.state_store = state_store
+        # Mission trust: owner authorizations, Factory-recorded successor
+        # provenance, and the hook that reports which successor missions a
+        # shipped mission's merge added (path + merged-content digest).
+        self.mission_authorization_store = mission_authorization_store
+        self.successor_provenance_store = successor_provenance_store
+        self.successor_inspector = successor_inspector
         self.work_item_store = work_item_store
         self.repo_proposal_store = repo_proposal_store
         self.capability_registry = CapabilityRegistry(capability_store)
@@ -714,7 +731,98 @@ class FactorySupervisor:
             else:
                 self._handle_work_evidence(evidence)
 
+    def _load_work_item_or_none(self, work_item_id: str) -> Optional[WorkItem]:
+        try:
+            return self.work_item_store.load(work_item_id)
+        except Exception:
+            return None
+
+    def _evaluate_mission_evidence(self, evidence: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Bind mission evidence to its content digest and decide its trust.
+
+        Returns None when the evidence must not be admitted this tick: the
+        mission's item is in flight (re-evaluated after the dispatch settles)
+        or already shipped (a shipped mission is never re-run because its own
+        governed change edited the file).
+        """
+        mission_path = evidence["mission_path"]
+        mission_digest = evidence.get("mission_digest") or ""
+        origin = evidence.get("origin", "owner_direction")
+        repository = evidence.get("repository", "")
+        fingerprint = work_item_fingerprint(origin, repository, evidence.get("identity_keys", []))
+        work_item_id = f"WI-{repository_tag(repository)}-{fingerprint}"
+        existing = self.work_item_store.find_by_fingerprint(fingerprint)
+        if existing is not None:
+            if existing.state in (WorkItemState.IN_PROGRESS, WorkItemState.VERIFYING):
+                return None
+            if existing.state == WorkItemState.SHIPPED and existing.mission_digest != mission_digest:
+                return None
+
+        if self.mission_authorization_store is None or self.successor_provenance_store is None:
+            trusted = bool(evidence.get("trusted_provenance", False))
+            reason = None if trusted else evidence.get("admission_blocked_reason")
+            provenance_id = evidence.get("provenance_id")
+        else:
+            trust = evaluate_mission_trust(
+                repository,
+                mission_path,
+                mission_digest,
+                mission_store=self.mission_authorization_store,
+                provenance_store=self.successor_provenance_store,
+                load_work_item=self._load_work_item_or_none,
+            )
+            trusted, reason, provenance_id = trust.trusted, trust.reason, trust.provenance_id
+            if trusted and trust.reason == TRUST_SUCCESSOR:
+                # Authorize the successor's exact content so its own successor
+                # can prove an authorized parent, continuing the chain.
+                self.mission_authorization_store.authorize(
+                    repository=repository,
+                    mission_path=mission_path,
+                    mission_digest=mission_digest,
+                    work_item_id=work_item_id,
+                    origin=AUTHORIZATION_ORIGIN_SUCCESSOR,
+                    provenance_id=provenance_id,
+                )
+            if trusted:
+                reason = None
+
+        # Trust established for content already admitted: release the item
+        # without waiting for new evidence (e.g. provenance recorded after the
+        # successor was first seen).
+        if (
+            existing is not None
+            and trusted
+            and existing.state == WorkItemState.AWAITING_OWNER
+            and existing.mission_digest == mission_digest
+            and not existing.human_boundary
+        ):
+            existing.trusted_provenance = True
+            existing.provenance_id = provenance_id
+            existing.admission_blocked_reason = None
+            existing.transition_to(WorkItemState.READY, reason="mission_trust_established")
+            self.work_item_store.save_object(existing)
+
+        admitted = dict(evidence)
+        admitted["trusted_provenance"] = trusted
+        admitted["admission_blocked_reason"] = reason
+        admitted["provenance_id"] = provenance_id
+        admitted["evidence_fingerprints"] = [
+            evidence_fingerprint_for_mission(mission_path, mission_digest)
+        ]
+        return admitted
+
     def _handle_work_evidence(self, evidence: Dict[str, Any]) -> None:
+        mission_fields: Dict[str, Any] = {}
+        if evidence.get("mission_path"):
+            evidence = self._evaluate_mission_evidence(evidence)
+            if evidence is None:
+                return
+            mission_fields = {
+                "mission_path": evidence["mission_path"],
+                "mission_digest": evidence.get("mission_digest"),
+                "provenance_id": evidence.get("provenance_id"),
+                "admission_blocked_reason": evidence.get("admission_blocked_reason"),
+            }
         origin = evidence.get("origin", "inferred_need")
         repository = evidence.get("repository", "")
         identity_keys = evidence.get("identity_keys", [])
@@ -767,6 +875,7 @@ class FactorySupervisor:
             source_file_rank=evidence.get("source_file_rank", 0),
             source_rank=evidence.get("source_rank", 0),
             kind=evidence.get("kind", "improvement"),
+            **mission_fields,
         )
 
     def _handle_capability_need(self, evidence: Dict[str, Any]) -> None:
@@ -956,12 +1065,24 @@ class FactorySupervisor:
             self._persist()
         item.transition_to(dispatch_result.next_work_item_state, reason=dispatch_result.reason)
         item.blocked_by = item.blocked_by or []
+        # An approved resume is consumed by this dispatch whatever its outcome;
+        # a new park records a new boundary and needs a new decision.
+        item.resume_orchestration_task_id = None
         if dispatch_result.blocker:
             item.admission_blocked_reason = dispatch_result.reason
             if dispatch_result.next_work_item_state == WorkItemState.BLOCKED:
                 blocker_id = dispatch_result.blocker
                 if blocker_id not in item.blocked_by:
                     item.blocked_by.append(blocker_id)
+        elif dispatch_result.next_work_item_state == WorkItemState.FAILED:
+            item.admission_blocked_reason = dispatch_result.reason
+        boundary = getattr(dispatch_result, "human_boundary", None)
+        if boundary:
+            item.human_boundary = dict(boundary)
+            triggers = boundary.get("triggers") or ["awaiting_human"]
+            item.admission_blocked_reason = f"human_boundary:{','.join(triggers)}"
+        else:
+            item.human_boundary = None
         if dispatch_result.next_work_item_state == WorkItemState.DEFERRED:
             wake_retry = self._state_record.provider_wake_conditions.get("retry_after")
             if wake_retry:
@@ -983,7 +1104,55 @@ class FactorySupervisor:
                 or (self._provider_retry_after_dt().isoformat() if self._provider_retry_after_dt() else None)
             )
         self.work_item_store.save_object(item)
+        if dispatch_result.success and item.mission_path:
+            self._record_successor_provenance(item, dispatch_result)
         return dispatch_result
+
+    def _record_successor_provenance(self, item: WorkItem, dispatch_result: DispatchOutcome) -> None:
+        """Record which successor missions a shipped, merged mission created.
+
+        Only verified governed integration counts: the merge must be observed
+        and contained in the remote main branch. The inspector reports the
+        mission files the merge *added*, with the digest of their merged
+        content, so anything added later or edited afterwards will not match.
+        """
+        if self.successor_provenance_store is None or self.successor_inspector is None:
+            return
+        record = dispatch_result.git_record or {}
+        if not (record.get("merged") and record.get("remote_main_contains_merge") and record.get("merge_sha")):
+            return
+        if not item.mission_digest or item.state != WorkItemState.SHIPPED:
+            return
+        try:
+            successors = self.successor_inspector(item, record) or []
+        except Exception as exc:  # noqa: BLE001 - missing provenance fails closed to owner review
+            logger.warning("successor inspection failed for %s: %s", item.work_item_id, exc)
+            self._state_record.last_error = f"successor_inspection_failed:{item.work_item_id}:{exc}"
+            return
+        for successor in successors:
+            path = successor.get("mission_path")
+            digest = successor.get("mission_digest")
+            if not path or not digest or path == item.mission_path:
+                continue
+            self.successor_provenance_store.record(
+                repository=item.repository,
+                parent_work_item_id=item.work_item_id,
+                parent_mission_path=item.mission_path,
+                parent_mission_digest=item.mission_digest,
+                parent_terminal_state=str(item.state),
+                successor_mission_path=path,
+                successor_mission_digest=digest,
+                generating_task_id=dispatch_result.task_id,
+                generating_dispatch_id=dispatch_result.dispatch_id,
+                merge_sha=record.get("merge_sha"),
+                governed_lifecycle_evidence={
+                    "pr_url": record.get("pr_url"),
+                    "commit_sha": record.get("commit_sha"),
+                    "merge_sha": record.get("merge_sha"),
+                    "remote_main_contains_merge": True,
+                    "integration_mode": record.get("integration_mode"),
+                },
+            )
 
     def _apply_dispatch_result(
         self,
@@ -1133,6 +1302,7 @@ class FactorySupervisor:
         if selection.item is not None:
             self._consecutive_capped_ticks = 0
             self._state_record.consecutive_capped_ticks = 0
+            self._state_record.clear_alerts("capped_candidates_deadlock", now_iso)
             dispatch_result = self._dispatch(selection.item, now_iso)
             if dispatch_result is None:
                 # Missing item: retain evidence and stop/park.
@@ -1194,6 +1364,7 @@ class FactorySupervisor:
             reason = "no_provider_capacity"
             self._consecutive_capped_ticks = 0
             self._state_record.consecutive_capped_ticks = 0
+            self._state_record.clear_alerts("capped_candidates_deadlock", now_iso)
         elif selection.no_valuable_work:
             next_state = SupervisorState.WAITING_FOR_WORK
             reason = "NO_VALUABLE_WORK"
@@ -1202,31 +1373,39 @@ class FactorySupervisor:
                 self._state_record.consecutive_capped_ticks = self._consecutive_capped_ticks
                 if self._consecutive_capped_ticks > 3:
                     reasons = sorted(set(w.get("reason", "") for w in selection.withheld))
+                    withheld_ids = sorted(set(w.get("work_item_id", "") for w in selection.withheld))
                     capped_alert = (
                         f"CAP_DEADLOCK_ALERT: Supervisor entered WAITING_FOR_WORK with "
                         f"{len(selection.withheld)} ready candidate(s) capped for "
                         f"{self._consecutive_capped_ticks} consecutive ticks. "
-                        f"Reasons: {reasons}"
+                        f"Reasons: {reasons}; Items: {withheld_ids}"
                     )
-                    logger.warning(capped_alert)
+                    # One log line when the condition starts and then a
+                    # periodic reminder; the coalesced alert carries the rest.
+                    if self._consecutive_capped_ticks == 4 or self._consecutive_capped_ticks % 100 == 0:
+                        logger.warning(capped_alert)
                     self._state_record.record_alert(
                         alert_type="capped_candidates_deadlock",
                         message=capped_alert,
                         now_iso=now_iso,
                         details={
+                            "condition_key": "reasons=" + ",".join(reasons) + ";items=" + ",".join(withheld_ids),
                             "consecutive_ticks": self._consecutive_capped_ticks,
                             "withheld_count": len(selection.withheld),
                             "reasons": reasons,
+                            "withheld_work_item_ids": withheld_ids,
                         },
                     )
             else:
                 self._consecutive_capped_ticks = 0
                 self._state_record.consecutive_capped_ticks = 0
+                self._state_record.clear_alerts("capped_candidates_deadlock", now_iso)
         else:
             next_state = SupervisorState.WAITING_FOR_WORK
             reason = "no_dispatchable_work"
             self._consecutive_capped_ticks = 0
             self._state_record.consecutive_capped_ticks = 0
+            self._state_record.clear_alerts("capped_candidates_deadlock", now_iso)
 
         if self._state_record.state != next_state:
             try:

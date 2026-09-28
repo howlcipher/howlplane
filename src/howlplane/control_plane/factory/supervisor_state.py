@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from howlplane.control_plane.atomic_io import safe_load_json
 from howlplane.control_plane.durable_store import ArtifactIdentityError, DurableObjectStore
@@ -207,6 +207,13 @@ class SupervisorStateRecord(DataClassSerializationMixin):
         self.recent_parked.append(entry)
         self.recent_parked = self.recent_parked[-50:]
 
+    @staticmethod
+    def _alert_condition(alert: Dict[str, Any]) -> Tuple[Any, Any]:
+        return alert.get("type"), (alert.get("details") or {}).get("condition_key")
+
+    def active_alerts(self) -> List[Dict[str, Any]]:
+        return [a for a in self.alerts if not a.get("resolved_at")]
+
     def record_alert(
         self,
         alert_type: str,
@@ -214,12 +221,46 @@ class SupervisorStateRecord(DataClassSerializationMixin):
         now_iso: str,
         details: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Record an operator-visible alert for abnormal conditions."""
+        """Record an operator-visible alert, coalescing one persistent condition.
+
+        A condition is identified by its type plus an optional
+        ``details["condition_key"]``, never by its message: messages carry
+        live counters, and keying on them appended one alert per tick
+        (campaign 626fbc7d... accumulated 50 identical cap alerts over 933
+        ticks). While a condition stays active, its single alert is updated
+        with ``last_detected_at``, ``consecutive_ticks``, the latest message
+        and the latest details; ``first_detected_at`` is preserved.
+        """
+        details = dict(details or {})
+        condition = (alert_type, details.get("condition_key"))
+        matches = [
+            a for a in self.alerts
+            if not a.get("resolved_at") and self._alert_condition(a) == condition
+        ]
+        if matches:
+            alert = matches[-1]
+            first = min(
+                (m.get("first_detected_at") or m.get("at") or now_iso) for m in matches
+            )
+            # Collapse duplicates left by older builds into the survivor.
+            duplicate_ids = {id(m) for m in matches if m is not alert}
+            self.alerts = [a for a in self.alerts if id(a) not in duplicate_ids]
+            alert["first_detected_at"] = first
+            alert["last_detected_at"] = now_iso
+            alert["consecutive_ticks"] = int(
+                details.get("consecutive_ticks") or int(alert.get("consecutive_ticks", 1)) + 1
+            )
+            alert["message"] = message
+            alert["details"] = details
+            return
         self.alerts.append({
             "type": alert_type,
             "message": message,
             "at": now_iso,
-            "details": details or {},
+            "first_detected_at": now_iso,
+            "last_detected_at": now_iso,
+            "consecutive_ticks": int(details.get("consecutive_ticks") or 1),
+            "details": details,
         })
         self.alerts = self.alerts[-50:]
 
@@ -227,6 +268,23 @@ class SupervisorStateRecord(DataClassSerializationMixin):
         self.current_work_item_id = None
         self.current_task_id = None
         self.current_dispatch_id = None
+
+    def clear_alerts(self, alert_type: str, now_iso: Optional[str] = None) -> None:
+        """Resolve active alerts of ``alert_type`` once progress is possible again.
+
+        The most recent occurrence is kept as a resolved audit entry; older
+        resolved entries of the same type are dropped so resolution history
+        cannot grow without bound.
+        """
+        active = [a for a in self.alerts if a.get("type") == alert_type and not a.get("resolved_at")]
+        if not active:
+            return
+        survivor = active[-1]
+        survivor["resolved_at"] = now_iso or datetime.now(timezone.utc).isoformat()
+        self.alerts = [
+            a for a in self.alerts
+            if a.get("type") != alert_type or a is survivor
+        ]
 
     def reconcile_on_load(self) -> None:
         """Fail-closed reconciliation after restart."""

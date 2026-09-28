@@ -24,6 +24,9 @@ class DispatchOutcome:
     task_id: Optional[str] = None
     dispatch_id: Optional[str] = None
     attempt: int = 1
+    # The precise human boundary an orchestration run parked on (triggers,
+    # orchestration task id, run directory, reviewer failures).
+    human_boundary: Optional[Dict[str, Any]] = None
 
 
 class RepositoryAuthorityError(ValueError):
@@ -113,6 +116,7 @@ class MarathonDispatcherAdapter:
                 requires_authority=True,
                 task_id=task_id,
                 dispatch_id=dispatch_id,
+                human_boundary=git_record.get("human_boundary"),
             )
         if success:
             return DispatchOutcome(
@@ -128,6 +132,22 @@ class MarathonDispatcherAdapter:
         failure_reason = record.get("failure_reason", "unknown")
         failure_class = record.get("failure_class")
         failure_code = record.get("failure_code")
+        if failure_code == "implementation_no_changes":
+            # Every implementer exited without changing anything. Nothing can
+            # be reviewed or approved, and retrying on a timer would repeat the
+            # same result, so the item fails with the evidence attached and
+            # waits for `howlplane factory retry`.
+            return DispatchOutcome(
+                success=False,
+                work_item_id=work_item.work_item_id,
+                next_work_item_state=WorkItemState.FAILED,
+                reason=failure_reason,
+                git_record=git_record,
+                failure_class=failure_class,
+                failure_code=failure_code,
+                task_id=task_id,
+                dispatch_id=dispatch_id,
+            )
         if failure_class in {"PROVIDER_EXHAUSTED", "PROVIDER_UNAVAILABLE"}:
             return DispatchOutcome(
                 success=False,
@@ -156,6 +176,7 @@ class MarathonDispatcherAdapter:
                 failure_code=failure_code,
                 task_id=task_id,
                 dispatch_id=dispatch_id,
+                human_boundary=record.get("human_boundary"),
             )
         if failure_class == "DEPENDENCY_BLOCKED":
             return DispatchOutcome(

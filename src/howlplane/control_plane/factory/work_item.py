@@ -118,6 +118,16 @@ WORK_ITEM_TRANSITIONS: Dict[str, Set[str]] = {
 }
 
 
+# Admission fields replaced when an existing item is reopened by new evidence.
+_REOPEN_REFRESHED_FIELDS = (
+    "description",
+    "admission_blocked_reason",
+    "mission_path",
+    "mission_digest",
+    "provenance_id",
+)
+
+
 class InvalidWorkItemTransitionError(ValueError):
     """Raised when an illegal portfolio state transition is attempted."""
 
@@ -191,6 +201,19 @@ class WorkItem(SafeArtifactSerializationMixin):
     campaign_id: Optional[str] = None
     attempts: int = 0
     retry_after: Optional[str] = None
+
+    # Owner-decision and mission-trust state. `mission_digest` is the content
+    # identity recorded at admission; an owner approval is bound to exactly it.
+    owner_decision_id: Optional[str] = None
+    mission_path: Optional[str] = None
+    mission_digest: Optional[str] = None
+    trusted_provenance: bool = False
+    provenance_id: Optional[str] = None
+
+    # The precise human boundary an orchestration run parked on, and the run an
+    # owner approval authorized the Factory to resume instead of starting over.
+    human_boundary: Optional[Dict[str, Any]] = None
+    resume_orchestration_task_id: Optional[str] = None
 
     reopening_history: List[Dict[str, Any]] = field(default_factory=list)
     created_at: str = field(default_factory=_now)
@@ -346,6 +369,38 @@ class WorkItemStore(DurableObjectStore):
             return WorkItemState.READY
         return WorkItemState.AWAITING_OWNER
 
+    def _transition_to_admission_target(self, item: WorkItem, target: str, reason: str) -> None:
+        """Move an existing item to its admission state using only legal edges.
+
+        READY cannot return to ADMITTED, but it can return to AWAITING_OWNER
+        when mission content changes after approval. DEFERRED and FAILED reach
+        AWAITING_OWNER through READY.
+        """
+        if item.state == target:
+            return
+        allowed = WORK_ITEM_TRANSITIONS.get(item.state, set())
+        if target in allowed:
+            item.transition_to(target, reason=reason)
+            return
+        if (
+            WorkItemState.ADMITTED in allowed
+            and target in WORK_ITEM_TRANSITIONS.get(WorkItemState.ADMITTED, set())
+        ):
+            item.transition_to(WorkItemState.ADMITTED, reason=reason)
+            item.transition_to(target, reason=reason)
+            return
+        if (
+            WorkItemState.READY in allowed
+            and target in WORK_ITEM_TRANSITIONS.get(WorkItemState.READY, set())
+        ):
+            item.transition_to(WorkItemState.READY, reason=reason)
+            if item.state != target:
+                item.transition_to(target, reason=reason)
+            return
+        raise InvalidWorkItemTransitionError(
+            f"Cannot re-admit {item.work_item_id} from {item.state} to {target}"
+        )
+
     def admit_evidence(
         self,
         origin: str,
@@ -365,17 +420,28 @@ class WorkItemStore(DurableObjectStore):
             new_refs = set(evidence_refs).difference(existing.evidence_refs)
             if not new_fps and not new_refs:
                 return existing
+            if existing.is_terminal or existing.state in (
+                WorkItemState.IN_PROGRESS, WorkItemState.VERIFYING,
+            ):
+                return existing
             existing.reopen(
                 sorted(new_refs), sorted(new_fps), reason="new evidence admitted"
             )
+            # Reopened evidence replaces the trust-relevant view of the item: a
+            # changed mission is judged on its new content, never on the old
+            # approval.
+            for name in _REOPEN_REFRESHED_FIELDS:
+                if name in kwargs:
+                    setattr(existing, name, kwargs[name])
+            existing.trusted_provenance = trusted_provenance
+            existing.owner_decision_id = None
+            existing.human_boundary = None
+            existing.resume_orchestration_task_id = None
             target = self._admission_state_for_origin(
                 origin, is_ambiguous, trusted_provenance=trusted_provenance
             )
-            existing.transition_to(
-                WorkItemState.ADMITTED,
-                reason="reopened evidence readmitted",
-            )
-            existing.transition_to(
+            self._transition_to_admission_target(
+                existing,
                 target,
                 reason=(
                     f"origin={origin} ambiguous={is_ambiguous} "
@@ -391,6 +457,7 @@ class WorkItemStore(DurableObjectStore):
             identity_keys=identity_keys,
             evidence_refs=sorted(set(evidence_refs)),
             evidence_fingerprints=sorted(set(evidence_fingerprints)),
+            trusted_provenance=trusted_provenance,
             **kwargs,
         )
         item.transition_to(WorkItemState.ADMITTED, reason="evidence admitted")

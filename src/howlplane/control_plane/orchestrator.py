@@ -99,6 +99,30 @@ FAILURE_CLASS_NO_ELIGIBLE_RESOURCE = "NO_ELIGIBLE_AI_RESOURCE"
 # distinct from PROVIDER_UNAVAILABLE so an operator reading the summary is never
 # told a reachable provider was unreachable (HOWLFRAM-SLOPFIX-05).
 FAILURE_CLASS_EXECUTION_BUDGET_EXCEEDED = "EXECUTION_BUDGET_EXCEEDED"
+# Stable marker for an implementation attempt that exited successfully but
+# changed nothing. Surfaced verbatim to the Factory so an owner is never asked
+# to approve work that does not exist.
+IMPLEMENTATION_NO_CHANGES = "implementation_no_changes"
+_NO_CHANGE_REPORT_MARKERS = (
+    "couldn't apply",
+    "could not apply",
+    "working tree is unchanged",
+    "working tree unchanged",
+    "mounted read-only",
+    "is read-only",
+)
+
+
+def _provider_reported_no_changes(impl_res: Any) -> bool:
+    """True when the provider's own text says it did not change the repository."""
+    parts = [
+        getattr(impl_res, "stdout", None),
+        getattr(impl_res, "stderr", None),
+        getattr(impl_res, "error_message", None),
+    ]
+    text = "\n".join(part for part in parts if isinstance(part, str)).lower()
+    text = text.replace("\u2019", "'").replace("\u2018", "'")
+    return any(marker in text for marker in _NO_CHANGE_REPORT_MARKERS)
 
 # A candidate that exists only because a provider was stopped at our budget.
 # Recorded so no artifact can imply the provider reported success.
@@ -2732,6 +2756,28 @@ class GovernedTaskOrchestrator:
                         )
                     if self.config.provider_pool is not None:
                         normalized_failure = ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
+                elif (
+                    impl_res is not None
+                    and impl_res.success
+                    and current_delta.is_empty
+                    and self.config.provider_pool is not None
+                    and _provider_reported_no_changes(impl_res)
+                ):
+                    # A provider that exits 0 and says it could not edit the
+                    # tree has not implemented the task. Reviewing that empty
+                    # diff only produces a human boundary for work that does
+                    # not exist (WI-howlplane-6a668797bb32f9a2: Codex reported
+                    # `.agents/` was not writable, exited 0, and the run parked
+                    # awaiting a human). Treat the report as an unusable
+                    # invocation so the next implementer is tried. A silent
+                    # empty delta is left to the existing completion path:
+                    # fixtures and no-op tasks do not claim they were blocked.
+                    impl_res.success = False
+                    impl_res.error_message = (
+                        f"{IMPLEMENTATION_NO_CHANGES}: provider reported success but produced "
+                        "no task-attributable repository changes"
+                    )
+                    normalized_failure = ProviderFailureClass.PROVIDER_STALLED
 
                 attempt_record = self._record_implementation_attempt(
                     run_dir=run_dir,

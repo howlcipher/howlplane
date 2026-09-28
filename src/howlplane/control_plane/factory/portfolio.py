@@ -127,10 +127,36 @@ def _sort_key(item: WorkItem, now: datetime, policy: FactoryPolicy) -> Tuple:
     )
 
 
+def _product_work_is_executable(
+    candidates: Sequence[WorkItem], counts: Dict[str, int], policy: FactoryPolicy
+) -> bool:
+    """True when some product-repository candidate could actually be dispatched now.
+
+    READY is not enough: a product item held by another cap cannot use the
+    capacity the non-product cap would reserve for it.
+    """
+    return any(
+        item.repository == policy.product_repository
+        and _cap_blocking(item, counts, policy, product_executable=True) is None
+        for item in candidates
+    )
+
+
 def _cap_blocking(
-    item: WorkItem, counts: Dict[str, int], policy: FactoryPolicy
+    item: WorkItem,
+    counts: Dict[str, int],
+    policy: FactoryPolicy,
+    product_executable: bool,
 ) -> Optional[str]:
-    """The cap this item would breach, or None if it may be dispatched."""
+    """The cap this item would breach, or None if it may be dispatched.
+
+    The non-product cap reserves capacity for product work, so it applies
+    only while product work is executable. The dispatch window only moves
+    when something is dispatched; applying the cap with no executable product
+    work froze the whole portfolio (campaign 626fbc7d...: 18 READY items
+    withheld for 933 ticks while the product's only mission awaited the
+    owner). The introspective and creative caps always apply.
+    """
     if item.origin == WorkItemOrigin.OWNER_DIRECTION:
         # Owner direction preempts the window. The owner setting a priority is
         # not the factory over-serving a category.
@@ -149,7 +175,8 @@ def _cap_blocking(
         item.repository != policy.product_repository
         and counts["non_product"] >= policy.max_non_product_in_window
     ):
-        return "non_product_repository_cap"
+        if product_executable:
+            return "non_product_repository_cap"
     return None
 
 
@@ -178,10 +205,11 @@ def select(
     # owner asking "why is my self-improvement work not running" needs the
     # answer even when something else was dispatched this tick, so `withheld`
     # is the complete set of capped candidates rather than a prefix of it.
+    product_executable = _product_work_is_executable(candidates, counts, policy)
     chosen: Optional[WorkItem] = None
     withheld: List[Dict[str, str]] = []
     for item in candidates:
-        breach = _cap_blocking(item, counts, policy)
+        breach = _cap_blocking(item, counts, policy, product_executable)
         if breach is None:
             if chosen is None:
                 chosen = item

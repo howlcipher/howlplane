@@ -1748,6 +1748,40 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_resume.add_argument("--target-repo", help="Repository to resolve (advanced)")
     p_resume.add_argument("--json", action="store_true", help="Output JSON result")
 
+    p_approve = factory_sub.add_parser(
+        "approve", help="Approve an awaiting_owner Factory WorkItem", **kwargs
+    )
+    p_approve.add_argument("work_item_id", help="Factory WorkItem ID to approve")
+    p_approve.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_approve.add_argument("--target-repo", help="Repository to resolve (advanced)")
+    p_approve.add_argument("--reason", help="Optional approval reason")
+    p_approve.add_argument("--json", action="store_true", help="Output JSON result")
+
+    p_reject = factory_sub.add_parser(
+        "reject", help="Reject an awaiting_owner Factory WorkItem", **kwargs
+    )
+    p_reject.add_argument("work_item_id", help="Factory WorkItem ID to reject")
+    p_reject.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_reject.add_argument("--target-repo", help="Repository to resolve (advanced)")
+    p_reject.add_argument("--reason", help="Optional rejection reason")
+    p_reject.add_argument("--json", action="store_true", help="Output JSON result")
+
+    p_retry = factory_sub.add_parser(
+        "retry", help="Return a parked or failed Factory WorkItem to READY for a fresh attempt", **kwargs
+    )
+    p_retry.add_argument("work_item_id", help="Factory WorkItem ID to retry")
+    p_retry.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_retry.add_argument("--target-repo", help="Repository to resolve (advanced)")
+    p_retry.add_argument("--reason", help="Optional reason")
+    p_retry.add_argument("--json", action="store_true", help="Output JSON result")
+
+    p_pending = factory_sub.add_parser(
+        "pending", help="List Factory WorkItems awaiting owner decision or blocked", **kwargs
+    )
+    p_pending.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_pending.add_argument("--target-repo", help="Repository to resolve (advanced)")
+    p_pending.add_argument("--json", action="store_true", help="Output JSON result")
+
     p_start = factory_sub.add_parser("start", help="Start a persistent Factory campaign for this repository", **kwargs)
     p_start.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_start.add_argument("--target-repo", help="Factory target worktree (advanced)")
@@ -2493,6 +2527,14 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None, *, ca
         canary_evidence_for_workspace,
     )
     from howlplane.control_plane.factory.dispatcher import MarathonDispatcherAdapter, RepositoryAuthorityError
+    from howlplane.control_plane.factory.mission_authorization import (
+        MissionAuthorizationStore,
+        SuccessorProvenanceStore,
+        compute_mission_digest,
+        evidence_fingerprint_for_mission,
+        inspect_successor_missions,
+        iter_mission_files,
+    )
     from howlplane.control_plane.factory.repo_proposal import CapabilityStore, RepoProposalStore
     from howlplane.control_plane.factory.supervisor import FactorySupervisor
     from howlplane.control_plane.factory.supervisor_state import SupervisorStateRecord, SupervisorStateStore
@@ -2512,6 +2554,8 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None, *, ca
     work_item_store = WorkItemStore(state_dir / "work_items")
     repo_proposal_store = RepoProposalStore(state_dir / "repo_proposals")
     capability_store = CapabilityStore(state_dir / "capabilities")
+    mission_authorization_store = MissionAuthorizationStore(state_dir / "mission_authorizations")
+    successor_provenance_store = SuccessorProvenanceStore(state_dir / "successor_provenance")
     target_repo = Path(getattr(args, "target_repo", None) or ".").resolve()
     target_mode = getattr(args, "target", "repo")
     workspace_path = getattr(args, "workspace", None)
@@ -2545,13 +2589,24 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None, *, ca
     state_record.workspace_file = str(Path(workspace_path).resolve()) if workspace_path else None
     state_store.save(state_record)
 
+    def _execution_root_for(repository: str) -> Path:
+        if target.mode == FactoryTargetMode.ECOSYSTEM and workspace_resolver is not None:
+            return workspace_resolver.resolve(repository).target_dir
+        return target_repo
+
+    def _mission_roots_for(repository: str) -> List[Path]:
+        try:
+            return [_execution_root_for(repository)]
+        except Exception:
+            return []
+
     def _backlog_rank(value: Any) -> int:
         try:
             return int(value)
         except (TypeError, ValueError):
             return 0
 
-    def _discover_repo(repo_path: Path, repo_name: str):
+    def _discover_repo(repo_path: Path, repo_name: str, mission_roots: Optional[List[Path]] = None):
         try:
             source = BacklogSource(repo_path)
             selection = source.select()
@@ -2572,21 +2627,39 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None, *, ca
             }
             for item in (selection.eligible if selection is not None else [])
         ]
-        mission_path = _ready_mission_path(repo_path)
-        if mission_path is not None and mission_path.is_file():
-            relative = str(mission_path.relative_to(repo_path))
-            backlog.append({
-                "origin": "owner_direction",
-                "repository": repo_name,
-                "title": mission_path.stem.replace("_", " ").title(),
-                "description": mission_path.read_text(encoding="utf-8"),
-                "identity_keys": [relative],
-                "evidence_refs": [relative],
-                "evidence_fingerprints": [f"mission:{relative}"],
-                "source_file_rank": 0,
-                "source_rank": 0,
-                "kind": "mission",
-            })
+        # Missions are read from the managed execution worktree first: governed
+        # integration keeps it synced to origin/main, so a successor merged by
+        # the Factory is visible there, while the operator checkout is never
+        # synced. The operator checkout is the fallback. Every numbered file is
+        # admitted; content identity, not the filename, decides trust.
+        seen_paths: Set[str] = set()
+        for root in [*(mission_roots or []), repo_path]:
+            if not Path(root).is_dir():
+                continue
+            for mission_path in iter_mission_files(root):
+                relative = mission_path.relative_to(root).as_posix()
+                if relative in seen_paths:
+                    continue
+                seen_paths.add(relative)
+                mission_text = mission_path.read_text(encoding="utf-8")
+                mission_digest = compute_mission_digest(mission_path)
+                backlog.append({
+                    "origin": "owner_direction",
+                    "repository": repo_name,
+                    "title": mission_path.stem.replace("_", " ").title(),
+                    "description": mission_text,
+                    "identity_keys": [relative],
+                    "evidence_refs": [relative],
+                    "evidence_fingerprints": [
+                        evidence_fingerprint_for_mission(relative, mission_digest)
+                    ],
+                    "source_file_rank": 0,
+                    "source_rank": 0,
+                    "kind": "mission",
+                    "trusted_provenance": False,
+                    "mission_path": relative,
+                    "mission_digest": mission_digest,
+                })
         return backlog
 
     def _discovery():
@@ -2622,7 +2695,7 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None, *, ca
             evidence: List[Dict[str, Any]] = []
             for repo in target.workspace.repositories:
                 repo_name = repo.repository or detect_repo_slug(repo.path) or str(repo.path)
-                evidence.extend(_discover_repo(repo.path, repo_name))
+                evidence.extend(_discover_repo(repo.path, repo_name, _mission_roots_for(repo_name)))
             return evidence
 
         repo = detect_repo_slug(target_repo) or str(target_repo)
@@ -2710,6 +2783,23 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None, *, ca
             work_item_engine_factory=_engine_for_work_item,
         )
 
+    def _execution_repo_for(repository: str) -> Optional[Path]:
+        if workspace_resolver is not None:
+            try:
+                return workspace_resolver.resolve(repository).target_dir
+            except Exception:
+                return None
+        if target.mode != FactoryTargetMode.ECOSYSTEM:
+            return target_repo
+        return None
+
+    def _successor_inspector(item: Any, record: Dict[str, Any]) -> List[Dict[str, str]]:
+        merge_sha = record.get("merge_sha")
+        repo = _execution_repo_for(item.repository)
+        if not merge_sha or repo is None or not item.mission_path:
+            return []
+        return inspect_successor_missions(repo, merge_sha, item.mission_path)
+
     return FactorySupervisor(
         state_store=state_store,
         work_item_store=work_item_store,
@@ -2725,6 +2815,9 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None, *, ca
         state_dir=state_dir,
         lock=None,
         max_work_items=getattr(args, "max_work_items", None),
+        mission_authorization_store=mission_authorization_store,
+        successor_provenance_store=successor_provenance_store,
+        successor_inspector=None if canary_mode else _successor_inspector,
     )
 
 
@@ -2805,6 +2898,88 @@ def _factory_state_store(args: argparse.Namespace):
     return SupervisorStateStore(Path(args.state_dir).resolve() / "supervisor")
 
 
+def _factory_repository_roots(state_dir: Path) -> Dict[str, List[Path]]:
+    """Repository slug -> checkouts a campaign reads, managed execution worktree first.
+
+    Read-only: built from the campaign's recorded execution targets and its
+    persisted workspace/target, never by preparing or resolving worktrees.
+    """
+    from howlplane.control_plane.factory.supervisor_state import SupervisorStateStore
+    from howlplane.control_plane.git_integration import detect_repo_slug
+
+    roots: Dict[str, List[Path]] = {}
+
+    def _add(slug: Optional[str], path: Any) -> None:
+        if not slug or not path:
+            return
+        candidate = Path(str(path))
+        bucket = roots.setdefault(slug, [])
+        if candidate not in bucket:
+            bucket.append(candidate)
+
+    for execution in sorted((state_dir / "repositories").glob("*/execution.json")):
+        try:
+            data = safe_load_json(execution)
+        except Exception:
+            continue
+        _add(data.get("repository"), data.get("target_repo"))
+
+    supervisor_dir = state_dir / "supervisor"
+    record = SupervisorStateStore(supervisor_dir).load(reconcile_restart=False) if supervisor_dir.is_dir() else None
+    target_repository = getattr(record, "target_repository", None)
+    workspace_file = getattr(record, "workspace_file", None)
+    if target_repository and Path(target_repository).is_dir() and not workspace_file:
+        _add(detect_repo_slug(target_repository), target_repository)
+    if workspace_file:
+        try:
+            from howlplane.control_plane.factory.target import Workspace
+            for repo in Workspace.from_file(workspace_file).repositories:
+                _add(repo.repository, repo.path)
+        except Exception:
+            pass
+    return roots
+
+
+def _legacy_parked_boundary(item: Any, roots: Dict[str, List[Path]]) -> Optional[Dict[str, Any]]:
+    """Boundary evidence for items parked before it was recorded on the WorkItem."""
+    from howlplane.control_plane.factory.owner_command import describe_parked_orchestration
+
+    if item.human_boundary or "awaiting_human" not in (item.admission_blocked_reason or ""):
+        return None
+    for root in roots.get(item.repository, []):
+        described = describe_parked_orchestration(Path(root) / ".task_runs" / item.work_item_id)
+        if described:
+            return described
+    return None
+
+
+def _factory_parked_entries(state_dir: Path) -> List[Dict[str, Any]]:
+    """Every WorkItem waiting on something, with its precise reason and next command."""
+    from howlplane.control_plane.factory.owner_command import PARKED_STATES, parked_reason_and_action
+    from howlplane.control_plane.factory.work_item import WorkItemStore
+
+    roots = _factory_repository_roots(state_dir)
+    entries = []
+    for item in WorkItemStore(state_dir / "work_items").list_all():
+        if item.state not in PARKED_STATES:
+            continue
+        reason, action = parked_reason_and_action(item, _legacy_parked_boundary(item, roots))
+        entries.append({
+            "work_item_id": item.work_item_id,
+            "repository": item.repository,
+            "state": str(item.state),
+            "origin": item.origin,
+            "title": item.title,
+            "blocker": item.admission_blocked_reason,
+            "reason": reason,
+            "action": action,
+            "mission_path": item.mission_path,
+            "mission_digest": item.mission_digest,
+            "human_boundary": item.human_boundary,
+        })
+    return entries
+
+
 def cmd_factory_status(args: argparse.Namespace) -> int:
     from pathlib import Path
     from howlplane.control_plane.factory.campaign import campaign_from_state_dir
@@ -2817,11 +2992,7 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
     record = store.load(reconcile_restart=False)
     work_store = WorkItemStore(Path(args.state_dir).resolve() / "work_items")
     proposal_store = RepoProposalStore(Path(args.state_dir).resolve() / "repo_proposals")
-    parked = [
-        {"work_item_id": i.work_item_id, "state": i.state, "blocker": i.admission_blocked_reason}
-        for i in work_store.list_all()
-        if i.state in (WorkItemState.AWAITING_OWNER, WorkItemState.BLOCKED, WorkItemState.DEFERRED)
-    ]
+    parked = _factory_parked_entries(Path(args.state_dir).resolve())
     proposals = [
         {"proposal_id": p.proposal_id, "repository_name": p.repository_name, "disposition": p.disposition}
         for p in proposal_store.list_awaiting_authority()
@@ -2939,16 +3110,21 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         if parked:
             print("Parked items:")
             for p in parked:
-                print(f"  - {p['work_item_id']}: {p['state']} ({p['blocker'] or 'no blocker'})")
+                print(f"  - {p['work_item_id']} ({p['repository']}): {p['state']} ({p['reason']})")
+                if p.get("action"):
+                    print(f"      run: {p['action']}")
         if proposals:
             print("Proposals awaiting authority:")
             for p in proposals:
                 print(f"  - {p['proposal_id']}: {p['repository_name']} ({p['disposition']})")
-        alerts = status.get("alerts", [])
+        alerts = [a for a in status.get("alerts", []) if not a.get("resolved_at")]
         if alerts:
             print("Active alerts:")
             for a in alerts[-5:]:
-                print(f"  - [{a.get('type')}] {a.get('message')}")
+                since = a.get("first_detected_at") or a.get("at")
+                ticks = a.get("consecutive_ticks")
+                extent = f" (since {since}, {ticks} ticks)" if ticks else ""
+                print(f"  - [{a.get('type')}]{extent} {a.get('message')}")
     return 0
 
 
@@ -2993,6 +3169,97 @@ def cmd_factory_resume(args: argparse.Namespace) -> int:
     record.stopped_reason = None
     store.save(record)
     print("Factory supervisor resumed.")
+    return 0
+
+
+def _factory_owner_state_dir(args: argparse.Namespace) -> Path:
+    campaign = _resolve_factory_campaign(args)
+    state_dir = getattr(args, "state_dir", None) or (campaign.state_dir if campaign else None)
+    if not state_dir:
+        raise ControlPlaneError("No Factory campaign found; pass --state-dir")
+    return Path(state_dir).resolve()
+
+
+def _cmd_factory_owner_decision(args: argparse.Namespace, decision: str) -> int:
+    """Shared handler for `factory approve|reject|retry`."""
+    import json
+    from howlplane.control_plane.factory.mission_authorization import MissionAuthorizationStore
+    from howlplane.control_plane.factory.owner_command import OwnerDecisionError, apply_owner_decision
+    from howlplane.control_plane.factory.owner_decision import OwnerDecisionStore
+    from howlplane.control_plane.factory.work_item import WorkItemStore
+
+    state_dir = _factory_owner_state_dir(args)
+    work_store = WorkItemStore(state_dir / "work_items")
+    try:
+        repository = work_store.load(args.work_item_id).repository
+    except Exception:
+        repository = None
+    roots = _factory_repository_roots(state_dir)
+    try:
+        summary = apply_owner_decision(
+            work_item_store=work_store,
+            owner_decision_store=OwnerDecisionStore(state_dir / "owner_decisions"),
+            mission_authorization_store=MissionAuthorizationStore(state_dir / "mission_authorizations"),
+            work_item_id=args.work_item_id,
+            decision=decision,
+            reason=getattr(args, "reason", None),
+            mission_roots=roots.get(repository or "", []),
+            operator_source="cli",
+        )
+    except OwnerDecisionError as exc:
+        if getattr(args, "json", False):
+            print(json.dumps({"error": str(exc), "work_item_id": args.work_item_id}, indent=2))
+        else:
+            print(f"Refused: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(summary, indent=2, default=str))
+        return 0
+    print(f"WorkItem {summary['work_item_id']} ({summary['repository']}): {decision}")
+    print(f"State: {summary['state']}")
+    print(f"Owner decision: {summary['owner_decision_id']}")
+    if summary.get("mission_digest") and decision == "approved":
+        print(f"Mission: {summary['mission_path']} @ {summary['mission_digest']}")
+    if summary.get("resume_orchestration_task_id"):
+        print(
+            f"Orchestration task {summary['resume_orchestration_task_id']} approved; "
+            "the Factory resumes it on its next dispatch."
+        )
+    return 0
+
+
+def cmd_factory_approve(args: argparse.Namespace) -> int:
+    """Approve an awaiting_owner Factory WorkItem."""
+    return _cmd_factory_owner_decision(args, "approved")
+
+
+def cmd_factory_reject(args: argparse.Namespace) -> int:
+    """Reject an awaiting_owner Factory WorkItem."""
+    return _cmd_factory_owner_decision(args, "rejected")
+
+
+def cmd_factory_retry(args: argparse.Namespace) -> int:
+    """Return a parked or failed Factory WorkItem to READY for a fresh governed attempt."""
+    return _cmd_factory_owner_decision(args, "retry")
+
+
+def cmd_factory_pending(args: argparse.Namespace) -> int:
+    """Read-only list of Factory WorkItems waiting on the owner or on a condition."""
+    import json
+
+    pending = _factory_parked_entries(_factory_owner_state_dir(args))
+    if getattr(args, "json", False):
+        print(json.dumps({"pending": pending}, indent=2, default=str))
+        return 0
+    print("Factory pending items\n")
+    if not pending:
+        print("Nothing is waiting.")
+    for entry in pending:
+        print(f"  - {entry['work_item_id']} ({entry['repository']}): {entry['state']} ({entry['reason']})")
+        if entry.get("mission_digest"):
+            print(f"      mission: {entry['mission_path']} @ {entry['mission_digest']}")
+        if entry.get("action"):
+            print(f"      run: {entry['action']}")
     return 0
 
 
@@ -3173,6 +3440,14 @@ def cmd_factory(args: argparse.Namespace) -> int:
             return cmd_factory_stop(args)
         if action == "resume":
             return cmd_factory_resume(args)
+        if action == "approve":
+            return cmd_factory_approve(args)
+        if action == "reject":
+            return cmd_factory_reject(args)
+        if action == "retry":
+            return cmd_factory_retry(args)
+        if action == "pending":
+            return cmd_factory_pending(args)
         if action == "start":
             return cmd_factory_start(args)
         if action == "logs":
