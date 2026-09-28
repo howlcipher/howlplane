@@ -2905,15 +2905,18 @@ def _factory_repository_roots(state_dir: Path) -> Dict[str, List[Path]]:
     persisted workspace/target, never by preparing or resolving worktrees.
     """
     from howlplane.control_plane.factory.supervisor_state import SupervisorStateStore
+    from howlplane.control_plane.factory.target import _canonical_slug
     from howlplane.control_plane.git_integration import detect_repo_slug
 
     roots: Dict[str, List[Path]] = {}
 
     def _add(slug: Optional[str], path: Any) -> None:
+        # Keyed by canonical slug: execution.json records the canonical form,
+        # while WorkItems carry the workspace's declared spelling.
         if not slug or not path:
             return
         candidate = Path(str(path))
-        bucket = roots.setdefault(slug, [])
+        bucket = roots.setdefault(_canonical_slug(slug), [])
         if candidate not in bucket:
             bucket.append(candidate)
 
@@ -2946,7 +2949,9 @@ def _legacy_parked_boundary(item: Any, roots: Dict[str, List[Path]]) -> Optional
 
     if item.human_boundary or "awaiting_human" not in (item.admission_blocked_reason or ""):
         return None
-    for root in roots.get(item.repository, []):
+    from howlplane.control_plane.factory.target import _canonical_slug
+
+    for root in roots.get(_canonical_slug(item.repository), []):
         described = describe_parked_orchestration(Path(root) / ".task_runs" / item.work_item_id)
         if described:
             return described
@@ -2958,6 +2963,9 @@ def _factory_parked_entries(state_dir: Path) -> List[Dict[str, Any]]:
     from howlplane.control_plane.factory.owner_command import PARKED_STATES, parked_reason_and_action
     from howlplane.control_plane.factory.work_item import WorkItemStore
 
+    if not (state_dir / "work_items").is_dir():
+        # Read-only: never create campaign directories just to report nothing.
+        return []
     roots = _factory_repository_roots(state_dir)
     entries = []
     for item in WorkItemStore(state_dir / "work_items").list_all():
@@ -3186,6 +3194,7 @@ def _cmd_factory_owner_decision(args: argparse.Namespace, decision: str) -> int:
     from howlplane.control_plane.factory.mission_authorization import MissionAuthorizationStore
     from howlplane.control_plane.factory.owner_command import OwnerDecisionError, apply_owner_decision
     from howlplane.control_plane.factory.owner_decision import OwnerDecisionStore
+    from howlplane.control_plane.factory.target import _canonical_slug
     from howlplane.control_plane.factory.work_item import WorkItemStore
 
     state_dir = _factory_owner_state_dir(args)
@@ -3203,7 +3212,7 @@ def _cmd_factory_owner_decision(args: argparse.Namespace, decision: str) -> int:
             work_item_id=args.work_item_id,
             decision=decision,
             reason=getattr(args, "reason", None),
-            mission_roots=roots.get(repository or "", []),
+            mission_roots=roots.get(_canonical_slug(repository or ""), []),
             operator_source="cli",
         )
     except OwnerDecisionError as exc:

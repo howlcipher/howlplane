@@ -355,6 +355,17 @@ def apply_owner_decision(
                     f"approved: {type(exc).__name__}: {exc}"
                 ) from exc
 
+    if decision == DECISION_RETRY and (item.mission_path or item.kind == "mission"):
+        # A retry re-runs content as it is now. For a mission that is only
+        # acceptable when the item is already trusted and the file still
+        # matches the digest that trust was granted for.
+        if not item.trusted_provenance or not item.mission_path:
+            raise OwnerDecisionError(
+                f"{work_item_id} is a mission whose content is not authorized; review it "
+                f"and run: howlplane factory approve {work_item_id}"
+            )
+        _mission_digest_for_approval(item, list(mission_roots or []))
+
     record = record_owner_decision(
         store=owner_decision_store,
         work_item_id=item.work_item_id,

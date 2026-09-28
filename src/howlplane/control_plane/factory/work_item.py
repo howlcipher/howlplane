@@ -420,9 +420,9 @@ class WorkItemStore(DurableObjectStore):
             new_refs = set(evidence_refs).difference(existing.evidence_refs)
             if not new_fps and not new_refs:
                 return existing
-            if existing.is_terminal or existing.state in (
-                WorkItemState.IN_PROGRESS, WorkItemState.VERIFYING,
-            ):
+            # A running item is re-evaluated after its dispatch settles; its
+            # scope must not change underneath the governed run.
+            if existing.state in (WorkItemState.IN_PROGRESS, WorkItemState.VERIFYING):
                 return existing
             existing.reopen(
                 sorted(new_refs), sorted(new_fps), reason="new evidence admitted"

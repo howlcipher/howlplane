@@ -15,7 +15,9 @@ from howlplane.control_plane.atomic_io import atomic_write_json, atomic_write_te
 from howlplane.control_plane.factory.dispatcher import DispatchOutcome, MarathonDispatcherAdapter
 from howlplane.control_plane.factory.mission_authorization import (
     AUTHORIZATION_ORIGIN_SUCCESSOR,
+    CONTENT_CHANGED,
     TRUST_SUCCESSOR,
+    UNTRUSTED_ROOT,
     MissionAuthorizationStore,
     SuccessorProvenanceStore,
     evaluate_mission_trust,
@@ -737,6 +739,23 @@ class FactorySupervisor:
         except Exception:
             return None
 
+    @staticmethod
+    def _parked_on_mission_trust(item: WorkItem) -> bool:
+        """True only when an item waits because its mission content was untrusted.
+
+        Dispatch-originated parks (authority boundaries, final-delta parks,
+        restart reconciliation) are owner decisions and are never released by
+        rediscovery, even for a trusted mission.
+        """
+        reason = item.admission_blocked_reason
+        if reason is None:
+            last = item.reopening_history[-1].get("reason", "") if item.reopening_history else ""
+            return str(last).startswith("origin=")
+        return (
+            reason in (UNTRUSTED_ROOT, CONTENT_CHANGED, "unauthorized_root_mission")
+            or reason.startswith("successor_provenance_")
+        )
+
     def _evaluate_mission_evidence(self, evidence: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Bind mission evidence to its content digest and decide its trust.
 
@@ -795,6 +814,7 @@ class FactorySupervisor:
             and existing.state == WorkItemState.AWAITING_OWNER
             and existing.mission_digest == mission_digest
             and not existing.human_boundary
+            and self._parked_on_mission_trust(existing)
         ):
             existing.trusted_provenance = True
             existing.provenance_id = provenance_id
@@ -802,21 +822,37 @@ class FactorySupervisor:
             existing.transition_to(WorkItemState.READY, reason="mission_trust_established")
             self.work_item_store.save_object(existing)
 
+        fingerprint_for_content = evidence_fingerprint_for_mission(mission_path, mission_digest)
         admitted = dict(evidence)
+        if (
+            existing is not None
+            and existing.mission_digest
+            and existing.mission_digest != mission_digest
+            and fingerprint_for_content in existing.evidence_fingerprints
+        ):
+            # The file returned to content this item already saw (e.g. an edit
+            # was reverted). Its fingerprint is not new, so without this the
+            # item would keep describing the newer, unapproved content. Treat
+            # it as new evidence so the item is re-judged on what is on disk.
+            existing.evidence_fingerprints = [
+                fp for fp in existing.evidence_fingerprints if fp != fingerprint_for_content
+            ]
+            self.work_item_store.save_object(existing)
+            admitted["_force_readmit"] = True
         admitted["trusted_provenance"] = trusted
         admitted["admission_blocked_reason"] = reason
         admitted["provenance_id"] = provenance_id
-        admitted["evidence_fingerprints"] = [
-            evidence_fingerprint_for_mission(mission_path, mission_digest)
-        ]
+        admitted["evidence_fingerprints"] = [fingerprint_for_content]
         return admitted
 
     def _handle_work_evidence(self, evidence: Dict[str, Any]) -> None:
         mission_fields: Dict[str, Any] = {}
+        force_readmit = False
         if evidence.get("mission_path"):
             evidence = self._evaluate_mission_evidence(evidence)
             if evidence is None:
                 return
+            force_readmit = bool(evidence.pop("_force_readmit", False))
             mission_fields = {
                 "mission_path": evidence["mission_path"],
                 "mission_digest": evidence.get("mission_digest"),
@@ -847,7 +883,7 @@ class FactorySupervisor:
                 evidence.get("evidence_fingerprints", [])
             ),
         }
-        if not self._is_new_decision(decision):
+        if not force_readmit and not self._is_new_decision(decision):
             # Older discovery omitted backlog detail. Fill that missing context
             # without reopening dispositions or changing a running task's scope.
             if origin == WorkItemOrigin.EXISTING_BACKLOG and evidence.get("description"):

@@ -64,6 +64,18 @@ def _write(root: Path, rel: str, text: str) -> Path:
     return path
 
 
+class CapturingDispatcher(RecordingDispatcher):
+    """Records a copy of every WorkItem exactly as it was handed to dispatch."""
+
+    def __init__(self, outcomes):
+        super().__init__(outcomes)
+        self.seen = []
+
+    def dispatch(self, work_item, dispatch_id, task_id):
+        self.seen.append(WorkItem.from_dict(work_item.to_dict()))
+        return super().dispatch(work_item, dispatch_id, task_id)
+
+
 class MissionWorld:
     """A synthetic repository checkout plus a Factory supervisor discovering it."""
 
@@ -299,14 +311,19 @@ def test_approval_refuses_content_the_owner_did_not_see(tmp_path):
     assert world.decisions.list_all() == [] and world.auth_store.list_all() == []
 
 
-def test_mission_changed_after_approval_requires_reapproval(tmp_path):
+def _approved_then_changed(tmp_path, changed_text):
+    """Mission v1 approved by the owner, then the file replaced with `changed_text`."""
     world = MissionWorld(tmp_path)
     world.put_mission("docs/MISSION_001.md", "v1\n")
     world.supervisor.tick()
     world.approve(world.item_for("docs/MISSION_001.md"))
-
-    world.put_mission("docs/MISSION_001.md", "v2 with new scope\n")
+    world.put_mission("docs/MISSION_001.md", changed_text)
     world.supervisor.tick()
+    return world
+
+
+def test_mission_changed_after_approval_requires_reapproval(tmp_path):
+    world = _approved_then_changed(tmp_path, "v2 with new scope\n")
     item = world.item_for("docs/MISSION_001.md")
     assert item.state == WorkItemState.AWAITING_OWNER
     assert item.admission_blocked_reason == CONTENT_CHANGED
@@ -449,12 +466,17 @@ def _git(repo: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def test_inspector_reads_only_files_the_merge_added(tmp_path):
+def _init_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
     _git(repo, "config", "user.email", "t@example.test")
     _git(repo, "config", "user.name", "T")
+    return repo
+
+
+def test_inspector_reads_only_files_the_merge_added(tmp_path):
+    repo = _init_repo(tmp_path)
     _write(repo, "docs/MISSION_001.md", "one\n")
     _write(repo, "docs/MISSION_FRAMEWORK.md", "framework\n")
     _git(repo, "add", "-A")
@@ -588,20 +610,13 @@ def test_approved_boundary_resumes_the_same_run_without_duplication(tmp_path):
     decision = world.decisions.load(summary["owner_decision_id"])
     assert decision.orchestration_task_id == item.work_item_id
 
-    seen = {}
-
-    class ResumeAwareDispatcher(RecordingDispatcher):
-        def dispatch(self, work_item, dispatch_id, task_id):
-            seen["resume"] = work_item.resume_orchestration_task_id
-            return super().dispatch(work_item, dispatch_id, task_id)
-
-    world.supervisor.dispatcher = ResumeAwareDispatcher([DispatchOutcome(
+    world.supervisor.dispatcher = CapturingDispatcher([DispatchOutcome(
         success=True, work_item_id=item.work_item_id,
         next_work_item_state=WorkItemState.SHIPPED, reason="governed_lifecycle_completed",
     )])
     result = world.supervisor.tick()
     assert result.selected_work_item_id == item.work_item_id
-    assert seen["resume"] == item.work_item_id
+    assert world.supervisor.dispatcher.seen[-1].resume_orchestration_task_id == item.work_item_id
 
     final = world.supervisor.work_item_store.load(item.work_item_id)
     assert final.state == WorkItemState.SHIPPED
@@ -711,3 +726,97 @@ def test_mission_without_an_identifiable_file_cannot_be_approved(tmp_path):
     with pytest.raises(OwnerDecisionError, match="Cannot identify the mission file"):
         world.approve(item)
     assert world.decisions.list_all() == [] and world.auth_store.list_all() == []
+
+
+# ---------------------------------------------------------------------------
+# Independent review findings (review of 0acafcf..863a442)
+# ---------------------------------------------------------------------------
+
+def test_dispatch_park_of_a_trusted_mission_is_never_released_by_rediscovery(tmp_path):
+    world = MissionWorld(tmp_path)
+    world.put_mission("docs/MISSION_001.md", "one\n")
+    world.supervisor.tick()
+    item = world.item_for("docs/MISSION_001.md")
+    world.approve(item)
+    world.supervisor.dispatcher.outcomes.append(DispatchOutcome(
+        success=False, work_item_id=item.work_item_id,
+        next_work_item_state=WorkItemState.AWAITING_OWNER,
+        reason="AWAITING_HUMAN_FINAL_DELTA", blocker="authority_boundary",
+        requires_authority=True, failure_code="final_delta_authority_boundary",
+    ))
+    for _ in range(5):
+        world.supervisor.tick()
+    parked = world.item_for("docs/MISSION_001.md")
+    assert world.supervisor.dispatcher.calls == [item.work_item_id]
+    assert parked.state == WorkItemState.AWAITING_OWNER
+    assert parked.admission_blocked_reason == "AWAITING_HUMAN_FINAL_DELTA"
+
+
+def test_reverting_to_approved_content_runs_exactly_that_content(tmp_path):
+    world = _approved_then_changed(tmp_path, "v2 unapproved scope\n")
+    assert world.item_for("docs/MISSION_001.md").admission_blocked_reason == CONTENT_CHANGED
+
+    world.put_mission("docs/MISSION_001.md", "v1\n")
+    world.supervisor.dispatcher = CapturingDispatcher([])
+    world.ship_next()
+    result = world.supervisor.tick()
+    assert result.selected_work_item_id == world.item_for("docs/MISSION_001.md").work_item_id
+    dispatched = world.supervisor.dispatcher.seen[-1]
+    assert (dispatched.description, dispatched.mission_digest) == ("v1\n", _digest("v1\n"))
+
+
+def test_retry_cannot_run_an_unauthorized_mission(tmp_path):
+    world = MissionWorld(tmp_path)
+    world.put_mission("docs/MISSION_001.md", "untrusted\n")
+    world.supervisor.tick()
+    item = world.item_for("docs/MISSION_001.md")
+    with pytest.raises(OwnerDecisionError, match="factory approve"):
+        world.approve(item, decision="retry")
+    assert world.item_for("docs/MISSION_001.md").state == WorkItemState.AWAITING_OWNER
+    assert world.decisions.list_all() == []
+
+
+def test_rejected_mission_is_reconsidered_when_its_content_changes(tmp_path):
+    world = MissionWorld(tmp_path)
+    world.put_mission("docs/MISSION_001.md", "v1\n")
+    world.supervisor.tick()
+    world.approve(world.item_for("docs/MISSION_001.md"), decision="rejected")
+    world.put_mission("docs/MISSION_001.md", "v2 revised after rejection\n")
+    world.supervisor.tick()
+    item = world.item_for("docs/MISSION_001.md")
+    assert item.state == WorkItemState.AWAITING_OWNER
+    assert item.description == "v2 revised after rejection\n"
+    assert item.mission_digest == _digest("v2 revised after rejection\n")
+
+
+def test_inspector_is_byte_exact_handles_root_commits_and_ignores_non_missions(tmp_path):
+    repo = _init_repo(tmp_path)
+    _git(repo, "config", "core.autocrlf", "false")
+    crlf = b"# Mission 002\r\nwindows line endings\r\n"
+    (repo / "docs").mkdir()
+    (repo / "docs/MISSION_002.md").write_bytes(crlf)
+    _write(repo, "scripts/evil.sh", "echo pwned\n")
+    _write(repo, ".dogfood/mission_state.json", json.dumps({"next_mission": "scripts/evil.sh"}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "root commit adds a successor")
+    merge_sha = _git(repo, "rev-parse", "HEAD")
+
+    found = inspect_successor_missions(repo, merge_sha, "docs/MISSION_001.md")
+    assert found == [{"mission_path": "docs/MISSION_002.md",
+                      "mission_digest": hashlib.sha256(crlf).hexdigest()}]
+    assert found[0]["mission_digest"] == compute_mission_digest(repo / "docs/MISSION_002.md")
+
+
+def test_read_only_pending_creates_nothing_and_roots_use_canonical_slugs(tmp_path):
+    from howlplane.control_plane.cli import _factory_parked_entries, _factory_repository_roots
+
+    empty = tmp_path / "empty-campaign"
+    empty.mkdir()
+    assert _factory_parked_entries(empty) == []
+    assert list(empty.iterdir()) == []
+
+    execution = tmp_path / "campaign" / "repositories" / "acme-x" / "execution.json"
+    execution.parent.mkdir(parents=True)
+    execution.write_text(json.dumps({"repository": "acme/Product", "target_repo": str(tmp_path / "managed")}))
+    roots = _factory_repository_roots(tmp_path / "campaign")
+    assert roots == {"acme/product": [tmp_path / "managed"]}

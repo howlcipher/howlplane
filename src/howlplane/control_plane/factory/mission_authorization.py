@@ -381,29 +381,29 @@ def inspect_successor_missions(
     later edit on disk cannot inherit the provenance.
     """
     import json
+    import subprocess
 
-    def _git_text(args: List[str]) -> Tuple[int, str, str]:
+    def _git(args: List[str]) -> Tuple[int, bytes, str]:
+        """Raw bytes: digests must match the file as git stores it, CRLF included."""
         if run_git is not None:
             result = run_git(args)
-            out = result.stdout
-            err = result.stderr
-            if isinstance(out, bytes):
-                out = out.decode("utf-8", "replace")
-            if isinstance(err, bytes):
-                err = err.decode("utf-8", "replace")
-            return result.returncode, out or "", err or ""
-        from howlplane.control_plane.git_env import run_git_in_repo
+        else:
+            from howlplane.control_plane.git_env import sanitized_git_env
 
-        result = run_git_in_repo(repo_root, args)
-        return result.returncode, result.stdout or "", result.stderr or ""
+            result = subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+                ["git", "-C", str(repo_root), *args],
+                capture_output=True, timeout=60, check=False, env=sanitized_git_env(),
+            )
+        out = result.stdout if isinstance(result.stdout, bytes) else (result.stdout or "").encode("utf-8")
+        err = result.stderr.decode("utf-8", "replace") if isinstance(result.stderr, bytes) else (result.stderr or "")
+        return result.returncode, out, err
 
-    diff_code, diff_out, diff_err = _git_text(
-        ["diff", "--name-status", "--no-renames", f"{merge_sha}^1", merge_sha]
-    )
-    if diff_code != 0:
-        raise RuntimeError(f"git diff for {merge_sha} failed: {diff_err.strip()}")
+    # diff-tree --root also covers a merge commit with no parent.
+    code, out, err = _git(["diff-tree", "-r", "--root", "--no-commit-id", "--name-status", "--no-renames", merge_sha])
+    if code != 0:
+        raise RuntimeError(f"git diff-tree for {merge_sha} failed: {err.strip()}")
     added = set()
-    for line in diff_out.splitlines():
+    for line in out.decode("utf-8", "replace").splitlines():
         status, _, path = line.partition("\t")
         if status.strip() == "A" and path:
             added.add(path.strip())
@@ -414,24 +414,26 @@ def inspect_successor_missions(
         number = mission_number(path)
         if number is not None and (parent_number is None or number > parent_number):
             candidates.add(path)
-    state_code, state_out, _state_err = _git_text(["show", f"{merge_sha}:.dogfood/mission_state.json"])
-    if state_code == 0:
+    code, out, _ = _git(["show", f"{merge_sha}:.dogfood/mission_state.json"])
+    if code == 0:
         try:
-            next_mission = json.loads(state_out).get("next_mission")
-        except ValueError:
+            next_mission = json.loads(out.decode("utf-8")).get("next_mission")
+        except (ValueError, UnicodeDecodeError, AttributeError):
             next_mission = None
-        if isinstance(next_mission, str) and next_mission in added:
+        # Only a recognizable mission file can inherit trust; mission_state is
+        # agent-written and must not nominate arbitrary paths.
+        if isinstance(next_mission, str) and next_mission in added and mission_number(next_mission) is not None:
             candidates.add(next_mission)
 
     successors: List[Dict[str, str]] = []
     for path in sorted(candidates):
         if path == parent_mission_path:
             continue
-        blob_code, blob_out, _blob_err = _git_text(["show", f"{merge_sha}:{path}"])
-        if blob_code != 0:
+        code, blob, _ = _git(["show", f"{merge_sha}:{path}"])
+        if code != 0:
             continue
         successors.append({
             "mission_path": path,
-            "mission_digest": compute_mission_digest_bytes(blob_out.encode("utf-8")),
+            "mission_digest": compute_mission_digest_bytes(blob),
         })
     return successors

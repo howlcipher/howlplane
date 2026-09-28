@@ -1831,6 +1831,7 @@ class MarathonDogfoodEngine:
                 attempt_baseline = None
 
             orchestrator = self._orchestrator_factory(orch_config)
+            resumed_attempt = bool(resume_task_id)
             if resume_task_id:
                 # Continue the same approved run instead of starting a new one
                 # (owner approval via `howlplane factory approve`, or a boundary
@@ -1949,8 +1950,11 @@ class MarathonDogfoodEngine:
                 record["failure_code"] = "budget_retry_baseline_not_restored"
                 return False, record
 
-            if event is None and not budget_retry:
-                # Engineering failure or authority block: do not fail over.
+            if (event is None and not budget_retry) or resumed_attempt:
+                # Engineering failure or authority block: do not fail over. A
+                # resumed run is also terminal here: failing over would start a
+                # fresh run in the same run directory, a duplicate of the work
+                # the owner approved.
                 boundary = None
                 if result.final_state == "awaiting_human" and result.run_dir:
                     from howlplane.control_plane.factory.owner_command import describe_parked_orchestration
