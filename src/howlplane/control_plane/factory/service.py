@@ -127,10 +127,29 @@ def _unit_name(campaign: FactoryCampaign) -> str:
     return f"howlplane-factory-{safe}"
 
 
-def _command(campaign: FactoryCampaign, authority_profile: Optional[str], objective: Optional[str], max_work_items: Optional[int] = None) -> list[str]:
+def _campaign_arguments(
+    target: str = "repo",
+    workspace: Optional[str] = None,
+    product_repo: Optional[str] = None,
+) -> list[str]:
+    arguments = ["--target", target]
+    if workspace:
+        arguments.extend(["--workspace", str(Path(workspace).resolve())])
+    if product_repo:
+        arguments.extend(["--product-repo", product_repo])
+    return arguments
+
+
+def _command(
+    campaign: FactoryCampaign,
+    authority_profile: Optional[str],
+    objective: Optional[str],
+    max_work_items: Optional[int] = None,
+    campaign_arguments: Optional[list[str]] = None,
+) -> list[str]:
     command = [sys.executable, "-m", "howlplane.control_plane.cli", "factory", "run",
                "--state-dir", str(campaign.state_dir), "--target-repo", str(campaign.target_dir),
-               "--target", "repo", "--resume-stopped"]
+               "--resume-stopped", *(campaign_arguments or _campaign_arguments())]
     if authority_profile:
         command.extend(["--authority-profile", authority_profile])
     if objective:
@@ -145,9 +164,24 @@ def _command(campaign: FactoryCampaign, authority_profile: Optional[str], object
     return command
 
 
-def start_process(campaign: FactoryCampaign, authority_profile: Optional[str], objective: Optional[str], max_work_items: Optional[int] = None) -> tuple[bool, FactoryProcessRecord]:
+def start_process(
+    campaign: FactoryCampaign,
+    authority_profile: Optional[str],
+    objective: Optional[str],
+    max_work_items: Optional[int] = None,
+    *,
+    target: str = "repo",
+    workspace: Optional[str] = None,
+    product_repo: Optional[str] = None,
+) -> tuple[bool, FactoryProcessRecord]:
     """Start exactly one supervisor, preferring a usable user systemd manager."""
-    command = _command(campaign, authority_profile, objective, max_work_items)
+    command = _command(
+        campaign,
+        authority_profile,
+        objective,
+        max_work_items,
+        _campaign_arguments(target, workspace, product_repo),
+    )
     launch_lock = SupervisorLock(campaign.state_dir, command="howlplane factory start")
     try:
         launch_lock.acquire()

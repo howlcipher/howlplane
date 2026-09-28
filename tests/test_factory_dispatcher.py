@@ -87,6 +87,57 @@ def test_adapter_classifies_unsuccessful_dispatch(evidence, expected_state, expe
         assert getattr(outcome, attribute) == expected
 
 
+def test_workspace_dispatch_resolves_engine_from_work_item_repository():
+    engines = {
+        "howlcipher/a": FakeEngine((True, {"target_repo": "howlcipher/a"})),
+        "howlcipher/b": FakeEngine((True, {"target_repo": "howlcipher/b"})),
+    }
+    adapter = MarathonDispatcherAdapter(
+        engine_factory=lambda: engines["howlcipher/a"],
+        work_item_engine_factory=lambda item: engines[item.repository],
+    )
+    item_a = WorkItem.create(
+        origin=WorkItemOrigin.EXISTING_BACKLOG,
+        repository="howlcipher/a",
+        title="A",
+        identity_keys=["a"],
+    )
+    item_b = WorkItem.create(
+        origin=WorkItemOrigin.EXISTING_BACKLOG,
+        repository="howlcipher/b",
+        title="B",
+        identity_keys=["b"],
+    )
+
+    assert adapter.dispatch(item_a, dispatch_id="D-A", task_id="T-A").success
+    assert adapter.dispatch(item_b, dispatch_id="D-B", task_id="T-B").success
+    assert engines["howlcipher/a"].last_work_item is item_a
+    assert engines["howlcipher/b"].last_work_item is item_b
+
+
+def test_unavailable_workspace_repository_is_parked_without_blocking_other_repositories():
+    healthy = FakeEngine((True, {"target_repo": "howlcipher/b"}))
+
+    def resolve(item):
+        if item.repository == "howlcipher/a":
+            raise ValueError("foreign unfinished session")
+        return healthy
+
+    adapter = MarathonDispatcherAdapter(
+        engine_factory=lambda: healthy,
+        work_item_engine_factory=resolve,
+    )
+    blocked = _work_item()
+    blocked.repository = "howlcipher/a"
+    unrelated = _work_item()
+    unrelated.repository = "howlcipher/b"
+
+    outcome = adapter.dispatch(blocked, dispatch_id="D-A", task_id="T-A")
+    assert outcome.next_work_item_state == WorkItemState.BLOCKED
+    assert outcome.failure_code == "workspace_target_unavailable"
+    assert adapter.dispatch(unrelated, dispatch_id="D-B", task_id="T-B").success
+
+
 def test_adapter_extracts_files_changed_from_evidence_refs():
     engine = FakeEngine((True, {"provider": "codex"}))
     adapter = MarathonDispatcherAdapter(engine_factory=lambda: engine)

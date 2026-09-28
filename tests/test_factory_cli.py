@@ -214,8 +214,8 @@ def test_factory_start_uses_zero_config_campaign_and_is_idempotent(tmp_path, mon
     set_xdg_paths(monkeypatch, tmp_path)
     calls = []
 
-    def fake_start(campaign, authority, objective):
-        calls.append((campaign, authority, objective))
+    def fake_start(campaign, authority, objective, **kwargs):
+        calls.append((campaign, authority, objective, kwargs))
         return len(calls) == 1, SimpleNamespace(backend="process")
 
     monkeypatch.setattr("howlplane.control_plane.factory.service.start_process", fake_start)
@@ -401,4 +401,37 @@ def test_factory_cli_parses_max_work_items_and_canary():
     start_args = parser.parse_args(["factory", "start", "--max-work-items", "3"])
     assert start_args.factory_action == "start"
     assert start_args.max_work_items == 3
+
+
+def test_detached_factory_command_preserves_ecosystem_configuration(tmp_path):
+    from howlplane.control_plane.factory.campaign import FactoryCampaign, RepositoryIdentity
+    from howlplane.control_plane.factory.service import _campaign_arguments, _command
+
+    workspace = tmp_path / "workspace.yaml"
+    workspace.write_text("repositories: []\n", encoding="utf-8")
+    repository = RepositoryIdentity(
+        root=tmp_path,
+        remote="https://github.com/howlcipher/howlplane.git",
+        default_branch="main",
+        commit="abc",
+        dirty=False,
+        common_git_dir=tmp_path / ".git",
+        campaign_id="campaign",
+    )
+    campaign = FactoryCampaign(repository, tmp_path / "state", tmp_path / "target")
+    command = _command(
+        campaign,
+        "strict",
+        "Improve the ecosystem",
+        campaign_arguments=_campaign_arguments(
+            target="ecosystem",
+            workspace=str(workspace),
+            product_repo="howlcipher/grocery-optimizer",
+        ),
+    )
+
+    assert command[command.index("--target") + 1] == "ecosystem"
+    assert command[command.index("--workspace") + 1] == str(workspace.resolve())
+    assert command[command.index("--product-repo") + 1] == "howlcipher/grocery-optimizer"
+    assert command[command.index("--objective") + 1] == "Improve the ecosystem"
 

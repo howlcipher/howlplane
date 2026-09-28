@@ -2476,8 +2476,8 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
             source = BacklogSource(repo_path)
             selection = source.select()
         except Exception:
-            return []
-        return [
+            selection = None
+        backlog = [
             {
                 "origin": "existing_backlog",
                 "repository": repo_name,
@@ -2490,8 +2490,38 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
                 "source_rank": _backlog_rank(item.item_id),
                 "kind": item.kind,
             }
-            for item in selection.eligible
+            for item in (selection.eligible if selection is not None else [])
         ]
+        mission_path = None
+        mission_state = repo_path / ".dogfood" / "mission_state.json"
+        if mission_state.is_file():
+            try:
+                state = safe_load_json(mission_state)
+                if state.get("status") == "READY" and state.get("next_mission"):
+                    mission_path = repo_path / state["next_mission"]
+            except Exception:
+                mission_path = None
+        if mission_path is None:
+            product_mission = repo_path / "docs" / "MISSION_001.md"
+            if product_mission.is_file():
+                heading = product_mission.read_text(encoding="utf-8", errors="replace")[:512]
+                if "Status: specification ready, implementation not started." in heading:
+                    mission_path = product_mission
+        if mission_path is not None and mission_path.is_file():
+            relative = str(mission_path.relative_to(repo_path))
+            backlog.append({
+                "origin": "owner_direction",
+                "repository": repo_name,
+                "title": mission_path.stem.replace("_", " ").title(),
+                "description": mission_path.read_text(encoding="utf-8"),
+                "identity_keys": [relative],
+                "evidence_refs": [relative],
+                "evidence_fingerprints": [f"mission:{relative}"],
+                "source_file_rank": 0,
+                "source_rank": 0,
+                "kind": "mission",
+            })
+        return backlog
 
     def _discovery():
         if target.mode == FactoryTargetMode.ECOSYSTEM:
@@ -2530,18 +2560,59 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
         )
         save_envelope(envelope, campaign_dir)
 
-    engine = MarathonDogfoodEngine(
-        provider_pool=provider_pool,
-        target_repo=target_repo,
-        repo_slug=detect_repo_slug(target_repo) or "",
-    )
-    engine.authority_envelope = envelope
-    if envelope is not None:
-        engine.git_executor = engine._git_executor_factory(
-            envelope, state_store.load().merges_count
+    def _new_engine(repository_path: Path, repository_slug: str):
+        candidate = MarathonDogfoodEngine(
+            provider_pool=provider_pool,
+            target_repo=repository_path,
+            repo_slug=repository_slug,
         )
+        candidate_envelope = envelope
+        if envelope is not None:
+            profile = get_profile(envelope.profile_id)
+            if profile.authorized_repositories and not any(
+                repository_slug == allowed or repository_slug.endswith(allowed)
+                for allowed in profile.authorized_repositories
+            ):
+                candidate_envelope = None
+        candidate.authority_envelope = candidate_envelope
+        if candidate_envelope is not None:
+            candidate.git_executor = candidate._git_executor_factory(
+                candidate_envelope, state_store.load().merges_count
+            )
+        return candidate
 
-    dispatcher = MarathonDispatcherAdapter(engine_factory=lambda: engine)
+    engine = _new_engine(target_repo, detect_repo_slug(target_repo) or "")
+    workspace_engines: Dict[str, Any] = {}
+
+    def _engine_for_work_item(work_item: Any):
+        if target.mode != FactoryTargetMode.ECOSYSTEM or target.workspace is None:
+            return engine
+        matches = [
+            repo for repo in target.workspace.repositories
+            if work_item.repository in {
+                repo.repository,
+                detect_repo_slug(repo.path) or "",
+                repo.path.name,
+                str(repo.path),
+            }
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"Workspace repository resolution for {work_item.repository!r} "
+                f"returned {len(matches)} matches"
+            )
+        repository = matches[0]
+        slug = repository.repository or detect_repo_slug(repository.path) or str(repository.path)
+        if slug not in workspace_engines:
+            from howlplane.control_plane.factory.campaign import prepare_campaign, resolve_campaign
+            isolated = prepare_campaign(resolve_campaign(repository.path))
+            workspace_engines[slug] = _new_engine(isolated.target_dir, slug)
+        return workspace_engines[slug]
+
+    dispatcher = MarathonDispatcherAdapter(
+        engine_factory=lambda: engine,
+        work_item_engine_factory=_engine_for_work_item,
+    )
 
     return FactorySupervisor(
         state_store=state_store,
@@ -2825,7 +2896,13 @@ def cmd_factory_start(args: argparse.Namespace) -> int:
     if getattr(args, "max_work_items", None) is not None:
         start_kwargs["max_work_items"] = args.max_work_items
     started, record = start_process(
-        campaign, profile, getattr(args, "objective", None), **start_kwargs
+        campaign,
+        profile,
+        getattr(args, "objective", None),
+        target=getattr(args, "target", "repo"),
+        workspace=getattr(args, "workspace", None),
+        product_repo=getattr(args, "product_repo", None),
+        **start_kwargs,
     )
     display_authority = "safe" if profile == "strict" else profile
     if getattr(args, "json", False):

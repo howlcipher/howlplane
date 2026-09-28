@@ -32,8 +32,10 @@ class MarathonDispatcherAdapter:
     def __init__(
         self,
         engine_factory: Callable[[], MarathonDogfoodEngine],
+        work_item_engine_factory: Optional[Callable[[WorkItem], MarathonDogfoodEngine]] = None,
     ):
         self._engine_factory = engine_factory
+        self._work_item_engine_factory = work_item_engine_factory
 
     @staticmethod
     def _files_changed_from_work_item(work_item: WorkItem) -> List[str]:
@@ -56,7 +58,24 @@ class MarathonDispatcherAdapter:
         task_id: str,
         run_mode: str = "continuous",
     ) -> DispatchOutcome:
-        engine = self._engine_factory()
+        try:
+            engine = (
+                self._work_item_engine_factory(work_item)
+                if self._work_item_engine_factory is not None
+                else self._engine_factory()
+            )
+        except Exception as exc:
+            return DispatchOutcome(
+                success=False,
+                work_item_id=work_item.work_item_id,
+                next_work_item_state=WorkItemState.BLOCKED,
+                reason=f"workspace_target_unavailable:{type(exc).__name__}:{exc}",
+                blocker="workspace_target_unavailable",
+                failure_class="DEPENDENCY_BLOCKED",
+                failure_code="workspace_target_unavailable",
+                task_id=task_id,
+                dispatch_id=dispatch_id,
+            )
         files_changed = self._files_changed_from_work_item(work_item)
         try:
             success, git_record = engine.execute_factory_work_item(
