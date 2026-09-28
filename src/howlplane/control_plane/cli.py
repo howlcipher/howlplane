@@ -16,6 +16,7 @@ import shlex
 import subprocess
 import sys
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from urllib.parse import urlparse
 
 _repo_root = str(Path(__file__).resolve().parents[3])
 if _repo_root not in sys.path:
@@ -2356,9 +2357,22 @@ def _required_factory_repositories(args: argparse.Namespace, campaign: Any) -> s
         slug = detect_repo_slug(repository_root) if repository_root else None
         if not slug:
             remote = str(getattr(campaign.repository, "remote", "")).rstrip("/")
-            if remote.endswith(".git"):
-                remote = remote[:-4]
-            slug = remote.split("github.com/", 1)[-1] if "github.com/" in remote else remote
+            parsed_remote = remote
+            if "://" not in parsed_remote and "@" in parsed_remote and ":" in parsed_remote:
+                user_host, path_part = parsed_remote.split(":", 1)
+                host = user_host.split("@", 1)[-1]
+                parsed_remote = f"ssh://{host}/{path_part.lstrip('/')}"
+            parsed = urlparse(parsed_remote)
+            host = (parsed.hostname or "").lower()
+            path = parsed.path.lstrip("/")
+            if path.endswith(".git"):
+                path = path[:-4]
+            if host in {"github.com", "www.github.com"} and path:
+                slug = path
+            else:
+                if remote.endswith(".git"):
+                    remote = remote[:-4]
+                slug = remote
         return {slug} if slug else set()
     workspace_path = getattr(args, "workspace", None)
     if not workspace_path:
