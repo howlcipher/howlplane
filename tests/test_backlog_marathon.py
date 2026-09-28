@@ -182,7 +182,7 @@ def test_existing_profiles_are_byte_identical():
     assert STRICT_PROFILE.allowed_action_classes == []
     assert STRICT_PROFILE.authorized_repositories == []
     assert set(CANONICAL_PROFILES) == {
-        "strict", "overnight-safe", "howlframe-overnight",
+        "strict", "overnight-safe", "howlframe-overnight", "howl-ecosystem-standard",
     }
 
 
