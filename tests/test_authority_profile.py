@@ -28,6 +28,7 @@ from howlplane.control_plane.authority_envelope import (
 from howlplane.control_plane.authority_profile import (
     CANONICAL_PROFILES,
     HOWLFRAME_OVERNIGHT_PROFILE,
+    HOWL_ECOSYSTEM_STANDARD_PROFILE,
     OVERNIGHT_SAFE_PROFILE,
     STRICT_PROFILE,
     UnknownProfileError,
@@ -356,26 +357,60 @@ def test_profiles_are_frozen_and_every_canonical_entry_is_a_module_constant():
     change, which is the point. `howlframe-overnight` was added for the first
     HowlFrame backlog marathon (issues.md marathon-readiness work).
     """
-    for profile in (STRICT_PROFILE, OVERNIGHT_SAFE_PROFILE, HOWLFRAME_OVERNIGHT_PROFILE):
+    for profile in (
+        STRICT_PROFILE,
+        OVERNIGHT_SAFE_PROFILE,
+        HOWLFRAME_OVERNIGHT_PROFILE,
+        HOWL_ECOSYSTEM_STANDARD_PROFILE,
+    ):
         with pytest.raises(Exception):  # frozen dataclass -> FrozenInstanceError
             profile.max_merges = 999999
 
     assert set(CANONICAL_PROFILES.keys()) == {
-        "strict", "overnight-safe", "howlframe-overnight",
+        "strict", "overnight-safe", "howlframe-overnight", "howl-ecosystem-standard",
     }
     assert CANONICAL_PROFILES["strict"] is STRICT_PROFILE
     assert CANONICAL_PROFILES["overnight-safe"] is OVERNIGHT_SAFE_PROFILE
     assert CANONICAL_PROFILES["howlframe-overnight"] is HOWLFRAME_OVERNIGHT_PROFILE
+    assert CANONICAL_PROFILES["howl-ecosystem-standard"] is HOWL_ECOSYSTEM_STANDARD_PROFILE
 
     # No entry may be anything other than one of those module-level constants.
     module_constants = {
         id(STRICT_PROFILE), id(OVERNIGHT_SAFE_PROFILE), id(HOWLFRAME_OVERNIGHT_PROFILE),
+        id(HOWL_ECOSYSTEM_STANDARD_PROFILE),
     }
     for profile_id, profile in CANONICAL_PROFILES.items():
         assert id(profile) in module_constants, (
             f"'{profile_id}' is not one of the module-level profile constants, so "
             f"it was constructed somewhere other than authority_profile.py"
         )
+
+
+def test_ecosystem_profile_expands_only_repository_scope():
+    assert set(HOWL_ECOSYSTEM_STANDARD_PROFILE.authorized_repositories) == {
+        "howlcipher/howl",
+        "howlcipher/howlplane",
+        "howlcipher/howlframe",
+        "howlcipher/grocery-optimizer",
+    }
+    assert HOWL_ECOSYSTEM_STANDARD_PROFILE.allowed_action_classes == OVERNIGHT_SAFE_PROFILE.allowed_action_classes
+    assert HOWL_ECOSYSTEM_STANDARD_PROFILE.denied_action_classes == OVERNIGHT_SAFE_PROFILE.denied_action_classes
+    assert HOWL_ECOSYSTEM_STANDARD_PROFILE.ttl_hours == OVERNIGHT_SAFE_PROFILE.ttl_hours
+    assert HOWL_ECOSYSTEM_STANDARD_PROFILE.max_merges == OVERNIGHT_SAFE_PROFILE.max_merges
+
+    envelope = create_envelope(HOWL_ECOSYSTEM_STANDARD_PROFILE, "ecosystem", "operator")
+    denied, _ = evaluate_action_against_envelope(
+        envelope,
+        "production_deployment",
+        "howlcipher/grocery-optimizer",
+    )
+    unknown, _ = evaluate_action_against_envelope(
+        envelope,
+        "commit_task_changes",
+        "howlcipher/other",
+    )
+    assert denied == AuthorityDecision.DENIED_BY_ENVELOPE
+    assert unknown == AuthorityDecision.OUTSIDE_ENVELOPE_SCOPE
 
 
 def test_adding_a_profile_did_not_widen_an_existing_grant():

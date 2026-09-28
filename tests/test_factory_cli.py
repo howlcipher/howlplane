@@ -94,6 +94,30 @@ class FakeSupervisor:
         self.state = SupervisorState.STOPPED
 
 
+def test_factory_status_displays_authority_repository_blocker(tmp_path, capsys):
+    from howlplane.control_plane.factory.work_item import WorkItem, WorkItemOrigin, WorkItemState, WorkItemStore
+
+    item = WorkItem.create(
+        origin=WorkItemOrigin.EXISTING_BACKLOG,
+        repository="howlcipher/grocery-optimizer",
+        title="product work",
+        identity_keys=["product"],
+    )
+    item.transition_to(WorkItemState.ADMITTED)
+    item.transition_to(WorkItemState.READY)
+    item.transition_to(WorkItemState.IN_PROGRESS)
+    item.transition_to(
+        WorkItemState.AWAITING_OWNER,
+        reason="authority_profile_does_not_cover_repository",
+    )
+    item.admission_blocked_reason = "authority_profile_does_not_cover_repository"
+    WorkItemStore(tmp_path / "work_items").save_object(item)
+
+    assert main(["factory", "status", "--state-dir", str(tmp_path)]) == 0
+
+    assert "authority_profile_does_not_cover_repository" in capsys.readouterr().out
+
+
 def test_factory_status_creates_default_state(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(
         "howlplane.control_plane.cli._build_factory_supervisor",
@@ -376,6 +400,115 @@ def test_factory_status_explicit_state_dir_wins_without_repository(tmp_path, mon
     assert campaign is not None
     assert campaign.state_dir == state_dir
     assert campaign.target_dir == target
+
+
+@pytest.mark.parametrize(
+    "repository",
+    [
+        "howlcipher/howl",
+        "howlcipher/howlplane",
+        "howlcipher/howlframe",
+        "howlcipher/grocery-optimizer",
+    ],
+)
+def test_ecosystem_work_item_dispatches_against_its_repository_target(
+    tmp_path, monkeypatch, repository
+):
+    from types import SimpleNamespace
+
+    from howlplane.control_plane.cli import _build_factory_supervisor
+    from howlplane.control_plane.factory.work_item import WorkItem, WorkItemOrigin
+    from tests.test_factory_target import _workspace_repositories
+    from tests._factory_test_helpers import set_xdg_paths
+
+    set_xdg_paths(monkeypatch, tmp_path)
+    repositories = _workspace_repositories(
+        tmp_path,
+        ["howl", "howlplane", "howlframe", "grocery-optimizer"],
+    )
+    workspace = tmp_path / "workspace.yaml"
+    workspace.write_text(
+        "repositories:\n"
+        + "".join(
+            f"  - path: {entry['path']}\n    repository: {entry['repository']}\n"
+            for entry in repositories
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeEngine:
+        def __init__(self, provider_pool, target_repo, repo_slug):
+            self.target_repo = Path(target_repo)
+            self.repo_slug = repo_slug
+            self.authority_envelope = None
+            self._git_executor_factory = lambda envelope, merges: None
+            self.git_executor = None
+
+        def execute_factory_work_item(self, item, files_changed=None, dispatch_id=None, run_mode=None):
+            return True, {"target_repo": str(self.target_repo), "repo_slug": self.repo_slug}
+
+    monkeypatch.setattr("howlplane.control_plane.synthesis.MarathonDogfoodEngine", FakeEngine)
+    monkeypatch.setattr(
+        "howlplane.control_plane.synthesis.provider_pool.ProviderPoolManager.from_config",
+        lambda probe_on_start=False: object(),
+    )
+    args = SimpleNamespace(
+        state_dir=str(tmp_path / "master-state"),
+        target_repo=str(tmp_path / "howlplane"),
+        target="ecosystem",
+        objective="Improve ecosystem",
+        workspace=str(workspace),
+        authority_profile="howl-ecosystem-standard",
+        product_repo="howlcipher/grocery-optimizer",
+        max_work_items=None,
+    )
+    supervisor = _build_factory_supervisor(args)
+    item = WorkItem.create(
+        origin=WorkItemOrigin.EXISTING_BACKLOG,
+        repository=repository,
+        title="route",
+        identity_keys=[repository],
+    )
+
+    outcome = supervisor.dispatcher.dispatch(item, "dispatch", "task")
+
+    assert outcome.success
+    assert outcome.git_record["repo_slug"] == repository
+    assert Path(outcome.git_record["target_repo"]).is_relative_to(
+        tmp_path / "data" / "howlplane" / "worktrees" / "master-state" / "repositories"
+    )
+    assert supervisor.policy.product_repository == "howlcipher/grocery-optimizer"
+
+
+def test_ecosystem_standard_authority_requires_workspace_coverage(tmp_path, monkeypatch):
+    from argparse import Namespace
+    from types import SimpleNamespace
+
+    from howlplane.control_plane.cli import _select_factory_authority
+
+    campaign = SimpleNamespace(
+        state_dir=tmp_path / "state",
+        repository=SimpleNamespace(remote="https://github.com/howlcipher/howlplane", root=tmp_path),
+    )
+    required = {
+        "howlcipher/howl",
+        "howlcipher/howlplane",
+        "howlcipher/howlframe",
+        "howlcipher/grocery-optimizer",
+    }
+    monkeypatch.setattr(
+        "howlplane.control_plane.cli._required_factory_repositories",
+        lambda args, selected_campaign: required,
+    )
+    args = Namespace(
+        authority="standard",
+        authority_profile=None,
+        target="ecosystem",
+        workspace="workspace.yaml",
+    )
+
+    assert _select_factory_authority(args, campaign) == "howl-ecosystem-standard"
+    assert args.authority_profile == "howl-ecosystem-standard"
 
 
 def test_factory_run_once_requires_explicit_noninteractive_authority(tmp_path, monkeypatch):

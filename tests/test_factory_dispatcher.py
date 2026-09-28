@@ -3,7 +3,11 @@
 
 import pytest
 
-from howlplane.control_plane.factory.dispatcher import DispatchOutcome, MarathonDispatcherAdapter
+from howlplane.control_plane.factory.dispatcher import (
+    DispatchOutcome,
+    MarathonDispatcherAdapter,
+    RepositoryAuthorityError,
+)
 from howlplane.control_plane.factory.work_item import WorkItem, WorkItemState, WorkItemOrigin
 
 
@@ -136,6 +140,30 @@ def test_unavailable_workspace_repository_is_parked_without_blocking_other_repos
     assert outcome.next_work_item_state == WorkItemState.BLOCKED
     assert outcome.failure_code == "workspace_target_unavailable"
     assert adapter.dispatch(unrelated, dispatch_id="D-B", task_id="T-B").success
+
+
+def test_repository_authority_blocker_is_explicit_and_does_not_block_other_repositories():
+    healthy = FakeEngine((True, {"target_repo": "howlcipher/howlplane"}))
+
+    def resolve(item):
+        if item.repository == "howlcipher/grocery-optimizer":
+            raise RepositoryAuthorityError(item.repository)
+        return healthy
+
+    adapter = MarathonDispatcherAdapter(
+        engine_factory=lambda: healthy,
+        work_item_engine_factory=resolve,
+    )
+    unauthorized = _work_item()
+    unauthorized.repository = "howlcipher/grocery-optimizer"
+    authorized = _work_item()
+
+    outcome = adapter.dispatch(unauthorized, dispatch_id="D-auth", task_id="T-auth")
+
+    assert outcome.next_work_item_state == WorkItemState.AWAITING_OWNER
+    assert outcome.reason == "authority_profile_does_not_cover_repository"
+    assert outcome.failure_code == "authority_profile_does_not_cover_repository"
+    assert adapter.dispatch(authorized, dispatch_id="D-ok", task_id="T-ok").success
 
 
 def test_adapter_extracts_files_changed_from_evidence_refs():

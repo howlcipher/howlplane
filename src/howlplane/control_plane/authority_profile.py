@@ -175,10 +175,30 @@ HOWLFRAME_OVERNIGHT_PROFILE = AuthorityProfile(
     local_only_iteration_limit=DEFAULT_LOCAL_ONLY_ITERATION_LIMIT,
 )
 
+HOWL_ECOSYSTEM_STANDARD_PROFILE = AuthorityProfile(
+    profile_id="howl-ecosystem-standard",
+    version="1.0",
+    ttl_hours=OVERNIGHT_SAFE_PROFILE.ttl_hours,
+    max_merges=OVERNIGHT_SAFE_PROFILE.max_merges,
+    external_spend_usd_limit=OVERNIGHT_SAFE_PROFILE.external_spend_usd_limit,
+    authorized_repositories=[
+        "howlcipher/howl",
+        "howlcipher/howlplane",
+        "howlcipher/howlframe",
+        "howlcipher/grocery-optimizer",
+    ],
+    allowed_action_classes=list(OVERNIGHT_SAFE_ALLOWED_ACTIONS),
+    denied_action_classes=list(OVERNIGHT_SAFE_DENIED_ACTIONS),
+    local_ram_threshold_gib=OVERNIGHT_SAFE_PROFILE.local_ram_threshold_gib,
+    local_keep_alive=OVERNIGHT_SAFE_PROFILE.local_keep_alive,
+    local_only_iteration_limit=DEFAULT_LOCAL_ONLY_ITERATION_LIMIT,
+)
+
 CANONICAL_PROFILES: Dict[str, AuthorityProfile] = {
     "strict": STRICT_PROFILE,
     "overnight-safe": OVERNIGHT_SAFE_PROFILE,
     "howlframe-overnight": HOWLFRAME_OVERNIGHT_PROFILE,
+    "howl-ecosystem-standard": HOWL_ECOSYSTEM_STANDARD_PROFILE,
 }
 
 

@@ -160,7 +160,9 @@ def test_authority_park_sets_awaiting_owner_and_allows_next_item(tmp_path):
     )
     parked, ready = ready_pair(supervisor.work_item_store, first_title="parked")
     supervisor.tick()
-    assert supervisor.work_item_store.load(parked.work_item_id).state == WorkItemState.AWAITING_OWNER
+    parked_item = supervisor.work_item_store.load(parked.work_item_id)
+    assert parked_item.state == WorkItemState.AWAITING_OWNER
+    assert parked_item.admission_blocked_reason == "parked_awaiting_human_authority"
     supervisor.tick()
     assert supervisor.work_item_store.load(ready.work_item_id).state == WorkItemState.SHIPPED
 

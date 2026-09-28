@@ -1666,7 +1666,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     )
     p_run_once.add_argument(
         "--authority-profile",
-        choices=["strict", "overnight-safe", "howlframe-overnight"],
+        choices=["strict", "overnight-safe", "howlframe-overnight", "howl-ecosystem-standard"],
         default=None,
         help="Bind delegated campaign authority for autonomous git/GitHub actions. "
              "Without this, authority-required work is parked rather than executed.",
@@ -1710,7 +1710,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     )
     p_run.add_argument(
         "--authority-profile",
-        choices=["strict", "overnight-safe", "howlframe-overnight"],
+        choices=["strict", "overnight-safe", "howlframe-overnight", "howl-ecosystem-standard"],
         default=None,
         help="Bind delegated campaign authority for autonomous git/GitHub actions. "
              "Without this, authority-required work is parked rather than executed.",
@@ -1752,7 +1752,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
                          help="Stop after dispatching this many distinct work items.")
     p_start.add_argument("--authority", choices=["safe", "standard", "autonomous"],
                          help="Named first-run authority choice")
-    p_start.add_argument("--authority-profile", choices=["strict", "overnight-safe", "howlframe-overnight"],
+    p_start.add_argument("--authority-profile", choices=["strict", "overnight-safe", "howlframe-overnight", "howl-ecosystem-standard"],
                          help="Existing authority profile id (advanced)")
     p_start.add_argument("--json", action="store_true", help="Output JSON result")
     _add_workspace_trust_argument(p_start)
@@ -1806,7 +1806,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     )
     p_canary.add_argument(
         "--authority-profile",
-        choices=["strict", "overnight-safe", "howlframe-overnight"],
+        choices=["strict", "overnight-safe", "howlframe-overnight", "howl-ecosystem-standard"],
         default=None,
         help="Bind delegated campaign authority for autonomous git/GitHub actions.",
     )
@@ -1900,7 +1900,7 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
     )
     p_marathon.add_argument(
         "--authority-profile", required=True,
-        choices=["strict", "overnight-safe", "howlframe-overnight"],
+        choices=["strict", "overnight-safe", "howlframe-overnight", "howl-ecosystem-standard"],
         help="Delegated campaign authority. Required -- there is no default; an "
              "operator must explicitly authorize exactly the actions it encodes.",
     )
@@ -2337,6 +2337,29 @@ def _resolve_factory_campaign(
     return campaign
 
 
+def _required_factory_repositories(args: argparse.Namespace, campaign: Any) -> set[str]:
+    if getattr(args, "target", "repo") != "ecosystem":
+        from howlplane.control_plane.git_integration import detect_repo_slug
+        repository_root = getattr(campaign.repository, "root", None)
+        slug = detect_repo_slug(repository_root) if repository_root else None
+        if not slug:
+            remote = str(getattr(campaign.repository, "remote", "")).rstrip("/")
+            if remote.endswith(".git"):
+                remote = remote[:-4]
+            slug = remote.split("github.com/", 1)[-1] if "github.com/" in remote else remote
+        return {slug} if slug else set()
+    workspace_path = getattr(args, "workspace", None)
+    if not workspace_path:
+        raise ValueError("Ecosystem authority selection requires --workspace")
+    from howlplane.control_plane.factory.target import Workspace, WorkspaceRepositoryResolver
+    resolver = WorkspaceRepositoryResolver(
+        Workspace.from_file(workspace_path),
+        campaign.repository.campaign_id,
+        campaign.state_dir,
+    )
+    return {repository.slug for repository in resolver.repositories}
+
+
 def _select_factory_authority(args: argparse.Namespace, campaign: Any) -> Optional[str]:
     """Obtain explicit first-run authority without inventing a new policy model."""
     from howlplane.control_plane.authority_envelope import ENVELOPE_FILENAME, load_envelope
@@ -2350,22 +2373,21 @@ def _select_factory_authority(args: argparse.Namespace, campaign: Any) -> Option
     requested = getattr(args, "authority_profile", None)
     choice = getattr(args, "authority", None)
     if choice:
-        remote = campaign.repository.remote
-        # Resolve only profiles already approved for this exact repository.
-        # `strict` is intentionally universal but loses to any repository grant.
+        required_repositories = _required_factory_repositories(args, campaign)
         compatible = [
             profile for profile in CANONICAL_PROFILES.values()
             if not profile.authorized_repositories
-            or any(remote.endswith(repository) for repository in profile.authorized_repositories)
+            or required_repositories.issubset(set(profile.authorized_repositories))
         ]
         delegated = [profile for profile in compatible if profile.authorized_repositories]
-        # Explicit, auditable ordering of already-granted authority. This does
-        # not construct or broaden a profile.
         strongest = max(
             delegated or compatible,
             key=lambda profile: (
-                len(profile.allowed_action_classes), profile.max_merges,
-                profile.ttl_hours, profile.profile_id,
+                -len(set(profile.authorized_repositories) - required_repositories),
+                len(profile.allowed_action_classes),
+                profile.max_merges,
+                profile.ttl_hours,
+                profile.profile_id,
             ),
             default=None,
         )
@@ -2452,11 +2474,16 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
     )
     from howlplane.control_plane.authority_profile import get_profile
     from howlplane.control_plane.backlog_source import BacklogSource
-    from howlplane.control_plane.factory.dispatcher import MarathonDispatcherAdapter
+    from howlplane.control_plane.factory.dispatcher import MarathonDispatcherAdapter, RepositoryAuthorityError
     from howlplane.control_plane.factory.repo_proposal import CapabilityStore, RepoProposalStore
     from howlplane.control_plane.factory.supervisor import FactorySupervisor
     from howlplane.control_plane.factory.supervisor_state import SupervisorStateRecord, SupervisorStateStore
-    from howlplane.control_plane.factory.target import FactoryTarget, FactoryTargetMode, Workspace
+    from howlplane.control_plane.factory.target import (
+        FactoryTarget,
+        FactoryTargetMode,
+        Workspace,
+        WorkspaceRepositoryResolver,
+    )
     from howlplane.control_plane.factory.work_item import WorkItemStore
     from howlplane.control_plane.git_integration import detect_repo_slug
     from howlplane.control_plane.synthesis import MarathonDogfoodEngine
@@ -2480,6 +2507,16 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
     )
     if target.mode == FactoryTargetMode.SELF:
         target.ensure_isolated_self_target()
+    workspace_resolver = None
+    if target.mode == FactoryTargetMode.ECOSYSTEM:
+        if target.workspace is None:
+            raise ValueError("Ecosystem mode requires a workspace")
+        workspace_resolver = WorkspaceRepositoryResolver(
+            target.workspace,
+            state_dir.name,
+            state_dir,
+        )
+        workspace_resolver.prepare_all()
 
     # Persist campaign objective and target metadata so they survive restart.
     state_record = state_store.load()
@@ -2578,13 +2615,6 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
             repo_slug=repository_slug,
         )
         candidate_envelope = envelope
-        if envelope is not None:
-            profile = get_profile(envelope.profile_id)
-            if profile.authorized_repositories and not any(
-                repository_slug == allowed or repository_slug.endswith(allowed)
-                for allowed in profile.authorized_repositories
-            ):
-                candidate_envelope = None
         candidate.authority_envelope = candidate_envelope
         if candidate_envelope is not None:
             candidate.git_executor = candidate._git_executor_factory(
@@ -2596,28 +2626,14 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
     workspace_engines: Dict[str, Any] = {}
 
     def _engine_for_work_item(work_item: Any):
-        if target.mode != FactoryTargetMode.ECOSYSTEM or target.workspace is None:
+        if target.mode != FactoryTargetMode.ECOSYSTEM or workspace_resolver is None:
             return engine
-        matches = [
-            repo for repo in target.workspace.repositories
-            if work_item.repository in {
-                repo.repository,
-                detect_repo_slug(repo.path) or "",
-                repo.path.name,
-                str(repo.path),
-            }
-        ]
-        if len(matches) != 1:
-            raise ValueError(
-                f"Workspace repository resolution for {work_item.repository!r} "
-                f"returned {len(matches)} matches"
-            )
-        repository = matches[0]
-        slug = repository.repository or detect_repo_slug(repository.path) or str(repository.path)
+        repository_target = workspace_resolver.resolve(work_item.repository)
+        slug = repository_target.slug
+        if envelope is not None and slug not in envelope.authorized_repositories:
+            raise RepositoryAuthorityError(slug)
         if slug not in workspace_engines:
-            from howlplane.control_plane.factory.campaign import prepare_campaign, resolve_campaign
-            isolated = prepare_campaign(resolve_campaign(repository.path))
-            workspace_engines[slug] = _new_engine(isolated.target_dir, slug)
+            workspace_engines[slug] = _new_engine(repository_target.target_dir, slug)
         return workspace_engines[slug]
 
     dispatcher = MarathonDispatcherAdapter(
@@ -2780,15 +2796,30 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         from howlplane.control_plane.factory.service import process_status
         from howlplane.control_plane.authority_envelope import ENVELOPE_FILENAME, load_envelope
         profile = None
+        authorized_repositories = []
         envelope_dir = campaign.state_dir / "campaign"
         if (envelope_dir / ENVELOPE_FILENAME).is_file():
-            profile = load_envelope(envelope_dir).profile_id
+            authority_envelope = load_envelope(envelope_dir)
+            profile = authority_envelope.profile_id
+            authorized_repositories = list(authority_envelope.authorized_repositories)
+        required_repositories = []
+        if record.target_mode == "ecosystem" and record.workspace_file:
+            from howlplane.control_plane.factory.target import Workspace
+            required_repositories = [repo.repository for repo in Workspace.from_file(record.workspace_file).repositories]
         display_authority = "safe" if profile == "strict" else profile
+        covered_repositories = sorted(set(required_repositories) & set(authorized_repositories))
         status.update({
             "campaign_id": campaign.repository.campaign_id,
             "project": campaign.repository.remote or campaign.repository.root.name,
             "worktree": str(campaign.target_dir),
             "authority": display_authority or "not configured",
+            "authorized_repositories": authorized_repositories,
+            "required_repositories": required_repositories,
+            "authority_repository_coverage": {
+                "covered": len(covered_repositories),
+                "required": len(required_repositories),
+                "repositories": covered_repositories,
+            },
             "process": process_status(campaign),
         })
     if getattr(args, "json", False):
@@ -2801,6 +2832,12 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
             print(f"Process: {status['process']}")
             print(f"Target: isolated worktree ({status['worktree']})")
             print(f"Authority: {status['authority']}")
+            coverage = status.get("authority_repository_coverage", {})
+            if coverage.get("required"):
+                print(
+                    "Authorized repositories: "
+                    f"{coverage.get('covered', 0)}/{coverage['required']}"
+                )
         print(f"State: {status['state']}")
         run_mode = status.get("run_mode", "continuous")
         print(f"Run mode: {run_mode}")

@@ -26,6 +26,10 @@ class DispatchOutcome:
     attempt: int = 1
 
 
+class RepositoryAuthorityError(ValueError):
+    """Raised when campaign authority does not cover a work item's repository."""
+
+
 class MarathonDispatcherAdapter:
     """Routes a factory WorkItem through MarathonDogfoodEngine's governed path."""
 
@@ -63,6 +67,19 @@ class MarathonDispatcherAdapter:
                 self._work_item_engine_factory(work_item)
                 if self._work_item_engine_factory is not None
                 else self._engine_factory()
+            )
+        except RepositoryAuthorityError:
+            return DispatchOutcome(
+                success=False,
+                work_item_id=work_item.work_item_id,
+                next_work_item_state=WorkItemState.AWAITING_OWNER,
+                reason="authority_profile_does_not_cover_repository",
+                blocker="authority_profile_does_not_cover_repository",
+                requires_authority=True,
+                failure_class="AUTHORITY_BLOCKED",
+                failure_code="authority_profile_does_not_cover_repository",
+                task_id=task_id,
+                dispatch_id=dispatch_id,
             )
         except Exception as exc:
             return DispatchOutcome(
