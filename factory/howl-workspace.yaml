@@ -1,0 +1,69 @@
+# HowlPlane Factory workspace for the four-repository continuous improvement campaign.
+#
+# Schema: howlplane.factory.workspace/v1 (parsed by Workspace.from_file).
+# This workspace declares the portfolio repositories, their roles, and the
+# cross-repository dependency map used by the Factory supervisor when selecting
+# the next justified work item.
+#
+# NOTE: All local paths are absolute and were verified at setup time. If a
+# repository is moved, update this file and re-run Factory preparation.
+
+objective: >-
+  Continuously develop Grocery Optimizer while improving the Howl ecosystem,
+  HowlPlane, and HowlFrame when evidence shows platform work has greater value
+  or is blocking product delivery.
+
+repositories:
+  - path: /run/media/system/tallgeese/dev/howl
+    repository: howlcipher/howl
+    roles:
+      - ecosystem
+      - integration
+    priority_hint: 1.0
+
+  - path: /run/media/system/tallgeese/dev/howlplane
+    repository: howlcipher/howlplane
+    roles:
+      - control-plane
+      - orchestration
+    priority_hint: 1.0
+
+  - path: /run/media/system/tallgeese/dev/howlframe
+    repository: howlcipher/howlframe
+    roles:
+      - governance
+      - execution-boundary
+    priority_hint: 1.0
+
+  - path: /run/media/system/tallgeese/dev/grocery-optimizer
+    repository: howlcipher/grocery-optimizer
+    roles:
+      - product
+      - consumer-application
+    priority_hint: 1.0
+
+# Cross-repository blocking relationships. These are advisory inputs to
+# prioritization; the Factory still requires evidence before selecting work.
+dependencies:
+  - "howlcipher/grocery-optimizer blocked by howlcipher/howlplane: orchestration defect or provider exhaustion prevents product mission progress"
+  - "howlcipher/howlplane blocked by howlcipher/howlframe: authorization, hashing, TTL, or execution-boundary semantics need strengthening"
+  - "howlcipher/howlplane blocked by howlcipher/howl: shared lifecycle, schema, or contract mismatch between ecosystem components"
+  - "howlcipher/howlframe blocked by howlcipher/howl: shared schema or interoperability contract mismatch"
+  - "when platform capability is sufficient, howlcipher/grocery-optimizer should progress"
+
+# Neutral priority hints unless repository evidence supports a different value.
+# Product repository is identified separately via --product-repo so the portfolio
+# anti-starvation policy can weight it correctly.
+priority_hints:
+  howlcipher/howl: 1.0
+  howlcipher/howlplane: 1.0
+  howlcipher/howlframe: 1.0
+  howlcipher/grocery-optimizer: 1.0
+
+# No global verification commands; each repository supplies its own CI/test
+# commands through its mission specification and project context.
+verification_commands: []
+
+# No additional authority constraints beyond the Factory authority envelope
+# selected at campaign start.
+authority_constraints: []
