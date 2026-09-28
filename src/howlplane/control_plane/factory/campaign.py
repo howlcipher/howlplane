@@ -345,8 +345,12 @@ def _validate_metadata(campaign: FactoryCampaign) -> None:
     except Exception as exc:
         raise CampaignError(f"Campaign metadata is unreadable: {exc}") from exc
     expected = _metadata(campaign)
-    for key in ("schema", "campaign_id", "repository_root", "remote", "source_common_git_dir", "target_repo"):
+    for key in ("schema", "campaign_id", "remote"):
         if data.get(key) != expected[key]:
+            raise CampaignError("Campaign metadata does not belong to this repository; refusing cross-project reuse")
+    for key in ("repository_root", "source_common_git_dir", "target_repo"):
+        value = data.get(key)
+        if not value or Path(value).expanduser().resolve() != Path(expected[key]).expanduser().resolve():
             raise CampaignError("Campaign metadata does not belong to this repository; refusing cross-project reuse")
 
 

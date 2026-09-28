@@ -4,6 +4,9 @@ test_factory_target.py
 Unit tests for the generalized Factory target/workspace abstraction.
 """
 
+import json
+import subprocess
+
 import pytest
 import yaml
 
@@ -13,6 +16,16 @@ from howlplane.control_plane.factory.target import (
     Workspace,
 )
 from tests._factory_test_helpers import make_git_repo, set_xdg_paths
+
+
+def _set_symlinked_xdg_home(tmp_path, monkeypatch):
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    linked_home = tmp_path / "linked-home"
+    linked_home.symlink_to(real_home, target_is_directory=True)
+    monkeypatch.setenv("XDG_STATE_HOME", str(linked_home / "state"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(linked_home / "data"))
+    return real_home, linked_home
 
 
 def test_factory_target_repo_mode_does_not_require_isolation(tmp_path):
@@ -132,17 +145,37 @@ def test_campaign_allows_symlink_above_factory_owned_root(tmp_path, monkeypatch)
     from howlplane.control_plane.factory.campaign import resolve_campaign
 
     repo = make_git_repo(tmp_path)
-    real_home = tmp_path / "real-home"
-    real_home.mkdir()
-    linked_home = tmp_path / "linked-home"
-    linked_home.symlink_to(real_home, target_is_directory=True)
-    monkeypatch.setenv("XDG_STATE_HOME", str(linked_home / "state"))
-    monkeypatch.setenv("XDG_DATA_HOME", str(linked_home / "data"))
+    real_home, _ = _set_symlinked_xdg_home(tmp_path, monkeypatch)
 
     campaign = resolve_campaign(repo)
 
     assert campaign.state_dir.is_relative_to(real_home)
     assert campaign.target_dir.is_relative_to(real_home)
+
+
+def test_campaign_metadata_accepts_equivalent_symlinked_path_spelling(tmp_path, monkeypatch):
+    from howlplane.control_plane.factory.campaign import prepare_campaign, resolve_campaign
+
+    repo = make_git_repo(tmp_path)
+    real_home, linked_home = _set_symlinked_xdg_home(tmp_path, monkeypatch)
+    campaign = resolve_campaign(repo)
+    campaign.state_dir.mkdir(parents=True)
+    linked_target = linked_home / campaign.target_dir.relative_to(real_home)
+    campaign.metadata_path.write_text(
+        json.dumps({
+            "schema": "howlplane.factory.campaign/v1",
+            "campaign_id": campaign.repository.campaign_id,
+            "repository_root": str(campaign.repository.root),
+            "remote": campaign.repository.remote,
+            "source_common_git_dir": str(campaign.repository.common_git_dir),
+            "target_repo": str(linked_target),
+        }),
+        encoding="utf-8",
+    )
+
+    prepared = prepare_campaign(campaign)
+
+    assert prepared.target_dir.is_dir()
 
 
 def test_campaign_refuses_symlink_below_factory_owned_root(tmp_path, monkeypatch):
@@ -172,3 +205,85 @@ def test_campaign_identity_distinguishes_same_basename_repositories(tmp_path, mo
     second = make_git_repo(second_root, name="same")
     set_xdg_paths(monkeypatch, tmp_path)
     assert resolve_campaign(first).repository.campaign_id != resolve_campaign(second).repository.campaign_id
+
+
+def _workspace_repositories(tmp_path, names):
+    repositories = []
+    for name in names:
+        repo = make_git_repo(tmp_path, name=name)
+        slug = f"howlcipher/{name}"
+        subprocess.run(
+            ["git", "remote", "add", "origin", f"https://github.com/{slug}.git"],
+            cwd=repo,
+            check=True,
+        )
+        repositories.append({"path": str(repo), "repository": slug})
+    return repositories
+
+
+def test_workspace_resolver_prepares_distinct_repository_targets_and_metadata(tmp_path, monkeypatch):
+    from howlplane.control_plane.factory.target import Workspace, WorkspaceRepositoryResolver
+
+    set_xdg_paths(monkeypatch, tmp_path)
+    repositories = _workspace_repositories(
+        tmp_path,
+        ["howl", "howlplane", "howlframe", "grocery-optimizer"],
+    )
+    resolver = WorkspaceRepositoryResolver(
+        Workspace.from_dict({"repositories": repositories}),
+        "master-campaign",
+        tmp_path / "master-state",
+    )
+
+    prepared = resolver.prepare_all()
+
+    assert len({target.slug for target in prepared}) == 4
+    assert len({target.target_dir for target in prepared}) == 4
+    assert len({target.identity.common_git_dir for target in prepared}) == 4
+    for target in prepared:
+        metadata = json.loads(target.metadata_path.read_text(encoding="utf-8"))
+        assert metadata["master_campaign_id"] == "master-campaign"
+        assert metadata["repository"] == target.slug
+        assert metadata["source_common_git_dir"] == str(target.identity.common_git_dir)
+        assert target.target_dir != target.identity.root
+
+
+def test_workspace_resolver_restart_reconstructs_same_targets(tmp_path, monkeypatch):
+    from howlplane.control_plane.factory.target import Workspace, WorkspaceRepositoryResolver
+
+    set_xdg_paths(monkeypatch, tmp_path)
+    workspace = Workspace.from_dict({"repositories": _workspace_repositories(tmp_path, ["howl", "howlplane"])})
+    first = WorkspaceRepositoryResolver(workspace, "master-campaign", tmp_path / "master-state")
+    first.prepare_all()
+    second = WorkspaceRepositoryResolver(workspace, "master-campaign", tmp_path / "master-state")
+    second.prepare_all()
+
+    assert {target.slug: target.target_dir for target in first.repositories} == {
+        target.slug: target.target_dir for target in second.repositories
+    }
+
+
+def test_workspace_resolver_rejects_unknown_and_mismatched_git_identity(tmp_path, monkeypatch):
+    from howlplane.control_plane.factory.target import (
+        Workspace,
+        WorkspaceRepositoryResolver,
+        WorkspaceResolutionError,
+    )
+
+    set_xdg_paths(monkeypatch, tmp_path)
+    repositories = _workspace_repositories(tmp_path, ["howl"])
+    resolver = WorkspaceRepositoryResolver(
+        Workspace.from_dict({"repositories": repositories}),
+        "master-campaign",
+        tmp_path / "master-state",
+    )
+    with pytest.raises(WorkspaceResolutionError, match="Unknown workspace repository"):
+        resolver.resolve("howlcipher/not-in-workspace")
+
+    repositories[0]["repository"] = "howlcipher/howlframe"
+    with pytest.raises(WorkspaceResolutionError, match="identity mismatch"):
+        WorkspaceRepositoryResolver(
+            Workspace.from_dict({"repositories": repositories}),
+            "master-campaign",
+            tmp_path / "other-state",
+        )
