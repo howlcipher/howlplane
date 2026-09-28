@@ -17,6 +17,7 @@ client_secret.json
 !examples/runs/*.json
 !dogfood/historical-reasoning-evidence/runs/*.json
 !tests/fixtures/*.json
+!.dogfood/mission_state.json
 
 # Generated skills index is tracked
 !.agents/skills.json
