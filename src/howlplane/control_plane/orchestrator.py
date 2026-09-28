@@ -3306,6 +3306,29 @@ class GovernedTaskOrchestrator:
                 and not self.config.custom_reviewer_fn
                 and not getattr(cycle_res, "independent_review_satisfied", True)
             ):
+                if current_delta.is_empty and self.config.provider_pool is not None:
+                    # Nothing was implemented, so there is nothing for a human
+                    # to authorize in place of the missing independent review.
+                    # Parking here is what stranded WI-howlplane-6a668797bb32f9a2
+                    # awaiting an approval that could only ship an empty change.
+                    return self._fail_task(
+                        task_spec,
+                        run_dir,
+                        (
+                            f"{IMPLEMENTATION_NO_CHANGES}: implementation produced no "
+                            "task-attributable changes and independent review was unavailable"
+                        ),
+                        start_time,
+                        agent_id=final_impl_resource_id or routing.selected_agent_id,
+                        progress_tracker=progress,
+                        routing=routing,
+                        initial_delta=initial_delta,
+                        current_delta=current_delta,
+                        review_cycles=review_cycles,
+                        provider_execution=impl_res,
+                        failure_class=FAILURE_CLASS_ENGINEERING,
+                        implementation_attempts=implementation_attempts,
+                    )
                 triggers: List[str] = ["independent_review_unavailable"]
                 if cycle_res.non_independent_roles:
                     triggers.append("non_independent_review")

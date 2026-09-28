@@ -1389,7 +1389,6 @@ class FactorySupervisor:
                         message=capped_alert,
                         now_iso=now_iso,
                         details={
-                            "condition_key": "reasons=" + ",".join(reasons) + ";items=" + ",".join(withheld_ids),
                             "consecutive_ticks": self._consecutive_capped_ticks,
                             "withheld_count": len(selection.withheld),
                             "reasons": reasons,

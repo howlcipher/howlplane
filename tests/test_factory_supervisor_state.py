@@ -94,3 +94,29 @@ def test_malformed_state_loads_fail_closed(tmp_path, contents, expected_substrin
     assert record.state == SupervisorState.STOPPED
     assert record.stopped_reason == "malformed_state"
     assert expected_substring in (record.last_error or "").lower()
+
+
+def test_one_active_alert_per_condition_even_as_details_change():
+    from howlplane.control_plane.factory.supervisor_state import SupervisorStateRecord
+
+    record = SupervisorStateRecord(supervisor_id="s")
+    # Two identical legacy alerts, as older builds appended every tick.
+    record.alerts = [
+        {"type": "capped_candidates_deadlock", "message": "old 5", "at": "t0", "details": {}},
+        {"type": "capped_candidates_deadlock", "message": "old 6", "at": "t1", "details": {}},
+    ]
+    record.record_alert("capped_candidates_deadlock", "18 capped, 933 ticks", "t2",
+                        details={"withheld_count": 18, "reasons": ["non_product_repository_cap"]})
+    record.record_alert("capped_candidates_deadlock", "17 capped, 934 ticks", "t3",
+                        details={"withheld_count": 17, "reasons": ["self_improvement_cap"]})
+
+    [alert] = record.active_alerts()
+    assert alert["first_detected_at"] == "t0" and alert["last_detected_at"] == "t3"
+    assert alert["message"] == "17 capped, 934 ticks"
+    assert alert["details"]["withheld_count"] == 17
+
+    record.clear_alerts("capped_candidates_deadlock", "t4")
+    assert record.active_alerts() == []
+    assert [a["resolved_at"] for a in record.alerts] == ["t4"]
+    record.clear_alerts("capped_candidates_deadlock", "t5")
+    assert [a["resolved_at"] for a in record.alerts] == ["t4"]

@@ -179,14 +179,23 @@ def test_independent_review_unavailable_detected_in_cycle(tmp_path: Path):
 
 def test_orchestrator_stage5_parks_when_independent_review_unavailable(tmp_path: Path):
     """When preserve_independent_review is True and independent review fails, Stage 5 parks with awaiting_human."""
+    res, _pool = _park_scenario(tmp_path, {
+        "success": True,
+        # A real change: rewriting feature.py with its existing content is
+        # an empty delta, which fails instead of parking.
+        "side_effect": lambda _task, cwd, _prompt: (cwd / "src" / "feature.py").write_text(
+            "def run():\n    # implemented\n    return True\n", encoding="utf-8"
+        ),
+    }, "T-PARK-01")
+
+    assert res.final_state == "awaiting_human"
+    assert "independent review unavailable" in res.error_message.lower()
+
+
+def _park_scenario(tmp_path: Path, impl_behavior: Dict[str, Any], task_id: str):
     repo = init_minimal_python_repo(tmp_path / "repo")
     resolver = _FakeBackendResolver({
-        "g_impl": {
-            "success": True,
-            "side_effect": lambda _task, cwd, _prompt: (cwd / "src" / "feature.py").write_text(
-                "def run():\n    return True\n", encoding="utf-8"
-            ),
-        },
+        "g_impl": impl_behavior,
         "g_rev": {"success": True, "stdout": "findings: []\n"},
     })
     pool = _make_pool(
@@ -194,7 +203,7 @@ def test_orchestrator_stage5_parks_when_independent_review_unavailable(tmp_path:
         resolver=resolver,
     )
     task = TaskSpec(
-        task_id="T-PARK-01",
+        task_id=task_id,
         repository="test_repo",
         objective="Implement feature",
         acceptance_criteria=["Works"],
@@ -207,11 +216,37 @@ def test_orchestrator_stage5_parks_when_independent_review_unavailable(tmp_path:
         enable_howlframe_audit=False,
         preserve_independent_review=True,
     )
-    orch = GovernedTaskOrchestrator(target_repo=repo, config=config)
-    res = orch.run(task)
+    return GovernedTaskOrchestrator(target_repo=repo, config=config).run(task), pool
 
-    assert res.final_state == "awaiting_human"
-    assert "independent review unavailable" in res.error_message.lower()
+
+def test_empty_implementation_fails_instead_of_parking_for_unavailable_review(tmp_path: Path):
+    """WI-howlplane-6a668797bb32f9a2: an implementation that changed nothing,
+    followed by an independent review that could not complete, parked awaiting a
+    human who could only approve an empty change. It must fail instead, with a
+    stable reason, and without a decision packet."""
+    res, pool = _park_scenario(tmp_path, {"success": True}, "T-EMPTY-01")
+
+    assert res.final_state == "failed"
+    assert "implementation_no_changes" in res.error_message
+    assert not (Path(res.run_dir) / "decision_packet.md").exists()
+    assert pool.get_resource_status("g_impl").status == ProviderAvailabilityStatus.AVAILABLE
+
+
+def test_provider_reporting_it_could_not_write_is_not_a_successful_implementation(tmp_path: Path):
+    """Codex exited 0 saying `.agents` was read-only. That attempt is an unusable
+    invocation, recorded as such, and never marks the provider exhausted."""
+    res, pool = _park_scenario(tmp_path, {
+        "success": True,
+        "stdout": "I couldn't apply the requested edits: `.agents` is mounted read-only. "
+                  "The working tree is unchanged.",
+    }, "T-EMPTY-02")
+
+    assert res.final_state == "failed"
+    first = res.implementation_attempts[0]
+    assert (first["resource_id"], first["failure_class"]) == ("g_impl", "PROVIDER_STALLED")
+    assert pool.get_resource_status("g_impl").status == ProviderAvailabilityStatus.AVAILABLE
+    assert "implementation_no_changes" in res.error_message
+    assert not (Path(res.run_dir) / "decision_packet.md").exists()
 
 
 def test_bounded_remediation_timeout_ceiling():

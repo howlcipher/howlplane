@@ -323,6 +323,13 @@ def apply_owner_decision(
         recovered = _mission_path_from_item(item)
         if recovered:
             item.mission_path = recovered
+        elif item.kind == "mission":
+            # Every mission approval is bound to exact content; a mission whose
+            # file cannot be identified has no content to bind to.
+            raise OwnerDecisionError(
+                f"Cannot identify the mission file for {work_item_id}; wait for the "
+                "Factory to rediscover it, then approve the rediscovered item"
+            )
     if decision == DECISION_APPROVED:
         if item.mission_path:
             mission_digest = _mission_digest_for_approval(item, list(mission_roots or []))

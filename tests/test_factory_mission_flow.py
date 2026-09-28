@@ -668,3 +668,46 @@ def test_product_mission_awaiting_owner_does_not_freeze_the_portfolio(tmp_path):
     world.approve(mission)
     world.ship_next()
     assert world.supervisor.tick().selected_work_item_id == mission.work_item_id
+
+
+# ---------------------------------------------------------------------------
+# Legacy items admitted before mission_path/digest were recorded (the four
+# Mission 001 items in campaign 626fbc7d... look like this).
+# ---------------------------------------------------------------------------
+
+def _legacy_mission_item(world, rel, kind="mission"):
+    item = WorkItem.create(
+        origin=WorkItemOrigin.OWNER_DIRECTION, repository=PRODUCT, title="Mission 001",
+        identity_keys=[rel], evidence_refs=[rel], evidence_fingerprints=[f"mission:{rel}"], kind=kind,
+    )
+    item.transition_to(WorkItemState.ADMITTED)
+    item.transition_to(WorkItemState.AWAITING_OWNER, reason="origin=owner_direction ambiguous=True trusted=False")
+    world.supervisor.work_item_store.save_object(item)
+    return item
+
+
+def test_legacy_mission_approval_binds_to_the_content_on_disk_and_then_runs(tmp_path):
+    world = MissionWorld(tmp_path)
+    _write(world.root, "docs/MISSION_001.md", "legacy mission\n")
+    item = _legacy_mission_item(world, "docs/MISSION_001.md")
+    assert parked_reason_and_action(item) == (UNTRUSTED_ROOT, f"howlplane factory approve {item.work_item_id}")
+
+    summary = world.approve(item)
+    assert (summary["mission_path"], summary["mission_digest"]) == (
+        "docs/MISSION_001.md", _digest("legacy mission\n"),
+    )
+    [auth] = world.auth_store.list_all()
+    assert auth.mission_digest == _digest("legacy mission\n")
+
+    # Rediscovery with the digest-bound fingerprint keeps it trusted and runs it.
+    world.missions = {"docs/MISSION_001.md": "legacy mission\n"}
+    world.ship_next()
+    assert world.supervisor.tick().selected_work_item_id == item.work_item_id
+
+
+def test_mission_without_an_identifiable_file_cannot_be_approved(tmp_path):
+    world = MissionWorld(tmp_path)
+    item = _legacy_mission_item(world, "notes/plan.md")
+    with pytest.raises(OwnerDecisionError, match="Cannot identify the mission file"):
+        world.approve(item)
+    assert world.decisions.list_all() == [] and world.auth_store.list_all() == []
