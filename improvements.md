@@ -29,8 +29,15 @@ Scores apply to Pending rows only; Done, Closed, and Merged rows show `—`.
 
 **Last groomed 2026-08-11:** re-verified all five remaining Pending rows live against current code; none has shipped since the last groom (items 42/43/44/46/50 closed out other rows in the interim but share no theme with the surviving Pending set, so no decay changes applied). Scores recomputed and unchanged: 51 (1.3), 45 and 48 (1.25 each), 49 (1.2), all above the floor and correctly ordered. Item 47 (narrow the blanket `*.json` ignore), the fourth instance of the already-shipped tracked-artifact-hygiene theme (items 2, 3, 35), remained below the 0.5 floor with no concrete recurrence since filing; surfaced to the user, who confirmed closing it. Two unrelated untracked scratch files at the repo root (`coverage_output.txt`, `job_log.txt`, leftover from a past manual test/CI run) were found and deleted. No stale task journals existed to clean.
 
+**Filed 2026-09-29 (not a groom):** rows 70 through 74 are the seat-poll near-term sequence in `documentation/journals/2026-09-29_team_howlplane_backlog.md`. They sit above the older library-hygiene Pending rows because each step unblocks the next. Scores on rows 61 through 69 were not recomputed. Hard nos from that poll are constraints inside the new detail sections, not extra rows.
+
 | # | Improvement | Status | Score (V×D÷E) | Claude model | Gemini model | ROI rationale |
 | --- | --- | --- | --- | --- | --- | --- |
+| 70 | [Host publish to E2E dogfood of the remote snapshot](#70-host-publish-to-e2e-dogfood-of-the-remote-snapshot) | Pending | 4.0 (8×1.0÷2) | Sonnet 5 | Gemini 3.7 Flash | Sequence 1 of 5. Owner on tallgeese commits the redacted snapshot; Board shows live status and Pending; one remote validate/format-check dry-run. Workers do not publish, take the lock, or start a campaign |
+| 71 | [Lock the remote snapshot contract](#71-lock-the-remote-snapshot-contract) | Pending | 2.0 (6×1.0÷3) | Sonnet 5 | Gemini 3.7 Flash | Sequence 2 of 5. Lock version, redaction, stale and SNAPSHOT_ABSENT, and tip SHA/path on howlplane.factory.status/v1, plus optional safe Board fields. Depends on 70 |
+| 72 | [Lock Pending admit evidence to the same identity](#72-lock-pending-admit-evidence-to-the-same-identity) | Pending | 2.0 (6×1.0÷3) | Sonnet 5 | Gemini 3.7 Flash | Sequence 3 of 5. Same row id and schema from Board preview through one admit path and thin validate/format-check evidence in Git. No second admit path and no supervisor lock |
+| 73 | [Keep Board the default work surface on the locked contract](#73-keep-board-the-default-work-surface-on-the-locked-contract) | Pending | 1.5 (6×1.0÷4) | Sonnet 5 | Gemini 3.7 Flash | Sequence 4 of 5. Board owns the work surface. Plane keeps the locked read contract for campaign, blockers, OWNER_REQUIRED, and Pending to mission. Do not build that UI in this repo |
+| 74 | [Prove publish cadence and snapshot freshness](#74-prove-publish-cadence-and-snapshot-freshness) | Pending | 1.0 (4×1.0÷4) | Sonnet 5 | Gemini 3.7 Flash | Sequence 5 of 5. Document the publish smoke and optional --arm-periodic only after the supervisor is running Plane #123. The freshness proof is the acceptance |
 | 61 | [Encode Test Impact Assessment in the verification and completion prompts](#61-encode-test-impact-assessment-in-the-verification-and-completion-prompts) | Pending | 2.0 (4×1.0÷2) | Sonnet 5 | Gemini 3.7 Flash | The Continuous Test Governance policy landed in AGENTS.md, two skills, one rule, and `work_next_item`, but not in `verify_change.md` or `ship_check.md` — the two prompts that actually own final verification and completion authority, which is where the policy says the TIA record and full regression gate belong |
 | 62 | [Give the anti-append-only test policy an actual mechanism](#62-give-the-anti-append-only-test-policy-an-actual-mechanism) | Pending | 1.5 (6×1.0÷4) | Sonnet 5 | Gemini 3.7 Flash | "Treat tests as production infrastructure, not an append-only ledger" is prose only: no TIA field in `schemas/evidence-entry.schema.json`, no duplicate-contract detection, no `ship_check` gate. The milestone that introduced the policy shipped a duplicate test itself |
 | 63 | [Resolve the contradictory coverage guidance across skills](#63-resolve-the-contradictory-coverage-guidance-across-skills) | Pending | 3.0 (3×1.0÷1) | Haiku 4.5 | Gemini 3.7 Flash | `test_and_verify/SKILL.md` still mandates "strict project coverage thresholds" while `quality_assurance` was rewritten to treat coverage as signal only; `defensive_debugging` and the `improvements.md` Working Protocol still point at the old stance and at an unconditional `make test` |
@@ -808,3 +815,55 @@ During the independent review of the Continuous Test Governance milestone, the f
 
 ### 69. Untrack the .coverage artifact
 `.coverage` appears at `.gitignore:40`, but the file was committed before that entry existed and `.gitignore` does not apply to already-tracked files. The result is that every `make coverage-python` or `make test-coverage` run leaves a modified binary artifact in the working tree. Two concrete consequences observed on 2026-09-02: `git status` is never clean after a coverage run, so a genuine unstaged change is easy to miss when staging; and `scripts/select_relevant_tests.py` reports `Conservative fallback: yes (uncertain impact: .coverage)` instead of naming the real trigger (`Makefile`, `tests/conftest.py`, or `.github/workflows/`), which undercuts the selector's explainability. Fix with `git rm --cached .coverage`. This is the fifth instance of the tracked-artifact-hygiene theme (items 2, 3, 35, 47), but unlike item 47 it has a concrete, reproducible recurrence. While here, consider having the selector prefer a `full_suite_trigger` path over an "uncertain impact" path when reporting its reason, since the trigger is the more informative explanation. Found during the independent review of the Continuous Test Governance milestone, 2026-09-02.
+
+### 70. Host publish to E2E dogfood of the remote snapshot
+HOWL-011 (Plane #123) can publish a redacted snapshot and can admit an exact `Pending` row. Tallgeese has not committed `factory/status/remote-snapshot.json`, so remote readers still have no live file. Board can already project status and a Pending preview once that file is in Git. The poll's first step is to prove that loop once, not to change the publisher.
+
+**Owner step, not a worker step.** From the Factory host checkout on tallgeese, the Owner runs `howlplane factory status --publish` and commits `factory/status/remote-snapshot.json`. A worker that finds the file absent parks `OWNER_REQUIRED` and stops. Workers do not publish from another checkout.
+
+**Deterministic acceptance:**
+- Git on the host checkout contains `factory/status/remote-snapshot.json`, and the dogfood note records that commit's tip SHA.
+- Board (or an equivalent Git clone) shows that file's status and Pending preview, and the projected tip matches the committed file.
+- One remote role runs a validate/format-check dry-run of the existing thin admit helper against one Pending row and records the result in Git. `admit --from-pending` is the seat's name for that helper; it is not a command in this tree as of 2026-09-29. Adding it belongs to row 72. This row only records one dry-run on the path that already exists.
+
+**Constraints (not separate rows):** no second Factory, including in the Grok cloud; no supervisor lock; no `factory start`; no trusted `owner_direction`; leave Plane pull request #122 alone; no second admit path. Full synthesis: `documentation/journals/2026-09-29_team_howlplane_backlog.md`.
+
+### 71. Lock the remote snapshot contract
+Readers currently depend on prose in `factory/REMOTE_OBSERVATION.md` and on schema `howlplane.factory.status/v1`. The poll asked to lock that contract before Board treats it as the default work surface. A missing file is "status unknown" today. The writer has no `SNAPSHOT_ABSENT` token. Tip SHA and snapshot path are not fields in the v1 document.
+
+**Lock these:**
+- Schema version, so a reader can reject a shape it does not know.
+- The redaction rules already implemented: tokens, cookies, absolute host paths, and raw task output stay out of the file.
+- Stale versus absent. Name the absent case `SNAPSHOT_ABSENT` (or one closed equivalent) so a missing file is not rendered as a live supervisor.
+- Tip SHA and path of the snapshot commit, so Board can show that it is projecting the Git tip and not a side channel.
+- Optional safe fields the Board surface needs: `campaign_id` is already in v1; add last-publish time if the proof in row 70 shows the current fields are not enough. Do not add workspace paths, command lines, provider inventory, or raw task output.
+
+**Deterministic acceptance:** the contract doc and the schema name the same version, redaction, stale/absent, and tip rules, and a reader with only the Git file can tell fresh, stale, and absent apart. Depends on row 70 having a real snapshot to lock against. Same constraints as row 70. Envelope binding and a richer ChangeOps signature story stay deferred until this tip-lock is proven.
+
+### 72. Lock Pending admit evidence to the same identity
+Board's Pending preview and the admit dry-run must name the same row. Today admission is "an exact `Pending` cell in `issues.md`, `bugs.md`, or `improvements.md`," discovered by `BacklogSource`. There is no `admit --from-pending` command in this tree. The seats still want one thin helper that validate/format-checks a row before anyone treats it as admitted work, and they want the result reconstructable from Git: who, which row, what the check returned.
+
+**Deterministic acceptance:**
+- One row id is identical in the backlog file, in the Board preview (or the snapshot's Pending projection), and in the validate/format-check evidence.
+- That evidence records who ran the check and the result, and a later reader can rebuild it from Git without the Factory state directory.
+- There is still one admit path. Thin CLI helpers may validate or format-check. They may not introduce a second queue, take the supervisor lock, start a campaign, or write trusted `owner_direction`.
+- CLI output stays JSON-first.
+
+Depends on row 71 so the ids and schema being compared are the locked ones. Same hard constraints as row 70.
+
+### 73. Keep Board the default work surface on the locked contract
+Once the snapshot contract is locked, the default place to see the campaign, blockers (`OWNER_REQUIRED`, `BLOCKED`, `DEFERRED`), and the step from a Pending row to a mission is Board. That surface is Board's. This repository does not implement it.
+
+**Plane's obligation:** the locked read contract from row 71 is sufficient for those views. If a safe field is missing, add it under row 71's rules (no paths, no command lines, no raw task output). Write the ownership split down next to the contract so a later change does not grow a second status UI here.
+
+**Deterministic acceptance:** a short ownership note states that Board renders campaign, blockers, and Pending-to-mission, and that Plane supplies the Git snapshot and the single admit path. No Board UI, no second Factory, and no supervisor changes land in this row. Depends on row 71.
+
+### 74. Prove publish cadence and snapshot freshness
+`--arm-periodic` already records `status_publish.path` so a supervisor restarted onto the #123 code refreshes the snapshot after each tick and after `run-once`. An already-running supervisor keeps its old code until that restart. One-shot `--publish` works without the restart. None of that has a freshness proof against a supervisor that is actually on #123, and the smoke is not written down as an operator checklist.
+
+**Deterministic acceptance:**
+- An ops note lists the smoke: one-shot `--publish` from the host, commit of `factory/status/remote-snapshot.json`, and how a remote reader detects stale versus `SNAPSHOT_ABSENT`.
+- The periodic path is documented as optional, and it is armed only after the host supervisor is running the #123 build. Arming does not start a campaign and does not take the lock by itself; say that explicitly so an operator does not "help" by running `factory start`.
+- The proof records the tip SHA before and after one refresh and shows the snapshot moved with that tip.
+
+Depends on rows 70 and 71. Same hard constraints as row 70. Effort on the poll was S for the ops note and M for the proof; the score uses the proof.
