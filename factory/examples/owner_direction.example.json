@@ -1,9 +1,0 @@
-{
-  "schema": "howlplane.factory.owner_direction/v1",
-  "id": "HOWL-011-example",
-  "title": "Example remote direction",
-  "goal": "Describe one bounded change. Copy this file to factory/owner_direction/<id>.json in a repository the live Factory already discovers. The supervisor admits it as untrusted owner direction and parks it for the Owner.",
-  "constraints": [
-    "Do not weaken authority, approvals, or HowlFrame boundaries."
-  ]
-}

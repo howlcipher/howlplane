@@ -1,9 +1,9 @@
 # Example ranked backlog row
 
-This file is not `bugs.md` or `improvements.md`, so Factory discovery does not
-read it. Copy the row into the live `## Ranked Backlog` table of `bugs.md` or
-`improvements.md` in a repository the campaign already watches. The status cell
-must be exactly `Pending`.
+This file is not `bugs.md`, `issues.md`, or `improvements.md`, so Factory
+discovery does not read it. Copy the row into the live `## Ranked Backlog`
+table of one of those files in a repository the campaign already watches.
+The status cell must be exactly `Pending`.
 
 ## Ranked Backlog
 
@@ -15,6 +15,6 @@ must be exactly `Pending`.
 
 Symptom: operators who are not on the Factory host cannot see campaign state.
 
-Deterministic acceptance: `.dogfood/factory-status.json` contains `campaign_id`,
+Deterministic acceptance: `factory/status/remote-snapshot.json` contains `campaign_id`,
 `state`, `current_dispatch`, blockers, `last_tick_at`, and `last_error`, and
 the file contains no tokens or absolute host home paths.

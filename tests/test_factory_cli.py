@@ -94,6 +94,47 @@ class FakeSupervisor:
         self.state = SupervisorState.STOPPED
 
 
+def test_factory_status_publish_writes_default_snapshot(tmp_path, capsys, monkeypatch):
+    """One-shot publish reads persisted state and does not start a campaign."""
+    state = tmp_path / "state"
+    store = SupervisorStateStore(state / "supervisor")
+    record = store.load()
+    record.last_error = "token=ghp_" + ("c" * 36)
+    record.recent_completed.append({"output": "SECRET_TASK_OUTPUT"})
+    record.recent_parked.append({"note": "raw parked transcript"})
+    store.save(record)
+    state_path = state / "supervisor" / "factory_supervisor.json"
+    original = state_path.read_bytes()
+    checkout = tmp_path / "checkout"
+    dogfood = checkout / ".dogfood"
+    dogfood.mkdir(parents=True)
+    (dogfood / "mission_state.json").write_text(
+        json.dumps({"campaign_id": "2026-09-27-continuous-improvement"}),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(checkout)
+    code = main(["factory", "status", "--state-dir", str(state), "--publish", "--json"])
+    captured = capsys.readouterr()
+    assert code == 0
+    assert state_path.read_bytes() == original
+    status = json.loads(captured.out)
+    assert status["current_dispatch_id"] is None
+    assert "SECRET_TASK_OUTPUT" in captured.out
+    snapshot_path = checkout / "factory" / "status" / "remote-snapshot.json"
+    published = snapshot_path.read_text(encoding="utf-8")
+    snapshot = json.loads(published)
+    assert snapshot["schema"] == "howlplane.factory.status/v1"
+    assert snapshot["current_dispatch"] == "idle"
+    assert snapshot["mission_campaign_id"] == "2026-09-27-continuous-improvement"
+    assert snapshot["state"] == record.state
+    assert "SECRET_TASK_OUTPUT" not in published
+    assert "raw parked transcript" not in published
+    assert "ghp_" not in published
+    assert "recent_completed" not in snapshot
+    assert "Published redacted status:" in captured.err
+    assert not (state / "campaign" / "process.json").exists()
+
+
 def test_factory_status_creates_default_state(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(
         "howlplane.control_plane.cli._build_factory_supervisor",

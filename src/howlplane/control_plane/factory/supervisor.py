@@ -623,16 +623,6 @@ class FactorySupervisor:
         """Reload persisted state so external stop commands are visible."""
         self._state_record = self.state_store.load()
 
-    def _owner_direction_evidence(self) -> List[Dict[str, Any]]:
-        """Admit committed direction files. They cannot mark themselves trusted."""
-        try:
-            from howlplane.control_plane.factory.owner_direction import (
-                collect_for_supervisor_record,
-            )
-            return collect_for_supervisor_record(self._state_record)
-        except Exception:
-            return []
-
     def _maybe_publish_status(self) -> None:
         """Refresh an armed redacted snapshot. Failures never stop the supervisor."""
         try:
@@ -730,9 +720,7 @@ class FactorySupervisor:
         )
 
     def _ingest_discovered(self) -> None:
-        discovered = list(self.discovery())
-        discovered.extend(self._owner_direction_evidence())
-        for evidence in discovered:
+        for evidence in self.discovery():
             self._state_record.observations_consumed += 1
             if evidence.get("capability_need"):
                 self._handle_capability_need(evidence)

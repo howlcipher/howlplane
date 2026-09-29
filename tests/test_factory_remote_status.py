@@ -1,27 +1,25 @@
 #!/usr/bin/env python3
-"""Redacted Factory status publish and untrusted owner-direction admission."""
+"""Redacted Factory status publish and ranked-backlog admission."""
 
 import json
 from pathlib import Path
 
 import pytest
 
+from howlplane.control_plane.backlog_source import BacklogSource, source_file_rank
 from howlplane.control_plane.cli import main
-from howlplane.control_plane.factory.owner_direction import (
-    OWNER_DIRECTION_SCHEMA,
-    discover_owner_directions,
-)
 from howlplane.control_plane.factory.status_publish import (
     STATUS_SCHEMA,
     arm_periodic_publish,
     build_redacted_status,
+    default_publish_path,
     publish_status,
     read_armed_publish_path,
+    read_mission_campaign_id,
     redact_text,
 )
 from howlplane.control_plane.factory.supervisor_state import SupervisorStateStore
 from howlplane.control_plane.factory.task_queue import load_queue
-from howlplane.control_plane.factory.work_item import WorkItemOrigin, WorkItemState
 from tests._factory_test_helpers import make_supervisor
 
 
@@ -30,23 +28,6 @@ GITHUB_TOKEN = "ghp_" + ("a" * 36)
 BEARER = "Bearer " + ("b" * 24)
 HOME_PATH = "/home/alice/dev/howlplane"
 HOST_PATH = "/run/media/system/tallgeese/dev/howlplane"
-
-
-def _direction(direction_id="remote-1", **extra):
-    payload = {
-        "schema": OWNER_DIRECTION_SCHEMA,
-        "id": direction_id,
-        "title": "Observe the campaign",
-        "goal": "Report blockers without starting a second Factory.",
-    }
-    payload.update(extra)
-    return payload
-
-
-def _write_direction(repo: Path, name: str, payload: dict) -> None:
-    inbox = repo / "factory" / "owner_direction"
-    inbox.mkdir(parents=True, exist_ok=True)
-    (inbox / name).write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_redact_text_strips_tokens_cookies_and_host_paths():
@@ -90,6 +71,9 @@ def test_redacted_snapshot_shape_omits_private_status_fields():
         "target_repository": HOST_PATH,
         "provider_inventory": [{"token": GITHUB_TOKEN}],
         "process": {"command": ["howlplane", "--token", GITHUB_TOKEN]},
+        "recent_completed": [{"output": "SECRET_TASK_OUTPUT " + GITHUB_TOKEN}],
+        "recent_failed": [{"stderr": "failed " + HOME_PATH}],
+        "recent_parked": [{"note": "parked raw transcript"}],
         "parked_items": [{
             "work_item_id": "WI-parked",
             "state": "awaiting_owner",
@@ -114,11 +98,16 @@ def test_redacted_snapshot_shape_omits_private_status_fields():
     assert snapshot["owner_required"] is True
     assert snapshot["last_tick_at"] == "2026-09-29T00:00:00+00:00"
     assert GITHUB_TOKEN not in blob
+    assert "SECRET_TASK_OUTPUT" not in blob
+    assert "raw transcript" not in blob
     assert "tallgeese" not in blob
     assert "/home/" not in blob
     assert "workspace_file" not in snapshot
     assert "provider_inventory" not in snapshot
     assert "worktree" not in snapshot
+    assert "recent_completed" not in snapshot
+    assert "recent_failed" not in snapshot
+    assert "recent_parked" not in snapshot
     classes = {item["class"] for item in snapshot["blockers"]}
     assert "OWNER_REQUIRED" in classes
     assert any(item.get("work_item_id") == "WI-parked" for item in snapshot["blockers"])
@@ -135,6 +124,24 @@ def test_idle_dispatch_and_waiting_for_authority_are_owner_visible():
     assert snapshot["campaign_id"] is None
     assert snapshot["owner_required"] is True
     assert snapshot["blockers"][0]["class"] == "OWNER_REQUIRED"
+
+
+def test_default_publish_path_is_the_factory_status_snapshot(tmp_path):
+    path = default_publish_path(tmp_path)
+    assert path == tmp_path / "factory" / "status" / "remote-snapshot.json"
+
+
+def test_mission_id_is_found_from_the_factory_status_directory(tmp_path):
+    checkout = tmp_path / "checkout"
+    snapshot = checkout / "factory" / "status" / "remote-snapshot.json"
+    snapshot.parent.mkdir(parents=True)
+    dogfood = checkout / ".dogfood"
+    dogfood.mkdir()
+    (dogfood / "mission_state.json").write_text(
+        json.dumps({"campaign_id": "2026-09-27-continuous-improvement"}),
+        encoding="utf-8",
+    )
+    assert read_mission_campaign_id(snapshot) == "2026-09-27-continuous-improvement"
 
 
 def test_publish_refuses_state_directory_and_keeps_private_error(tmp_path):
@@ -161,6 +168,7 @@ def test_status_publish_does_not_rewrite_supervisor_state(tmp_path, capsys):
     record = store.load()
     record.last_error = "Authorization: " + BEARER + " token=" + GITHUB_TOKEN
     record.objective = "work in " + HOME_PATH
+    record.recent_completed.append({"output": "SECRET_TASK_OUTPUT"})
     store.save(record)
     state_path = state / "supervisor" / "factory_supervisor.json"
     original = state_path.read_bytes()
@@ -177,7 +185,7 @@ def test_status_publish_does_not_rewrite_supervisor_state(tmp_path, capsys):
     assert GITHUB_TOKEN in state_path.read_text(encoding="utf-8")
     published = dest.read_text(encoding="utf-8")
     assert GITHUB_TOKEN not in published
-    assert "supersecret" not in published
+    assert "SECRET_TASK_OUTPUT" not in published
     assert "/home/alice" not in published
     snapshot = json.loads(published)
     assert snapshot["schema"] == STATUS_SCHEMA
@@ -202,12 +210,14 @@ def test_run_once_refreshes_armed_snapshot_without_leaking_state(tmp_path):
     state = tmp_path / "state"
     supervisor, _now, _sleeps = make_supervisor(tmp_path, state_dir=state)
     supervisor.state_record.last_error = "Cookie: session=" + ("d" * 24)
+    supervisor.state_record.recent_failed.append({"stderr": "RAW_FAILURE_OUTPUT"})
     supervisor._persist()
     dest = tmp_path / "pub" / "factory-status.json"
     arm_periodic_publish(state, dest)
     supervisor.run_once()
     published = dest.read_text(encoding="utf-8")
     assert "d" * 24 not in published
+    assert "RAW_FAILURE_OUTPUT" not in published
     assert json.loads(published)["schema"] == STATUS_SCHEMA
     private = (state / "supervisor" / "factory_supervisor.json").read_text(encoding="utf-8")
     assert "d" * 24 in private
@@ -224,109 +234,44 @@ def test_publish_failure_does_not_fail_the_supervisor_tick(tmp_path):
     assert not (blocker / "factory-status.json").exists()
 
 
-def test_owner_direction_file_cannot_trust_itself(tmp_path):
+def test_issues_md_pending_row_is_the_admit_path(tmp_path):
     repo = tmp_path / "repo"
-    _write_direction(repo, "remote-1.json", _direction(trusted_provenance=True, trusted=True))
-    _write_direction(repo, "skip.example.json", _direction("skipped"))
-    _write_direction(repo, "bad.json", {"schema": "nope"})
-    found = discover_owner_directions(repo, "howlcipher/howlplane")
-    assert len(found) == 1
-    assert found[0]["origin"] == "owner_direction"
-    assert found[0]["trusted_provenance"] is False
-    assert found[0]["repository"] == "howlcipher/howlplane"
-    assert found[0]["identity_keys"] == ["factory/owner_direction", "remote-1"]
-
-
-def test_owner_direction_skips_repository_mismatch(tmp_path):
-    repo = tmp_path / "repo"
-    _write_direction(
-        repo, "other.json", _direction("other", repository="howlcipher/other")
-    )
-    assert discover_owner_directions(repo, "howlcipher/howlplane") == []
-
-
-def test_owner_direction_skips_symlinks(tmp_path):
-    repo = tmp_path / "repo"
-    outside = tmp_path / "outside.json"
-    outside.write_text(json.dumps(_direction("linked")), encoding="utf-8")
-    inbox = repo / "factory" / "owner_direction"
-    inbox.mkdir(parents=True, exist_ok=True)
-    link = inbox / "linked.json"
-    try:
-        link.symlink_to(outside)
-    except OSError:
-        pytest.skip("symlink unsupported")
-    assert discover_owner_directions(repo, "howlcipher/howlplane") == []
-
-
-def test_supervisor_parks_owner_direction_and_still_readies_backlog(tmp_path):
-    repo = tmp_path / "repo"
-    _write_direction(repo, "remote-1.json", _direction(trusted_provenance=True))
-    state = tmp_path / "state"
-    supervisor, _now, _sleeps = make_supervisor(
-        tmp_path,
-        state_dir=state,
-        discovery=lambda: [{
-            "origin": "existing_backlog",
-            "repository": "howlcipher/howlplane",
-            "title": "bug",
-            "identity_keys": ["bugs.md", "1"],
-            "evidence_refs": ["bugs.md#1"],
-            "evidence_fingerprints": ["backlog:bugs.md:1"],
-            "source_file_rank": 0,
-            "source_rank": 1,
-            "kind": "bug",
-        }],
-    )
-    supervisor.state_record.target_repository = str(repo)
-    supervisor._persist()
-    supervisor.tick()
-    items = {item.origin: item for item in supervisor.work_item_store.list_all()}
-    assert items[WorkItemOrigin.OWNER_DIRECTION].state == WorkItemState.AWAITING_OWNER
-    assert items[WorkItemOrigin.EXISTING_BACKLOG].state in (
-        WorkItemState.READY, WorkItemState.SHIPPED,
-    )
-
-
-def test_workspace_file_discovers_direction_in_declared_repo(tmp_path):
-    repo = tmp_path / "repo"
-    _write_direction(repo, "remote-2.json", _direction("remote-2"))
-    workspace = tmp_path / "workspace.yaml"
-    workspace.write_text(
-        'repositories:\n  - path: "%s"\n    repository: howlcipher/howlplane\n' % repo.as_posix(),
+    repo.mkdir()
+    (repo / "issues.md").write_text(
+        "\n".join([
+            "## Ranked Backlog",
+            "| # | Title | Status | Score | Rationale |",
+            "| --- | --- | --- | --- | --- |",
+            "| 7 | [Live bug](#7) | Pending | 2.0 | open |",
+            "| 8 | [Blocked](#8) | Pending — blocked on #1 | 2.0 | wait |",
+        ]),
         encoding="utf-8",
     )
-    state = tmp_path / "state"
-    supervisor, _now, _sleeps = make_supervisor(tmp_path, state_dir=state)
-    supervisor.state_record.workspace_file = str(workspace)
-    supervisor._persist()
-    supervisor.tick()
-    item = supervisor.work_item_store.list_all()[0]
-    assert item.origin == WorkItemOrigin.OWNER_DIRECTION
-    assert item.state == WorkItemState.AWAITING_OWNER
-    assert item.repository == "howlcipher/howlplane"
-
-
-def test_committed_examples_match_the_admit_contracts(tmp_path):
-    example = ROOT / "factory" / "examples" / "owner_direction.example.json"
-    payload = json.loads(example.read_text(encoding="utf-8"))
-    assert payload["schema"] == OWNER_DIRECTION_SCHEMA
-    repo = tmp_path / "repo"
-    inbox = repo / "factory" / "owner_direction"
-    inbox.mkdir(parents=True)
-    (inbox / example.name).write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
-    assert discover_owner_directions(repo, "howlcipher/howlplane") == []
-    (inbox / "HOWL-011-example.json").write_text(
-        example.read_text(encoding="utf-8"), encoding="utf-8"
+    (repo / "improvements.md").write_text(
+        "\n".join([
+            "## Ranked Backlog",
+            "| # | Title | Status | Score | Rationale |",
+            "| --- | --- | --- | --- | --- |",
+            "| 3 | [Live improvement](#3) | Pending | 1.5 | open |",
+        ]),
+        encoding="utf-8",
     )
-    found = discover_owner_directions(repo, "howlcipher/howlplane")
-    assert len(found) == 1
-    assert found[0]["trusted_provenance"] is False
-    assert found[0]["identity_keys"][1] == "HOWL-011-example"
+    selection = BacklogSource(repo).select()
+    assert selection.files_read == ["issues.md", "improvements.md"]
+    assert [item.item_id for item in selection.eligible] == ["7", "3"]
+    bug, improvement = selection.eligible
+    assert bug.kind == "bug"
+    assert improvement.kind == "improvement"
+    assert source_file_rank(bug) == 0
+    assert source_file_rank(improvement) == 1
+    assert all(item.status == "Pending" for item in selection.eligible)
+
+
+def test_committed_examples_match_the_admit_contracts():
     tasks = load_queue(
         ROOT / "factory" / "examples" / "factory-queue.example.json", ROOT
     )
     assert [task.status for task in tasks] == ["PROPOSED"]
-    assert (ROOT / "factory" / "examples" / "ranked-backlog-row.md").name not in {
-        "bugs.md", "improvements.md",
-    }
+    example = ROOT / "factory" / "examples" / "ranked-backlog-row.md"
+    assert example.name not in {"bugs.md", "issues.md", "improvements.md"}
+    assert "Pending" in example.read_text(encoding="utf-8")

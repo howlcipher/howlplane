@@ -18,7 +18,7 @@ from howlplane.control_plane.atomic_io import atomic_write_text
 
 
 STATUS_SCHEMA = "howlplane.factory.status/v1"
-DEFAULT_RELATIVE_PATH = Path(".dogfood") / "factory-status.json"
+DEFAULT_RELATIVE_PATH = Path("factory") / "status" / "remote-snapshot.json"
 MARKER_NAME = "status_publish.path"
 OWNER_REQUIRED = "OWNER_REQUIRED"
 _MAX_TEXT = 500
@@ -155,16 +155,19 @@ def build_redacted_status(
 
 
 def read_mission_campaign_id(publish_path: Union[str, Path]) -> Optional[str]:
-    """Read the org campaign id from a sibling mission_state file, if present."""
-    path = Path(publish_path)
-    candidates = []
-    if path.parent.name == ".dogfood":
-        candidates.append(path.parent / "mission_state.json")
-    candidates.append(path.parent / ".dogfood" / "mission_state.json")
-    for candidate in candidates:
-        mission_id = _mission_id_in(candidate)
-        if mission_id is not None:
-            return mission_id
+    """Read the org campaign id from `.dogfood/mission_state.json` above the snapshot."""
+    current = Path(publish_path).parent
+    for _ in range(8):
+        for candidate in (
+            current / "mission_state.json",
+            current / ".dogfood" / "mission_state.json",
+        ):
+            mission_id = _mission_id_in(candidate)
+            if mission_id is not None:
+                return mission_id
+        if current.parent == current:
+            break
+        current = current.parent
     return None
 
 

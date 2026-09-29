@@ -3,7 +3,7 @@
 backlog_source.py
 
 Read-only selection of the next eligible item from a project's ranked markdown
-backlogs (`bugs.md` and `improvements.md`).
+backlogs (`bugs.md`, `issues.md`, and `improvements.md`).
 
 This is the implementation behind the `select_next_evidence_backed_task`
 authority action, which existed only as a string literal in
@@ -45,9 +45,12 @@ RANKED_BACKLOG_HEADING = "## Ranked Backlog"
 # every other string starting with "Pending" -- is left for a human.
 ELIGIBLE_STATUS = "Pending"
 
-# Default backlog files, highest-priority first. Bugs outrank improvements of
-# similar score, which is the ordering both backlogs already document.
-DEFAULT_BACKLOG_FILES = ("bugs.md", "improvements.md")
+# Default backlog files, highest-priority first. Bug ledgers outrank
+# improvements of similar score, which is the ordering the backlogs document.
+# `bugs.md` is the HowlFrame-style ledger. `issues.md` is the same role in
+# HowlPlane checkouts. Both are read when present; neither is a second queue.
+BUG_BACKLOG_FILES = ("bugs.md", "issues.md")
+DEFAULT_BACKLOG_FILES = BUG_BACKLOG_FILES + ("improvements.md",)
 
 _ROW_PATTERN = re.compile(r"^\|\s*(\d+)\s*\|")
 _SCORE_PATTERN = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)")
@@ -101,6 +104,11 @@ class BacklogSelection(DataClassSerializationMixin):
         return None
 
 
+def source_file_rank(item: BacklogItem) -> int:
+    """Bug ledgers sort ahead of improvements. Factory discovery uses this."""
+    return 0 if item.kind == "bug" else 1
+
+
 def _split_row(line: str) -> List[str]:
     return [cell.strip() for cell in line.split("|")[1:-1]]
 
@@ -144,7 +152,7 @@ def parse_backlog_file(path: Union[str, Path]) -> List[BacklogItem]:
         len(lines),
     )
 
-    kind = "bug" if path.name == "bugs.md" else "improvement"
+    kind = "bug" if path.name in BUG_BACKLOG_FILES else "improvement"
     items: List[BacklogItem] = []
     for line in lines[start:end]:
         match = _ROW_PATTERN.match(line)

@@ -1728,7 +1728,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_status.add_argument(
         "--publish",
         action="store_true",
-        help="Write a redacted status snapshot to .dogfood/factory-status.json. "
+        help="Write a redacted status snapshot to factory/status/remote-snapshot.json. "
              "Does not start a campaign.",
     )
     p_status.add_argument(
@@ -2442,7 +2442,7 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
         save_envelope,
     )
     from howlplane.control_plane.authority_profile import get_profile
-    from howlplane.control_plane.backlog_source import BacklogSource
+    from howlplane.control_plane.backlog_source import BacklogSource, source_file_rank
     from howlplane.control_plane.factory.dispatcher import MarathonDispatcherAdapter
     from howlplane.control_plane.factory.repo_proposal import CapabilityStore, RepoProposalStore
     from howlplane.control_plane.factory.supervisor import FactorySupervisor
@@ -2502,7 +2502,7 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
                 "identity_keys": [item.source_file, item.item_id],
                 "evidence_refs": [f"{item.source_file}#{item.item_id}"],
                 "evidence_fingerprints": [f"backlog:{item.source_file}:{item.item_id}"],
-                "source_file_rank": 0 if item.source_file == "bugs.md" else 1,
+                "source_file_rank": source_file_rank(item),
                 "source_rank": _backlog_rank(item.item_id),
                 "kind": item.kind,
             }

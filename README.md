@@ -73,10 +73,9 @@ foreground advanced/debug command, and explicit `--state-dir` and
 zero-config resolver when those overrides are omitted.
 
 `howlplane factory status --publish` writes a redacted snapshot to
-`.dogfood/factory-status.json` in the current checkout. It reads the existing
-supervisor and does not start a campaign. Remote operators read that file from
-Git. See `factory/REMOTE_OBSERVATION.md` for the snapshot fields, the periodic
-refresh, and how to enqueue work the running Factory already admits.
+`factory/status/remote-snapshot.json` in the current checkout. It reads the
+existing supervisor and does not start a campaign. Remote operators read that
+file from Git. See `factory/REMOTE_OBSERVATION.md`.
 
 ### Advanced persistent Linux user service
 
