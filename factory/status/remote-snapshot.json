@@ -1,0 +1,35 @@
+{
+  "schema": "howlplane.factory.status/v1",
+  "redacted": true,
+  "published_at": "2026-09-29T20:52:57.875992+00:00",
+  "campaign_id": "626fbc7d0aed64d2d8dcbd09",
+  "mission_campaign_id": "2026-09-27-continuous-improvement",
+  "repository": "howlcipher/howlplane",
+  "state": "stopped",
+  "current_dispatch": "idle",
+  "current_work_item_id": null,
+  "blockers": [
+    {
+      "class": "DEFERRED",
+      "work_item_id": "WI-grocery-optimizer-a22392bf4ca89a29",
+      "state": "deferred",
+      "summary": "NO_ELIGIBLE_PROVIDER_REMAINING: tried agy, claude_code, codex, devin_cli"
+    },
+    {
+      "class": "OWNER_REQUIRED",
+      "work_item_id": "WI-howlplane-6a668797bb32f9a2",
+      "state": "awaiting_owner",
+      "summary": "orchestrator_final_state:awaiting_human"
+    }
+  ],
+  "owner_required": true,
+  "last_tick_at": "2026-09-28T21:55:24.292921+00:00",
+  "last_successful_tick_at": "2026-09-28T21:26:04.141954+00:00",
+  "last_error": null,
+  "failure_count": 0,
+  "stopped_reason": "operator_stop",
+  "objective": "Continuously develop Grocery Optimizer and improve the Howl ecosystem, HowlPlane, and HowlFrame based on verified evidence, always selecting the highest-value justified executable work across the four repositories.",
+  "target_mode": "ecosystem",
+  "run_mode": "continuous",
+  "authority": null
+}
