@@ -75,7 +75,9 @@ zero-config resolver when those overrides are omitted.
 `howlplane factory status --publish` writes a redacted snapshot to
 `factory/status/remote-snapshot.json` in the current checkout. It reads the
 existing supervisor and does not start a campaign. Remote operators read that
-file from Git. See `factory/REMOTE_OBSERVATION.md`.
+file from Git. See `factory/REMOTE_OBSERVATION.md`. The 2026-09-29 follow-on
+sequence is `documentation/journals/2026-09-29_team_howlplane_backlog.md`
+(improvements rows 70 through 74).
 
 ### Advanced persistent Linux user service
 
@@ -387,3 +389,4 @@ The `howlplane` launcher locates the HowlPlane control plane using the following
 - [AI Framework Blueprint](documentation/AI_FRAMEWORK_BLUEPRINT.md)
 - [Localizations & Languages](documentation/languages/README_en_US.md)
 - [Change Log](change_log.md)
+- [2026-09-29 remote snapshot follow-ons](documentation/journals/2026-09-29_team_howlplane_backlog.md)
