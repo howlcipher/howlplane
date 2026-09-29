@@ -1725,6 +1725,22 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_status.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_status.add_argument("--target-repo", help="Repository to resolve (advanced)")
     p_status.add_argument("--json", action="store_true", help="Output JSON result")
+    p_status.add_argument(
+        "--publish",
+        action="store_true",
+        help="Write a redacted status snapshot to .dogfood/factory-status.json. "
+             "Does not start a campaign.",
+    )
+    p_status.add_argument(
+        "--publish-path",
+        help="Override the redacted snapshot path used by --publish",
+    )
+    p_status.add_argument(
+        "--arm-periodic",
+        action="store_true",
+        help="Also record the snapshot path so a restarted supervisor refreshes it "
+             "each tick. Does not start a campaign.",
+    )
 
     p_stop = factory_sub.add_parser(
         "stop", help="Stop the factory supervisor loop", **kwargs
@@ -2709,6 +2725,8 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
             "authority": display_authority or "not configured",
             "process": process_status(campaign),
         })
+    from howlplane.control_plane.factory.status_publish import publish_cli_status
+    published = publish_cli_status(status, args)
     if getattr(args, "json", False):
         import json
         print(json.dumps(status, indent=2, default=str))
@@ -2761,6 +2779,9 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
             print("Active alerts:")
             for a in alerts[-5:]:
                 print(f"  - [{a.get('type')}] {a.get('message')}")
+    if published is not None:
+        stream = sys.stderr if getattr(args, "json", False) else sys.stdout
+        print(f"Published redacted status: {published}", file=stream)
     return 0
 
 

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 
+- `howlplane factory status --publish [--publish-path PATH] [--arm-periodic]`
+  writes a redacted Factory snapshot to `.dogfood/factory-status.json` (or the
+  given path) without starting a campaign. The snapshot keeps campaign id,
+  state, current dispatch or `idle`, blockers including `OWNER_REQUIRED`, and
+  the last tick and last error, and strips tokens, cookies, and absolute host
+  paths. `--arm-periodic` records the path so a supervisor restarted onto this
+  code refreshes the file after each tick. Remote admission is documented in
+  `factory/REMOTE_OBSERVATION.md`: ranked `Pending` backlog rows are executed
+  by the existing supervisor; `factory/owner_direction/*.json` is admitted as
+  untrusted owner direction and parked; `howlplane factory queue` stays a
+  separate host-run finite queue.
+
 - `howlplane factory queue QUEUE.json [--dry-run] [--retry ID] [--max-tasks N]
   [--stop-on-failure] [--json]`: a finite Factory supervisor over an explicit
   queue of human-`APPROVED` tasks. Each task becomes one ordinary orchestration
