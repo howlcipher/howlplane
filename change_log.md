@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
   supervisor restarted onto this code refreshes the file after each tick.
   Remote admission is the existing ranked `Pending` row in `issues.md`,
   `bugs.md`, or `improvements.md`. See `factory/REMOTE_OBSERVATION.md`.
+  Org tracking is HowlFutureWorks PR #16; that record's Plane PR placeholder
+  is filled from this contract.
 
 - `howlplane factory queue QUEUE.json [--dry-run] [--retry ID] [--max-tasks N]
   [--stop-on-failure] [--json]`: a finite Factory supervisor over an explicit

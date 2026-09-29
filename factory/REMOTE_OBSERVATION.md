@@ -126,3 +126,17 @@ howlplane factory queue path/to/QUEUE.json --dry-run
 Git commits and pull requests on the target repository are the ship evidence
 remote roles can read. The redacted snapshot reports supervisor state. It is
 not the evidence ledger and it does not grant authority.
+
+## Org record
+
+HowlFutureWorks tracks this as HOWL-011. The org docs change is
+https://github.com/howlcipher/HowlFutureWorks/pull/16. That record still has a
+Plane PR URL placeholder. The follow-up that fills it should use:
+
+- Plane PR: https://github.com/howlcipher/howlplane/pull/123
+- Command: `howlplane factory status --publish`
+- Artifact: `factory/status/remote-snapshot.json`
+- Admit path: an exact `Pending` row in `issues.md`, `bugs.md`, or `improvements.md`
+
+The host operator merges the Plane PR and publishes from the Factory host.
+This checkout does not publish that snapshot.
