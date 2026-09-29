@@ -72,6 +72,11 @@ foreground advanced/debug command, and explicit `--state-dir` and
 `--target-repo` overrides remain available. `factory run-once` also uses the
 zero-config resolver when those overrides are omitted.
 
+`howlplane factory status --publish` writes a redacted snapshot to
+`factory/status/remote-snapshot.json` in the current checkout. It reads the
+existing supervisor and does not start a campaign. Remote operators read that
+file from Git. See `factory/REMOTE_OBSERVATION.md`.
+
 ### Advanced persistent Linux user service
 
 `factory status` reports the persisted supervisor state without treating an
