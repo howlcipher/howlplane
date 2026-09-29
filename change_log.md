@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 
+- 2026-09-29 seat-poll follow-ons for the remote snapshot loop. The synthesis
+  lives in `documentation/journals/2026-09-29_team_howlplane_backlog.md`.
+  Pending rows 70 through 74 in `improvements.md` are the near-term sequence:
+  host publish dogfood, snapshot contract lock, Pending admit evidence,
+  Board as the default work surface on that contract, and publish freshness.
+  Hard nos (no second Factory, no bot supervisor lock or campaign start, leave
+  pull request #122 alone, no parallel admit path) are constraints, not rows.
+  Envelope binding and a richer ChangeOps signature story stay deferred.
+  No Factory, CLI, or runtime code changed with this filing.
+
 - `howlplane factory status --publish [--publish-path PATH] [--arm-periodic]`
   writes a redacted Factory snapshot to `factory/status/remote-snapshot.json`
   (or the given path) without starting a campaign. The snapshot keeps campaign

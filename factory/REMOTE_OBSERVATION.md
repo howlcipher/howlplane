@@ -140,3 +140,14 @@ Plane PR URL placeholder. The follow-up that fills it should use:
 
 The host operator merges the Plane PR and publishes from the Factory host.
 This checkout does not publish that snapshot.
+
+## Follow-ons filed 2026-09-29
+
+The seat-poll sequence after this contract is
+`documentation/journals/2026-09-29_team_howlplane_backlog.md`, and Pending
+rows 70 through 74 in `improvements.md`. Those rows do not change this
+contract. They record host dogfood, a locked snapshot schema, admit evidence,
+Board as the consumer of that schema, and a freshness proof. The unanimous
+constraints (no second Factory, bots do not take the supervisor lock or start
+a campaign or write trusted `owner_direction`, leave pull request #122 alone,
+no parallel admit path) stay constraints.
