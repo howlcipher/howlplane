@@ -18,6 +18,10 @@ client_secret.json
 !dogfood/historical-reasoning-evidence/runs/*.json
 !tests/fixtures/*.json
 !.dogfood/mission_state.json
+# Redacted Factory status published from the host (HOWL-011). Not a credential.
+!factory/status/remote-snapshot.json
+# Finite-queue example used by the remote admit doc. Not a credential.
+!factory/examples/*.json
 
 # Generated skills index is tracked
 !.agents/skills.json

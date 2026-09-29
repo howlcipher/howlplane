@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 
+- `howlplane factory status --publish [--publish-path PATH] [--arm-periodic]`
+  writes a redacted Factory snapshot to `factory/status/remote-snapshot.json`
+  (or the given path) without starting a campaign. The snapshot keeps campaign
+  id, state, current dispatch or `idle`, blockers including `OWNER_REQUIRED`,
+  and the last tick and last error. It strips tokens, cookies, absolute host
+  paths, and raw task output. `--arm-periodic` records the path so a
+  supervisor restarted onto this code refreshes the file after each tick.
+  Remote admission is the existing ranked `Pending` row in `issues.md`,
+  `bugs.md`, or `improvements.md`. See `factory/REMOTE_OBSERVATION.md`.
+  Org tracking is HowlFutureWorks PR #16; that record's Plane PR placeholder
+  is filled from this contract.
+
 - `howlplane factory queue QUEUE.json [--dry-run] [--retry ID] [--max-tasks N]
   [--stop-on-failure] [--json]`: a finite Factory supervisor over an explicit
   queue of human-`APPROVED` tasks. Each task becomes one ordinary orchestration

@@ -619,10 +619,23 @@ class FactorySupervisor:
         except Exception:
             pass
 
-
     def _reload_state(self) -> None:
         """Reload persisted state so external stop commands are visible."""
         self._state_record = self.state_store.load()
+
+    def _maybe_publish_status(self) -> None:
+        """Refresh an armed redacted snapshot. Failures never stop the supervisor."""
+        try:
+            from howlplane.control_plane.factory.status_publish import (
+                publish_status,
+                read_armed_publish_path,
+            )
+            target = read_armed_publish_path(self._state_dir)
+            if target is None:
+                return
+            publish_status(self.status(), target, state_dir=self._state_dir)
+        except Exception:
+            logger.warning("factory status publish failed", exc_info=True)
 
     def _provider_inventory(self) -> List[Dict[str, Any]]:
         try:
@@ -1248,28 +1261,35 @@ class FactorySupervisor:
         while True:
             self._reload_state()
             if self._state_record.state == SupervisorState.STOPPED:
+                self._maybe_publish_status()
                 break
             if self._bounded_limit_reached():
                 self._bounded_stop(
                     self._state_record.bounded_run_stop_reason or "max_work_items_reached",
                     self._now_iso(),
                 )
+                self._maybe_publish_status()
                 break
             if self._stop_requested:
                 self.stop(self._stop_requested)
+                self._maybe_publish_status()
                 break
             result = self.tick()
             self._state_record.last_successful_tick_at = self._now_iso()
             self._persist()
             if self._stop_requested:
                 self.stop(self._stop_requested)
+                self._maybe_publish_status()
                 break
             if self._state_record.state == SupervisorState.STOPPED:
+                self._maybe_publish_status()
                 break
             now = self._now()
             if until is not None and now >= until:
                 self.stop(reason="until_deadline")
+                self._maybe_publish_status()
                 break
+            self._maybe_publish_status()
             next_wake = result.next_wake_at or (now + timedelta(seconds=self.tick_interval_seconds))
             sleep_seconds = (next_wake - now).total_seconds()
             if sleep_seconds > 0:
@@ -1286,9 +1306,12 @@ class FactorySupervisor:
         """Execute one tick under the same mutual-exclusion lock as the loop."""
         lock = self._configured_lock()
         if lock is None:
-            return self.tick()
-        with lock:
-            return self.tick()
+            result = self.tick()
+        else:
+            with lock:
+                result = self.tick()
+        self._maybe_publish_status()
+        return result
 
     def run(self, until: Optional[datetime] = None, resume_stopped: bool = False) -> None:
         # The run loop holds a single-supervisor lock for the state directory.

@@ -1,0 +1,12 @@
+{
+  "schema": "howlplane.factory_queue/v1",
+  "repo": ".",
+  "tasks": [
+    {
+      "id": "HOWL-011-example",
+      "goal": "Example only. Set status to APPROVED and point repo at the target checkout before a host operator runs howlplane factory queue.",
+      "status": "PROPOSED",
+      "priority": 1
+    }
+  ]
+}
