@@ -1354,6 +1354,51 @@ def cmd_trace(args: argparse.Namespace) -> int:
         return 1
 
 
+
+def _grouped_help_formatter(groups, default_title):
+    """Help formatter that lists subcommands in named groups.
+
+    Every registered subcommand still appears: anything not named in `groups`
+    lands under `default_title`, so adding a command can never hide it.
+    """
+    class GroupedHelpFormatter(argparse.RawDescriptionHelpFormatter):
+        def _format_action(self, action):
+            if not isinstance(action, argparse._SubParsersAction):
+                return super()._format_action(action)
+            entries = {a.dest: a for a in action._get_subactions()}
+            placed = set()
+            out = []
+            sections = [(title, [n for n in names if n in entries]) for title, names in groups]
+            sections.append((default_title, [n for n in entries if not any(n in names for _, names in groups)]))
+            for title, names in sections:
+                if not names:
+                    continue
+                out.append(f"\n{title}:\n")
+                for name in names:
+                    placed.add(name)
+                    out.append(super()._format_action(entries[name]))
+            return "".join(out)
+
+    return GroupedHelpFormatter
+
+
+_TOP_LEVEL_HELP_GROUPS = [
+    ("Get started", ["setup", "factory", "work", "status", "doctor", "agents", "create"]),
+    ("Decisions and recovery", ["approve", "reject", "resume", "cancel", "unlock"]),
+]
+
+_FACTORY_HELP_GROUPS = [
+    ("Everyday (start, status, logs, stop)", ["start", "status", "logs", "stop"]),
+    ("Setup and recovery", ["doctor", "prepare", "resume"]),
+]
+
+_TOP_LEVEL_QUICKSTART = """\
+New here? Run these in a Git repository:
+  howlplane setup
+  howlplane factory start
+  howlplane factory status
+"""
+
 def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument(
@@ -1376,7 +1421,8 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog=program_name,
-        description="Deterministic Multi-Agent Engineering Control Plane CLI",
+        description="Deterministic Multi-Agent Engineering Control Plane CLI\n\n" + _TOP_LEVEL_QUICKSTART,
+        formatter_class=_grouped_help_formatter(_TOP_LEVEL_HELP_GROUPS, "Advanced and engineering"),
         parents=[common_parser],
     )
     parser.add_argument(
@@ -1385,7 +1431,8 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
         version=f"{program_name} {__version__}",
     )
 
-    subparsers = parser.add_subparsers(dest="subcommand", help="Command to execute")
+    parser._positionals.title = "Commands"
+    subparsers = parser.add_subparsers(dest="subcommand", metavar="<command>", help="Command to execute")
 
     from howlplane.control_plane.orchestration import add_parser as add_orchestration_parser
     add_orchestration_parser(subparsers, common_parser)
@@ -1636,9 +1683,12 @@ def _positive_int(value: str) -> int:
 def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = None) -> None:
     kwargs = {"parents": parents} if parents else {}
     p_factory = subparsers.add_parser(
-        "factory", help="Persistent factory supervisor", **kwargs
+        "factory", help="Persistent factory supervisor", **kwargs,
+        formatter_class=_grouped_help_formatter(_FACTORY_HELP_GROUPS, "Advanced and debugging"),
+        epilog="Normal workflow: start -> status -> logs -> stop.",
     )
-    factory_sub = p_factory.add_subparsers(dest="factory_action", required=True)
+    p_factory._positionals.title = "Actions"
+    factory_sub = p_factory.add_subparsers(dest="factory_action", required=True, metavar="<action>")
 
     p_run_once = factory_sub.add_parser(
         "run-once", help="Execute a single factory supervisor tick", **kwargs
