@@ -1383,7 +1383,7 @@ def _grouped_help_formatter(groups, default_title):
 
 
 _TOP_LEVEL_HELP_GROUPS = [
-    ("Get started", ["setup", "factory", "work", "status", "doctor", "agents", "create"]),
+    ("Get started", ["setup", "factory", "work", "status", "doctor", "agents", "create", "config"]),
     ("Decisions and recovery", ["approve", "reject", "resume", "cancel", "unlock"]),
 ]
 
@@ -2013,6 +2013,17 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
                          help="Confirm the printed preparation scope non-interactively")
     p_setup.add_argument("--json", action="store_true", help="Output JSON result (never prompts)")
     _add_workspace_trust_argument(p_setup)
+
+    p_config = subparsers.add_parser(
+        "config", help="Show, validate and explain effective configuration", **kwargs)
+    config_sub = p_config.add_subparsers(dest="config_action", required=True, metavar="<action>")
+    for name, text in (("show", "Show effective settings and where each value came from"),
+                       ("validate", "Check that the configuration is valid"),
+                       ("explain", "Explain one setting: value, source, default and type")):
+        p_cfg = config_sub.add_parser(name, help=text)
+        if name == "explain":
+            p_cfg.add_argument("key", help="Dotted setting name, for example server.port")
+        p_cfg.add_argument("--json", action="store_true", help="Output JSON result")
 
     # local (local Ollama model setup/health check, #58 Phase 3)
     p_local = subparsers.add_parser("local", help="Local (Ollama) model utilities", **kwargs)
@@ -3506,6 +3517,7 @@ HANDLERS = {
     "acceptance": cmd_acceptance,
     "marathon": cmd_marathon,
     "authority": cmd_authority,
+    "config": lambda args: __import__("howlplane.control_plane.config_cli", fromlist=["command"]).command(args),
     "setup": lambda args: __import__("howlplane.control_plane.setup_cli", fromlist=["command"]).command(args),
     "local": cmd_local,
     "factory": cmd_factory,
