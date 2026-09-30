@@ -614,7 +614,7 @@ class DurableCampaignState(DataClassSerializationMixin):
             "",
             "To resume or continue this dogfood campaign with updated quotas:",
             "```bash",
-            f"ai dogfood --resume {self.campaign_id}",
+            f"howlplane dogfood --resume {self.campaign_id}",
             "```",
             "",
         ])

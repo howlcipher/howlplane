@@ -104,3 +104,12 @@ def run_git_in_repo(
         check=check,
         env=sanitized_git_env(overrides=env_overrides),
     )
+
+
+def git_stdout(repo_root: Union[str, Path], args: List[str], timeout: int = 10) -> Optional[str]:
+    """Trimmed stdout of a successful read-only git command, else None."""
+    try:
+        out = run_git_in_repo(repo_root, args, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (out.stdout.strip() or None) if out.returncode == 0 else None

@@ -15,11 +15,20 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence, Union
 
 from howlplane.control_plane.atomic_io import atomic_write_text
+from howlplane.control_plane.git_env import git_stdout
 
 
 STATUS_SCHEMA = "howlplane.factory.status/v1"
 DEFAULT_RELATIVE_PATH = Path("factory") / "status" / "remote-snapshot.json"
 MARKER_NAME = "status_publish.path"
+READ_SCHEMA = "howlplane.factory.snapshot_read/v1"
+# Reader-side default. A snapshot older than this is STALE; Board may pass its own.
+DEFAULT_FRESH_SECONDS = 1800
+_CLOCK_SKEW_SECONDS = 300
+FRESH = "FRESH"
+STALE = "STALE"
+SNAPSHOT_ABSENT = "SNAPSHOT_ABSENT"
+SNAPSHOT_INVALID = "SNAPSHOT_INVALID"
 OWNER_REQUIRED = "OWNER_REQUIRED"
 _MAX_TEXT = 500
 _MAX_BLOCKERS = 40
@@ -151,7 +160,63 @@ def build_redacted_status(
         "target_mode": _plain(status.get("target_mode")),
         "run_mode": _plain(status.get("run_mode")),
         "authority": authority if authority in _AUTHORITY_VALUES else None,
+        "operator": _operator_summary(status),
     }
+
+
+def _git_identity(repo_root: Path, path: Path) -> dict:
+    """Tip SHA of the commit that last touched the snapshot, plus repository HEAD.
+
+    A file cannot contain the SHA of the commit that stores it, so the reader
+    derives it from Git. Both are None when Git or history is unavailable.
+    """
+    try:
+        rel = path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        return {"path": None, "tip_sha": None, "head_sha": None}
+    return {"path": rel, "tip_sha": git_stdout(repo_root, ["log", "-1", "--format=%H", "--", rel]),
+            "head_sha": git_stdout(repo_root, ["rev-parse", "HEAD"])}
+
+
+def read_snapshot(
+    path: Union[str, Path],
+    *,
+    now: Optional[datetime] = None,
+    fresh_seconds: int = DEFAULT_FRESH_SECONDS,
+    repo_root: Optional[Union[str, Path]] = None,
+) -> dict:
+    """Read-only view of a published snapshot for Board or a Git-only reader.
+
+    Returns `freshness` of FRESH, STALE, SNAPSHOT_ABSENT or SNAPSHOT_INVALID.
+    It never writes, never touches supervisor state and never takes the lock.
+    An unreadable, wrong-schema or undated snapshot is INVALID, not fresh.
+    """
+    target = Path(path)
+    identity = _git_identity(Path(repo_root), target) if repo_root is not None else {
+        "path": None, "tip_sha": None, "head_sha": None}
+    result = {"schema": READ_SCHEMA, "freshness": SNAPSHOT_ABSENT, "snapshot": None,
+              "age_seconds": None, "fresh_seconds": fresh_seconds, **identity}
+    if not target.is_file():
+        return result
+    try:
+        document = json.loads(target.read_text(encoding="utf-8"))
+        published = datetime.fromisoformat(str(document["published_at"]))
+    except (OSError, ValueError, KeyError, TypeError):
+        result["freshness"] = SNAPSHOT_INVALID
+        return result
+    if not isinstance(document, dict) or document.get("schema") != STATUS_SCHEMA:
+        result["freshness"] = SNAPSHOT_INVALID
+        return result
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=timezone.utc)
+    age = ((now or datetime.now(timezone.utc)) - published).total_seconds()
+    if age < -_CLOCK_SKEW_SECONDS:
+        # Published in the future: the clock that wrote it cannot be trusted.
+        result["freshness"] = SNAPSHOT_INVALID
+        return result
+    result.update(snapshot=document, age_seconds=max(0, int(age)),
+                  freshness=FRESH if age <= fresh_seconds else STALE)
+    return result
 
 
 def read_mission_campaign_id(publish_path: Union[str, Path]) -> Optional[str]:
@@ -260,6 +325,15 @@ def publish_cli_status(status: Mapping[str, Any], args: Any) -> Optional[Path]:
             raise ValueError("--arm-periodic needs the factory state directory")
         arm_periodic_publish(state_dir, written)
     return written
+
+
+def _operator_summary(status: Mapping[str, Any]) -> dict:
+    """Stable, free-text-free projection of the CLI's operator status."""
+    from howlplane.control_plane.presentation.operator import derive_operator_status
+
+    op = derive_operator_status(status)
+    return {"label": op.label, "severity": op.severity.value, "reason_code": op.reason_code.value,
+            "owner_required": op.owner_required}
 
 
 def _blockers(status: Mapping[str, Any], repository: Optional[str]) -> list:

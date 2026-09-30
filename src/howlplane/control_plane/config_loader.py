@@ -257,6 +257,10 @@ class ConfigLoader:
                 finally:
                     loader.dispose()
 
+        # Kept so `howlplane config` can report which layer supplied a value.
+        self.file_layer = yaml_data
+        self.local_layer = {}
+
         local_candidate = local_config_path
         if local_candidate is None and config_path is None:
             local_candidate = (
@@ -269,7 +273,8 @@ class ConfigLoader:
         if self.local_config_path and self.local_config_path.is_file():
             with open(self.local_config_path, "rb") as local_file:
                 local_data = tomllib.load(local_file)
-            yaml_data = _deep_merge(yaml_data, _resource_local_config(local_data))
+            self.local_layer = _resource_local_config(local_data)
+            yaml_data = _deep_merge(yaml_data, self.local_layer)
 
         # Load pydantic settings prioritizing .env over yaml_data
         self.settings = AppSettings(**yaml_data)

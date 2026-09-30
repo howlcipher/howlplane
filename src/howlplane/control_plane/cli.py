@@ -625,7 +625,7 @@ def cmd_providers(args: argparse.Namespace) -> int:
     resource_id = getattr(args, "resource_id", None)
     if action == "reset":
         if not resource_id:
-            print("ERROR: ai providers reset requires a resource ID", file=sys.stderr)
+            print("ERROR: howlplane providers reset requires a resource ID", file=sys.stderr)
             return 1
         pool = ProviderPoolManager.from_config(probe_on_start=False)
         state = pool.reset_resource(resource_id, reprobe=True)
@@ -1354,6 +1354,51 @@ def cmd_trace(args: argparse.Namespace) -> int:
         return 1
 
 
+
+def _grouped_help_formatter(groups, default_title):
+    """Help formatter that lists subcommands in named groups.
+
+    Every registered subcommand still appears: anything not named in `groups`
+    lands under `default_title`, so adding a command can never hide it.
+    """
+    class GroupedHelpFormatter(argparse.RawDescriptionHelpFormatter):
+        def _format_action(self, action):
+            if not isinstance(action, argparse._SubParsersAction):
+                return super()._format_action(action)
+            entries = {a.dest: a for a in action._get_subactions()}
+            placed = set()
+            out = []
+            sections = [(title, [n for n in names if n in entries]) for title, names in groups]
+            sections.append((default_title, [n for n in entries if not any(n in names for _, names in groups)]))
+            for title, names in sections:
+                if not names:
+                    continue
+                out.append(f"\n{title}:\n")
+                for name in names:
+                    placed.add(name)
+                    out.append(super()._format_action(entries[name]))
+            return "".join(out)
+
+    return GroupedHelpFormatter
+
+
+_TOP_LEVEL_HELP_GROUPS = [
+    ("Get started", ["setup", "factory", "work", "status", "doctor", "agents", "create", "config"]),
+    ("Decisions and recovery", ["approve", "reject", "resume", "cancel", "unlock"]),
+]
+
+_FACTORY_HELP_GROUPS = [
+    ("Everyday (start, status, logs, stop)", ["start", "status", "logs", "stop"]),
+    ("Setup and recovery", ["doctor", "prepare", "resume"]),
+]
+
+_TOP_LEVEL_QUICKSTART = """\
+New here? Run these in a Git repository:
+  howlplane setup
+  howlplane factory start
+  howlplane factory status
+"""
+
 def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument(
@@ -1376,7 +1421,8 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog=program_name,
-        description="Deterministic Multi-Agent Engineering Control Plane CLI",
+        description="Deterministic Multi-Agent Engineering Control Plane CLI\n\n" + _TOP_LEVEL_QUICKSTART,
+        formatter_class=_grouped_help_formatter(_TOP_LEVEL_HELP_GROUPS, "Advanced and engineering"),
         parents=[common_parser],
     )
     parser.add_argument(
@@ -1385,7 +1431,8 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
         version=f"{program_name} {__version__}",
     )
 
-    subparsers = parser.add_subparsers(dest="subcommand", help="Command to execute")
+    parser._positionals.title = "Commands"
+    subparsers = parser.add_subparsers(dest="subcommand", metavar="<command>", help="Command to execute")
 
     from howlplane.control_plane.orchestration import add_parser as add_orchestration_parser
     add_orchestration_parser(subparsers, common_parser)
@@ -1636,9 +1683,12 @@ def _positive_int(value: str) -> int:
 def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = None) -> None:
     kwargs = {"parents": parents} if parents else {}
     p_factory = subparsers.add_parser(
-        "factory", help="Persistent factory supervisor", **kwargs
+        "factory", help="Persistent factory supervisor", **kwargs,
+        formatter_class=_grouped_help_formatter(_FACTORY_HELP_GROUPS, "Advanced and debugging"),
+        epilog="Normal workflow: start -> status -> logs -> stop.",
     )
-    factory_sub = p_factory.add_subparsers(dest="factory_action", required=True)
+    p_factory._positionals.title = "Actions"
+    factory_sub = p_factory.add_subparsers(dest="factory_action", required=True, metavar="<action>")
 
     p_run_once = factory_sub.add_parser(
         "run-once", help="Execute a single factory supervisor tick", **kwargs
@@ -1726,6 +1776,12 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_status.add_argument("--target-repo", help="Repository to resolve (advanced)")
     p_status.add_argument("--json", action="store_true", help="Output JSON result")
     p_status.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show full supervisor details (IDs, ticks, history counts)",
+    )
+    p_status.add_argument(
         "--publish",
         action="store_true",
         help="Write a redacted status snapshot to factory/status/remote-snapshot.json. "
@@ -1741,6 +1797,23 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
         help="Also record the snapshot path so a restarted supervisor refreshes it "
              "each tick. Does not start a campaign.",
     )
+
+    p_snapshot = factory_sub.add_parser(
+        "snapshot", help="Read a published remote status snapshot (freshness, tip SHA)", **kwargs
+    )
+    p_snapshot.add_argument("--path", help="Snapshot file (default: factory/status/remote-snapshot.json)")
+    p_snapshot.add_argument("--fresh-seconds", type=int, default=None,
+                            help="Snapshots older than this are STALE (default 1800)")
+    p_snapshot.add_argument("--json", action="store_true", help="Output JSON result")
+
+    p_pending = factory_sub.add_parser(
+        "pending", help="List ranked Pending backlog rows, or validate one (read-only)", **kwargs
+    )
+    p_pending.add_argument("--validate", metavar="ROW_ID",
+                           help="Emit validation evidence for one row id. Does not admit or claim it.")
+    p_pending.add_argument("--recorded-by", metavar="NAME",
+                           help="Who ran the validation; recorded in the evidence")
+    p_pending.add_argument("--json", action="store_true", help="Output JSON result")
 
     p_stop = factory_sub.add_parser(
         "stop", help="Stop the factory supervisor loop", **kwargs
@@ -1950,6 +2023,24 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
     p_authority_show = authority_sub.add_parser("show", help="Show a canonical authority profile's exact permissions")
     p_authority_show.add_argument("profile_id", choices=sorted(CANONICAL_PROFILES))
     p_authority_show.add_argument("--json", action="store_true", help="Output JSON result")
+
+    p_setup = subparsers.add_parser(
+        "setup", help="Check this repository and prepare it for Factory use", **kwargs)
+    p_setup.add_argument("--yes", action="store_true",
+                         help="Confirm the printed preparation scope non-interactively")
+    p_setup.add_argument("--json", action="store_true", help="Output JSON result (never prompts)")
+    _add_workspace_trust_argument(p_setup)
+
+    p_config = subparsers.add_parser(
+        "config", help="Show, validate and explain effective configuration", **kwargs)
+    config_sub = p_config.add_subparsers(dest="config_action", required=True, metavar="<action>")
+    for name, text in (("show", "Show effective settings and where each value came from"),
+                       ("validate", "Check that the configuration is valid"),
+                       ("explain", "Explain one setting: value, source, default and type")):
+        p_cfg = config_sub.add_parser(name, help=text)
+        if name == "explain":
+            p_cfg.add_argument("key", help="Dotted setting name, for example server.port")
+        p_cfg.add_argument("--json", action="store_true", help="Output JSON result")
 
     # local (local Ollama model setup/health check, #58 Phase 3)
     p_local = subparsers.add_parser("local", help="Local (Ollama) model utilities", **kwargs)
@@ -2727,9 +2818,16 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         })
     from howlplane.control_plane.factory.status_publish import publish_cli_status
     published = publish_cli_status(status, args)
+    from howlplane.control_plane.presentation.operator import (
+        derive_operator_status,
+        render_operator_text,
+    )
+    operator = derive_operator_status(status)
     if getattr(args, "json", False):
         import json
-        print(json.dumps(status, indent=2, default=str))
+        print(json.dumps({**status, "operator": operator.to_dict()}, indent=2, default=str))
+    elif not getattr(args, "verbose", False):
+        print("\n".join(render_operator_text(operator, status)))
     else:
         print("HowlPlane Factory\n")
         if campaign is not None:
@@ -2994,6 +3092,12 @@ def cmd_factory(args: argparse.Namespace) -> int:
             return cmd_factory_run(args)
         if action == "status":
             return cmd_factory_status(args)
+        if action == "pending":
+            from howlplane.control_plane.factory import remote_cli
+            return remote_cli.cmd_factory_pending(args)
+        if action == "snapshot":
+            from howlplane.control_plane.factory import remote_cli
+            return remote_cli.cmd_factory_snapshot(args)
         if action == "stop":
             return cmd_factory_stop(args)
         if action == "resume":
@@ -3091,7 +3195,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         print(f"  Bundle: {res.product_bundle.directory}")
         print("")
         print("Run:")
-        print(f"  ai run {res.product_bundle.directory}")
+        print(f"  howlplane run {res.product_bundle.directory}")
         print("=" * 60)
         return 0
     else:
@@ -3213,7 +3317,7 @@ def cmd_acceptance(args: argparse.Namespace) -> int:
     its designated evidence artifact under documentation/task_journals/.
     """
     if getattr(args, "acceptance_action", None) != "overnight-integration":
-        print("Usage: ai acceptance overnight-integration --authority-profile <strict|overnight-safe>")
+        print("Usage: howlplane acceptance overnight-integration --authority-profile <strict|overnight-safe>")
         return 1
 
     from howlplane.control_plane.synthesis import MarathonDogfoodEngine
@@ -3436,6 +3540,8 @@ HANDLERS = {
     "acceptance": cmd_acceptance,
     "marathon": cmd_marathon,
     "authority": cmd_authority,
+    "config": lambda args: __import__("howlplane.control_plane.config_cli", fromlist=["command"]).command(args),
+    "setup": lambda args: __import__("howlplane.control_plane.setup_cli", fromlist=["command"]).command(args),
     "local": cmd_local,
     "factory": cmd_factory,
     "explore": cmd_explore,
@@ -3470,11 +3576,25 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
         workspace_trust.resolve_policy()
         return handler(parsed_args)
     except ControlPlaneError as err:
-        print(str(err), file=sys.stderr)
+        print(_operator_error_text(err, parsed_args) or str(err), file=sys.stderr)
         return 1
     except Exception as err:
-        print(f"ERROR: {err}", file=sys.stderr)
+        print(_operator_error_text(err, parsed_args) or f"ERROR: {err}", file=sys.stderr)
         return 1
+
+
+def _operator_error_text(err: BaseException, parsed_args: argparse.Namespace) -> Optional[str]:
+    """What/why/next for recognized failures; None keeps the original message."""
+    try:
+        from howlplane.control_plane.presentation.errors import explain
+        explained = explain(err)
+    except Exception:
+        return None
+    if explained is None:
+        return None
+    if getattr(parsed_args, "json", False):
+        return json.dumps(explained.to_dict())
+    return explained.render()
 
 
 def legacy_main(args: Optional[List[str]] = None) -> int:

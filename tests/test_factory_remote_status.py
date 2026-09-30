@@ -8,6 +8,7 @@ import pytest
 
 from howlplane.control_plane.backlog_source import BacklogSource, source_file_rank
 from howlplane.control_plane.cli import main
+from howlplane.control_plane.factory import status_publish
 from howlplane.control_plane.factory.status_publish import (
     STATUS_SCHEMA,
     arm_periodic_publish,
@@ -275,3 +276,119 @@ def test_committed_examples_match_the_admit_contracts():
     example = ROOT / "factory" / "examples" / "ranked-backlog-row.md"
     assert example.name not in {"bugs.md", "issues.md", "improvements.md"}
     assert "Pending" in example.read_text(encoding="utf-8")
+
+
+# --- Row 71: read-side contract (freshness, absent, tip identity) ---------------
+
+def _snapshot_file(tmp_path, published_at, schema=status_publish.STATUS_SCHEMA):
+    path = tmp_path / "factory" / "status" / "remote-snapshot.json"
+    path.parent.mkdir(parents=True)
+    doc = status_publish.build_redacted_status({"state": "idle"}, published_at=published_at)
+    doc["schema"] = schema
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    return path
+
+
+def test_reader_distinguishes_fresh_stale_absent_and_invalid(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
+    absent = status_publish.read_snapshot(tmp_path / "nope.json", now=now)
+    assert absent["freshness"] == status_publish.SNAPSHOT_ABSENT and absent["snapshot"] is None
+
+    fresh = _snapshot_file(tmp_path, (now - timedelta(seconds=60)).isoformat())
+    assert status_publish.read_snapshot(fresh, now=now)["freshness"] == status_publish.FRESH
+    assert status_publish.read_snapshot(fresh, now=now, fresh_seconds=30)["freshness"] == status_publish.STALE
+
+    future = tmp_path / "future.json"
+    future.write_text(fresh.read_text().replace(
+        json.loads(fresh.read_text())["published_at"], (now + timedelta(days=1)).isoformat()))
+    assert status_publish.read_snapshot(future, now=now)["freshness"] == status_publish.SNAPSHOT_INVALID
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json")
+    assert status_publish.read_snapshot(bad, now=now)["freshness"] == status_publish.SNAPSHOT_INVALID
+    wrong = tmp_path / "wrong.json"
+    wrong.write_text(json.dumps({"schema": "other/v9", "published_at": now.isoformat()}))
+    assert status_publish.read_snapshot(wrong, now=now)["freshness"] == status_publish.SNAPSHOT_INVALID
+
+
+def test_reader_reports_git_tip_identity_and_never_writes(tmp_path):
+    import subprocess
+    from datetime import datetime, timezone
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    path = _snapshot_file(tmp_path, datetime.now(timezone.utc).isoformat())
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.email=a@b", "-c", "user.name=n",
+                    "commit", "-q", "-m", "snap"], check=True)
+    before = sorted(p.name for p in tmp_path.rglob("*"))
+    result = status_publish.read_snapshot(path, repo_root=tmp_path)
+    head = subprocess.run(["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True,
+                          text=True, check=True).stdout.strip()
+    assert result["tip_sha"] == head == result["head_sha"]
+    assert result["path"] == "factory/status/remote-snapshot.json"
+    assert sorted(p.name for p in tmp_path.rglob("*")) == before
+
+
+def test_published_snapshot_carries_stable_operator_summary():
+    doc = status_publish.build_redacted_status({"state": "waiting_for_authority"})
+    assert doc["operator"] == {"label": "OWNER REQUIRED", "severity": "attention",
+                               "reason_code": "OWNER_REQUIRED", "owner_required": True}
+
+
+def test_factory_snapshot_cli_absent_is_not_healthy(tmp_path, capsys):
+    from howlplane.control_plane.cli import main
+    assert main(["factory", "snapshot", "--repo", str(tmp_path), "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["freshness"] == "SNAPSHOT_ABSENT"
+
+
+# --- Row 72: Pending identity and validation evidence (read-only, same admit path) ---
+
+def _backlog_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "improvements.md").write_text("\n".join([
+        "## Ranked Backlog",
+        "| # | Title | Status | Score | Rationale |",
+        "| --- | --- | --- | --- | --- |",
+        "| 3 | [Live](#3-live) | Pending | 1.5 | open |",
+        "| 4 | [Blocked](#4-b) | Pending — blocked on #3 | 1.0 | wait |",
+        "| 5 | [No detail](#5-n) | Pending | 1.0 | open |",
+        "",
+        "### 3. Live",
+        "",
+        "Acceptance: something.",
+    ]), encoding="utf-8")
+    return repo
+
+
+def test_pending_projection_shares_identity_with_the_admit_path(tmp_path):
+    from howlplane.control_plane import backlog_source
+    repo = _backlog_repo(tmp_path)
+    projection = backlog_source.pending_projection(repo)
+    selection = BacklogSource(repo).select()
+    eligible = [r for r in projection["rows"] if r["eligible"]]
+    assert [r["task_id"] for r in eligible] == [i.task_id for i in selection.eligible]
+    assert eligible[0]["item_id"] == "3" and eligible[0]["rank"] == 1
+    blocked = next(r for r in projection["rows"] if r["item_id"] == "4")
+    assert not blocked["eligible"] and blocked["reason"].startswith("STATUS_NOT_ELIGIBLE")
+
+
+def test_validation_evidence_is_deterministic_and_does_not_write(tmp_path):
+    from howlplane.control_plane import backlog_source
+    repo = _backlog_repo(tmp_path)
+    before = {p.name: p.read_bytes() for p in repo.iterdir()}
+    first = backlog_source.validate_pending_row(repo, "3")
+    assert first == backlog_source.validate_pending_row(repo, "3")
+    assert backlog_source.validate_pending_row(repo, "3", "tester")["recorded_by"] == "tester"
+    assert first["admittable"] and first["task_id"] == "HOWLFRAM-IMP-3" and first["detail_sha256"]
+    assert backlog_source.validate_pending_row(repo, "5")["reason"] == "MISSING_DETAIL_SECTION"
+    assert backlog_source.validate_pending_row(repo, "4")["admittable"] is False
+    assert backlog_source.validate_pending_row(repo, "99")["found"] is False
+    assert {p.name: p.read_bytes() for p in repo.iterdir()} == before
+
+
+def test_factory_pending_cli_validate_exit_codes(tmp_path, capsys):
+    repo = _backlog_repo(tmp_path)
+    assert main(["factory", "pending", "--repo", str(repo), "--validate", "3", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["schema"] == "howlplane.backlog.validation/v1"
+    assert main(["factory", "pending", "--repo", str(repo), "--validate", "4"]) == 1

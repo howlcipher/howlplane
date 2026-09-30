@@ -1280,7 +1280,7 @@ bash scripts/run.sh
 Or execute via HowlPlane:
 
 ```bash
-ai run .
+howlplane run .
 ```
 
 Open [http://localhost:{spec.default_port}](http://localhost:{spec.default_port}) in your browser.
