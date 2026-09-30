@@ -1811,6 +1811,8 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     )
     p_pending.add_argument("--validate", metavar="ROW_ID",
                            help="Emit validation evidence for one row id. Does not admit or claim it.")
+    p_pending.add_argument("--recorded-by", metavar="NAME",
+                           help="Who ran the validation; recorded in the evidence")
     p_pending.add_argument("--json", action="store_true", help="Output JSON result")
 
     p_stop = factory_sub.add_parser(
@@ -2886,7 +2888,7 @@ def cmd_factory_pending(args: argparse.Namespace) -> int:
     from howlplane.control_plane import backlog_source
     repo = Path(getattr(args, "repo", None) or ".").expanduser().resolve()
     if args.validate:
-        doc = backlog_source.validate_pending_row(repo, args.validate)
+        doc = backlog_source.validate_pending_row(repo, args.validate, getattr(args, 'recorded_by', None))
         ok = bool(doc["admittable"])
     else:
         doc = backlog_source.pending_projection(repo)

@@ -262,6 +262,16 @@ PENDING_PROJECTION_SCHEMA = "howlplane.backlog.pending/v1"
 VALIDATION_EVIDENCE_SCHEMA = "howlplane.backlog.validation/v1"
 
 
+def _head_sha(repo_root: Path) -> Optional[str]:
+    import subprocess
+    try:
+        out = subprocess.run(["git", "-C", str(repo_root), "rev-parse", "HEAD"], capture_output=True,
+                             text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() or None if out.returncode == 0 else None
+
+
 def pending_projection(repo_root: Union[str, Path]) -> Dict[str, object]:
     """Read-only list of Pending rows with the identity Board and admit share.
 
@@ -285,7 +295,9 @@ def pending_projection(repo_root: Union[str, Path]) -> Dict[str, object]:
             "files_read": selection.files_read, "rows": rows}
 
 
-def validate_pending_row(repo_root: Union[str, Path], item_id: str) -> Dict[str, object]:
+def validate_pending_row(
+    repo_root: Union[str, Path], item_id: str, recorded_by: Optional[str] = None
+) -> Dict[str, object]:
     """Deterministic, read-only validation evidence for one row id.
 
     Rebuildable from the committed backlog alone: it records the same identity
@@ -302,6 +314,7 @@ def validate_pending_row(repo_root: Union[str, Path], item_id: str) -> Dict[str,
         "schema": VALIDATION_EVIDENCE_SCHEMA, "item_id": item_id, "found": False,
         "task_id": None, "source_file": None, "admittable": False, "reason": "ROW_NOT_FOUND_OR_NOT_PENDING",
         "has_detail_section": False, "detail_sha256": None,
+        "recorded_by": recorded_by, "repo_head": _head_sha(source.repo_root),
     }
     if eligible is not None:
         detail = source.item_detail(eligible)

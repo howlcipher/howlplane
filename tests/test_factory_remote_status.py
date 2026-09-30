@@ -379,6 +379,7 @@ def test_validation_evidence_is_deterministic_and_does_not_write(tmp_path):
     before = {p.name: p.read_bytes() for p in repo.iterdir()}
     first = backlog_source.validate_pending_row(repo, "3")
     assert first == backlog_source.validate_pending_row(repo, "3")
+    assert backlog_source.validate_pending_row(repo, "3", "tester")["recorded_by"] == "tester"
     assert first["admittable"] and first["task_id"] == "HOWLFRAM-IMP-3" and first["detail_sha256"]
     assert backlog_source.validate_pending_row(repo, "5")["reason"] == "MISSING_DETAIL_SECTION"
     assert backlog_source.validate_pending_row(repo, "4")["admittable"] is False

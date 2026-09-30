@@ -33,11 +33,11 @@ Scores apply to Pending rows only; Done, Closed, and Merged rows show `—`.
 
 | # | Improvement | Status | Score (V×D÷E) | Claude model | Gemini model | ROI rationale |
 | --- | --- | --- | --- | --- | --- | --- |
-| 70 | [Host publish to E2E dogfood of the remote snapshot](#70-host-publish-to-e2e-dogfood-of-the-remote-snapshot) | Pending | 4.0 (8×1.0÷2) | Sonnet 5 | Gemini 3.7 Flash | Sequence 1 of 5. Owner on tallgeese commits the redacted snapshot; Board shows live status and Pending; one remote validate/format-check dry-run. Workers do not publish, take the lock, or start a campaign |
-| 71 | [Lock the remote snapshot contract](#71-lock-the-remote-snapshot-contract) | Pending | 2.0 (6×1.0÷3) | Sonnet 5 | Gemini 3.7 Flash | Sequence 2 of 5. Lock version, redaction, stale and SNAPSHOT_ABSENT, and tip SHA/path on howlplane.factory.status/v1, plus optional safe Board fields. Depends on 70 |
-| 72 | [Lock Pending admit evidence to the same identity](#72-lock-pending-admit-evidence-to-the-same-identity) | Pending | 2.0 (6×1.0÷3) | Sonnet 5 | Gemini 3.7 Flash | Sequence 3 of 5. Same row id and schema from Board preview through one admit path and thin validate/format-check evidence in Git. No second admit path and no supervisor lock |
-| 73 | [Keep Board the default work surface on the locked contract](#73-keep-board-the-default-work-surface-on-the-locked-contract) | Pending | 1.5 (6×1.0÷4) | Sonnet 5 | Gemini 3.7 Flash | Sequence 4 of 5. Board owns the work surface. Plane keeps the locked read contract for campaign, blockers, OWNER_REQUIRED, and Pending to mission. Do not build that UI in this repo |
-| 74 | [Prove publish cadence and snapshot freshness](#74-prove-publish-cadence-and-snapshot-freshness) | Pending | 1.0 (4×1.0÷4) | Sonnet 5 | Gemini 3.7 Flash | Sequence 5 of 5. Document the publish smoke and optional --arm-periodic only after the supervisor is running Plane #123. The freshness proof is the acceptance |
+| 70 | [Host publish to E2E dogfood of the remote snapshot](#70-host-publish-to-e2e-dogfood-of-the-remote-snapshot) | Pending | 4.0 (8×1.0÷2) | Sonnet 5 | Gemini 3.7 Flash | Sequence 1 of 5. Owner on tallgeese commits the redacted snapshot; Board shows live status and Pending; one remote validate/format-check dry-run. Workers do not publish, take the lock, or start a campaign **2026-09-30:** the snapshot is already committed (6276da3, stopped campaign). Remaining steps are Owner-only: host provenance, Board evidence, one remote dry-run. |
+| 71 | [Lock the remote snapshot contract](#71-lock-the-remote-snapshot-contract) | Done (2026-09-30) | 2.0 (6×1.0÷3) | Sonnet 5 | Gemini 3.7 Flash | Sequence 2 of 5. Lock version, redaction, stale and SNAPSHOT_ABSENT, and tip SHA/path on howlplane.factory.status/v1, plus optional safe Board fields. Depends on 70 |
+| 72 | [Lock Pending admit evidence to the same identity](#72-lock-pending-admit-evidence-to-the-same-identity) | Pending | 2.0 (6×1.0÷3) | Sonnet 5 | Gemini 3.7 Flash | Sequence 3 of 5. Same row id and schema from Board preview through one admit path and thin validate/format-check evidence in Git. No second admit path and no supervisor lock **2026-09-30:** Plane side shipped (`factory pending`). Open: one recorded dry-run in Git by a remote role. |
+| 73 | [Keep Board the default work surface on the locked contract](#73-keep-board-the-default-work-surface-on-the-locked-contract) | Done (2026-09-30) | 1.5 (6×1.0÷4) | Sonnet 5 | Gemini 3.7 Flash | Sequence 4 of 5. Board owns the work surface. Plane keeps the locked read contract for campaign, blockers, OWNER_REQUIRED, and Pending to mission. Do not build that UI in this repo |
+| 74 | [Prove publish cadence and snapshot freshness](#74-prove-publish-cadence-and-snapshot-freshness) | Pending | 1.0 (4×1.0÷4) | Sonnet 5 | Gemini 3.7 Flash | Sequence 5 of 5. Document the publish smoke and optional --arm-periodic only after the supervisor is running Plane #123. The freshness proof is the acceptance **2026-09-30:** checklist documented in `REMOTE_OBSERVATION.md`. Open: live before/after tip proof, Owner-only. |
 | 61 | [Encode Test Impact Assessment in the verification and completion prompts](#61-encode-test-impact-assessment-in-the-verification-and-completion-prompts) | Pending | 2.0 (4×1.0÷2) | Sonnet 5 | Gemini 3.7 Flash | The Continuous Test Governance policy landed in AGENTS.md, two skills, one rule, and `work_next_item`, but not in `verify_change.md` or `ship_check.md` — the two prompts that actually own final verification and completion authority, which is where the policy says the TIA record and full regression gate belong |
 | 62 | [Give the anti-append-only test policy an actual mechanism](#62-give-the-anti-append-only-test-policy-an-actual-mechanism) | Pending | 1.5 (6×1.0÷4) | Sonnet 5 | Gemini 3.7 Flash | "Treat tests as production infrastructure, not an append-only ledger" is prose only: no TIA field in `schemas/evidence-entry.schema.json`, no duplicate-contract detection, no `ship_check` gate. The milestone that introduced the policy shipped a duplicate test itself |
 | 63 | [Resolve the contradictory coverage guidance across skills](#63-resolve-the-contradictory-coverage-guidance-across-skills) | Pending | 3.0 (3×1.0÷1) | Haiku 4.5 | Gemini 3.7 Flash | `test_and_verify/SKILL.md` still mandates "strict project coverage thresholds" while `quality_assurance` was rewritten to treat coverage as signal only; `defensive_debugging` and the `improvements.md` Working Protocol still point at the old stance and at an unconditional `make test` |
@@ -828,6 +828,8 @@ HOWL-011 (Plane #123) can publish a redacted snapshot and can admit an exact `Pe
 
 **Constraints (not separate rows):** no second Factory, including in the Grok cloud; no supervisor lock; no `factory start`; no trusted `owner_direction`; leave Plane pull request #122 alone; no second admit path. Full synthesis: `documentation/journals/2026-09-29_team_howlplane_backlog.md`.
 
+**Status 2026-09-30:** the premise above is stale. `factory/status/remote-snapshot.json` is on `main` (commit 6276da3, `state: stopped`, `operator_stop`). What remains is Owner-only and is not done here: confirming it was published from the tallgeese host, recording Board showing that tip, and one remote validate dry-run (now possible with `howlplane factory pending --validate ROW_ID --recorded-by NAME --json`). A worker does not publish from another checkout.
+
 ### 71. Lock the remote snapshot contract
 Readers currently depend on prose in `factory/REMOTE_OBSERVATION.md` and on schema `howlplane.factory.status/v1`. The poll asked to lock that contract before Board treats it as the default work surface. A missing file is "status unknown" today. The writer has no `SNAPSHOT_ABSENT` token. Tip SHA and snapshot path are not fields in the v1 document.
 
@@ -840,6 +842,8 @@ Readers currently depend on prose in `factory/REMOTE_OBSERVATION.md` and on sche
 
 **Deterministic acceptance:** the contract doc and the schema name the same version, redaction, stale/absent, and tip rules, and a reader with only the Git file can tell fresh, stale, and absent apart. Depends on row 70 having a real snapshot to lock against. Same constraints as row 70. Envelope binding and a richer ChangeOps signature story stay deferred until this tip-lock is proven.
 
+**Done 2026-09-30:** `status_publish.read_snapshot` and `howlplane factory snapshot [--json]` return `FRESH`, `STALE`, `SNAPSHOT_ABSENT` or `SNAPSHOT_INVALID` plus Git-derived `path`, `tip_sha` and `head_sha` (a file cannot hold its own commit SHA). `factory/REMOTE_OBSERVATION.md` documents every v1 field and the read contract; the snapshot gained an additive free-text-free `operator` summary. Tests in `tests/test_factory_remote_status.py`.
+
 ### 72. Lock Pending admit evidence to the same identity
 Board's Pending preview and the admit dry-run must name the same row. Today admission is "an exact `Pending` cell in `issues.md`, `bugs.md`, or `improvements.md`," discovered by `BacklogSource`. There is no `admit --from-pending` command in this tree. The seats still want one thin helper that validate/format-checks a row before anyone treats it as admitted work, and they want the result reconstructable from Git: who, which row, what the check returned.
 
@@ -851,12 +855,16 @@ Board's Pending preview and the admit dry-run must name the same row. Today admi
 
 Depends on row 71 so the ids and schema being compared are the locked ones. Same hard constraints as row 70.
 
+**Progress 2026-09-30:** `howlplane factory pending [--json]` projects the ranked rows from the existing `BacklogSource` admit path, and `--validate ROW_ID --recorded-by NAME` emits `howlplane.backlog.validation/v1` evidence (row id, task id, admittable, detail hash, who, repo HEAD). Both are read-only. Still open: a remote role committing one such record to Git; the snapshot does not embed the Pending projection.
+
 ### 73. Keep Board the default work surface on the locked contract
 Once the snapshot contract is locked, the default place to see the campaign, blockers (`OWNER_REQUIRED`, `BLOCKED`, `DEFERRED`), and the step from a Pending row to a mission is Board. That surface is Board's. This repository does not implement it.
 
 **Plane's obligation:** the locked read contract from row 71 is sufficient for those views. If a safe field is missing, add it under row 71's rules (no paths, no command lines, no raw task output). Write the ownership split down next to the contract so a later change does not grow a second status UI here.
 
 **Deterministic acceptance:** a short ownership note states that Board renders campaign, blockers, and Pending-to-mission, and that Plane supplies the Git snapshot and the single admit path. No Board UI, no second Factory, and no supervisor changes land in this row. Depends on row 71.
+
+**Done 2026-09-30:** the ownership note (Plane, Board, Factory) sits next to the contract in `factory/REMOTE_OBSERVATION.md`.
 
 ### 74. Prove publish cadence and snapshot freshness
 `--arm-periodic` already records `status_publish.path` so a supervisor restarted onto the #123 code refreshes the snapshot after each tick and after `run-once`. An already-running supervisor keeps its old code until that restart. One-shot `--publish` works without the restart. None of that has a freshness proof against a supervisor that is actually on #123, and the smoke is not written down as an operator checklist.
@@ -867,3 +875,5 @@ Once the snapshot contract is locked, the default place to see the campaign, blo
 - The proof records the tip SHA before and after one refresh and shows the snapshot moved with that tip.
 
 Depends on rows 70 and 71. Same hard constraints as row 70. Effort on the poll was S for the ops note and M for the proof; the score uses the proof.
+
+**Progress 2026-09-30:** the publish-smoke checklist and the optional `--arm-periodic` note are in `factory/REMOTE_OBSERVATION.md`. The before/after tip proof needs the Factory host running the #123 build and is Owner-only; this row stays Pending for that step.

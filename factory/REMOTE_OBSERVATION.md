@@ -41,7 +41,16 @@ Schema: `howlplane.factory.status/v1`.
 | `blockers` | Parked work and proposals. `class` is `OWNER_REQUIRED`, `BLOCKED`, or `DEFERRED` |
 | `owner_required` | True when any blocker is `OWNER_REQUIRED`, including `waiting_for_authority` and a missing authority envelope |
 | `last_tick_at` | Last recorded tick time |
+| `last_successful_tick_at` | Last tick that completed work, or null |
 | `last_error` | Last supervisor error after redaction, or null |
+| `current_work_item_id` | Work item being processed, or null |
+| `failure_count` | Consecutive failures recorded by the supervisor |
+| `stopped_reason` | Why the supervisor stopped (for example `operator_stop`), or null |
+| `objective`, `target_mode`, `run_mode` | Campaign objective, target mode and run mode, redacted |
+| `authority` | Authority profile name or `not configured`; null if not a known value |
+| `published_at` | When the snapshot was written. The freshness clock |
+| `redacted` | Always `true`; a reader must reject a snapshot without it |
+| `operator` | Stable summary shared with the CLI: `label`, `severity`, `reason_code`, `owner_required`. No free text |
 
 The writer does not copy workspace paths, worktree paths, process command
 lines, provider inventory, or raw task output (`recent_completed`,
@@ -54,6 +63,62 @@ component is that repository, and `[path]` otherwise.
 Commit and push `factory/status/remote-snapshot.json` from the host. Remote
 readers use Git. Until the first publish, the file is absent and status is
 unknown.
+
+### Read contract: fresh, stale, absent
+
+Schema version is the `schema` field (`howlplane.factory.status/v1`). A reader
+must reject any other value. `howlplane factory snapshot [--json]` (library:
+`status_publish.read_snapshot`) is the read-only reference implementation. It
+never writes, never takes the supervisor lock and never starts a campaign.
+
+| `freshness` | Meaning | Reader must |
+| --- | --- | --- |
+| `FRESH` | Valid v1 snapshot, `published_at` within the fresh window (default 1800 s; the reader may pass its own) | Show state normally |
+| `STALE` | Valid, but older than the window | Show the last state labelled stale; do not claim the Factory is running |
+| `SNAPSHOT_ABSENT` | No file at the path | Show "status unknown", not healthy |
+| `SNAPSHOT_INVALID` | Unparseable, wrong `schema`, no `published_at`, or dated in the future beyond 5 minutes of skew | Reject; treat as unknown |
+
+A file cannot contain the SHA of the commit that stores it, so the reader
+derives identity from Git: `path` (repository-relative), `tip_sha` (the commit
+that last touched the snapshot) and `head_sha`. Board shows `tip_sha` to prove
+it is projecting the Git tip and not a side channel. These values are not
+fields in the v1 document.
+
+### Pending row identity and validation evidence
+
+`howlplane factory pending [--json]` projects the ranked `Pending` rows the
+existing `BacklogSource` admit path already reads: `item_id` plus
+`source_file` is the row identity, `task_id` is what admission derives from it.
+`howlplane factory pending --validate ROW_ID --recorded-by NAME --json` emits
+`howlplane.backlog.validation/v1` evidence: row id, task id, whether admission
+would accept it, the detail-section hash, who recorded it and the repository
+HEAD. Committing that output gives a record rebuildable from Git. These
+commands are read-only: there is still one admit path, no second queue, no
+supervisor lock, and no trusted `owner_direction`.
+
+### Ownership: Plane, Board, Factory
+
+- **Plane** is the governed engine and control plane. It supplies the Git
+  snapshot, the read contract above and the single admit path.
+- **Board** is the rich human work surface. It renders the campaign, blockers
+  (`OWNER_REQUIRED`, `BLOCKED`, `DEFERRED`) and the step from a Pending row to
+  a mission. No such UI lives in this repository.
+- **Factory** is the persistent engineering loop that Plane runs.
+
+### Publish smoke (operator checklist)
+
+1. On the Factory host checkout: `howlplane factory status --publish`.
+2. Commit and push `factory/status/remote-snapshot.json`.
+3. From any clone: `howlplane factory snapshot --json`. Expect `FRESH`, a
+   `tip_sha` equal to the commit from step 2, and a `published_at` that moved.
+4. Delete or rename the file in a scratch clone and confirm `SNAPSHOT_ABSENT`.
+5. Optional cadence: `howlplane factory status --publish --arm-periodic`, only
+   after the host supervisor runs a build that contains the periodic hook.
+   Arming neither starts a campaign nor takes the lock, so do not run
+   `factory start` to "help".
+
+The live before/after tip proof in step 3 needs the Factory host and is an
+Owner action.
 
 ### Periodic refresh
 
@@ -139,7 +204,9 @@ Plane PR URL placeholder. The follow-up that fills it should use:
 - Admit path: an exact `Pending` row in `issues.md`, `bugs.md`, or `improvements.md`
 
 The host operator merges the Plane PR and publishes from the Factory host.
-This checkout does not publish that snapshot.
+As of 2026-09-30 `factory/status/remote-snapshot.json` is committed on `main`
+(commit 6276da3, a snapshot of a stopped campaign). Whether it was produced on
+the tallgeese host is not verifiable from this repository.
 
 ## Follow-ons filed 2026-09-29
 
