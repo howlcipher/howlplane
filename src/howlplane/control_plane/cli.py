@@ -1957,6 +1957,13 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
     p_authority_show.add_argument("profile_id", choices=sorted(CANONICAL_PROFILES))
     p_authority_show.add_argument("--json", action="store_true", help="Output JSON result")
 
+    p_setup = subparsers.add_parser(
+        "setup", help="Check this repository and prepare it for Factory use", **kwargs)
+    p_setup.add_argument("--yes", action="store_true",
+                         help="Confirm the printed preparation scope non-interactively")
+    p_setup.add_argument("--json", action="store_true", help="Output JSON result (never prompts)")
+    _add_workspace_trust_argument(p_setup)
+
     # local (local Ollama model setup/health check, #58 Phase 3)
     p_local = subparsers.add_parser("local", help="Local (Ollama) model utilities", **kwargs)
     p_local.add_argument("local_action", choices=["setup"], help="Action to perform")
@@ -3449,6 +3456,7 @@ HANDLERS = {
     "acceptance": cmd_acceptance,
     "marathon": cmd_marathon,
     "authority": cmd_authority,
+    "setup": lambda args: __import__("howlplane.control_plane.setup_cli", fromlist=["command"]).command(args),
     "local": cmd_local,
     "factory": cmd_factory,
     "explore": cmd_explore,
