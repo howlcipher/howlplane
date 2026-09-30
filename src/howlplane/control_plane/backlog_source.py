@@ -256,3 +256,60 @@ class BacklogSource:
             len(lines),
         )
         return "\n".join(lines[start:end]).strip()
+
+
+PENDING_PROJECTION_SCHEMA = "howlplane.backlog.pending/v1"
+VALIDATION_EVIDENCE_SCHEMA = "howlplane.backlog.validation/v1"
+
+
+def pending_projection(repo_root: Union[str, Path]) -> Dict[str, object]:
+    """Read-only list of Pending rows with the identity Board and admit share.
+
+    This is the same `BacklogSource.select()` admit path, projected. It admits,
+    claims and writes nothing. `item_id` plus `source_file` is the row identity;
+    `task_id` is what admission derives from it.
+    """
+    source = BacklogSource(repo_root)
+    selection = source.select()
+    rows = [{
+        "item_id": item.item_id, "task_id": item.task_id, "source_file": item.source_file,
+        "title": item.title, "kind": item.kind, "score": item.score, "rank": rank,
+        "eligible": True, "reason": None,
+    } for rank, item in enumerate(selection.eligible, start=1)]
+    rows += [{
+        "item_id": ex["item_id"], "task_id": None, "source_file": ex["source_file"],
+        "title": None, "kind": None, "score": None, "rank": None,
+        "eligible": False, "reason": ex["reason"],
+    } for ex in selection.excluded]
+    return {"schema": PENDING_PROJECTION_SCHEMA, "item_schema": BACKLOG_ITEM_SCHEMA_VERSION,
+            "files_read": selection.files_read, "rows": rows}
+
+
+def validate_pending_row(repo_root: Union[str, Path], item_id: str) -> Dict[str, object]:
+    """Deterministic, read-only validation evidence for one row id.
+
+    Rebuildable from the committed backlog alone: it records the same identity
+    `pending_projection` exposes, whether admission would accept the row, and
+    whether the row has the detail section a governed task is built from.
+    """
+    import hashlib
+
+    source = BacklogSource(repo_root)
+    selection = source.select()
+    eligible = next((i for i in selection.eligible if i.item_id == item_id), None)
+    excluded = next((e for e in selection.excluded if e["item_id"] == item_id), None)
+    evidence: Dict[str, object] = {
+        "schema": VALIDATION_EVIDENCE_SCHEMA, "item_id": item_id, "found": False,
+        "task_id": None, "source_file": None, "admittable": False, "reason": "ROW_NOT_FOUND_OR_NOT_PENDING",
+        "has_detail_section": False, "detail_sha256": None,
+    }
+    if eligible is not None:
+        detail = source.item_detail(eligible)
+        evidence.update(
+            found=True, task_id=eligible.task_id, source_file=eligible.source_file,
+            admittable=bool(detail), reason=None if detail else "MISSING_DETAIL_SECTION",
+            has_detail_section=bool(detail),
+            detail_sha256=hashlib.sha256(detail.encode("utf-8")).hexdigest() if detail else None)
+    elif excluded is not None:
+        evidence.update(found=True, source_file=excluded["source_file"], reason=excluded["reason"])
+    return evidence

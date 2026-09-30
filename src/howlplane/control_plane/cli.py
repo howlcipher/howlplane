@@ -1806,6 +1806,13 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
                             help="Snapshots older than this are STALE (default 1800)")
     p_snapshot.add_argument("--json", action="store_true", help="Output JSON result")
 
+    p_pending = factory_sub.add_parser(
+        "pending", help="List ranked Pending backlog rows, or validate one (read-only)", **kwargs
+    )
+    p_pending.add_argument("--validate", metavar="ROW_ID",
+                           help="Emit validation evidence for one row id. Does not admit or claim it.")
+    p_pending.add_argument("--json", action="store_true", help="Output JSON result")
+
     p_stop = factory_sub.add_parser(
         "stop", help="Stop the factory supervisor loop", **kwargs
     )
@@ -2874,6 +2881,34 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_factory_pending(args: argparse.Namespace) -> int:
+    """Read-only projection of the admit path's Pending rows. Admits nothing, takes no lock."""
+    from howlplane.control_plane import backlog_source
+    repo = Path(getattr(args, "repo", None) or ".").expanduser().resolve()
+    if args.validate:
+        doc = backlog_source.validate_pending_row(repo, args.validate)
+        ok = bool(doc["admittable"])
+    else:
+        doc = backlog_source.pending_projection(repo)
+        ok = True
+    if getattr(args, "json", False):
+        print(json.dumps(doc, indent=2))
+    elif args.validate:
+        print(f"Row {doc['item_id']}: {'admittable' if ok else 'not admittable'}"
+              + ("" if ok else f" ({doc['reason']})"))
+        if doc["task_id"]:
+            print(f"Task id: {doc['task_id']} ({doc['source_file']})")
+    else:
+        for row in doc["rows"]:
+            if row["eligible"]:
+                print(f"{row['rank']:>3}. {row['item_id']} {row['title']} ({row['source_file']})")
+            else:
+                print(f"  - {row['item_id']} not admittable: {row['reason']}")
+        if not doc["rows"]:
+            print("No Pending backlog rows.")
+    return 0 if ok else 1
+
+
 def cmd_factory_snapshot(args: argparse.Namespace) -> int:
     """Read-only: report a published snapshot's freshness. Never touches supervisor state."""
     from howlplane.control_plane.factory import status_publish
@@ -3110,6 +3145,8 @@ def cmd_factory(args: argparse.Namespace) -> int:
             return cmd_factory_run(args)
         if action == "status":
             return cmd_factory_status(args)
+        if action == "pending":
+            return cmd_factory_pending(args)
         if action == "snapshot":
             return cmd_factory_snapshot(args)
         if action == "stop":

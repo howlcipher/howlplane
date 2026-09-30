@@ -339,3 +339,55 @@ def test_factory_snapshot_cli_absent_is_not_healthy(tmp_path, capsys):
     from howlplane.control_plane.cli import main
     assert main(["factory", "snapshot", "--repo", str(tmp_path), "--json"]) == 1
     assert json.loads(capsys.readouterr().out)["freshness"] == "SNAPSHOT_ABSENT"
+
+
+# --- Row 72: Pending identity and validation evidence (read-only, same admit path) ---
+
+def _backlog_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "improvements.md").write_text("\n".join([
+        "## Ranked Backlog",
+        "| # | Title | Status | Score | Rationale |",
+        "| --- | --- | --- | --- | --- |",
+        "| 3 | [Live](#3-live) | Pending | 1.5 | open |",
+        "| 4 | [Blocked](#4-b) | Pending — blocked on #3 | 1.0 | wait |",
+        "| 5 | [No detail](#5-n) | Pending | 1.0 | open |",
+        "",
+        "### 3. Live",
+        "",
+        "Acceptance: something.",
+    ]), encoding="utf-8")
+    return repo
+
+
+def test_pending_projection_shares_identity_with_the_admit_path(tmp_path):
+    from howlplane.control_plane import backlog_source
+    repo = _backlog_repo(tmp_path)
+    projection = backlog_source.pending_projection(repo)
+    selection = BacklogSource(repo).select()
+    eligible = [r for r in projection["rows"] if r["eligible"]]
+    assert [r["task_id"] for r in eligible] == [i.task_id for i in selection.eligible]
+    assert eligible[0]["item_id"] == "3" and eligible[0]["rank"] == 1
+    blocked = next(r for r in projection["rows"] if r["item_id"] == "4")
+    assert not blocked["eligible"] and blocked["reason"].startswith("STATUS_NOT_ELIGIBLE")
+
+
+def test_validation_evidence_is_deterministic_and_does_not_write(tmp_path):
+    from howlplane.control_plane import backlog_source
+    repo = _backlog_repo(tmp_path)
+    before = {p.name: p.read_bytes() for p in repo.iterdir()}
+    first = backlog_source.validate_pending_row(repo, "3")
+    assert first == backlog_source.validate_pending_row(repo, "3")
+    assert first["admittable"] and first["task_id"] == "HOWLFRAM-IMP-3" and first["detail_sha256"]
+    assert backlog_source.validate_pending_row(repo, "5")["reason"] == "MISSING_DETAIL_SECTION"
+    assert backlog_source.validate_pending_row(repo, "4")["admittable"] is False
+    assert backlog_source.validate_pending_row(repo, "99")["found"] is False
+    assert {p.name: p.read_bytes() for p in repo.iterdir()} == before
+
+
+def test_factory_pending_cli_validate_exit_codes(tmp_path, capsys):
+    repo = _backlog_repo(tmp_path)
+    assert main(["factory", "pending", "--repo", str(repo), "--validate", "3", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["schema"] == "howlplane.backlog.validation/v1"
+    assert main(["factory", "pending", "--repo", str(repo), "--validate", "4"]) == 1
