@@ -3629,11 +3629,25 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
         workspace_trust.resolve_policy()
         return handler(parsed_args)
     except ControlPlaneError as err:
-        print(str(err), file=sys.stderr)
+        print(_operator_error_text(err, parsed_args) or str(err), file=sys.stderr)
         return 1
     except Exception as err:
-        print(f"ERROR: {err}", file=sys.stderr)
+        print(_operator_error_text(err, parsed_args) or f"ERROR: {err}", file=sys.stderr)
         return 1
+
+
+def _operator_error_text(err: BaseException, parsed_args: argparse.Namespace) -> Optional[str]:
+    """What/why/next for recognized failures; None keeps the original message."""
+    try:
+        from howlplane.control_plane.presentation.errors import explain
+        explained = explain(err)
+    except Exception:
+        return None
+    if explained is None:
+        return None
+    if getattr(parsed_args, "json", False):
+        return json.dumps(explained.to_dict())
+    return explained.render()
 
 
 def legacy_main(args: Optional[List[str]] = None) -> int:
