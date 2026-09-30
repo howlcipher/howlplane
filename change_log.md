@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 
+- Operator experience pass. `howlplane factory status` is human-first by
+  default (state, project, current work, health, reason, exact next action) and
+  keeps full supervisor detail under `--verbose`; `--json` keeps every existing
+  key and gains an additive `operator` object
+  (`howlplane.operator.status/v1`: state, severity, `reason_code`,
+  `owner_required`, `next_action`) from the new `presentation/operator.py`.
+  New `howlplane setup [--yes] [--json]` composes agent readiness, workspace
+  trust and config checks and delegates preparation to `factory prepare`.
+  New `howlplane config show|validate|explain` reports effective settings with
+  their source. `howlplane --help` and `factory --help` group the everyday
+  workflow first. Recognized errors print what/why/next with a stable code
+  (`howlplane.error/v1` under `--json`). Remaining `ai ...` recommendations now
+  say `howlplane ...`, and the naming test derives its verbs from the parser.
+  New read-only `howlplane factory snapshot` (FRESH, STALE, SNAPSHOT_ABSENT,
+  SNAPSHOT_INVALID plus Git tip identity) and `factory pending [--validate]`
+  close out the Plane side of rows 71 to 73; rows 70 and 74 keep their
+  Owner-only steps. The empty-purpose `ui` extra (Textual, Streamlit) is now an
+  empty deprecated alias because Board owns the rich UI.
+
 - 2026-09-29 seat-poll follow-ons for the remote snapshot loop. The synthesis
   lives in `documentation/journals/2026-09-29_team_howlplane_backlog.md`.
   Pending rows 70 through 74 in `improvements.md` are the near-term sequence:

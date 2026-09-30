@@ -15,12 +15,11 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional
 
+from howlplane.control_plane.factory.status_publish import OWNER_REQUIRED
 from howlplane.control_plane.factory.supervisor_state import SupervisorState
 from howlplane.control_plane.resource_models import ProviderFailureClass
 
 OPERATOR_STATUS_SCHEMA = "howlplane.operator.status/v1"
-
-from howlplane.control_plane.factory.status_publish import OWNER_REQUIRED
 
 
 class Severity(str, Enum):

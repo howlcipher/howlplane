@@ -4,9 +4,25 @@ Welcome to the official User Guide for HowlPlane! This document outlines how to 
 
 ---
 
-## 1. 🚀 Everyday Workflow: The Global Launcher (`ai`)
+## 0. First run
 
-The primary way to interact with HowlPlane across any codebase on your machine is through the `ai` command:
+```bash
+cd /path/to/project
+howlplane setup            # check the repo, workers and workspace trust; prepare if you confirm
+howlplane factory start
+howlplane factory status   # health, current work, and your next action
+howlplane factory logs --follow
+```
+
+`howlplane setup --json` is the non-interactive form. `howlplane config show`
+and `howlplane config explain <setting>` show effective configuration and where
+each value came from. The sections below are the full reference.
+
+---
+
+## 1. 🚀 Everyday Workflow: The `howlplane` Command
+
+The primary way to interact with HowlPlane across any codebase on your machine is through the `howlplane` command (the older `ai` launcher remains as a deprecated alias):
 
 ```bash
 # Stand inside any repository and execute an objective:

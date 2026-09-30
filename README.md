@@ -31,6 +31,18 @@
 > - *Evidence records historical truth.*
 > - *Humans authorize consequential risk.*
 
+### Quick start
+
+1. Install HowlPlane (see [Global Installation & Setup](#global-installation--setup)).
+2. `cd` into a Git repository.
+3. `howlplane setup` checks the repository, your AI workers and workspace trust, offers to prepare the repository (it asks before authorizing anything), and tells you what to run next.
+4. `howlplane factory start`
+5. `howlplane factory status` shows whether the Factory is healthy, what it is working on, and exactly what you need to do, if anything.
+6. `howlplane factory logs --follow`
+7. If status says `OWNER REQUIRED`, run the command it prints. Use `howlplane factory status --verbose` for full supervisor detail, or `--json` for a stable machine-readable contract.
+
+Three names to keep straight: **Plane** is the governed engine and control plane (this repository). **Board** is the rich human work surface; it reads the contracts Plane publishes and is not part of this repository. The **Factory** is the persistent engineering loop Plane runs. `howlplane --help` lists the everyday commands first and the advanced ones after.
+
 The persistent factory supervisor uses one lock per state directory. A second
 process is rejected without changing the durable record of the active process.
 Review, verification, and hygiene policy files remain human only, and skipped
@@ -58,6 +70,11 @@ howlplane factory status
 howlplane factory logs --follow
 howlplane factory stop
 ```
+
+`factory status` is concise by default and shows health, current work, and the
+next action. Add `--verbose` for supervisor IDs, ticks and history counts, and
+`--json` for the stable contract (its `operator` object carries the state,
+severity, `reason_code` and next action).
 
 On its first interactive start, Factory asks for an explicit authority choice.
 The safe default uses the existing `strict` authority profile. In automation,
