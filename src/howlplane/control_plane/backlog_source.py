@@ -33,6 +33,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
+from howlplane.control_plane.git_env import git_stdout
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
 
 BACKLOG_ITEM_SCHEMA_VERSION = "howlplane.backlog_item/v1"
@@ -262,16 +263,6 @@ PENDING_PROJECTION_SCHEMA = "howlplane.backlog.pending/v1"
 VALIDATION_EVIDENCE_SCHEMA = "howlplane.backlog.validation/v1"
 
 
-def _head_sha(repo_root: Path) -> Optional[str]:
-    import subprocess
-    try:
-        out = subprocess.run(["git", "-C", str(repo_root), "rev-parse", "HEAD"], capture_output=True,
-                             text=True, timeout=10, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return out.stdout.strip() or None if out.returncode == 0 else None
-
-
 def pending_projection(repo_root: Union[str, Path]) -> Dict[str, object]:
     """Read-only list of Pending rows with the identity Board and admit share.
 
@@ -314,7 +305,7 @@ def validate_pending_row(
         "schema": VALIDATION_EVIDENCE_SCHEMA, "item_id": item_id, "found": False,
         "task_id": None, "source_file": None, "admittable": False, "reason": "ROW_NOT_FOUND_OR_NOT_PENDING",
         "has_detail_section": False, "detail_sha256": None,
-        "recorded_by": recorded_by, "repo_head": _head_sha(source.repo_root),
+        "recorded_by": recorded_by, "repo_head": git_stdout(source.repo_root, ["rev-parse", "HEAD"]),
     }
     if eligible is not None:
         detail = source.item_detail(eligible)

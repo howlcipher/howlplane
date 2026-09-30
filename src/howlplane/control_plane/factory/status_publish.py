@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence, Union
 
 from howlplane.control_plane.atomic_io import atomic_write_text
+from howlplane.control_plane.git_env import git_stdout
 
 
 STATUS_SCHEMA = "howlplane.factory.status/v1"
@@ -170,20 +170,12 @@ def _git_identity(repo_root: Path, path: Path) -> dict:
     A file cannot contain the SHA of the commit that stores it, so the reader
     derives it from Git. Both are None when Git or history is unavailable.
     """
-    def run(*argv: str) -> Optional[str]:
-        try:
-            out = subprocess.run(["git", "-C", str(repo_root), *argv], capture_output=True,
-                                 text=True, timeout=10, check=False)
-        except (OSError, subprocess.SubprocessError):
-            return None
-        return out.stdout.strip() or None if out.returncode == 0 else None
-
     try:
         rel = path.resolve().relative_to(repo_root.resolve()).as_posix()
     except ValueError:
         return {"path": None, "tip_sha": None, "head_sha": None}
-    return {"path": rel, "tip_sha": run("log", "-1", "--format=%H", "--", rel),
-            "head_sha": run("rev-parse", "HEAD")}
+    return {"path": rel, "tip_sha": git_stdout(repo_root, ["log", "-1", "--format=%H", "--", rel]),
+            "head_sha": git_stdout(repo_root, ["rev-parse", "HEAD"])}
 
 
 def read_snapshot(
