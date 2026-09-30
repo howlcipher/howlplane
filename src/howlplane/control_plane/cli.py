@@ -1798,6 +1798,14 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
              "each tick. Does not start a campaign.",
     )
 
+    p_snapshot = factory_sub.add_parser(
+        "snapshot", help="Read a published remote status snapshot (freshness, tip SHA)", **kwargs
+    )
+    p_snapshot.add_argument("--path", help="Snapshot file (default: factory/status/remote-snapshot.json)")
+    p_snapshot.add_argument("--fresh-seconds", type=int, default=None,
+                            help="Snapshots older than this are STALE (default 1800)")
+    p_snapshot.add_argument("--json", action="store_true", help="Output JSON result")
+
     p_stop = factory_sub.add_parser(
         "stop", help="Stop the factory supervisor loop", **kwargs
     )
@@ -2866,6 +2874,33 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_factory_snapshot(args: argparse.Namespace) -> int:
+    """Read-only: report a published snapshot's freshness. Never touches supervisor state."""
+    from howlplane.control_plane.factory import status_publish
+    repo = Path(getattr(args, "repo", None) or ".").expanduser().resolve()
+    path = Path(args.path) if args.path else status_publish.default_publish_path(repo)
+    result = status_publish.read_snapshot(
+        path, repo_root=repo,
+        fresh_seconds=args.fresh_seconds or status_publish.DEFAULT_FRESH_SECONDS)
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2, default=str))
+    else:
+        print(f"Remote status snapshot: {result['freshness']}")
+        if result["freshness"] == status_publish.SNAPSHOT_ABSENT:
+            print("No snapshot has been published. Status is unknown, not healthy.")
+            print("Publish one on the Factory host: howlplane factory status --publish")
+        elif result["freshness"] == status_publish.SNAPSHOT_INVALID:
+            print("The snapshot could not be read or has an unsupported schema.")
+        else:
+            print(f"Age: {result['age_seconds']}s (fresh window {result['fresh_seconds']}s)")
+            print(f"State: {result['snapshot'].get('state')}")
+            if result["tip_sha"]:
+                print(f"Tip: {result['tip_sha'][:12]} ({result['path']})")
+            if result["freshness"] == status_publish.STALE:
+                print("Stale: the Factory host has not published recently. Do not assume it is running.")
+    return 0 if result["freshness"] == status_publish.FRESH else 1
+
+
 def cmd_factory_stop(args: argparse.Namespace) -> int:
     from howlplane.control_plane.factory.campaign import campaign_from_state_dir
     from howlplane.control_plane.factory.supervisor_state import SupervisorState
@@ -3075,6 +3110,8 @@ def cmd_factory(args: argparse.Namespace) -> int:
             return cmd_factory_run(args)
         if action == "status":
             return cmd_factory_status(args)
+        if action == "snapshot":
+            return cmd_factory_snapshot(args)
         if action == "stop":
             return cmd_factory_stop(args)
         if action == "resume":

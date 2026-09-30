@@ -8,6 +8,7 @@ import pytest
 
 from howlplane.control_plane.backlog_source import BacklogSource, source_file_rank
 from howlplane.control_plane.cli import main
+from howlplane.control_plane.factory import status_publish
 from howlplane.control_plane.factory.status_publish import (
     STATUS_SCHEMA,
     arm_periodic_publish,
@@ -275,3 +276,66 @@ def test_committed_examples_match_the_admit_contracts():
     example = ROOT / "factory" / "examples" / "ranked-backlog-row.md"
     assert example.name not in {"bugs.md", "issues.md", "improvements.md"}
     assert "Pending" in example.read_text(encoding="utf-8")
+
+
+# --- Row 71: read-side contract (freshness, absent, tip identity) ---------------
+
+def _snapshot_file(tmp_path, published_at, schema=status_publish.STATUS_SCHEMA):
+    path = tmp_path / "factory" / "status" / "remote-snapshot.json"
+    path.parent.mkdir(parents=True)
+    doc = status_publish.build_redacted_status({"state": "idle"}, published_at=published_at)
+    doc["schema"] = schema
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    return path
+
+
+def test_reader_distinguishes_fresh_stale_absent_and_invalid(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 9, 30, 12, 0, tzinfo=timezone.utc)
+    absent = status_publish.read_snapshot(tmp_path / "nope.json", now=now)
+    assert absent["freshness"] == status_publish.SNAPSHOT_ABSENT and absent["snapshot"] is None
+
+    fresh = _snapshot_file(tmp_path, (now - timedelta(seconds=60)).isoformat())
+    assert status_publish.read_snapshot(fresh, now=now)["freshness"] == status_publish.FRESH
+    assert status_publish.read_snapshot(fresh, now=now, fresh_seconds=30)["freshness"] == status_publish.STALE
+
+    future = tmp_path / "future.json"
+    future.write_text(fresh.read_text().replace(
+        json.loads(fresh.read_text())["published_at"], (now + timedelta(days=1)).isoformat()))
+    assert status_publish.read_snapshot(future, now=now)["freshness"] == status_publish.SNAPSHOT_INVALID
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json")
+    assert status_publish.read_snapshot(bad, now=now)["freshness"] == status_publish.SNAPSHOT_INVALID
+    wrong = tmp_path / "wrong.json"
+    wrong.write_text(json.dumps({"schema": "other/v9", "published_at": now.isoformat()}))
+    assert status_publish.read_snapshot(wrong, now=now)["freshness"] == status_publish.SNAPSHOT_INVALID
+
+
+def test_reader_reports_git_tip_identity_and_never_writes(tmp_path):
+    import subprocess
+    from datetime import datetime, timezone
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    path = _snapshot_file(tmp_path, datetime.now(timezone.utc).isoformat())
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.email=a@b", "-c", "user.name=n",
+                    "commit", "-q", "-m", "snap"], check=True)
+    before = sorted(p.name for p in tmp_path.rglob("*"))
+    result = status_publish.read_snapshot(path, repo_root=tmp_path)
+    head = subprocess.run(["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True,
+                          text=True, check=True).stdout.strip()
+    assert result["tip_sha"] == head == result["head_sha"]
+    assert result["path"] == "factory/status/remote-snapshot.json"
+    assert sorted(p.name for p in tmp_path.rglob("*")) == before
+
+
+def test_published_snapshot_carries_stable_operator_summary():
+    doc = status_publish.build_redacted_status({"state": "waiting_for_authority"})
+    assert doc["operator"] == {"label": "OWNER REQUIRED", "severity": "attention",
+                               "reason_code": "OWNER_REQUIRED", "owner_required": True}
+
+
+def test_factory_snapshot_cli_absent_is_not_healthy(tmp_path, capsys):
+    from howlplane.control_plane.cli import main
+    assert main(["factory", "snapshot", "--repo", str(tmp_path), "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["freshness"] == "SNAPSHOT_ABSENT"

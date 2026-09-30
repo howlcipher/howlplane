@@ -20,7 +20,7 @@ from howlplane.control_plane.resource_models import ProviderFailureClass
 
 OPERATOR_STATUS_SCHEMA = "howlplane.operator.status/v1"
 
-OWNER_REQUIRED = "OWNER_REQUIRED"
+from howlplane.control_plane.factory.status_publish import OWNER_REQUIRED
 
 
 class Severity(str, Enum):
@@ -49,6 +49,9 @@ class ReasonCode(str, Enum):
     STOPPED = "STOPPED"
     BOUNDED_RUN_COMPLETE = "BOUNDED_RUN_COMPLETE"
     NOT_STARTED = "NOT_STARTED"
+    STALE_SNAPSHOT = "STALE_SNAPSHOT"
+    SNAPSHOT_ABSENT = "SNAPSHOT_ABSENT"
+    SNAPSHOT_INVALID = "SNAPSHOT_INVALID"
 
 
 @dataclass(frozen=True)
