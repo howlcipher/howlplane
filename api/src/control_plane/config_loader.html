@@ -367,6 +367,12 @@
                                 <a class="variable" href="#ConfigLoader.repo_root">repo_root</a>
                         </li>
                         <li>
+                                <a class="variable" href="#ConfigLoader.file_layer">file_layer</a>
+                        </li>
+                        <li>
+                                <a class="variable" href="#ConfigLoader.local_layer">local_layer</a>
+                        </li>
+                        <li>
                                 <a class="variable" href="#ConfigLoader.local_config_path">local_config_path</a>
                         </li>
                         <li>
@@ -694,129 +700,134 @@
 </span><span id="L-257"><a href="#L-257"><span class="linenos">257</span></a>                <span class="k">finally</span><span class="p">:</span>
 </span><span id="L-258"><a href="#L-258"><span class="linenos">258</span></a>                    <span class="n">loader</span><span class="o">.</span><span class="n">dispose</span><span class="p">()</span>
 </span><span id="L-259"><a href="#L-259"><span class="linenos">259</span></a>
-</span><span id="L-260"><a href="#L-260"><span class="linenos">260</span></a>        <span class="n">local_candidate</span> <span class="o">=</span> <span class="n">local_config_path</span>
-</span><span id="L-261"><a href="#L-261"><span class="linenos">261</span></a>        <span class="k">if</span> <span class="n">local_candidate</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">config_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="L-262"><a href="#L-262"><span class="linenos">262</span></a>            <span class="n">local_candidate</span> <span class="o">=</span> <span class="p">(</span>
-</span><span id="L-263"><a href="#L-263"><span class="linenos">263</span></a>                <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"HOWLPLANE_LOCAL_CONFIG"</span><span class="p">)</span>
-</span><span id="L-264"><a href="#L-264"><span class="linenos">264</span></a>                <span class="ow">or</span> <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">".config"</span> <span class="o">/</span> <span class="s2">"howlplane"</span> <span class="o">/</span> <span class="s2">"config.toml"</span>
-</span><span id="L-265"><a href="#L-265"><span class="linenos">265</span></a>            <span class="p">)</span>
-</span><span id="L-266"><a href="#L-266"><span class="linenos">266</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span> <span class="o">=</span> <span class="p">(</span>
-</span><span id="L-267"><a href="#L-267"><span class="linenos">267</span></a>            <span class="n">Path</span><span class="p">(</span><span class="n">local_candidate</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span> <span class="k">if</span> <span class="n">local_candidate</span> <span class="k">else</span> <span class="kc">None</span>
-</span><span id="L-268"><a href="#L-268"><span class="linenos">268</span></a>        <span class="p">)</span>
-</span><span id="L-269"><a href="#L-269"><span class="linenos">269</span></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
-</span><span id="L-270"><a href="#L-270"><span class="linenos">270</span></a>            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span><span class="p">,</span> <span class="s2">"rb"</span><span class="p">)</span> <span class="k">as</span> <span class="n">local_file</span><span class="p">:</span>
-</span><span id="L-271"><a href="#L-271"><span class="linenos">271</span></a>                <span class="n">local_data</span> <span class="o">=</span> <span class="n">tomllib</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">local_file</span><span class="p">)</span>
-</span><span id="L-272"><a href="#L-272"><span class="linenos">272</span></a>            <span class="n">yaml_data</span> <span class="o">=</span> <span class="n">_deep_merge</span><span class="p">(</span><span class="n">yaml_data</span><span class="p">,</span> <span class="n">_resource_local_config</span><span class="p">(</span><span class="n">local_data</span><span class="p">))</span>
-</span><span id="L-273"><a href="#L-273"><span class="linenos">273</span></a>
-</span><span id="L-274"><a href="#L-274"><span class="linenos">274</span></a>        <span class="c1"># Load pydantic settings prioritizing .env over yaml_data</span>
-</span><span id="L-275"><a href="#L-275"><span class="linenos">275</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">settings</span> <span class="o">=</span> <span class="n">AppSettings</span><span class="p">(</span><span class="o">**</span><span class="n">yaml_data</span><span class="p">)</span>
-</span><span id="L-276"><a href="#L-276"><span class="linenos">276</span></a>
-</span><span id="L-277"><a href="#L-277"><span class="linenos">277</span></a>        <span class="c1"># Override with Secret Manager if configured</span>
-</span><span id="L-278"><a href="#L-278"><span class="linenos">278</span></a>        <span class="n">secret_mgr</span> <span class="o">=</span> <span class="n">SecretManager</span><span class="p">()</span>
-</span><span id="L-279"><a href="#L-279"><span class="linenos">279</span></a>        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"USE_AWS_SECRETS_MANAGER"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"true"</span><span class="p">:</span>
-</span><span id="L-280"><a href="#L-280"><span class="linenos">280</span></a>            <span class="n">aws_api_key</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"GEMINI_API_KEY"</span><span class="p">)</span>
-</span><span id="L-281"><a href="#L-281"><span class="linenos">281</span></a>            <span class="k">if</span> <span class="n">aws_api_key</span><span class="p">:</span>
-</span><span id="L-282"><a href="#L-282"><span class="linenos">282</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">gemini_api_key</span> <span class="o">=</span> <span class="n">aws_api_key</span>
-</span><span id="L-283"><a href="#L-283"><span class="linenos">283</span></a>
-</span><span id="L-284"><a href="#L-284"><span class="linenos">284</span></a>            <span class="n">aws_anthropic_key</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"ANTHROPIC_API_KEY"</span><span class="p">)</span>
-</span><span id="L-285"><a href="#L-285"><span class="linenos">285</span></a>            <span class="k">if</span> <span class="n">aws_anthropic_key</span><span class="p">:</span>
-</span><span id="L-286"><a href="#L-286"><span class="linenos">286</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">anthropic_api_key</span> <span class="o">=</span> <span class="n">aws_anthropic_key</span>
-</span><span id="L-287"><a href="#L-287"><span class="linenos">287</span></a>
-</span><span id="L-288"><a href="#L-288"><span class="linenos">288</span></a>            <span class="n">aws_webhook</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"WEBHOOK_SECRET"</span><span class="p">)</span>
-</span><span id="L-289"><a href="#L-289"><span class="linenos">289</span></a>            <span class="k">if</span> <span class="n">aws_webhook</span><span class="p">:</span>
-</span><span id="L-290"><a href="#L-290"><span class="linenos">290</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">server</span><span class="o">.</span><span class="n">webhook_secret</span> <span class="o">=</span> <span class="n">aws_webhook</span>
-</span><span id="L-291"><a href="#L-291"><span class="linenos">291</span></a>
-</span><span id="L-292"><a href="#L-292"><span class="linenos">292</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">config</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">model_dump</span><span class="p">()</span>
-</span><span id="L-293"><a href="#L-293"><span class="linenos">293</span></a>
-</span><span id="L-294"><a href="#L-294"><span class="linenos">294</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
-</span><span id="L-295"><a href="#L-295"><span class="linenos">295</span></a><span class="w">        </span><span class="sd">"""</span>
-</span><span id="L-296"><a href="#L-296"><span class="linenos">296</span></a><span class="sd">        Retrieves a value from the configuration using the provided key.</span>
-</span><span id="L-297"><a href="#L-297"><span class="linenos">297</span></a><span class="sd">        """</span>
-</span><span id="L-298"><a href="#L-298"><span class="linenos">298</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="p">)</span>
-</span><span id="L-299"><a href="#L-299"><span class="linenos">299</span></a>
-</span><span id="L-300"><a href="#L-300"><span class="linenos">300</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_repo_root</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</span><span id="L-301"><a href="#L-301"><span class="linenos">301</span></a><span class="w">        </span><span class="sd">"""</span>
-</span><span id="L-302"><a href="#L-302"><span class="linenos">302</span></a><span class="sd">        Returns the root directory of the repository.</span>
-</span><span id="L-303"><a href="#L-303"><span class="linenos">303</span></a><span class="sd">        """</span>
-</span><span id="L-304"><a href="#L-304"><span class="linenos">304</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">repo_root</span>
-</span><span id="L-305"><a href="#L-305"><span class="linenos">305</span></a>
-</span><span id="L-306"><a href="#L-306"><span class="linenos">306</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_local_only</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="L-307"><a href="#L-307"><span class="linenos">307</span></a><span class="w">        </span><span class="sd">"""</span>
-</span><span id="L-308"><a href="#L-308"><span class="linenos">308</span></a><span class="sd">        Returns True if the operating mode is 'local_only'.</span>
-</span><span id="L-309"><a href="#L-309"><span class="linenos">309</span></a><span class="sd">        """</span>
-</span><span id="L-310"><a href="#L-310"><span class="linenos">310</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"operating_mode"</span><span class="p">,</span> <span class="s2">"local_only"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"local_only"</span>
-</span><span id="L-311"><a href="#L-311"><span class="linenos">311</span></a>
-</span><span id="L-312"><a href="#L-312"><span class="linenos">312</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_connected</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="L-313"><a href="#L-313"><span class="linenos">313</span></a><span class="w">        </span><span class="sd">"""</span>
-</span><span id="L-314"><a href="#L-314"><span class="linenos">314</span></a><span class="sd">        Returns True if the operating mode is 'connected'.</span>
-</span><span id="L-315"><a href="#L-315"><span class="linenos">315</span></a><span class="sd">        """</span>
-</span><span id="L-316"><a href="#L-316"><span class="linenos">316</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"operating_mode"</span><span class="p">,</span> <span class="s2">"local_only"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"connected"</span>
-</span><span id="L-317"><a href="#L-317"><span class="linenos">317</span></a>
-</span><span id="L-318"><a href="#L-318"><span class="linenos">318</span></a>
-</span><span id="L-319"><a href="#L-319"><span class="linenos">319</span></a><span class="c1"># Provide a default instance and config dictionary for backward compatibility</span>
-</span><span id="L-320"><a href="#L-320"><span class="linenos">320</span></a><span class="n">default_loader</span> <span class="o">=</span> <span class="n">ConfigLoader</span><span class="p">()</span>
-</span><span id="L-321"><a href="#L-321"><span class="linenos">321</span></a><span class="n">config</span> <span class="o">=</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">config</span>
+</span><span id="L-260"><a href="#L-260"><span class="linenos">260</span></a>        <span class="c1"># Kept so `howlplane config` can report which layer supplied a value.</span>
+</span><span id="L-261"><a href="#L-261"><span class="linenos">261</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">file_layer</span> <span class="o">=</span> <span class="n">yaml_data</span>
+</span><span id="L-262"><a href="#L-262"><span class="linenos">262</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">local_layer</span> <span class="o">=</span> <span class="p">{}</span>
+</span><span id="L-263"><a href="#L-263"><span class="linenos">263</span></a>
+</span><span id="L-264"><a href="#L-264"><span class="linenos">264</span></a>        <span class="n">local_candidate</span> <span class="o">=</span> <span class="n">local_config_path</span>
+</span><span id="L-265"><a href="#L-265"><span class="linenos">265</span></a>        <span class="k">if</span> <span class="n">local_candidate</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">config_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="L-266"><a href="#L-266"><span class="linenos">266</span></a>            <span class="n">local_candidate</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="L-267"><a href="#L-267"><span class="linenos">267</span></a>                <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"HOWLPLANE_LOCAL_CONFIG"</span><span class="p">)</span>
+</span><span id="L-268"><a href="#L-268"><span class="linenos">268</span></a>                <span class="ow">or</span> <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">".config"</span> <span class="o">/</span> <span class="s2">"howlplane"</span> <span class="o">/</span> <span class="s2">"config.toml"</span>
+</span><span id="L-269"><a href="#L-269"><span class="linenos">269</span></a>            <span class="p">)</span>
+</span><span id="L-270"><a href="#L-270"><span class="linenos">270</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="L-271"><a href="#L-271"><span class="linenos">271</span></a>            <span class="n">Path</span><span class="p">(</span><span class="n">local_candidate</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span> <span class="k">if</span> <span class="n">local_candidate</span> <span class="k">else</span> <span class="kc">None</span>
+</span><span id="L-272"><a href="#L-272"><span class="linenos">272</span></a>        <span class="p">)</span>
+</span><span id="L-273"><a href="#L-273"><span class="linenos">273</span></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+</span><span id="L-274"><a href="#L-274"><span class="linenos">274</span></a>            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span><span class="p">,</span> <span class="s2">"rb"</span><span class="p">)</span> <span class="k">as</span> <span class="n">local_file</span><span class="p">:</span>
+</span><span id="L-275"><a href="#L-275"><span class="linenos">275</span></a>                <span class="n">local_data</span> <span class="o">=</span> <span class="n">tomllib</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">local_file</span><span class="p">)</span>
+</span><span id="L-276"><a href="#L-276"><span class="linenos">276</span></a>            <span class="bp">self</span><span class="o">.</span><span class="n">local_layer</span> <span class="o">=</span> <span class="n">_resource_local_config</span><span class="p">(</span><span class="n">local_data</span><span class="p">)</span>
+</span><span id="L-277"><a href="#L-277"><span class="linenos">277</span></a>            <span class="n">yaml_data</span> <span class="o">=</span> <span class="n">_deep_merge</span><span class="p">(</span><span class="n">yaml_data</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_layer</span><span class="p">)</span>
+</span><span id="L-278"><a href="#L-278"><span class="linenos">278</span></a>
+</span><span id="L-279"><a href="#L-279"><span class="linenos">279</span></a>        <span class="c1"># Load pydantic settings prioritizing .env over yaml_data</span>
+</span><span id="L-280"><a href="#L-280"><span class="linenos">280</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">settings</span> <span class="o">=</span> <span class="n">AppSettings</span><span class="p">(</span><span class="o">**</span><span class="n">yaml_data</span><span class="p">)</span>
+</span><span id="L-281"><a href="#L-281"><span class="linenos">281</span></a>
+</span><span id="L-282"><a href="#L-282"><span class="linenos">282</span></a>        <span class="c1"># Override with Secret Manager if configured</span>
+</span><span id="L-283"><a href="#L-283"><span class="linenos">283</span></a>        <span class="n">secret_mgr</span> <span class="o">=</span> <span class="n">SecretManager</span><span class="p">()</span>
+</span><span id="L-284"><a href="#L-284"><span class="linenos">284</span></a>        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"USE_AWS_SECRETS_MANAGER"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"true"</span><span class="p">:</span>
+</span><span id="L-285"><a href="#L-285"><span class="linenos">285</span></a>            <span class="n">aws_api_key</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"GEMINI_API_KEY"</span><span class="p">)</span>
+</span><span id="L-286"><a href="#L-286"><span class="linenos">286</span></a>            <span class="k">if</span> <span class="n">aws_api_key</span><span class="p">:</span>
+</span><span id="L-287"><a href="#L-287"><span class="linenos">287</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">gemini_api_key</span> <span class="o">=</span> <span class="n">aws_api_key</span>
+</span><span id="L-288"><a href="#L-288"><span class="linenos">288</span></a>
+</span><span id="L-289"><a href="#L-289"><span class="linenos">289</span></a>            <span class="n">aws_anthropic_key</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"ANTHROPIC_API_KEY"</span><span class="p">)</span>
+</span><span id="L-290"><a href="#L-290"><span class="linenos">290</span></a>            <span class="k">if</span> <span class="n">aws_anthropic_key</span><span class="p">:</span>
+</span><span id="L-291"><a href="#L-291"><span class="linenos">291</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">anthropic_api_key</span> <span class="o">=</span> <span class="n">aws_anthropic_key</span>
+</span><span id="L-292"><a href="#L-292"><span class="linenos">292</span></a>
+</span><span id="L-293"><a href="#L-293"><span class="linenos">293</span></a>            <span class="n">aws_webhook</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"WEBHOOK_SECRET"</span><span class="p">)</span>
+</span><span id="L-294"><a href="#L-294"><span class="linenos">294</span></a>            <span class="k">if</span> <span class="n">aws_webhook</span><span class="p">:</span>
+</span><span id="L-295"><a href="#L-295"><span class="linenos">295</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">server</span><span class="o">.</span><span class="n">webhook_secret</span> <span class="o">=</span> <span class="n">aws_webhook</span>
+</span><span id="L-296"><a href="#L-296"><span class="linenos">296</span></a>
+</span><span id="L-297"><a href="#L-297"><span class="linenos">297</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">config</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">model_dump</span><span class="p">()</span>
+</span><span id="L-298"><a href="#L-298"><span class="linenos">298</span></a>
+</span><span id="L-299"><a href="#L-299"><span class="linenos">299</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+</span><span id="L-300"><a href="#L-300"><span class="linenos">300</span></a><span class="w">        </span><span class="sd">"""</span>
+</span><span id="L-301"><a href="#L-301"><span class="linenos">301</span></a><span class="sd">        Retrieves a value from the configuration using the provided key.</span>
+</span><span id="L-302"><a href="#L-302"><span class="linenos">302</span></a><span class="sd">        """</span>
+</span><span id="L-303"><a href="#L-303"><span class="linenos">303</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="p">)</span>
+</span><span id="L-304"><a href="#L-304"><span class="linenos">304</span></a>
+</span><span id="L-305"><a href="#L-305"><span class="linenos">305</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_repo_root</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+</span><span id="L-306"><a href="#L-306"><span class="linenos">306</span></a><span class="w">        </span><span class="sd">"""</span>
+</span><span id="L-307"><a href="#L-307"><span class="linenos">307</span></a><span class="sd">        Returns the root directory of the repository.</span>
+</span><span id="L-308"><a href="#L-308"><span class="linenos">308</span></a><span class="sd">        """</span>
+</span><span id="L-309"><a href="#L-309"><span class="linenos">309</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">repo_root</span>
+</span><span id="L-310"><a href="#L-310"><span class="linenos">310</span></a>
+</span><span id="L-311"><a href="#L-311"><span class="linenos">311</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_local_only</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="L-312"><a href="#L-312"><span class="linenos">312</span></a><span class="w">        </span><span class="sd">"""</span>
+</span><span id="L-313"><a href="#L-313"><span class="linenos">313</span></a><span class="sd">        Returns True if the operating mode is 'local_only'.</span>
+</span><span id="L-314"><a href="#L-314"><span class="linenos">314</span></a><span class="sd">        """</span>
+</span><span id="L-315"><a href="#L-315"><span class="linenos">315</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"operating_mode"</span><span class="p">,</span> <span class="s2">"local_only"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"local_only"</span>
+</span><span id="L-316"><a href="#L-316"><span class="linenos">316</span></a>
+</span><span id="L-317"><a href="#L-317"><span class="linenos">317</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_connected</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="L-318"><a href="#L-318"><span class="linenos">318</span></a><span class="w">        </span><span class="sd">"""</span>
+</span><span id="L-319"><a href="#L-319"><span class="linenos">319</span></a><span class="sd">        Returns True if the operating mode is 'connected'.</span>
+</span><span id="L-320"><a href="#L-320"><span class="linenos">320</span></a><span class="sd">        """</span>
+</span><span id="L-321"><a href="#L-321"><span class="linenos">321</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"operating_mode"</span><span class="p">,</span> <span class="s2">"local_only"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"connected"</span>
 </span><span id="L-322"><a href="#L-322"><span class="linenos">322</span></a>
 </span><span id="L-323"><a href="#L-323"><span class="linenos">323</span></a>
-</span><span id="L-324"><a href="#L-324"><span class="linenos">324</span></a><span class="k">def</span><span class="w"> </span><span class="nf">load_config</span><span class="p">():</span>
-</span><span id="L-325"><a href="#L-325"><span class="linenos">325</span></a><span class="w">    </span><span class="sd">"""</span>
-</span><span id="L-326"><a href="#L-326"><span class="linenos">326</span></a><span class="sd">    Legacy function to load config directly.</span>
-</span><span id="L-327"><a href="#L-327"><span class="linenos">327</span></a><span class="sd">    """</span>
-</span><span id="L-328"><a href="#L-328"><span class="linenos">328</span></a>    <span class="k">return</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">config</span>
-</span><span id="L-329"><a href="#L-329"><span class="linenos">329</span></a>
-</span><span id="L-330"><a href="#L-330"><span class="linenos">330</span></a>
-</span><span id="L-331"><a href="#L-331"><span class="linenos">331</span></a><span class="k">def</span><span class="w"> </span><span class="nf">is_local_only</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="L-332"><a href="#L-332"><span class="linenos">332</span></a><span class="w">    </span><span class="sd">"""</span>
-</span><span id="L-333"><a href="#L-333"><span class="linenos">333</span></a><span class="sd">    Convenience function to check if the current configuration enforces local_only mode.</span>
-</span><span id="L-334"><a href="#L-334"><span class="linenos">334</span></a><span class="sd">    """</span>
-</span><span id="L-335"><a href="#L-335"><span class="linenos">335</span></a>    <span class="k">return</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">is_local_only</span><span class="p">()</span>
-</span><span id="L-336"><a href="#L-336"><span class="linenos">336</span></a>
-</span><span id="L-337"><a href="#L-337"><span class="linenos">337</span></a>
-</span><span id="L-338"><a href="#L-338"><span class="linenos">338</span></a><span class="k">def</span><span class="w"> </span><span class="nf">is_connected</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="L-339"><a href="#L-339"><span class="linenos">339</span></a><span class="w">    </span><span class="sd">"""</span>
-</span><span id="L-340"><a href="#L-340"><span class="linenos">340</span></a><span class="sd">    Convenience function to check if the current configuration permits connected mode.</span>
-</span><span id="L-341"><a href="#L-341"><span class="linenos">341</span></a><span class="sd">    """</span>
-</span><span id="L-342"><a href="#L-342"><span class="linenos">342</span></a>    <span class="k">return</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">is_connected</span><span class="p">()</span>
-</span><span id="L-343"><a href="#L-343"><span class="linenos">343</span></a>
-</span><span id="L-344"><a href="#L-344"><span class="linenos">344</span></a>
-</span><span id="L-345"><a href="#L-345"><span class="linenos">345</span></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
-</span><span id="L-346"><a href="#L-346"><span class="linenos">346</span></a><span class="w">    </span><span class="sd">"""</span>
-</span><span id="L-347"><a href="#L-347"><span class="linenos">347</span></a><span class="sd">    Main entry point for testing the ConfigLoader.</span>
-</span><span id="L-348"><a href="#L-348"><span class="linenos">348</span></a><span class="sd">    """</span>
-</span><span id="L-349"><a href="#L-349"><span class="linenos">349</span></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Loaded config: </span><span class="si">{</span><span class="n">config</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-</span><span id="L-350"><a href="#L-350"><span class="linenos">350</span></a>
-</span><span id="L-351"><a href="#L-351"><span class="linenos">351</span></a>
-</span><span id="L-352"><a href="#L-352"><span class="linenos">352</span></a><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
-</span><span id="L-353"><a href="#L-353"><span class="linenos">353</span></a>    <span class="n">main</span><span class="p">()</span>
-</span><span id="L-354"><a href="#L-354"><span class="linenos">354</span></a>
+</span><span id="L-324"><a href="#L-324"><span class="linenos">324</span></a><span class="c1"># Provide a default instance and config dictionary for backward compatibility</span>
+</span><span id="L-325"><a href="#L-325"><span class="linenos">325</span></a><span class="n">default_loader</span> <span class="o">=</span> <span class="n">ConfigLoader</span><span class="p">()</span>
+</span><span id="L-326"><a href="#L-326"><span class="linenos">326</span></a><span class="n">config</span> <span class="o">=</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">config</span>
+</span><span id="L-327"><a href="#L-327"><span class="linenos">327</span></a>
+</span><span id="L-328"><a href="#L-328"><span class="linenos">328</span></a>
+</span><span id="L-329"><a href="#L-329"><span class="linenos">329</span></a><span class="k">def</span><span class="w"> </span><span class="nf">load_config</span><span class="p">():</span>
+</span><span id="L-330"><a href="#L-330"><span class="linenos">330</span></a><span class="w">    </span><span class="sd">"""</span>
+</span><span id="L-331"><a href="#L-331"><span class="linenos">331</span></a><span class="sd">    Legacy function to load config directly.</span>
+</span><span id="L-332"><a href="#L-332"><span class="linenos">332</span></a><span class="sd">    """</span>
+</span><span id="L-333"><a href="#L-333"><span class="linenos">333</span></a>    <span class="k">return</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">config</span>
+</span><span id="L-334"><a href="#L-334"><span class="linenos">334</span></a>
+</span><span id="L-335"><a href="#L-335"><span class="linenos">335</span></a>
+</span><span id="L-336"><a href="#L-336"><span class="linenos">336</span></a><span class="k">def</span><span class="w"> </span><span class="nf">is_local_only</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="L-337"><a href="#L-337"><span class="linenos">337</span></a><span class="w">    </span><span class="sd">"""</span>
+</span><span id="L-338"><a href="#L-338"><span class="linenos">338</span></a><span class="sd">    Convenience function to check if the current configuration enforces local_only mode.</span>
+</span><span id="L-339"><a href="#L-339"><span class="linenos">339</span></a><span class="sd">    """</span>
+</span><span id="L-340"><a href="#L-340"><span class="linenos">340</span></a>    <span class="k">return</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">is_local_only</span><span class="p">()</span>
+</span><span id="L-341"><a href="#L-341"><span class="linenos">341</span></a>
+</span><span id="L-342"><a href="#L-342"><span class="linenos">342</span></a>
+</span><span id="L-343"><a href="#L-343"><span class="linenos">343</span></a><span class="k">def</span><span class="w"> </span><span class="nf">is_connected</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="L-344"><a href="#L-344"><span class="linenos">344</span></a><span class="w">    </span><span class="sd">"""</span>
+</span><span id="L-345"><a href="#L-345"><span class="linenos">345</span></a><span class="sd">    Convenience function to check if the current configuration permits connected mode.</span>
+</span><span id="L-346"><a href="#L-346"><span class="linenos">346</span></a><span class="sd">    """</span>
+</span><span id="L-347"><a href="#L-347"><span class="linenos">347</span></a>    <span class="k">return</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">is_connected</span><span class="p">()</span>
+</span><span id="L-348"><a href="#L-348"><span class="linenos">348</span></a>
+</span><span id="L-349"><a href="#L-349"><span class="linenos">349</span></a>
+</span><span id="L-350"><a href="#L-350"><span class="linenos">350</span></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+</span><span id="L-351"><a href="#L-351"><span class="linenos">351</span></a><span class="w">    </span><span class="sd">"""</span>
+</span><span id="L-352"><a href="#L-352"><span class="linenos">352</span></a><span class="sd">    Main entry point for testing the ConfigLoader.</span>
+</span><span id="L-353"><a href="#L-353"><span class="linenos">353</span></a><span class="sd">    """</span>
+</span><span id="L-354"><a href="#L-354"><span class="linenos">354</span></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Loaded config: </span><span class="si">{</span><span class="n">config</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </span><span id="L-355"><a href="#L-355"><span class="linenos">355</span></a>
-</span><span id="L-356"><a href="#L-356"><span class="linenos">356</span></a><span class="k">def</span><span class="w"> </span><span class="nf">get_chroma_db_path</span><span class="p">():</span>
-</span><span id="L-357"><a href="#L-357"><span class="linenos">357</span></a><span class="w">    </span><span class="sd">"""</span>
-</span><span id="L-358"><a href="#L-358"><span class="linenos">358</span></a><span class="sd">    Returns the absolute path to the ChromaDB directory.</span>
-</span><span id="L-359"><a href="#L-359"><span class="linenos">359</span></a><span class="sd">    """</span>
-</span><span id="L-360"><a href="#L-360"><span class="linenos">360</span></a>    <span class="n">db_path</span> <span class="o">=</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"database"</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"chroma_db_path"</span><span class="p">,</span> <span class="s2">".chromadb"</span><span class="p">)</span>
-</span><span id="L-361"><a href="#L-361"><span class="linenos">361</span></a>    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">default_loader</span><span class="o">.</span><span class="n">get_repo_root</span><span class="p">(),</span> <span class="n">db_path</span><span class="p">))</span>
-</span><span id="L-362"><a href="#L-362"><span class="linenos">362</span></a>
-</span><span id="L-363"><a href="#L-363"><span class="linenos">363</span></a>
-</span><span id="L-364"><a href="#L-364"><span class="linenos">364</span></a><span class="k">def</span><span class="w"> </span><span class="nf">resolve_utility_llm</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
-</span><span id="L-365"><a href="#L-365"><span class="linenos">365</span></a><span class="w">    </span><span class="sd">"""</span>
-</span><span id="L-366"><a href="#L-366"><span class="linenos">366</span></a><span class="sd">    Picks a fast, cheap LiteLLM model for internal utility calls (query</span>
-</span><span id="L-367"><a href="#L-367"><span class="linenos">367</span></a><span class="sd">    expansion, content verification) based on whichever provider API key</span>
-</span><span id="L-368"><a href="#L-368"><span class="linenos">368</span></a><span class="sd">    is configured. Returns a (model, api_key) tuple, or (None, None) if</span>
-</span><span id="L-369"><a href="#L-369"><span class="linenos">369</span></a><span class="sd">    no provider key is available.</span>
-</span><span id="L-370"><a href="#L-370"><span class="linenos">370</span></a><span class="sd">    """</span>
-</span><span id="L-371"><a href="#L-371"><span class="linenos">371</span></a>    <span class="n">cfg</span> <span class="o">=</span> <span class="n">cfg</span> <span class="ow">or</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">config</span>
-</span><span id="L-372"><a href="#L-372"><span class="linenos">372</span></a>    <span class="n">gemini_key</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"gemini_api_key"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"GEMINI_API_KEY"</span><span class="p">)</span>
-</span><span id="L-373"><a href="#L-373"><span class="linenos">373</span></a>    <span class="k">if</span> <span class="n">gemini_key</span><span class="p">:</span>
-</span><span id="L-374"><a href="#L-374"><span class="linenos">374</span></a>        <span class="k">return</span> <span class="s2">"gemini/gemini-1.5-flash"</span><span class="p">,</span> <span class="n">gemini_key</span>
-</span><span id="L-375"><a href="#L-375"><span class="linenos">375</span></a>
-</span><span id="L-376"><a href="#L-376"><span class="linenos">376</span></a>    <span class="n">anthropic_key</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"anthropic_api_key"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
-</span><span id="L-377"><a href="#L-377"><span class="linenos">377</span></a>        <span class="s2">"ANTHROPIC_API_KEY"</span>
-</span><span id="L-378"><a href="#L-378"><span class="linenos">378</span></a>    <span class="p">)</span>
-</span><span id="L-379"><a href="#L-379"><span class="linenos">379</span></a>    <span class="k">if</span> <span class="n">anthropic_key</span><span class="p">:</span>
-</span><span id="L-380"><a href="#L-380"><span class="linenos">380</span></a>        <span class="k">return</span> <span class="s2">"anthropic/claude-haiku-4-5-20251001"</span><span class="p">,</span> <span class="n">anthropic_key</span>
-</span><span id="L-381"><a href="#L-381"><span class="linenos">381</span></a>
-</span><span id="L-382"><a href="#L-382"><span class="linenos">382</span></a>    <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+</span><span id="L-356"><a href="#L-356"><span class="linenos">356</span></a>
+</span><span id="L-357"><a href="#L-357"><span class="linenos">357</span></a><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+</span><span id="L-358"><a href="#L-358"><span class="linenos">358</span></a>    <span class="n">main</span><span class="p">()</span>
+</span><span id="L-359"><a href="#L-359"><span class="linenos">359</span></a>
+</span><span id="L-360"><a href="#L-360"><span class="linenos">360</span></a>
+</span><span id="L-361"><a href="#L-361"><span class="linenos">361</span></a><span class="k">def</span><span class="w"> </span><span class="nf">get_chroma_db_path</span><span class="p">():</span>
+</span><span id="L-362"><a href="#L-362"><span class="linenos">362</span></a><span class="w">    </span><span class="sd">"""</span>
+</span><span id="L-363"><a href="#L-363"><span class="linenos">363</span></a><span class="sd">    Returns the absolute path to the ChromaDB directory.</span>
+</span><span id="L-364"><a href="#L-364"><span class="linenos">364</span></a><span class="sd">    """</span>
+</span><span id="L-365"><a href="#L-365"><span class="linenos">365</span></a>    <span class="n">db_path</span> <span class="o">=</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"database"</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"chroma_db_path"</span><span class="p">,</span> <span class="s2">".chromadb"</span><span class="p">)</span>
+</span><span id="L-366"><a href="#L-366"><span class="linenos">366</span></a>    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">default_loader</span><span class="o">.</span><span class="n">get_repo_root</span><span class="p">(),</span> <span class="n">db_path</span><span class="p">))</span>
+</span><span id="L-367"><a href="#L-367"><span class="linenos">367</span></a>
+</span><span id="L-368"><a href="#L-368"><span class="linenos">368</span></a>
+</span><span id="L-369"><a href="#L-369"><span class="linenos">369</span></a><span class="k">def</span><span class="w"> </span><span class="nf">resolve_utility_llm</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+</span><span id="L-370"><a href="#L-370"><span class="linenos">370</span></a><span class="w">    </span><span class="sd">"""</span>
+</span><span id="L-371"><a href="#L-371"><span class="linenos">371</span></a><span class="sd">    Picks a fast, cheap LiteLLM model for internal utility calls (query</span>
+</span><span id="L-372"><a href="#L-372"><span class="linenos">372</span></a><span class="sd">    expansion, content verification) based on whichever provider API key</span>
+</span><span id="L-373"><a href="#L-373"><span class="linenos">373</span></a><span class="sd">    is configured. Returns a (model, api_key) tuple, or (None, None) if</span>
+</span><span id="L-374"><a href="#L-374"><span class="linenos">374</span></a><span class="sd">    no provider key is available.</span>
+</span><span id="L-375"><a href="#L-375"><span class="linenos">375</span></a><span class="sd">    """</span>
+</span><span id="L-376"><a href="#L-376"><span class="linenos">376</span></a>    <span class="n">cfg</span> <span class="o">=</span> <span class="n">cfg</span> <span class="ow">or</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">config</span>
+</span><span id="L-377"><a href="#L-377"><span class="linenos">377</span></a>    <span class="n">gemini_key</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"gemini_api_key"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"GEMINI_API_KEY"</span><span class="p">)</span>
+</span><span id="L-378"><a href="#L-378"><span class="linenos">378</span></a>    <span class="k">if</span> <span class="n">gemini_key</span><span class="p">:</span>
+</span><span id="L-379"><a href="#L-379"><span class="linenos">379</span></a>        <span class="k">return</span> <span class="s2">"gemini/gemini-1.5-flash"</span><span class="p">,</span> <span class="n">gemini_key</span>
+</span><span id="L-380"><a href="#L-380"><span class="linenos">380</span></a>
+</span><span id="L-381"><a href="#L-381"><span class="linenos">381</span></a>    <span class="n">anthropic_key</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"anthropic_api_key"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+</span><span id="L-382"><a href="#L-382"><span class="linenos">382</span></a>        <span class="s2">"ANTHROPIC_API_KEY"</span>
+</span><span id="L-383"><a href="#L-383"><span class="linenos">383</span></a>    <span class="p">)</span>
+</span><span id="L-384"><a href="#L-384"><span class="linenos">384</span></a>    <span class="k">if</span> <span class="n">anthropic_key</span><span class="p">:</span>
+</span><span id="L-385"><a href="#L-385"><span class="linenos">385</span></a>        <span class="k">return</span> <span class="s2">"anthropic/claude-haiku-4-5-20251001"</span><span class="p">,</span> <span class="n">anthropic_key</span>
+</span><span id="L-386"><a href="#L-386"><span class="linenos">386</span></a>
+</span><span id="L-387"><a href="#L-387"><span class="linenos">387</span></a>    <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
 </span></pre></div>
 
 
@@ -2651,63 +2662,68 @@ _build_sources: Pre-initialized sources and init kwargs to use for building inst
 </span><span id="ConfigLoader-258"><a href="#ConfigLoader-258"><span class="linenos">258</span></a>                <span class="k">finally</span><span class="p">:</span>
 </span><span id="ConfigLoader-259"><a href="#ConfigLoader-259"><span class="linenos">259</span></a>                    <span class="n">loader</span><span class="o">.</span><span class="n">dispose</span><span class="p">()</span>
 </span><span id="ConfigLoader-260"><a href="#ConfigLoader-260"><span class="linenos">260</span></a>
-</span><span id="ConfigLoader-261"><a href="#ConfigLoader-261"><span class="linenos">261</span></a>        <span class="n">local_candidate</span> <span class="o">=</span> <span class="n">local_config_path</span>
-</span><span id="ConfigLoader-262"><a href="#ConfigLoader-262"><span class="linenos">262</span></a>        <span class="k">if</span> <span class="n">local_candidate</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">config_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="ConfigLoader-263"><a href="#ConfigLoader-263"><span class="linenos">263</span></a>            <span class="n">local_candidate</span> <span class="o">=</span> <span class="p">(</span>
-</span><span id="ConfigLoader-264"><a href="#ConfigLoader-264"><span class="linenos">264</span></a>                <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"HOWLPLANE_LOCAL_CONFIG"</span><span class="p">)</span>
-</span><span id="ConfigLoader-265"><a href="#ConfigLoader-265"><span class="linenos">265</span></a>                <span class="ow">or</span> <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">".config"</span> <span class="o">/</span> <span class="s2">"howlplane"</span> <span class="o">/</span> <span class="s2">"config.toml"</span>
-</span><span id="ConfigLoader-266"><a href="#ConfigLoader-266"><span class="linenos">266</span></a>            <span class="p">)</span>
-</span><span id="ConfigLoader-267"><a href="#ConfigLoader-267"><span class="linenos">267</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span> <span class="o">=</span> <span class="p">(</span>
-</span><span id="ConfigLoader-268"><a href="#ConfigLoader-268"><span class="linenos">268</span></a>            <span class="n">Path</span><span class="p">(</span><span class="n">local_candidate</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span> <span class="k">if</span> <span class="n">local_candidate</span> <span class="k">else</span> <span class="kc">None</span>
-</span><span id="ConfigLoader-269"><a href="#ConfigLoader-269"><span class="linenos">269</span></a>        <span class="p">)</span>
-</span><span id="ConfigLoader-270"><a href="#ConfigLoader-270"><span class="linenos">270</span></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
-</span><span id="ConfigLoader-271"><a href="#ConfigLoader-271"><span class="linenos">271</span></a>            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span><span class="p">,</span> <span class="s2">"rb"</span><span class="p">)</span> <span class="k">as</span> <span class="n">local_file</span><span class="p">:</span>
-</span><span id="ConfigLoader-272"><a href="#ConfigLoader-272"><span class="linenos">272</span></a>                <span class="n">local_data</span> <span class="o">=</span> <span class="n">tomllib</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">local_file</span><span class="p">)</span>
-</span><span id="ConfigLoader-273"><a href="#ConfigLoader-273"><span class="linenos">273</span></a>            <span class="n">yaml_data</span> <span class="o">=</span> <span class="n">_deep_merge</span><span class="p">(</span><span class="n">yaml_data</span><span class="p">,</span> <span class="n">_resource_local_config</span><span class="p">(</span><span class="n">local_data</span><span class="p">))</span>
-</span><span id="ConfigLoader-274"><a href="#ConfigLoader-274"><span class="linenos">274</span></a>
-</span><span id="ConfigLoader-275"><a href="#ConfigLoader-275"><span class="linenos">275</span></a>        <span class="c1"># Load pydantic settings prioritizing .env over yaml_data</span>
-</span><span id="ConfigLoader-276"><a href="#ConfigLoader-276"><span class="linenos">276</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">settings</span> <span class="o">=</span> <span class="n">AppSettings</span><span class="p">(</span><span class="o">**</span><span class="n">yaml_data</span><span class="p">)</span>
-</span><span id="ConfigLoader-277"><a href="#ConfigLoader-277"><span class="linenos">277</span></a>
-</span><span id="ConfigLoader-278"><a href="#ConfigLoader-278"><span class="linenos">278</span></a>        <span class="c1"># Override with Secret Manager if configured</span>
-</span><span id="ConfigLoader-279"><a href="#ConfigLoader-279"><span class="linenos">279</span></a>        <span class="n">secret_mgr</span> <span class="o">=</span> <span class="n">SecretManager</span><span class="p">()</span>
-</span><span id="ConfigLoader-280"><a href="#ConfigLoader-280"><span class="linenos">280</span></a>        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"USE_AWS_SECRETS_MANAGER"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"true"</span><span class="p">:</span>
-</span><span id="ConfigLoader-281"><a href="#ConfigLoader-281"><span class="linenos">281</span></a>            <span class="n">aws_api_key</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"GEMINI_API_KEY"</span><span class="p">)</span>
-</span><span id="ConfigLoader-282"><a href="#ConfigLoader-282"><span class="linenos">282</span></a>            <span class="k">if</span> <span class="n">aws_api_key</span><span class="p">:</span>
-</span><span id="ConfigLoader-283"><a href="#ConfigLoader-283"><span class="linenos">283</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">gemini_api_key</span> <span class="o">=</span> <span class="n">aws_api_key</span>
-</span><span id="ConfigLoader-284"><a href="#ConfigLoader-284"><span class="linenos">284</span></a>
-</span><span id="ConfigLoader-285"><a href="#ConfigLoader-285"><span class="linenos">285</span></a>            <span class="n">aws_anthropic_key</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"ANTHROPIC_API_KEY"</span><span class="p">)</span>
-</span><span id="ConfigLoader-286"><a href="#ConfigLoader-286"><span class="linenos">286</span></a>            <span class="k">if</span> <span class="n">aws_anthropic_key</span><span class="p">:</span>
-</span><span id="ConfigLoader-287"><a href="#ConfigLoader-287"><span class="linenos">287</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">anthropic_api_key</span> <span class="o">=</span> <span class="n">aws_anthropic_key</span>
-</span><span id="ConfigLoader-288"><a href="#ConfigLoader-288"><span class="linenos">288</span></a>
-</span><span id="ConfigLoader-289"><a href="#ConfigLoader-289"><span class="linenos">289</span></a>            <span class="n">aws_webhook</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"WEBHOOK_SECRET"</span><span class="p">)</span>
-</span><span id="ConfigLoader-290"><a href="#ConfigLoader-290"><span class="linenos">290</span></a>            <span class="k">if</span> <span class="n">aws_webhook</span><span class="p">:</span>
-</span><span id="ConfigLoader-291"><a href="#ConfigLoader-291"><span class="linenos">291</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">server</span><span class="o">.</span><span class="n">webhook_secret</span> <span class="o">=</span> <span class="n">aws_webhook</span>
-</span><span id="ConfigLoader-292"><a href="#ConfigLoader-292"><span class="linenos">292</span></a>
-</span><span id="ConfigLoader-293"><a href="#ConfigLoader-293"><span class="linenos">293</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">config</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">model_dump</span><span class="p">()</span>
-</span><span id="ConfigLoader-294"><a href="#ConfigLoader-294"><span class="linenos">294</span></a>
-</span><span id="ConfigLoader-295"><a href="#ConfigLoader-295"><span class="linenos">295</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
-</span><span id="ConfigLoader-296"><a href="#ConfigLoader-296"><span class="linenos">296</span></a><span class="w">        </span><span class="sd">"""</span>
-</span><span id="ConfigLoader-297"><a href="#ConfigLoader-297"><span class="linenos">297</span></a><span class="sd">        Retrieves a value from the configuration using the provided key.</span>
-</span><span id="ConfigLoader-298"><a href="#ConfigLoader-298"><span class="linenos">298</span></a><span class="sd">        """</span>
-</span><span id="ConfigLoader-299"><a href="#ConfigLoader-299"><span class="linenos">299</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="p">)</span>
-</span><span id="ConfigLoader-300"><a href="#ConfigLoader-300"><span class="linenos">300</span></a>
-</span><span id="ConfigLoader-301"><a href="#ConfigLoader-301"><span class="linenos">301</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_repo_root</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</span><span id="ConfigLoader-302"><a href="#ConfigLoader-302"><span class="linenos">302</span></a><span class="w">        </span><span class="sd">"""</span>
-</span><span id="ConfigLoader-303"><a href="#ConfigLoader-303"><span class="linenos">303</span></a><span class="sd">        Returns the root directory of the repository.</span>
-</span><span id="ConfigLoader-304"><a href="#ConfigLoader-304"><span class="linenos">304</span></a><span class="sd">        """</span>
-</span><span id="ConfigLoader-305"><a href="#ConfigLoader-305"><span class="linenos">305</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">repo_root</span>
-</span><span id="ConfigLoader-306"><a href="#ConfigLoader-306"><span class="linenos">306</span></a>
-</span><span id="ConfigLoader-307"><a href="#ConfigLoader-307"><span class="linenos">307</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_local_only</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="ConfigLoader-308"><a href="#ConfigLoader-308"><span class="linenos">308</span></a><span class="w">        </span><span class="sd">"""</span>
-</span><span id="ConfigLoader-309"><a href="#ConfigLoader-309"><span class="linenos">309</span></a><span class="sd">        Returns True if the operating mode is 'local_only'.</span>
-</span><span id="ConfigLoader-310"><a href="#ConfigLoader-310"><span class="linenos">310</span></a><span class="sd">        """</span>
-</span><span id="ConfigLoader-311"><a href="#ConfigLoader-311"><span class="linenos">311</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"operating_mode"</span><span class="p">,</span> <span class="s2">"local_only"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"local_only"</span>
-</span><span id="ConfigLoader-312"><a href="#ConfigLoader-312"><span class="linenos">312</span></a>
-</span><span id="ConfigLoader-313"><a href="#ConfigLoader-313"><span class="linenos">313</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_connected</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="ConfigLoader-314"><a href="#ConfigLoader-314"><span class="linenos">314</span></a><span class="w">        </span><span class="sd">"""</span>
-</span><span id="ConfigLoader-315"><a href="#ConfigLoader-315"><span class="linenos">315</span></a><span class="sd">        Returns True if the operating mode is 'connected'.</span>
-</span><span id="ConfigLoader-316"><a href="#ConfigLoader-316"><span class="linenos">316</span></a><span class="sd">        """</span>
-</span><span id="ConfigLoader-317"><a href="#ConfigLoader-317"><span class="linenos">317</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"operating_mode"</span><span class="p">,</span> <span class="s2">"local_only"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"connected"</span>
+</span><span id="ConfigLoader-261"><a href="#ConfigLoader-261"><span class="linenos">261</span></a>        <span class="c1"># Kept so `howlplane config` can report which layer supplied a value.</span>
+</span><span id="ConfigLoader-262"><a href="#ConfigLoader-262"><span class="linenos">262</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">file_layer</span> <span class="o">=</span> <span class="n">yaml_data</span>
+</span><span id="ConfigLoader-263"><a href="#ConfigLoader-263"><span class="linenos">263</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">local_layer</span> <span class="o">=</span> <span class="p">{}</span>
+</span><span id="ConfigLoader-264"><a href="#ConfigLoader-264"><span class="linenos">264</span></a>
+</span><span id="ConfigLoader-265"><a href="#ConfigLoader-265"><span class="linenos">265</span></a>        <span class="n">local_candidate</span> <span class="o">=</span> <span class="n">local_config_path</span>
+</span><span id="ConfigLoader-266"><a href="#ConfigLoader-266"><span class="linenos">266</span></a>        <span class="k">if</span> <span class="n">local_candidate</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">config_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="ConfigLoader-267"><a href="#ConfigLoader-267"><span class="linenos">267</span></a>            <span class="n">local_candidate</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="ConfigLoader-268"><a href="#ConfigLoader-268"><span class="linenos">268</span></a>                <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"HOWLPLANE_LOCAL_CONFIG"</span><span class="p">)</span>
+</span><span id="ConfigLoader-269"><a href="#ConfigLoader-269"><span class="linenos">269</span></a>                <span class="ow">or</span> <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">".config"</span> <span class="o">/</span> <span class="s2">"howlplane"</span> <span class="o">/</span> <span class="s2">"config.toml"</span>
+</span><span id="ConfigLoader-270"><a href="#ConfigLoader-270"><span class="linenos">270</span></a>            <span class="p">)</span>
+</span><span id="ConfigLoader-271"><a href="#ConfigLoader-271"><span class="linenos">271</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="ConfigLoader-272"><a href="#ConfigLoader-272"><span class="linenos">272</span></a>            <span class="n">Path</span><span class="p">(</span><span class="n">local_candidate</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span> <span class="k">if</span> <span class="n">local_candidate</span> <span class="k">else</span> <span class="kc">None</span>
+</span><span id="ConfigLoader-273"><a href="#ConfigLoader-273"><span class="linenos">273</span></a>        <span class="p">)</span>
+</span><span id="ConfigLoader-274"><a href="#ConfigLoader-274"><span class="linenos">274</span></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+</span><span id="ConfigLoader-275"><a href="#ConfigLoader-275"><span class="linenos">275</span></a>            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span><span class="p">,</span> <span class="s2">"rb"</span><span class="p">)</span> <span class="k">as</span> <span class="n">local_file</span><span class="p">:</span>
+</span><span id="ConfigLoader-276"><a href="#ConfigLoader-276"><span class="linenos">276</span></a>                <span class="n">local_data</span> <span class="o">=</span> <span class="n">tomllib</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">local_file</span><span class="p">)</span>
+</span><span id="ConfigLoader-277"><a href="#ConfigLoader-277"><span class="linenos">277</span></a>            <span class="bp">self</span><span class="o">.</span><span class="n">local_layer</span> <span class="o">=</span> <span class="n">_resource_local_config</span><span class="p">(</span><span class="n">local_data</span><span class="p">)</span>
+</span><span id="ConfigLoader-278"><a href="#ConfigLoader-278"><span class="linenos">278</span></a>            <span class="n">yaml_data</span> <span class="o">=</span> <span class="n">_deep_merge</span><span class="p">(</span><span class="n">yaml_data</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_layer</span><span class="p">)</span>
+</span><span id="ConfigLoader-279"><a href="#ConfigLoader-279"><span class="linenos">279</span></a>
+</span><span id="ConfigLoader-280"><a href="#ConfigLoader-280"><span class="linenos">280</span></a>        <span class="c1"># Load pydantic settings prioritizing .env over yaml_data</span>
+</span><span id="ConfigLoader-281"><a href="#ConfigLoader-281"><span class="linenos">281</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">settings</span> <span class="o">=</span> <span class="n">AppSettings</span><span class="p">(</span><span class="o">**</span><span class="n">yaml_data</span><span class="p">)</span>
+</span><span id="ConfigLoader-282"><a href="#ConfigLoader-282"><span class="linenos">282</span></a>
+</span><span id="ConfigLoader-283"><a href="#ConfigLoader-283"><span class="linenos">283</span></a>        <span class="c1"># Override with Secret Manager if configured</span>
+</span><span id="ConfigLoader-284"><a href="#ConfigLoader-284"><span class="linenos">284</span></a>        <span class="n">secret_mgr</span> <span class="o">=</span> <span class="n">SecretManager</span><span class="p">()</span>
+</span><span id="ConfigLoader-285"><a href="#ConfigLoader-285"><span class="linenos">285</span></a>        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"USE_AWS_SECRETS_MANAGER"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"true"</span><span class="p">:</span>
+</span><span id="ConfigLoader-286"><a href="#ConfigLoader-286"><span class="linenos">286</span></a>            <span class="n">aws_api_key</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"GEMINI_API_KEY"</span><span class="p">)</span>
+</span><span id="ConfigLoader-287"><a href="#ConfigLoader-287"><span class="linenos">287</span></a>            <span class="k">if</span> <span class="n">aws_api_key</span><span class="p">:</span>
+</span><span id="ConfigLoader-288"><a href="#ConfigLoader-288"><span class="linenos">288</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">gemini_api_key</span> <span class="o">=</span> <span class="n">aws_api_key</span>
+</span><span id="ConfigLoader-289"><a href="#ConfigLoader-289"><span class="linenos">289</span></a>
+</span><span id="ConfigLoader-290"><a href="#ConfigLoader-290"><span class="linenos">290</span></a>            <span class="n">aws_anthropic_key</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"ANTHROPIC_API_KEY"</span><span class="p">)</span>
+</span><span id="ConfigLoader-291"><a href="#ConfigLoader-291"><span class="linenos">291</span></a>            <span class="k">if</span> <span class="n">aws_anthropic_key</span><span class="p">:</span>
+</span><span id="ConfigLoader-292"><a href="#ConfigLoader-292"><span class="linenos">292</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">anthropic_api_key</span> <span class="o">=</span> <span class="n">aws_anthropic_key</span>
+</span><span id="ConfigLoader-293"><a href="#ConfigLoader-293"><span class="linenos">293</span></a>
+</span><span id="ConfigLoader-294"><a href="#ConfigLoader-294"><span class="linenos">294</span></a>            <span class="n">aws_webhook</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"WEBHOOK_SECRET"</span><span class="p">)</span>
+</span><span id="ConfigLoader-295"><a href="#ConfigLoader-295"><span class="linenos">295</span></a>            <span class="k">if</span> <span class="n">aws_webhook</span><span class="p">:</span>
+</span><span id="ConfigLoader-296"><a href="#ConfigLoader-296"><span class="linenos">296</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">server</span><span class="o">.</span><span class="n">webhook_secret</span> <span class="o">=</span> <span class="n">aws_webhook</span>
+</span><span id="ConfigLoader-297"><a href="#ConfigLoader-297"><span class="linenos">297</span></a>
+</span><span id="ConfigLoader-298"><a href="#ConfigLoader-298"><span class="linenos">298</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">config</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">model_dump</span><span class="p">()</span>
+</span><span id="ConfigLoader-299"><a href="#ConfigLoader-299"><span class="linenos">299</span></a>
+</span><span id="ConfigLoader-300"><a href="#ConfigLoader-300"><span class="linenos">300</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+</span><span id="ConfigLoader-301"><a href="#ConfigLoader-301"><span class="linenos">301</span></a><span class="w">        </span><span class="sd">"""</span>
+</span><span id="ConfigLoader-302"><a href="#ConfigLoader-302"><span class="linenos">302</span></a><span class="sd">        Retrieves a value from the configuration using the provided key.</span>
+</span><span id="ConfigLoader-303"><a href="#ConfigLoader-303"><span class="linenos">303</span></a><span class="sd">        """</span>
+</span><span id="ConfigLoader-304"><a href="#ConfigLoader-304"><span class="linenos">304</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="p">)</span>
+</span><span id="ConfigLoader-305"><a href="#ConfigLoader-305"><span class="linenos">305</span></a>
+</span><span id="ConfigLoader-306"><a href="#ConfigLoader-306"><span class="linenos">306</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_repo_root</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+</span><span id="ConfigLoader-307"><a href="#ConfigLoader-307"><span class="linenos">307</span></a><span class="w">        </span><span class="sd">"""</span>
+</span><span id="ConfigLoader-308"><a href="#ConfigLoader-308"><span class="linenos">308</span></a><span class="sd">        Returns the root directory of the repository.</span>
+</span><span id="ConfigLoader-309"><a href="#ConfigLoader-309"><span class="linenos">309</span></a><span class="sd">        """</span>
+</span><span id="ConfigLoader-310"><a href="#ConfigLoader-310"><span class="linenos">310</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">repo_root</span>
+</span><span id="ConfigLoader-311"><a href="#ConfigLoader-311"><span class="linenos">311</span></a>
+</span><span id="ConfigLoader-312"><a href="#ConfigLoader-312"><span class="linenos">312</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_local_only</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="ConfigLoader-313"><a href="#ConfigLoader-313"><span class="linenos">313</span></a><span class="w">        </span><span class="sd">"""</span>
+</span><span id="ConfigLoader-314"><a href="#ConfigLoader-314"><span class="linenos">314</span></a><span class="sd">        Returns True if the operating mode is 'local_only'.</span>
+</span><span id="ConfigLoader-315"><a href="#ConfigLoader-315"><span class="linenos">315</span></a><span class="sd">        """</span>
+</span><span id="ConfigLoader-316"><a href="#ConfigLoader-316"><span class="linenos">316</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"operating_mode"</span><span class="p">,</span> <span class="s2">"local_only"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"local_only"</span>
+</span><span id="ConfigLoader-317"><a href="#ConfigLoader-317"><span class="linenos">317</span></a>
+</span><span id="ConfigLoader-318"><a href="#ConfigLoader-318"><span class="linenos">318</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_connected</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="ConfigLoader-319"><a href="#ConfigLoader-319"><span class="linenos">319</span></a><span class="w">        </span><span class="sd">"""</span>
+</span><span id="ConfigLoader-320"><a href="#ConfigLoader-320"><span class="linenos">320</span></a><span class="sd">        Returns True if the operating mode is 'connected'.</span>
+</span><span id="ConfigLoader-321"><a href="#ConfigLoader-321"><span class="linenos">321</span></a><span class="sd">        """</span>
+</span><span id="ConfigLoader-322"><a href="#ConfigLoader-322"><span class="linenos">322</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"operating_mode"</span><span class="p">,</span> <span class="s2">"local_only"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"connected"</span>
 </span></pre></div>
 
 
@@ -2747,39 +2763,44 @@ as well as common directory paths to apply DRY principles.</p>
 </span><span id="ConfigLoader.__init__-258"><a href="#ConfigLoader.__init__-258"><span class="linenos">258</span></a>                <span class="k">finally</span><span class="p">:</span>
 </span><span id="ConfigLoader.__init__-259"><a href="#ConfigLoader.__init__-259"><span class="linenos">259</span></a>                    <span class="n">loader</span><span class="o">.</span><span class="n">dispose</span><span class="p">()</span>
 </span><span id="ConfigLoader.__init__-260"><a href="#ConfigLoader.__init__-260"><span class="linenos">260</span></a>
-</span><span id="ConfigLoader.__init__-261"><a href="#ConfigLoader.__init__-261"><span class="linenos">261</span></a>        <span class="n">local_candidate</span> <span class="o">=</span> <span class="n">local_config_path</span>
-</span><span id="ConfigLoader.__init__-262"><a href="#ConfigLoader.__init__-262"><span class="linenos">262</span></a>        <span class="k">if</span> <span class="n">local_candidate</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">config_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-</span><span id="ConfigLoader.__init__-263"><a href="#ConfigLoader.__init__-263"><span class="linenos">263</span></a>            <span class="n">local_candidate</span> <span class="o">=</span> <span class="p">(</span>
-</span><span id="ConfigLoader.__init__-264"><a href="#ConfigLoader.__init__-264"><span class="linenos">264</span></a>                <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"HOWLPLANE_LOCAL_CONFIG"</span><span class="p">)</span>
-</span><span id="ConfigLoader.__init__-265"><a href="#ConfigLoader.__init__-265"><span class="linenos">265</span></a>                <span class="ow">or</span> <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">".config"</span> <span class="o">/</span> <span class="s2">"howlplane"</span> <span class="o">/</span> <span class="s2">"config.toml"</span>
-</span><span id="ConfigLoader.__init__-266"><a href="#ConfigLoader.__init__-266"><span class="linenos">266</span></a>            <span class="p">)</span>
-</span><span id="ConfigLoader.__init__-267"><a href="#ConfigLoader.__init__-267"><span class="linenos">267</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span> <span class="o">=</span> <span class="p">(</span>
-</span><span id="ConfigLoader.__init__-268"><a href="#ConfigLoader.__init__-268"><span class="linenos">268</span></a>            <span class="n">Path</span><span class="p">(</span><span class="n">local_candidate</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span> <span class="k">if</span> <span class="n">local_candidate</span> <span class="k">else</span> <span class="kc">None</span>
-</span><span id="ConfigLoader.__init__-269"><a href="#ConfigLoader.__init__-269"><span class="linenos">269</span></a>        <span class="p">)</span>
-</span><span id="ConfigLoader.__init__-270"><a href="#ConfigLoader.__init__-270"><span class="linenos">270</span></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
-</span><span id="ConfigLoader.__init__-271"><a href="#ConfigLoader.__init__-271"><span class="linenos">271</span></a>            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span><span class="p">,</span> <span class="s2">"rb"</span><span class="p">)</span> <span class="k">as</span> <span class="n">local_file</span><span class="p">:</span>
-</span><span id="ConfigLoader.__init__-272"><a href="#ConfigLoader.__init__-272"><span class="linenos">272</span></a>                <span class="n">local_data</span> <span class="o">=</span> <span class="n">tomllib</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">local_file</span><span class="p">)</span>
-</span><span id="ConfigLoader.__init__-273"><a href="#ConfigLoader.__init__-273"><span class="linenos">273</span></a>            <span class="n">yaml_data</span> <span class="o">=</span> <span class="n">_deep_merge</span><span class="p">(</span><span class="n">yaml_data</span><span class="p">,</span> <span class="n">_resource_local_config</span><span class="p">(</span><span class="n">local_data</span><span class="p">))</span>
-</span><span id="ConfigLoader.__init__-274"><a href="#ConfigLoader.__init__-274"><span class="linenos">274</span></a>
-</span><span id="ConfigLoader.__init__-275"><a href="#ConfigLoader.__init__-275"><span class="linenos">275</span></a>        <span class="c1"># Load pydantic settings prioritizing .env over yaml_data</span>
-</span><span id="ConfigLoader.__init__-276"><a href="#ConfigLoader.__init__-276"><span class="linenos">276</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">settings</span> <span class="o">=</span> <span class="n">AppSettings</span><span class="p">(</span><span class="o">**</span><span class="n">yaml_data</span><span class="p">)</span>
-</span><span id="ConfigLoader.__init__-277"><a href="#ConfigLoader.__init__-277"><span class="linenos">277</span></a>
-</span><span id="ConfigLoader.__init__-278"><a href="#ConfigLoader.__init__-278"><span class="linenos">278</span></a>        <span class="c1"># Override with Secret Manager if configured</span>
-</span><span id="ConfigLoader.__init__-279"><a href="#ConfigLoader.__init__-279"><span class="linenos">279</span></a>        <span class="n">secret_mgr</span> <span class="o">=</span> <span class="n">SecretManager</span><span class="p">()</span>
-</span><span id="ConfigLoader.__init__-280"><a href="#ConfigLoader.__init__-280"><span class="linenos">280</span></a>        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"USE_AWS_SECRETS_MANAGER"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"true"</span><span class="p">:</span>
-</span><span id="ConfigLoader.__init__-281"><a href="#ConfigLoader.__init__-281"><span class="linenos">281</span></a>            <span class="n">aws_api_key</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"GEMINI_API_KEY"</span><span class="p">)</span>
-</span><span id="ConfigLoader.__init__-282"><a href="#ConfigLoader.__init__-282"><span class="linenos">282</span></a>            <span class="k">if</span> <span class="n">aws_api_key</span><span class="p">:</span>
-</span><span id="ConfigLoader.__init__-283"><a href="#ConfigLoader.__init__-283"><span class="linenos">283</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">gemini_api_key</span> <span class="o">=</span> <span class="n">aws_api_key</span>
-</span><span id="ConfigLoader.__init__-284"><a href="#ConfigLoader.__init__-284"><span class="linenos">284</span></a>
-</span><span id="ConfigLoader.__init__-285"><a href="#ConfigLoader.__init__-285"><span class="linenos">285</span></a>            <span class="n">aws_anthropic_key</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"ANTHROPIC_API_KEY"</span><span class="p">)</span>
-</span><span id="ConfigLoader.__init__-286"><a href="#ConfigLoader.__init__-286"><span class="linenos">286</span></a>            <span class="k">if</span> <span class="n">aws_anthropic_key</span><span class="p">:</span>
-</span><span id="ConfigLoader.__init__-287"><a href="#ConfigLoader.__init__-287"><span class="linenos">287</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">anthropic_api_key</span> <span class="o">=</span> <span class="n">aws_anthropic_key</span>
-</span><span id="ConfigLoader.__init__-288"><a href="#ConfigLoader.__init__-288"><span class="linenos">288</span></a>
-</span><span id="ConfigLoader.__init__-289"><a href="#ConfigLoader.__init__-289"><span class="linenos">289</span></a>            <span class="n">aws_webhook</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"WEBHOOK_SECRET"</span><span class="p">)</span>
-</span><span id="ConfigLoader.__init__-290"><a href="#ConfigLoader.__init__-290"><span class="linenos">290</span></a>            <span class="k">if</span> <span class="n">aws_webhook</span><span class="p">:</span>
-</span><span id="ConfigLoader.__init__-291"><a href="#ConfigLoader.__init__-291"><span class="linenos">291</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">server</span><span class="o">.</span><span class="n">webhook_secret</span> <span class="o">=</span> <span class="n">aws_webhook</span>
-</span><span id="ConfigLoader.__init__-292"><a href="#ConfigLoader.__init__-292"><span class="linenos">292</span></a>
-</span><span id="ConfigLoader.__init__-293"><a href="#ConfigLoader.__init__-293"><span class="linenos">293</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">config</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">model_dump</span><span class="p">()</span>
+</span><span id="ConfigLoader.__init__-261"><a href="#ConfigLoader.__init__-261"><span class="linenos">261</span></a>        <span class="c1"># Kept so `howlplane config` can report which layer supplied a value.</span>
+</span><span id="ConfigLoader.__init__-262"><a href="#ConfigLoader.__init__-262"><span class="linenos">262</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">file_layer</span> <span class="o">=</span> <span class="n">yaml_data</span>
+</span><span id="ConfigLoader.__init__-263"><a href="#ConfigLoader.__init__-263"><span class="linenos">263</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">local_layer</span> <span class="o">=</span> <span class="p">{}</span>
+</span><span id="ConfigLoader.__init__-264"><a href="#ConfigLoader.__init__-264"><span class="linenos">264</span></a>
+</span><span id="ConfigLoader.__init__-265"><a href="#ConfigLoader.__init__-265"><span class="linenos">265</span></a>        <span class="n">local_candidate</span> <span class="o">=</span> <span class="n">local_config_path</span>
+</span><span id="ConfigLoader.__init__-266"><a href="#ConfigLoader.__init__-266"><span class="linenos">266</span></a>        <span class="k">if</span> <span class="n">local_candidate</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">config_path</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="ConfigLoader.__init__-267"><a href="#ConfigLoader.__init__-267"><span class="linenos">267</span></a>            <span class="n">local_candidate</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="ConfigLoader.__init__-268"><a href="#ConfigLoader.__init__-268"><span class="linenos">268</span></a>                <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"HOWLPLANE_LOCAL_CONFIG"</span><span class="p">)</span>
+</span><span id="ConfigLoader.__init__-269"><a href="#ConfigLoader.__init__-269"><span class="linenos">269</span></a>                <span class="ow">or</span> <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">".config"</span> <span class="o">/</span> <span class="s2">"howlplane"</span> <span class="o">/</span> <span class="s2">"config.toml"</span>
+</span><span id="ConfigLoader.__init__-270"><a href="#ConfigLoader.__init__-270"><span class="linenos">270</span></a>            <span class="p">)</span>
+</span><span id="ConfigLoader.__init__-271"><a href="#ConfigLoader.__init__-271"><span class="linenos">271</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span> <span class="o">=</span> <span class="p">(</span>
+</span><span id="ConfigLoader.__init__-272"><a href="#ConfigLoader.__init__-272"><span class="linenos">272</span></a>            <span class="n">Path</span><span class="p">(</span><span class="n">local_candidate</span><span class="p">)</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span> <span class="k">if</span> <span class="n">local_candidate</span> <span class="k">else</span> <span class="kc">None</span>
+</span><span id="ConfigLoader.__init__-273"><a href="#ConfigLoader.__init__-273"><span class="linenos">273</span></a>        <span class="p">)</span>
+</span><span id="ConfigLoader.__init__-274"><a href="#ConfigLoader.__init__-274"><span class="linenos">274</span></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+</span><span id="ConfigLoader.__init__-275"><a href="#ConfigLoader.__init__-275"><span class="linenos">275</span></a>            <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">local_config_path</span><span class="p">,</span> <span class="s2">"rb"</span><span class="p">)</span> <span class="k">as</span> <span class="n">local_file</span><span class="p">:</span>
+</span><span id="ConfigLoader.__init__-276"><a href="#ConfigLoader.__init__-276"><span class="linenos">276</span></a>                <span class="n">local_data</span> <span class="o">=</span> <span class="n">tomllib</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">local_file</span><span class="p">)</span>
+</span><span id="ConfigLoader.__init__-277"><a href="#ConfigLoader.__init__-277"><span class="linenos">277</span></a>            <span class="bp">self</span><span class="o">.</span><span class="n">local_layer</span> <span class="o">=</span> <span class="n">_resource_local_config</span><span class="p">(</span><span class="n">local_data</span><span class="p">)</span>
+</span><span id="ConfigLoader.__init__-278"><a href="#ConfigLoader.__init__-278"><span class="linenos">278</span></a>            <span class="n">yaml_data</span> <span class="o">=</span> <span class="n">_deep_merge</span><span class="p">(</span><span class="n">yaml_data</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">local_layer</span><span class="p">)</span>
+</span><span id="ConfigLoader.__init__-279"><a href="#ConfigLoader.__init__-279"><span class="linenos">279</span></a>
+</span><span id="ConfigLoader.__init__-280"><a href="#ConfigLoader.__init__-280"><span class="linenos">280</span></a>        <span class="c1"># Load pydantic settings prioritizing .env over yaml_data</span>
+</span><span id="ConfigLoader.__init__-281"><a href="#ConfigLoader.__init__-281"><span class="linenos">281</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">settings</span> <span class="o">=</span> <span class="n">AppSettings</span><span class="p">(</span><span class="o">**</span><span class="n">yaml_data</span><span class="p">)</span>
+</span><span id="ConfigLoader.__init__-282"><a href="#ConfigLoader.__init__-282"><span class="linenos">282</span></a>
+</span><span id="ConfigLoader.__init__-283"><a href="#ConfigLoader.__init__-283"><span class="linenos">283</span></a>        <span class="c1"># Override with Secret Manager if configured</span>
+</span><span id="ConfigLoader.__init__-284"><a href="#ConfigLoader.__init__-284"><span class="linenos">284</span></a>        <span class="n">secret_mgr</span> <span class="o">=</span> <span class="n">SecretManager</span><span class="p">()</span>
+</span><span id="ConfigLoader.__init__-285"><a href="#ConfigLoader.__init__-285"><span class="linenos">285</span></a>        <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"USE_AWS_SECRETS_MANAGER"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"true"</span><span class="p">:</span>
+</span><span id="ConfigLoader.__init__-286"><a href="#ConfigLoader.__init__-286"><span class="linenos">286</span></a>            <span class="n">aws_api_key</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"GEMINI_API_KEY"</span><span class="p">)</span>
+</span><span id="ConfigLoader.__init__-287"><a href="#ConfigLoader.__init__-287"><span class="linenos">287</span></a>            <span class="k">if</span> <span class="n">aws_api_key</span><span class="p">:</span>
+</span><span id="ConfigLoader.__init__-288"><a href="#ConfigLoader.__init__-288"><span class="linenos">288</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">gemini_api_key</span> <span class="o">=</span> <span class="n">aws_api_key</span>
+</span><span id="ConfigLoader.__init__-289"><a href="#ConfigLoader.__init__-289"><span class="linenos">289</span></a>
+</span><span id="ConfigLoader.__init__-290"><a href="#ConfigLoader.__init__-290"><span class="linenos">290</span></a>            <span class="n">aws_anthropic_key</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"ANTHROPIC_API_KEY"</span><span class="p">)</span>
+</span><span id="ConfigLoader.__init__-291"><a href="#ConfigLoader.__init__-291"><span class="linenos">291</span></a>            <span class="k">if</span> <span class="n">aws_anthropic_key</span><span class="p">:</span>
+</span><span id="ConfigLoader.__init__-292"><a href="#ConfigLoader.__init__-292"><span class="linenos">292</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">anthropic_api_key</span> <span class="o">=</span> <span class="n">aws_anthropic_key</span>
+</span><span id="ConfigLoader.__init__-293"><a href="#ConfigLoader.__init__-293"><span class="linenos">293</span></a>
+</span><span id="ConfigLoader.__init__-294"><a href="#ConfigLoader.__init__-294"><span class="linenos">294</span></a>            <span class="n">aws_webhook</span> <span class="o">=</span> <span class="n">secret_mgr</span><span class="o">.</span><span class="n">get_secret</span><span class="p">(</span><span class="s2">"WEBHOOK_SECRET"</span><span class="p">)</span>
+</span><span id="ConfigLoader.__init__-295"><a href="#ConfigLoader.__init__-295"><span class="linenos">295</span></a>            <span class="k">if</span> <span class="n">aws_webhook</span><span class="p">:</span>
+</span><span id="ConfigLoader.__init__-296"><a href="#ConfigLoader.__init__-296"><span class="linenos">296</span></a>                <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">server</span><span class="o">.</span><span class="n">webhook_secret</span> <span class="o">=</span> <span class="n">aws_webhook</span>
+</span><span id="ConfigLoader.__init__-297"><a href="#ConfigLoader.__init__-297"><span class="linenos">297</span></a>
+</span><span id="ConfigLoader.__init__-298"><a href="#ConfigLoader.__init__-298"><span class="linenos">298</span></a>        <span class="bp">self</span><span class="o">.</span><span class="n">config</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">settings</span><span class="o">.</span><span class="n">model_dump</span><span class="p">()</span>
 </span></pre></div>
 
 
@@ -2806,6 +2827,28 @@ as well as common directory paths to apply DRY principles.</p>
         
     </div>
     <a class="headerlink" href="#ConfigLoader.repo_root"></a>
+    
+    
+
+                            </div>
+                            <div id="ConfigLoader.file_layer" class="classattr">
+                                <div class="attr variable">
+            <span class="name">file_layer</span>
+
+        
+    </div>
+    <a class="headerlink" href="#ConfigLoader.file_layer"></a>
+    
+    
+
+                            </div>
+                            <div id="ConfigLoader.local_layer" class="classattr">
+                                <div class="attr variable">
+            <span class="name">local_layer</span>
+
+        
+    </div>
+    <a class="headerlink" href="#ConfigLoader.local_layer"></a>
     
     
 
@@ -2854,11 +2897,11 @@ as well as common directory paths to apply DRY principles.</p>
 
     </div>
     <a class="headerlink" href="#ConfigLoader.get"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="ConfigLoader.get-295"><a href="#ConfigLoader.get-295"><span class="linenos">295</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
-</span><span id="ConfigLoader.get-296"><a href="#ConfigLoader.get-296"><span class="linenos">296</span></a><span class="w">        </span><span class="sd">"""</span>
-</span><span id="ConfigLoader.get-297"><a href="#ConfigLoader.get-297"><span class="linenos">297</span></a><span class="sd">        Retrieves a value from the configuration using the provided key.</span>
-</span><span id="ConfigLoader.get-298"><a href="#ConfigLoader.get-298"><span class="linenos">298</span></a><span class="sd">        """</span>
-</span><span id="ConfigLoader.get-299"><a href="#ConfigLoader.get-299"><span class="linenos">299</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="p">)</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="ConfigLoader.get-300"><a href="#ConfigLoader.get-300"><span class="linenos">300</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+</span><span id="ConfigLoader.get-301"><a href="#ConfigLoader.get-301"><span class="linenos">301</span></a><span class="w">        </span><span class="sd">"""</span>
+</span><span id="ConfigLoader.get-302"><a href="#ConfigLoader.get-302"><span class="linenos">302</span></a><span class="sd">        Retrieves a value from the configuration using the provided key.</span>
+</span><span id="ConfigLoader.get-303"><a href="#ConfigLoader.get-303"><span class="linenos">303</span></a><span class="sd">        """</span>
+</span><span id="ConfigLoader.get-304"><a href="#ConfigLoader.get-304"><span class="linenos">304</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">default</span><span class="p">)</span>
 </span></pre></div>
 
 
@@ -2878,11 +2921,11 @@ as well as common directory paths to apply DRY principles.</p>
 
     </div>
     <a class="headerlink" href="#ConfigLoader.get_repo_root"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="ConfigLoader.get_repo_root-301"><a href="#ConfigLoader.get_repo_root-301"><span class="linenos">301</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_repo_root</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</span><span id="ConfigLoader.get_repo_root-302"><a href="#ConfigLoader.get_repo_root-302"><span class="linenos">302</span></a><span class="w">        </span><span class="sd">"""</span>
-</span><span id="ConfigLoader.get_repo_root-303"><a href="#ConfigLoader.get_repo_root-303"><span class="linenos">303</span></a><span class="sd">        Returns the root directory of the repository.</span>
-</span><span id="ConfigLoader.get_repo_root-304"><a href="#ConfigLoader.get_repo_root-304"><span class="linenos">304</span></a><span class="sd">        """</span>
-</span><span id="ConfigLoader.get_repo_root-305"><a href="#ConfigLoader.get_repo_root-305"><span class="linenos">305</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">repo_root</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="ConfigLoader.get_repo_root-306"><a href="#ConfigLoader.get_repo_root-306"><span class="linenos">306</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_repo_root</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+</span><span id="ConfigLoader.get_repo_root-307"><a href="#ConfigLoader.get_repo_root-307"><span class="linenos">307</span></a><span class="w">        </span><span class="sd">"""</span>
+</span><span id="ConfigLoader.get_repo_root-308"><a href="#ConfigLoader.get_repo_root-308"><span class="linenos">308</span></a><span class="sd">        Returns the root directory of the repository.</span>
+</span><span id="ConfigLoader.get_repo_root-309"><a href="#ConfigLoader.get_repo_root-309"><span class="linenos">309</span></a><span class="sd">        """</span>
+</span><span id="ConfigLoader.get_repo_root-310"><a href="#ConfigLoader.get_repo_root-310"><span class="linenos">310</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">repo_root</span>
 </span></pre></div>
 
 
@@ -2902,11 +2945,11 @@ as well as common directory paths to apply DRY principles.</p>
 
     </div>
     <a class="headerlink" href="#ConfigLoader.is_local_only"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="ConfigLoader.is_local_only-307"><a href="#ConfigLoader.is_local_only-307"><span class="linenos">307</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_local_only</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="ConfigLoader.is_local_only-308"><a href="#ConfigLoader.is_local_only-308"><span class="linenos">308</span></a><span class="w">        </span><span class="sd">"""</span>
-</span><span id="ConfigLoader.is_local_only-309"><a href="#ConfigLoader.is_local_only-309"><span class="linenos">309</span></a><span class="sd">        Returns True if the operating mode is 'local_only'.</span>
-</span><span id="ConfigLoader.is_local_only-310"><a href="#ConfigLoader.is_local_only-310"><span class="linenos">310</span></a><span class="sd">        """</span>
-</span><span id="ConfigLoader.is_local_only-311"><a href="#ConfigLoader.is_local_only-311"><span class="linenos">311</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"operating_mode"</span><span class="p">,</span> <span class="s2">"local_only"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"local_only"</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="ConfigLoader.is_local_only-312"><a href="#ConfigLoader.is_local_only-312"><span class="linenos">312</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_local_only</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="ConfigLoader.is_local_only-313"><a href="#ConfigLoader.is_local_only-313"><span class="linenos">313</span></a><span class="w">        </span><span class="sd">"""</span>
+</span><span id="ConfigLoader.is_local_only-314"><a href="#ConfigLoader.is_local_only-314"><span class="linenos">314</span></a><span class="sd">        Returns True if the operating mode is 'local_only'.</span>
+</span><span id="ConfigLoader.is_local_only-315"><a href="#ConfigLoader.is_local_only-315"><span class="linenos">315</span></a><span class="sd">        """</span>
+</span><span id="ConfigLoader.is_local_only-316"><a href="#ConfigLoader.is_local_only-316"><span class="linenos">316</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"operating_mode"</span><span class="p">,</span> <span class="s2">"local_only"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"local_only"</span>
 </span></pre></div>
 
 
@@ -2926,11 +2969,11 @@ as well as common directory paths to apply DRY principles.</p>
 
     </div>
     <a class="headerlink" href="#ConfigLoader.is_connected"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="ConfigLoader.is_connected-313"><a href="#ConfigLoader.is_connected-313"><span class="linenos">313</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_connected</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="ConfigLoader.is_connected-314"><a href="#ConfigLoader.is_connected-314"><span class="linenos">314</span></a><span class="w">        </span><span class="sd">"""</span>
-</span><span id="ConfigLoader.is_connected-315"><a href="#ConfigLoader.is_connected-315"><span class="linenos">315</span></a><span class="sd">        Returns True if the operating mode is 'connected'.</span>
-</span><span id="ConfigLoader.is_connected-316"><a href="#ConfigLoader.is_connected-316"><span class="linenos">316</span></a><span class="sd">        """</span>
-</span><span id="ConfigLoader.is_connected-317"><a href="#ConfigLoader.is_connected-317"><span class="linenos">317</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"operating_mode"</span><span class="p">,</span> <span class="s2">"local_only"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"connected"</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="ConfigLoader.is_connected-318"><a href="#ConfigLoader.is_connected-318"><span class="linenos">318</span></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_connected</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="ConfigLoader.is_connected-319"><a href="#ConfigLoader.is_connected-319"><span class="linenos">319</span></a><span class="w">        </span><span class="sd">"""</span>
+</span><span id="ConfigLoader.is_connected-320"><a href="#ConfigLoader.is_connected-320"><span class="linenos">320</span></a><span class="sd">        Returns True if the operating mode is 'connected'.</span>
+</span><span id="ConfigLoader.is_connected-321"><a href="#ConfigLoader.is_connected-321"><span class="linenos">321</span></a><span class="sd">        """</span>
+</span><span id="ConfigLoader.is_connected-322"><a href="#ConfigLoader.is_connected-322"><span class="linenos">322</span></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"operating_mode"</span><span class="p">,</span> <span class="s2">"local_only"</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"connected"</span>
 </span></pre></div>
 
 
@@ -2976,11 +3019,11 @@ as well as common directory paths to apply DRY principles.</p>
 
     </div>
     <a class="headerlink" href="#load_config"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="load_config-325"><a href="#load_config-325"><span class="linenos">325</span></a><span class="k">def</span><span class="w"> </span><span class="nf">load_config</span><span class="p">():</span>
-</span><span id="load_config-326"><a href="#load_config-326"><span class="linenos">326</span></a><span class="w">    </span><span class="sd">"""</span>
-</span><span id="load_config-327"><a href="#load_config-327"><span class="linenos">327</span></a><span class="sd">    Legacy function to load config directly.</span>
-</span><span id="load_config-328"><a href="#load_config-328"><span class="linenos">328</span></a><span class="sd">    """</span>
-</span><span id="load_config-329"><a href="#load_config-329"><span class="linenos">329</span></a>    <span class="k">return</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">config</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="load_config-330"><a href="#load_config-330"><span class="linenos">330</span></a><span class="k">def</span><span class="w"> </span><span class="nf">load_config</span><span class="p">():</span>
+</span><span id="load_config-331"><a href="#load_config-331"><span class="linenos">331</span></a><span class="w">    </span><span class="sd">"""</span>
+</span><span id="load_config-332"><a href="#load_config-332"><span class="linenos">332</span></a><span class="sd">    Legacy function to load config directly.</span>
+</span><span id="load_config-333"><a href="#load_config-333"><span class="linenos">333</span></a><span class="sd">    """</span>
+</span><span id="load_config-334"><a href="#load_config-334"><span class="linenos">334</span></a>    <span class="k">return</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">config</span>
 </span></pre></div>
 
 
@@ -3000,11 +3043,11 @@ as well as common directory paths to apply DRY principles.</p>
 
     </div>
     <a class="headerlink" href="#is_local_only"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="is_local_only-332"><a href="#is_local_only-332"><span class="linenos">332</span></a><span class="k">def</span><span class="w"> </span><span class="nf">is_local_only</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="is_local_only-333"><a href="#is_local_only-333"><span class="linenos">333</span></a><span class="w">    </span><span class="sd">"""</span>
-</span><span id="is_local_only-334"><a href="#is_local_only-334"><span class="linenos">334</span></a><span class="sd">    Convenience function to check if the current configuration enforces local_only mode.</span>
-</span><span id="is_local_only-335"><a href="#is_local_only-335"><span class="linenos">335</span></a><span class="sd">    """</span>
-</span><span id="is_local_only-336"><a href="#is_local_only-336"><span class="linenos">336</span></a>    <span class="k">return</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">is_local_only</span><span class="p">()</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="is_local_only-337"><a href="#is_local_only-337"><span class="linenos">337</span></a><span class="k">def</span><span class="w"> </span><span class="nf">is_local_only</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="is_local_only-338"><a href="#is_local_only-338"><span class="linenos">338</span></a><span class="w">    </span><span class="sd">"""</span>
+</span><span id="is_local_only-339"><a href="#is_local_only-339"><span class="linenos">339</span></a><span class="sd">    Convenience function to check if the current configuration enforces local_only mode.</span>
+</span><span id="is_local_only-340"><a href="#is_local_only-340"><span class="linenos">340</span></a><span class="sd">    """</span>
+</span><span id="is_local_only-341"><a href="#is_local_only-341"><span class="linenos">341</span></a>    <span class="k">return</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">is_local_only</span><span class="p">()</span>
 </span></pre></div>
 
 
@@ -3024,11 +3067,11 @@ as well as common directory paths to apply DRY principles.</p>
 
     </div>
     <a class="headerlink" href="#is_connected"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="is_connected-339"><a href="#is_connected-339"><span class="linenos">339</span></a><span class="k">def</span><span class="w"> </span><span class="nf">is_connected</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-</span><span id="is_connected-340"><a href="#is_connected-340"><span class="linenos">340</span></a><span class="w">    </span><span class="sd">"""</span>
-</span><span id="is_connected-341"><a href="#is_connected-341"><span class="linenos">341</span></a><span class="sd">    Convenience function to check if the current configuration permits connected mode.</span>
-</span><span id="is_connected-342"><a href="#is_connected-342"><span class="linenos">342</span></a><span class="sd">    """</span>
-</span><span id="is_connected-343"><a href="#is_connected-343"><span class="linenos">343</span></a>    <span class="k">return</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">is_connected</span><span class="p">()</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="is_connected-344"><a href="#is_connected-344"><span class="linenos">344</span></a><span class="k">def</span><span class="w"> </span><span class="nf">is_connected</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="is_connected-345"><a href="#is_connected-345"><span class="linenos">345</span></a><span class="w">    </span><span class="sd">"""</span>
+</span><span id="is_connected-346"><a href="#is_connected-346"><span class="linenos">346</span></a><span class="sd">    Convenience function to check if the current configuration permits connected mode.</span>
+</span><span id="is_connected-347"><a href="#is_connected-347"><span class="linenos">347</span></a><span class="sd">    """</span>
+</span><span id="is_connected-348"><a href="#is_connected-348"><span class="linenos">348</span></a>    <span class="k">return</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">is_connected</span><span class="p">()</span>
 </span></pre></div>
 
 
@@ -3048,11 +3091,11 @@ as well as common directory paths to apply DRY principles.</p>
 
     </div>
     <a class="headerlink" href="#main"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="main-346"><a href="#main-346"><span class="linenos">346</span></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
-</span><span id="main-347"><a href="#main-347"><span class="linenos">347</span></a><span class="w">    </span><span class="sd">"""</span>
-</span><span id="main-348"><a href="#main-348"><span class="linenos">348</span></a><span class="sd">    Main entry point for testing the ConfigLoader.</span>
-</span><span id="main-349"><a href="#main-349"><span class="linenos">349</span></a><span class="sd">    """</span>
-</span><span id="main-350"><a href="#main-350"><span class="linenos">350</span></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Loaded config: </span><span class="si">{</span><span class="n">config</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="main-351"><a href="#main-351"><span class="linenos">351</span></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+</span><span id="main-352"><a href="#main-352"><span class="linenos">352</span></a><span class="w">    </span><span class="sd">"""</span>
+</span><span id="main-353"><a href="#main-353"><span class="linenos">353</span></a><span class="sd">    Main entry point for testing the ConfigLoader.</span>
+</span><span id="main-354"><a href="#main-354"><span class="linenos">354</span></a><span class="sd">    """</span>
+</span><span id="main-355"><a href="#main-355"><span class="linenos">355</span></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Loaded config: </span><span class="si">{</span><span class="n">config</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </span></pre></div>
 
 
@@ -3072,12 +3115,12 @@ as well as common directory paths to apply DRY principles.</p>
 
     </div>
     <a class="headerlink" href="#get_chroma_db_path"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="get_chroma_db_path-357"><a href="#get_chroma_db_path-357"><span class="linenos">357</span></a><span class="k">def</span><span class="w"> </span><span class="nf">get_chroma_db_path</span><span class="p">():</span>
-</span><span id="get_chroma_db_path-358"><a href="#get_chroma_db_path-358"><span class="linenos">358</span></a><span class="w">    </span><span class="sd">"""</span>
-</span><span id="get_chroma_db_path-359"><a href="#get_chroma_db_path-359"><span class="linenos">359</span></a><span class="sd">    Returns the absolute path to the ChromaDB directory.</span>
-</span><span id="get_chroma_db_path-360"><a href="#get_chroma_db_path-360"><span class="linenos">360</span></a><span class="sd">    """</span>
-</span><span id="get_chroma_db_path-361"><a href="#get_chroma_db_path-361"><span class="linenos">361</span></a>    <span class="n">db_path</span> <span class="o">=</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"database"</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"chroma_db_path"</span><span class="p">,</span> <span class="s2">".chromadb"</span><span class="p">)</span>
-</span><span id="get_chroma_db_path-362"><a href="#get_chroma_db_path-362"><span class="linenos">362</span></a>    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">default_loader</span><span class="o">.</span><span class="n">get_repo_root</span><span class="p">(),</span> <span class="n">db_path</span><span class="p">))</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="get_chroma_db_path-362"><a href="#get_chroma_db_path-362"><span class="linenos">362</span></a><span class="k">def</span><span class="w"> </span><span class="nf">get_chroma_db_path</span><span class="p">():</span>
+</span><span id="get_chroma_db_path-363"><a href="#get_chroma_db_path-363"><span class="linenos">363</span></a><span class="w">    </span><span class="sd">"""</span>
+</span><span id="get_chroma_db_path-364"><a href="#get_chroma_db_path-364"><span class="linenos">364</span></a><span class="sd">    Returns the absolute path to the ChromaDB directory.</span>
+</span><span id="get_chroma_db_path-365"><a href="#get_chroma_db_path-365"><span class="linenos">365</span></a><span class="sd">    """</span>
+</span><span id="get_chroma_db_path-366"><a href="#get_chroma_db_path-366"><span class="linenos">366</span></a>    <span class="n">db_path</span> <span class="o">=</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"database"</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"chroma_db_path"</span><span class="p">,</span> <span class="s2">".chromadb"</span><span class="p">)</span>
+</span><span id="get_chroma_db_path-367"><a href="#get_chroma_db_path-367"><span class="linenos">367</span></a>    <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">default_loader</span><span class="o">.</span><span class="n">get_repo_root</span><span class="p">(),</span> <span class="n">db_path</span><span class="p">))</span>
 </span></pre></div>
 
 
@@ -3097,25 +3140,25 @@ as well as common directory paths to apply DRY principles.</p>
 
     </div>
     <a class="headerlink" href="#resolve_utility_llm"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="resolve_utility_llm-365"><a href="#resolve_utility_llm-365"><span class="linenos">365</span></a><span class="k">def</span><span class="w"> </span><span class="nf">resolve_utility_llm</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
-</span><span id="resolve_utility_llm-366"><a href="#resolve_utility_llm-366"><span class="linenos">366</span></a><span class="w">    </span><span class="sd">"""</span>
-</span><span id="resolve_utility_llm-367"><a href="#resolve_utility_llm-367"><span class="linenos">367</span></a><span class="sd">    Picks a fast, cheap LiteLLM model for internal utility calls (query</span>
-</span><span id="resolve_utility_llm-368"><a href="#resolve_utility_llm-368"><span class="linenos">368</span></a><span class="sd">    expansion, content verification) based on whichever provider API key</span>
-</span><span id="resolve_utility_llm-369"><a href="#resolve_utility_llm-369"><span class="linenos">369</span></a><span class="sd">    is configured. Returns a (model, api_key) tuple, or (None, None) if</span>
-</span><span id="resolve_utility_llm-370"><a href="#resolve_utility_llm-370"><span class="linenos">370</span></a><span class="sd">    no provider key is available.</span>
-</span><span id="resolve_utility_llm-371"><a href="#resolve_utility_llm-371"><span class="linenos">371</span></a><span class="sd">    """</span>
-</span><span id="resolve_utility_llm-372"><a href="#resolve_utility_llm-372"><span class="linenos">372</span></a>    <span class="n">cfg</span> <span class="o">=</span> <span class="n">cfg</span> <span class="ow">or</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">config</span>
-</span><span id="resolve_utility_llm-373"><a href="#resolve_utility_llm-373"><span class="linenos">373</span></a>    <span class="n">gemini_key</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"gemini_api_key"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"GEMINI_API_KEY"</span><span class="p">)</span>
-</span><span id="resolve_utility_llm-374"><a href="#resolve_utility_llm-374"><span class="linenos">374</span></a>    <span class="k">if</span> <span class="n">gemini_key</span><span class="p">:</span>
-</span><span id="resolve_utility_llm-375"><a href="#resolve_utility_llm-375"><span class="linenos">375</span></a>        <span class="k">return</span> <span class="s2">"gemini/gemini-1.5-flash"</span><span class="p">,</span> <span class="n">gemini_key</span>
-</span><span id="resolve_utility_llm-376"><a href="#resolve_utility_llm-376"><span class="linenos">376</span></a>
-</span><span id="resolve_utility_llm-377"><a href="#resolve_utility_llm-377"><span class="linenos">377</span></a>    <span class="n">anthropic_key</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"anthropic_api_key"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
-</span><span id="resolve_utility_llm-378"><a href="#resolve_utility_llm-378"><span class="linenos">378</span></a>        <span class="s2">"ANTHROPIC_API_KEY"</span>
-</span><span id="resolve_utility_llm-379"><a href="#resolve_utility_llm-379"><span class="linenos">379</span></a>    <span class="p">)</span>
-</span><span id="resolve_utility_llm-380"><a href="#resolve_utility_llm-380"><span class="linenos">380</span></a>    <span class="k">if</span> <span class="n">anthropic_key</span><span class="p">:</span>
-</span><span id="resolve_utility_llm-381"><a href="#resolve_utility_llm-381"><span class="linenos">381</span></a>        <span class="k">return</span> <span class="s2">"anthropic/claude-haiku-4-5-20251001"</span><span class="p">,</span> <span class="n">anthropic_key</span>
-</span><span id="resolve_utility_llm-382"><a href="#resolve_utility_llm-382"><span class="linenos">382</span></a>
-</span><span id="resolve_utility_llm-383"><a href="#resolve_utility_llm-383"><span class="linenos">383</span></a>    <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="resolve_utility_llm-370"><a href="#resolve_utility_llm-370"><span class="linenos">370</span></a><span class="k">def</span><span class="w"> </span><span class="nf">resolve_utility_llm</span><span class="p">(</span><span class="n">cfg</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+</span><span id="resolve_utility_llm-371"><a href="#resolve_utility_llm-371"><span class="linenos">371</span></a><span class="w">    </span><span class="sd">"""</span>
+</span><span id="resolve_utility_llm-372"><a href="#resolve_utility_llm-372"><span class="linenos">372</span></a><span class="sd">    Picks a fast, cheap LiteLLM model for internal utility calls (query</span>
+</span><span id="resolve_utility_llm-373"><a href="#resolve_utility_llm-373"><span class="linenos">373</span></a><span class="sd">    expansion, content verification) based on whichever provider API key</span>
+</span><span id="resolve_utility_llm-374"><a href="#resolve_utility_llm-374"><span class="linenos">374</span></a><span class="sd">    is configured. Returns a (model, api_key) tuple, or (None, None) if</span>
+</span><span id="resolve_utility_llm-375"><a href="#resolve_utility_llm-375"><span class="linenos">375</span></a><span class="sd">    no provider key is available.</span>
+</span><span id="resolve_utility_llm-376"><a href="#resolve_utility_llm-376"><span class="linenos">376</span></a><span class="sd">    """</span>
+</span><span id="resolve_utility_llm-377"><a href="#resolve_utility_llm-377"><span class="linenos">377</span></a>    <span class="n">cfg</span> <span class="o">=</span> <span class="n">cfg</span> <span class="ow">or</span> <span class="n">default_loader</span><span class="o">.</span><span class="n">config</span>
+</span><span id="resolve_utility_llm-378"><a href="#resolve_utility_llm-378"><span class="linenos">378</span></a>    <span class="n">gemini_key</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"gemini_api_key"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"GEMINI_API_KEY"</span><span class="p">)</span>
+</span><span id="resolve_utility_llm-379"><a href="#resolve_utility_llm-379"><span class="linenos">379</span></a>    <span class="k">if</span> <span class="n">gemini_key</span><span class="p">:</span>
+</span><span id="resolve_utility_llm-380"><a href="#resolve_utility_llm-380"><span class="linenos">380</span></a>        <span class="k">return</span> <span class="s2">"gemini/gemini-1.5-flash"</span><span class="p">,</span> <span class="n">gemini_key</span>
+</span><span id="resolve_utility_llm-381"><a href="#resolve_utility_llm-381"><span class="linenos">381</span></a>
+</span><span id="resolve_utility_llm-382"><a href="#resolve_utility_llm-382"><span class="linenos">382</span></a>    <span class="n">anthropic_key</span> <span class="o">=</span> <span class="n">cfg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"anthropic_api_key"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+</span><span id="resolve_utility_llm-383"><a href="#resolve_utility_llm-383"><span class="linenos">383</span></a>        <span class="s2">"ANTHROPIC_API_KEY"</span>
+</span><span id="resolve_utility_llm-384"><a href="#resolve_utility_llm-384"><span class="linenos">384</span></a>    <span class="p">)</span>
+</span><span id="resolve_utility_llm-385"><a href="#resolve_utility_llm-385"><span class="linenos">385</span></a>    <span class="k">if</span> <span class="n">anthropic_key</span><span class="p">:</span>
+</span><span id="resolve_utility_llm-386"><a href="#resolve_utility_llm-386"><span class="linenos">386</span></a>        <span class="k">return</span> <span class="s2">"anthropic/claude-haiku-4-5-20251001"</span><span class="p">,</span> <span class="n">anthropic_key</span>
+</span><span id="resolve_utility_llm-387"><a href="#resolve_utility_llm-387"><span class="linenos">387</span></a>
+</span><span id="resolve_utility_llm-388"><a href="#resolve_utility_llm-388"><span class="linenos">388</span></a>    <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
 </span></pre></div>
 
 

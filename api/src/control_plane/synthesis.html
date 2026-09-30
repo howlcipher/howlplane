@@ -2690,7 +2690,7 @@ HowlFrame language and runtime capabilities.</p>
 </span><span id="DurableCampaignState-615"><a href="#DurableCampaignState-615"><span class="linenos">615</span></a>            <span class="s2">""</span><span class="p">,</span>
 </span><span id="DurableCampaignState-616"><a href="#DurableCampaignState-616"><span class="linenos">616</span></a>            <span class="s2">"To resume or continue this dogfood campaign with updated quotas:"</span><span class="p">,</span>
 </span><span id="DurableCampaignState-617"><a href="#DurableCampaignState-617"><span class="linenos">617</span></a>            <span class="s2">"```bash"</span><span class="p">,</span>
-</span><span id="DurableCampaignState-618"><a href="#DurableCampaignState-618"><span class="linenos">618</span></a>            <span class="sa">f</span><span class="s2">"ai dogfood --resume </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">campaign_id</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>
+</span><span id="DurableCampaignState-618"><a href="#DurableCampaignState-618"><span class="linenos">618</span></a>            <span class="sa">f</span><span class="s2">"howlplane dogfood --resume </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">campaign_id</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>
 </span><span id="DurableCampaignState-619"><a href="#DurableCampaignState-619"><span class="linenos">619</span></a>            <span class="s2">"```"</span><span class="p">,</span>
 </span><span id="DurableCampaignState-620"><a href="#DurableCampaignState-620"><span class="linenos">620</span></a>            <span class="s2">""</span><span class="p">,</span>
 </span><span id="DurableCampaignState-621"><a href="#DurableCampaignState-621"><span class="linenos">621</span></a>        <span class="p">])</span>
@@ -4030,7 +4030,7 @@ duplicate.</p>
 </span><span id="DurableCampaignState.render_markdown-615"><a href="#DurableCampaignState.render_markdown-615"><span class="linenos">615</span></a>            <span class="s2">""</span><span class="p">,</span>
 </span><span id="DurableCampaignState.render_markdown-616"><a href="#DurableCampaignState.render_markdown-616"><span class="linenos">616</span></a>            <span class="s2">"To resume or continue this dogfood campaign with updated quotas:"</span><span class="p">,</span>
 </span><span id="DurableCampaignState.render_markdown-617"><a href="#DurableCampaignState.render_markdown-617"><span class="linenos">617</span></a>            <span class="s2">"```bash"</span><span class="p">,</span>
-</span><span id="DurableCampaignState.render_markdown-618"><a href="#DurableCampaignState.render_markdown-618"><span class="linenos">618</span></a>            <span class="sa">f</span><span class="s2">"ai dogfood --resume </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">campaign_id</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>
+</span><span id="DurableCampaignState.render_markdown-618"><a href="#DurableCampaignState.render_markdown-618"><span class="linenos">618</span></a>            <span class="sa">f</span><span class="s2">"howlplane dogfood --resume </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">campaign_id</span><span class="si">}</span><span class="s2">"</span><span class="p">,</span>
 </span><span id="DurableCampaignState.render_markdown-619"><a href="#DurableCampaignState.render_markdown-619"><span class="linenos">619</span></a>            <span class="s2">"```"</span><span class="p">,</span>
 </span><span id="DurableCampaignState.render_markdown-620"><a href="#DurableCampaignState.render_markdown-620"><span class="linenos">620</span></a>            <span class="s2">""</span><span class="p">,</span>
 </span><span id="DurableCampaignState.render_markdown-621"><a href="#DurableCampaignState.render_markdown-621"><span class="linenos">621</span></a>        <span class="p">])</span>
@@ -4983,7 +4983,7 @@ interfaces, and persistence mechanisms.</p>
                             <div id="HowlFrameCapabilityRegistry.SUPPORTED_ROOT_FORMS" class="classattr">
                                 <div class="attr variable">
             <span class="name">SUPPORTED_ROOT_FORMS</span>        =
-<span class="default_value">{&#39;module&#39;, &#39;http_server&#39;, &#39;web_app&#39;, &#39;cli_app&#39;}</span>
+<span class="default_value">{&#39;module&#39;, &#39;web_app&#39;, &#39;http_server&#39;, &#39;cli_app&#39;}</span>
 
         
     </div>
@@ -4995,7 +4995,7 @@ interfaces, and persistence mechanisms.</p>
                             <div id="HowlFrameCapabilityRegistry.SUPPORTED_TARGETS" class="classattr">
                                 <div class="attr variable">
             <span class="name">SUPPORTED_TARGETS</span>        =
-<span class="default_value">{&#39;bytecode&#39;, &#39;gogen&#39;, &#39;wasm&#39;, &#39;javascript&#39;}</span>
+<span class="default_value">{&#39;gogen&#39;, &#39;wasm&#39;, &#39;bytecode&#39;, &#39;javascript&#39;}</span>
 
         
     </div>
@@ -5007,7 +5007,7 @@ interfaces, and persistence mechanisms.</p>
                             <div id="HowlFrameCapabilityRegistry.SUPPORTED_CAPABILITIES" class="classattr">
                                 <div class="attr variable">
             <span class="name">SUPPORTED_CAPABILITIES</span>        =
-<span class="default_value">{&#39;environment&#39;, &#39;filesystem&#39;, &#39;network&#39;, &#39;database&#39;, &#39;process&#39;}</span>
+<span class="default_value">{&#39;filesystem&#39;, &#39;database&#39;, &#39;network&#39;, &#39;environment&#39;, &#39;process&#39;}</span>
 
         
     </div>
@@ -5019,7 +5019,7 @@ interfaces, and persistence mechanisms.</p>
                             <div id="HowlFrameCapabilityRegistry.SUPPORTED_STORE_SCHEMES" class="classattr">
                                 <div class="attr variable">
             <span class="name">SUPPORTED_STORE_SCHEMES</span>        =
-<span class="default_value">{&#39;memory://&#39;, &#39;file://&#39;}</span>
+<span class="default_value">{&#39;file://&#39;, &#39;memory://&#39;}</span>
 
         
     </div>
@@ -5541,7 +5541,7 @@ interfaces, and persistence mechanisms.</p>
 </span><span id="MarathonDogfoodEngine-699"><a href="#MarathonDogfoodEngine-699"><span class="linenos"> 699</span></a>
 </span><span id="MarathonDogfoodEngine-700"><a href="#MarathonDogfoodEngine-700"><span class="linenos"> 700</span></a>        <span class="n">campaign_state</span><span class="o">.</span><span class="n">stop_reason</span> <span class="o">=</span> <span class="n">stop_reason</span>
 </span><span id="MarathonDogfoodEngine-701"><a href="#MarathonDogfoodEngine-701"><span class="linenos"> 701</span></a>        <span class="n">campaign_state</span><span class="o">.</span><span class="n">total_duration_seconds</span> <span class="o">=</span> <span class="n">total_elapsed</span>
-</span><span id="MarathonDogfoodEngine-702"><a href="#MarathonDogfoodEngine-702"><span class="linenos"> 702</span></a>        <span class="n">campaign_state</span><span class="o">.</span><span class="n">next_action</span> <span class="o">=</span> <span class="s2">"none"</span> <span class="k">if</span> <span class="n">failed</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">"ai dogfood --resume </span><span class="si">{</span><span class="n">campaign_id</span><span class="si">}</span><span class="s2">"</span>
+</span><span id="MarathonDogfoodEngine-702"><a href="#MarathonDogfoodEngine-702"><span class="linenos"> 702</span></a>        <span class="n">campaign_state</span><span class="o">.</span><span class="n">next_action</span> <span class="o">=</span> <span class="s2">"none"</span> <span class="k">if</span> <span class="n">failed</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">"howlplane dogfood --resume </span><span class="si">{</span><span class="n">campaign_id</span><span class="si">}</span><span class="s2">"</span>
 </span><span id="MarathonDogfoodEngine-703"><a href="#MarathonDogfoodEngine-703"><span class="linenos"> 703</span></a>        <span class="n">campaign_state</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">state_dir</span><span class="p">)</span>
 </span><span id="MarathonDogfoodEngine-704"><a href="#MarathonDogfoodEngine-704"><span class="linenos"> 704</span></a>
 </span><span id="MarathonDogfoodEngine-705"><a href="#MarathonDogfoodEngine-705"><span class="linenos"> 705</span></a>        <span class="k">return</span> <span class="n">MarathonSummaryReport</span><span class="p">(</span>
@@ -7499,7 +7499,7 @@ governed self-improvement task delegation, git/PR integration, and durable state
 </span><span id="MarathonDogfoodEngine.run_marathon-699"><a href="#MarathonDogfoodEngine.run_marathon-699"><span class="linenos">699</span></a>
 </span><span id="MarathonDogfoodEngine.run_marathon-700"><a href="#MarathonDogfoodEngine.run_marathon-700"><span class="linenos">700</span></a>        <span class="n">campaign_state</span><span class="o">.</span><span class="n">stop_reason</span> <span class="o">=</span> <span class="n">stop_reason</span>
 </span><span id="MarathonDogfoodEngine.run_marathon-701"><a href="#MarathonDogfoodEngine.run_marathon-701"><span class="linenos">701</span></a>        <span class="n">campaign_state</span><span class="o">.</span><span class="n">total_duration_seconds</span> <span class="o">=</span> <span class="n">total_elapsed</span>
-</span><span id="MarathonDogfoodEngine.run_marathon-702"><a href="#MarathonDogfoodEngine.run_marathon-702"><span class="linenos">702</span></a>        <span class="n">campaign_state</span><span class="o">.</span><span class="n">next_action</span> <span class="o">=</span> <span class="s2">"none"</span> <span class="k">if</span> <span class="n">failed</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">"ai dogfood --resume </span><span class="si">{</span><span class="n">campaign_id</span><span class="si">}</span><span class="s2">"</span>
+</span><span id="MarathonDogfoodEngine.run_marathon-702"><a href="#MarathonDogfoodEngine.run_marathon-702"><span class="linenos">702</span></a>        <span class="n">campaign_state</span><span class="o">.</span><span class="n">next_action</span> <span class="o">=</span> <span class="s2">"none"</span> <span class="k">if</span> <span class="n">failed</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">"howlplane dogfood --resume </span><span class="si">{</span><span class="n">campaign_id</span><span class="si">}</span><span class="s2">"</span>
 </span><span id="MarathonDogfoodEngine.run_marathon-703"><a href="#MarathonDogfoodEngine.run_marathon-703"><span class="linenos">703</span></a>        <span class="n">campaign_state</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">state_dir</span><span class="p">)</span>
 </span><span id="MarathonDogfoodEngine.run_marathon-704"><a href="#MarathonDogfoodEngine.run_marathon-704"><span class="linenos">704</span></a>
 </span><span id="MarathonDogfoodEngine.run_marathon-705"><a href="#MarathonDogfoodEngine.run_marathon-705"><span class="linenos">705</span></a>        <span class="k">return</span> <span class="n">MarathonSummaryReport</span><span class="p">(</span>
@@ -11515,7 +11515,7 @@ Returns a list of validation error strings (empty if fully valid).</p>
 </span><span id="ProductSynthesizer-1281"><a href="#ProductSynthesizer-1281"><span class="linenos">1281</span></a><span class="s2">Or execute via HowlPlane:</span>
 </span><span id="ProductSynthesizer-1282"><a href="#ProductSynthesizer-1282"><span class="linenos">1282</span></a>
 </span><span id="ProductSynthesizer-1283"><a href="#ProductSynthesizer-1283"><span class="linenos">1283</span></a><span class="s2">```bash</span>
-</span><span id="ProductSynthesizer-1284"><a href="#ProductSynthesizer-1284"><span class="linenos">1284</span></a><span class="s2">ai run .</span>
+</span><span id="ProductSynthesizer-1284"><a href="#ProductSynthesizer-1284"><span class="linenos">1284</span></a><span class="s2">howlplane run .</span>
 </span><span id="ProductSynthesizer-1285"><a href="#ProductSynthesizer-1285"><span class="linenos">1285</span></a><span class="s2">```</span>
 </span><span id="ProductSynthesizer-1286"><a href="#ProductSynthesizer-1286"><span class="linenos">1286</span></a>
 </span><span id="ProductSynthesizer-1287"><a href="#ProductSynthesizer-1287"><span class="linenos">1287</span></a><span class="s2">Open [http://localhost:</span><span class="si">{</span><span class="n">spec</span><span class="o">.</span><span class="n">default_port</span><span class="si">}</span><span class="s2">](http://localhost:</span><span class="si">{</span><span class="n">spec</span><span class="o">.</span><span class="n">default_port</span><span class="si">}</span><span class="s2">) in your browser.</span>
