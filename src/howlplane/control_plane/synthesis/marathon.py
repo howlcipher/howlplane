@@ -698,7 +698,7 @@ class MarathonDogfoodEngine:
 
         campaign_state.stop_reason = stop_reason
         campaign_state.total_duration_seconds = total_elapsed
-        campaign_state.next_action = "none" if failed == 0 else f"ai dogfood --resume {campaign_id}"
+        campaign_state.next_action = "none" if failed == 0 else f"howlplane dogfood --resume {campaign_id}"
         campaign_state.save(state_dir)
 
         return MarathonSummaryReport(

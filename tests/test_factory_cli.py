@@ -12,8 +12,9 @@ from howlplane.control_plane.cli import main
 from howlplane.control_plane.factory.supervisor_state import SupervisorState, SupervisorStateStore
 
 
-@pytest.mark.parametrize("json_output", [False, True])
-def test_status_observes_active_dispatch_without_restarting(tmp_path, capsys, json_output):
+@pytest.mark.parametrize("mode", ["default", "verbose", "json"])
+def test_status_observes_active_dispatch_without_restarting(tmp_path, capsys, mode):
+    json_output = mode == "json"
     store = SupervisorStateStore(tmp_path / "supervisor")
     record = store.load()
     record.transition_to(SupervisorState.DISPATCHING, reason="item_selected")
@@ -24,7 +25,8 @@ def test_status_observes_active_dispatch_without_restarting(tmp_path, capsys, js
     original = state_path.read_bytes()
 
     args = ["factory", "status", "--state-dir", str(tmp_path)]
-    assert main(args + (["--json"] if json_output else [])) == 0
+    flag = {"default": [], "verbose": ["--verbose"], "json": ["--json"]}[mode]
+    assert main(args + flag) == 0
     output = capsys.readouterr().out
     if json_output:
         status = json.loads(output)
@@ -32,11 +34,18 @@ def test_status_observes_active_dispatch_without_restarting(tmp_path, capsys, js
         assert status["failure_count"] == 4
         assert status["current_dispatch_id"] == "D-live"
         assert status["last_error"] is None
-    else:
+        assert status["operator"]["schema"] == "howlplane.operator.status/v1"
+        assert status["operator"]["state"] == "dispatching"
+    elif mode == "verbose":
         assert "State: dispatching" in output
         assert "Failures: 4" in output
         assert "Current dispatch: D-live" in output
         assert "Restart during dispatch" not in output
+    else:
+        assert "RUNNING" in output
+        assert "Current work: WI-live" in output
+        assert "Current dispatch" not in output
+        assert "Failures:" not in output
     assert state_path.read_bytes() == original
     # A genuine startup still reconciles interrupted work, retaining identity.
     recovered = store.load()
@@ -143,7 +152,9 @@ def test_factory_status_creates_default_state(tmp_path, capsys, monkeypatch):
     code = main(["factory", "status", "--state-dir", str(tmp_path / "state")])
     captured = capsys.readouterr()
     assert code == 0
-    assert "idle" in captured.out
+    assert "IDLE" in captured.out
+    main(["factory", "status", "--state-dir", str(tmp_path / "state"), "--verbose"])
+    assert "idle" in capsys.readouterr().out
 
 
 def test_factory_stop_and_resume(tmp_path, monkeypatch):

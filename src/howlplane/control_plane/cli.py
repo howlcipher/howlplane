@@ -625,7 +625,7 @@ def cmd_providers(args: argparse.Namespace) -> int:
     resource_id = getattr(args, "resource_id", None)
     if action == "reset":
         if not resource_id:
-            print("ERROR: ai providers reset requires a resource ID", file=sys.stderr)
+            print("ERROR: howlplane providers reset requires a resource ID", file=sys.stderr)
             return 1
         pool = ProviderPoolManager.from_config(probe_on_start=False)
         state = pool.reset_resource(resource_id, reprobe=True)
@@ -1726,6 +1726,12 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_status.add_argument("--target-repo", help="Repository to resolve (advanced)")
     p_status.add_argument("--json", action="store_true", help="Output JSON result")
     p_status.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show full supervisor details (IDs, ticks, history counts)",
+    )
+    p_status.add_argument(
         "--publish",
         action="store_true",
         help="Write a redacted status snapshot to factory/status/remote-snapshot.json. "
@@ -2727,9 +2733,16 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         })
     from howlplane.control_plane.factory.status_publish import publish_cli_status
     published = publish_cli_status(status, args)
+    from howlplane.control_plane.presentation.operator import (
+        derive_operator_status,
+        render_operator_text,
+    )
+    operator = derive_operator_status(status)
     if getattr(args, "json", False):
         import json
-        print(json.dumps(status, indent=2, default=str))
+        print(json.dumps({**status, "operator": operator.to_dict()}, indent=2, default=str))
+    elif not getattr(args, "verbose", False):
+        print("\n".join(render_operator_text(operator, status)))
     else:
         print("HowlPlane Factory\n")
         if campaign is not None:
@@ -3091,7 +3104,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         print(f"  Bundle: {res.product_bundle.directory}")
         print("")
         print("Run:")
-        print(f"  ai run {res.product_bundle.directory}")
+        print(f"  howlplane run {res.product_bundle.directory}")
         print("=" * 60)
         return 0
     else:
@@ -3213,7 +3226,7 @@ def cmd_acceptance(args: argparse.Namespace) -> int:
     its designated evidence artifact under documentation/task_journals/.
     """
     if getattr(args, "acceptance_action", None) != "overnight-integration":
-        print("Usage: ai acceptance overnight-integration --authority-profile <strict|overnight-safe>")
+        print("Usage: howlplane acceptance overnight-integration --authority-profile <strict|overnight-safe>")
         return 1
 
     from howlplane.control_plane.synthesis import MarathonDogfoodEngine

@@ -37,12 +37,36 @@ import pytest
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 REPO_ROOT = SRC_DIR.parent
 
-_VERBS = "approve|reject|resume|cancel|unlock|work|status|doctor|verify|marathon"
+def _registered_verbs() -> str:
+    """Every real subcommand name, so the scan is not limited to a hand-picked list."""
+    import argparse
+
+    from howlplane.control_plane.cli import build_parser
+
+    verbs = set()
+    stack = [build_parser()]
+    while stack:
+        parser = stack.pop()
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                verbs.update(action.choices)
+                stack.extend(action.choices.values())
+    return "|".join(sorted((re.escape(v) for v in verbs), key=len, reverse=True))
+
 
 # Two wrong names for the same commands: `ai` is the deprecated launcher, and
 # `howl plane` was removed when the Howl CLI narrowed to installer and lifecycle
 # management. Only `howlplane` reaches them.
-LEGACY_RECOMMENDATION = re.compile(rf"\b(ai|howl plane) ({_VERBS})\b")
+_LEGACY_RECOMMENDATION = None
+
+
+def _legacy_pattern() -> "re.Pattern[str]":
+    global _LEGACY_RECOMMENDATION
+    if _LEGACY_RECOMMENDATION is None:
+        _LEGACY_RECOMMENDATION = re.compile(
+            rf"(?<![\w./-])(ai|howl plane) ({_registered_verbs()}|[a-z]+-[a-z-]+)\b"
+        )
+    return _LEGACY_RECOMMENDATION
 
 
 def _literal_text(node: ast.AST) -> str:
@@ -66,6 +90,13 @@ def _operator_facing_strings(tree: ast.AST) -> Iterator[Tuple[int, str]]:
             shown = list(node.args)
         elif isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
             shown = list(node.exc.args)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            # argparse help text, usage and descriptions are shown by --help.
+            shown = [
+                kw.value
+                for kw in node.keywords
+                if kw.arg in {"help", "description", "epilog", "usage"}
+            ]
         for arg in shown:
             text = _literal_text(arg)
             if text:
@@ -77,7 +108,7 @@ def _legacy_recommendations() -> List[str]:
     for path in sorted(SRC_DIR.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for line, text in _operator_facing_strings(tree):
-            match = LEGACY_RECOMMENDATION.search(text)
+            match = _legacy_pattern().search(text)
             if match:
                 rel = path.relative_to(REPO_ROOT)
                 offenders.append(f"{rel}:{line}: {match.group(0)!r} in {text.strip()!r}")
