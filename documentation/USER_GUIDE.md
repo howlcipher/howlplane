@@ -61,17 +61,13 @@ Available actions:
 
 ---
 
-## 3. 🤖 Querying the Knowledge & Skills Layer (RAG Interfaces)
+## 3. 🤖 Visual Work Surface
 
-You can explore and query the HowlPlane knowledge base interactively:
-
-### 🖥️ Terminal UI (TUI)
-* Fast, terminal-native chat interface built with Python `textual`.
-* Allows hot-swapping configured LLM providers for interactive queries.
-
-### 🌐 Web UI (Streamlit)
-* Graphical browser interface built with Python `streamlit`.
-* Useful for visually reviewing retrieved documentation snippets and telemetry.
+HowlPlane is the governed engine; it does not ship a terminal or web dashboard.
+The rich visual work surface is **HowlBoard**, which reads the stable contracts
+HowlPlane publishes (for example `howlplane factory status --json` and the
+redacted remote status snapshot). Use `howlplane factory status` for a concise
+terminal view and `--verbose` for full supervisor detail.
 
 ---
 
