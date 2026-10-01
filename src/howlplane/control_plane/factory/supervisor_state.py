@@ -245,6 +245,9 @@ class SupervisorStateRecord(DataClassSerializationMixin):
         self.current_work_item_id = None
         self.current_task_id = None
         self.current_dispatch_id = None
+        self.current_provider = None
+        self.current_provider_attempt = None
+        self.current_dispatch_started_at = None
 
     def reconcile_on_load(self) -> None:
         """Fail-closed reconciliation after restart."""

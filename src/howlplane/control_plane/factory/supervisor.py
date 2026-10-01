@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from howlplane.control_plane.factory.oplog import OperationalLog
+
 logger = logging.getLogger("howlplane.factory.supervisor")
 
 from howlplane.control_plane.atomic_io import atomic_write_json, atomic_write_text, safe_load_json
@@ -89,6 +91,12 @@ class FactorySupervisor:
         self._stop_requested: Optional[str] = None
         self.instance_id: str = self._resolve_instance_id()
         self._state_record = self.state_store.load()
+        self._oplog = OperationalLog(
+            self._state_dir or Path(self.state_store.base_dir),
+            context={"supervisor_id": self.instance_id},
+            clock=clock,
+        )
+        self._logged_state = self._state_record.state
 
         # Dynamically parameterize policy product_repository
         def _resolve_repo_slug(val: Optional[Union[str, Path]]) -> Optional[str]:
@@ -417,6 +425,7 @@ class FactorySupervisor:
                 if att_end and att_end > now_iso:
                     now_iso = att_end
         self._state_record.bounded_run_completed_at = now_iso
+        self._log("run.bounded_complete", f"Bounded run complete: {reason}", reason=reason)
         self._state_record.clear_current_dispatch()
         self._state_record.transition_to(
             SupervisorState.STOPPED, reason=reason, at=now_iso
@@ -707,6 +716,34 @@ class FactorySupervisor:
 
     def _persist(self) -> None:
         self.state_store.save(self._state_record)
+        self._log_state_change()
+
+    def _log(self, code: str, message: str, severity: str = "INFO", **fields: Any) -> None:
+        record = self._state_record
+        self._oplog.emit(
+            code, message, severity,
+            state=record.state,
+            work_item_id=fields.pop("work_item_id", record.current_work_item_id),
+            task_id=fields.pop("task_id", record.current_task_id),
+            dispatch_id=fields.pop("dispatch_id", record.current_dispatch_id),
+            provider=fields.pop("provider", record.current_provider),
+            **fields,
+        )
+
+    def _log_state_change(self) -> None:
+        record = self._state_record
+        if record.state == self._logged_state:
+            return
+        previous, self._logged_state = self._logged_state, record.state
+        history = record.transition_history[-1] if record.transition_history else {}
+        severity = "WARNING" if record.state in (
+            SupervisorState.BACKOFF_AFTER_FAILURE, SupervisorState.WAITING_FOR_PROVIDER,
+            SupervisorState.WAITING_FOR_AUTHORITY) else "INFO"
+        self._log("supervisor.state_changed", f"Factory state {previous} -> {record.state}", severity,
+                  from_state=previous, reason=history.get("reason") or None,
+                  failure_count=record.failure_count or None,
+                  retry_after=record.next_wake_at if record.state in (
+                      SupervisorState.BACKOFF_AFTER_FAILURE, SupervisorState.WAITING_FOR_PROVIDER) else None)
 
     @staticmethod
     def _decision_key(decision: Dict[str, Any]) -> Tuple:
@@ -945,6 +982,7 @@ class FactorySupervisor:
             origin=item.origin,
             repository=item.repository,
         )
+        self._log("dispatch.started", f"{item.work_item_id} dispatched", attempt=item.attempts)
         # Bounded execution: count distinct work items committed to dispatch.
         if self._state_record.run_mode == "bounded":
             self._state_record.work_items_dispatched += 1
@@ -954,8 +992,14 @@ class FactorySupervisor:
         self._persist()
 
         def _observe_provider(provider: str, attempt: int) -> None:
+            previous = self._state_record.current_provider
             self._state_record.record_provider(provider, attempt)
             self._persist()
+            if previous and previous != provider:
+                self._log("provider.failover", f"Failover {previous} -> {provider}", "WARNING",
+                          from_provider=previous, attempt=attempt)
+            else:
+                self._log("provider.selected", f"{item.work_item_id} running on {provider}", attempt=attempt)
 
         setter = getattr(self.dispatcher, "set_provider_observer", None)
         if callable(setter):
@@ -979,6 +1023,7 @@ class FactorySupervisor:
         ):
             self._state_record.merges_count += 1
             self._persist()
+        self._log_dispatch_outcome(item, dispatch_result)
         item.transition_to(dispatch_result.next_work_item_state, reason=dispatch_result.reason)
         item.blocked_by = item.blocked_by or []
         if dispatch_result.blocker:
@@ -1009,6 +1054,24 @@ class FactorySupervisor:
             )
         self.work_item_store.save_object(item)
         return dispatch_result
+
+    def _log_dispatch_outcome(self, item: WorkItem, result: DispatchOutcome) -> None:
+        wid = item.work_item_id
+        common = {"work_item_id": wid, "failure_class": result.failure_class}
+        if result.success:
+            self._log("dispatch.completed", f"{wid} completed", **common)
+            if (result.git_record or {}).get("merged"):
+                self._log("merge.completed", f"{wid} merged", **common)
+        elif result.requires_authority:
+            self._log("owner.decision_required", f"{wid} needs an owner decision", "WARNING",
+                      reason=result.reason, **common)
+        elif result.provider_unavailable:
+            self._log("provider.unavailable", f"Provider unavailable for {wid}", "WARNING",
+                      reason=result.reason, retry_after=result.retry_after, **common)
+        elif result.next_work_item_state == WorkItemState.BLOCKED:
+            self._log("work.parked", f"{wid} parked: {result.reason}", "WARNING", reason=result.reason, **common)
+        else:
+            self._log("dispatch.failed", f"{wid} failed: {result.reason}", "ERROR", reason=result.reason, **common)
 
     def _apply_dispatch_result(
         self,

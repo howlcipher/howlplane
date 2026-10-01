@@ -7,13 +7,14 @@ message; nothing is hidden or rewritten.
 """
 
 import os
-import re
 import time
 import traceback
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
+
+from howlplane.control_plane.presentation.redact import redact_operator_text
 
 ERROR_SCHEMA = "howlplane.error/v1"
 
@@ -61,13 +62,8 @@ class OperatorFailure(Exception):
         self.error = error
 
 
-_SECRET = re.compile(r"(?i)(sk[-_][A-Za-z0-9_\-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|"
-                     r"(authorization|api[_-]?key|token|secret|password)\s*[:=]\s*\S+)")
-
-
 def redact_text(text: str) -> str:
-    """Single redaction primitive for operator-visible text (logs, diagnostics, errors)."""
-    return _SECRET.sub("[REDACTED]", text)
+    return redact_operator_text(text)
 
 
 def diagnostics_dir() -> Path:

@@ -1853,7 +1853,16 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_logs.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_logs.add_argument("--target-repo", help="Repository to resolve (advanced)")
     p_logs.add_argument("--follow", action="store_true", help="Stream new log output")
-    p_logs.add_argument("--lines", type=int, default=80, help="Number of recent lines")
+    p_logs.add_argument("--lines", "-n", type=int, default=80, help="Number of recent entries")
+    p_logs.add_argument("--errors", action="store_true", help="Only errors (same as --level ERROR)")
+    p_logs.add_argument("--level", type=str.upper, choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                        help="Show this severity and above")
+    p_logs.add_argument("--work-item", help="Only entries for this work item, for example WI-042")
+    p_logs.add_argument("--provider", help="Only entries for this provider, for example codex")
+    p_logs.add_argument("--since", help="Only entries newer than 30m, 1h, 2d or an ISO timestamp")
+    p_logs.add_argument("--raw", action="store_true", help="Show raw process output instead of events")
+    p_logs.add_argument("--json", action="store_true", help="One JSON object per line")
+    p_logs.add_argument("--verbose", action="store_true", help="Include event codes and correlation ids")
 
     p_factory_doctor = factory_sub.add_parser("doctor", help="Check whether Factory can start safely", **kwargs)
     p_factory_doctor.add_argument("--state-dir", help="Factory state directory (advanced)")
@@ -3023,13 +3032,17 @@ def cmd_factory_start(args: argparse.Namespace) -> int:
 
 def cmd_factory_logs(args: argparse.Namespace) -> int:
     from howlplane.control_plane.factory.campaign import campaign_from_state_dir
-    from howlplane.control_plane.factory.service import recent_logs
+    from howlplane.control_plane.factory import logs_cli
+    from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
     campaign = _resolve_factory_campaign(args)
     if campaign is None:
         campaign = campaign_from_state_dir(args.state_dir)
     if campaign is None:
-        raise ValueError("factory logs without campaign resolution requires a repository working directory")
-    return recent_logs(campaign, follow=getattr(args, "follow", False), lines=getattr(args, "lines", 80))
+        raise OperatorFailure(OperatorError(
+            "FACTORY_NO_CAMPAIGN", "Factory logs need a repository to look up.",
+            "No repository or state directory was given and the current directory is not a Git repository.",
+            "Run it inside the repository, or pass --target-repo PATH."))
+    return logs_cli.command(campaign, args)
 
 
 def _add_readiness_arguments(parser: argparse.ArgumentParser) -> None:
