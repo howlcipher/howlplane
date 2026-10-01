@@ -2618,6 +2618,15 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
         if parsed_args.subcommand != "config":
             workspace_trust.resolve_policy()
         return handler(parsed_args)
+    except BrokenPipeError:
+        # The reader went away (`howlplane logs | head`). That is not a HowlPlane
+        # failure: stay quiet and keep the interpreter from re-raising on the
+        # final stdout flush.
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        except (OSError, ValueError):
+            pass
+        return 141
     except Exception as err:
         return _report_failure(err, parsed_args, debug)
 

@@ -173,6 +173,15 @@ def _missing_binary(status: Mapping[str, Any]) -> Optional[str]:
     return None
 
 
+def _failures_since_last_success(status: Mapping[str, Any]) -> bool:
+    """True when the newest recorded failure is newer than the newest completion."""
+    failed = [str(f.get("at") or "") for f in status.get("recent_failed") or []]
+    if not failed:
+        return False
+    done = [str(c.get("at") or "") for c in status.get("recent_completed") or []]
+    return not done or max(failed) > max(done)
+
+
 def _blockers(status: Mapping[str, Any]) -> List[str]:
     blockers = []
     for item in status.get("parked_items") or []:
@@ -323,6 +332,19 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
             reason_code=ReasonCode.WAITING_FOR_DEPENDENCY,
             next_action=OperatorAction("None. HowlPlane continues automatically."), **common)
     if state == SupervisorState.WAITING_FOR_WORK.value or state == SupervisorState.IDLE.value:
+        if _failures_since_last_success(status):
+            # Idle only because every attempted item failed. Reporting this as
+            # a healthy, empty queue hides the failure from the owner.
+            count = len(status.get("recent_failed") or [])
+            return OperatorStatus(
+                label="IDLE", severity=Severity.ATTENTION,
+                summary=(f"No work is ready, and the last {count} attempt(s) failed: "
+                         f"{status.get('last_error') or 'unknown error'}."),
+                reason_code=ReasonCode.FACTORY_FAILURE,
+                next_action=OperatorAction(
+                    "Look at what went wrong; failed work is not retried automatically.",
+                    "howlplane logs --errors"),
+                **common)
         return OperatorStatus(
             label="IDLE", severity=Severity.OK,
             summary="No work is ready. HowlPlane is waiting for new work.",

@@ -12,6 +12,7 @@ Checks:
 """
 
 from dataclasses import dataclass
+import getpass
 import importlib
 import json
 import os
@@ -41,8 +42,8 @@ def check_python_environment() -> DiagnosticCheck:
         )
     return DiagnosticCheck(
         name="Python Environment",
-        status="warning",
-        message=f"Not running inside an active VIRTUAL_ENV (Python {py_ver})",
+        status="ok",
+        message=f"Note: no virtualenv is active (Python {py_ver}); one is optional and does not block anything.",
     )
 
 
@@ -91,11 +92,20 @@ def check_go_toolchain() -> DiagnosticCheck:
 
 
 def check_git_status(repo_root: Path) -> DiagnosticCheck:
-    if not (repo_root / ".git").is_dir():
+    if not shutil.which("git"):
+        return DiagnosticCheck(
+            name="Git Repository",
+            status="error",
+            message="Git is not installed (no 'git' on PATH), so no repository can be used.",
+            details={"action": "Install Git, then re-run 'howlplane doctor'."},
+        )
+    # In a linked worktree or submodule .git is a file, not a directory.
+    if not (repo_root / ".git").exists():
         return DiagnosticCheck(
             name="Git Repository",
             status="warning",
             message=f"Directory {repo_root} is not a git repository.",
+            details={"action": f"git -C {repo_root} init"},
         )
     return DiagnosticCheck(
         name="Git Repository",
@@ -104,13 +114,31 @@ def check_git_status(repo_root: Path) -> DiagnosticCheck:
     )
 
 
+def _hooks_dir(repo_root: Path) -> Path:
+    """Hooks directory; follows a worktree or submodule .git file through git itself."""
+    default = repo_root / ".git" / "hooks"
+    if (repo_root / ".git").is_dir() or not shutil.which("git"):
+        return default
+    try:
+        res = subprocess.run(["git", "-C", str(repo_root), "rev-parse", "--git-path", "hooks"],
+                             capture_output=True, text=True, check=False, timeout=10.0)
+        out = res.stdout.strip()
+        if res.returncode == 0 and out:
+            path = Path(out)
+            return path if path.is_absolute() else repo_root / path
+    except Exception:
+        pass
+    return default
+
+
 def check_git_hooks(repo_root: Path) -> DiagnosticCheck:
-    hooks_dir = repo_root / ".git" / "hooks"
+    hooks_dir = _hooks_dir(repo_root)
     if not hooks_dir.is_dir():
         return DiagnosticCheck(
             name="Git Hooks",
             status="warning",
-            message="Git hooks directory .git/hooks not found.",
+            message=f"Git hooks directory {hooks_dir} not found.",
+            details={"action": "python3 scripts/install_pre_commit_hook.py && python3 scripts/install_pre_push_hook.py"},
         )
     pre_commit = hooks_dir / "pre-commit"
     pre_push = hooks_dir / "pre-push"
@@ -130,7 +158,7 @@ def check_git_hooks(repo_root: Path) -> DiagnosticCheck:
             name="Git Hooks",
             status="warning",
             message=f"Git hooks missing or not executable: {', '.join(missing)}.",
-            details={"action": "Run hook installer scripts to install."},
+            details={"action": "python3 scripts/install_pre_commit_hook.py && python3 scripts/install_pre_push_hook.py"},
         )
     return DiagnosticCheck(
         name="Git Hooks",
@@ -146,7 +174,7 @@ def check_slopslint() -> DiagnosticCheck:
             name="SlopsLint Binary",
             status="warning",
             message="SlopsLint binary 'slopslint' not found on PATH.",
-            details={"action": "Run 'bash scripts/install_slopslint.sh' to install pinned v0.1.0."},
+            details={"action": "bash scripts/install_slopslint.sh"},
         )
     try:
         res = subprocess.run(
@@ -168,17 +196,20 @@ def check_slopslint() -> DiagnosticCheck:
                 name="SlopsLint Binary",
                 status="warning",
                 message=f"SlopsLint version mismatch: got '{ver_line}', expected '0.1.0'.",
+                details={"action": "bash scripts/install_slopslint.sh"},
             )
         return DiagnosticCheck(
             name="SlopsLint Binary",
             status="warning",
             message=f"SlopsLint returned non-zero exit code: {res.returncode}.",
+            details={"action": "bash scripts/install_slopslint.sh"},
         )
     except Exception as exc:
         return DiagnosticCheck(
             name="SlopsLint Binary",
             status="warning",
             message=f"Error checking slopslint: {exc}.",
+            details={"action": "bash scripts/install_slopslint.sh"},
         )
 
 
@@ -268,6 +299,86 @@ def check_ai_resources(provider_pool: Optional[Any] = None) -> List[DiagnosticCh
         )]
 
 
+MIN_FREE_BYTES = 1024 ** 3
+
+
+def _state_dir() -> Path:
+    from howlplane.control_plane.factory.campaign import factory_state_home
+
+    return factory_state_home()
+
+
+def _nearest_existing(path: Path) -> Path:
+    cur = path
+    while not cur.exists() and cur != cur.parent:
+        cur = cur.parent
+    return cur
+
+
+def check_state_dir() -> DiagnosticCheck:
+    """Read-only: can the Factory state directory be written (or created)?"""
+    try:
+        state = _state_dir()
+    except Exception as exc:
+        return DiagnosticCheck(name="State Directory", status="warning",
+                               message=f"Could not determine the state directory: {exc}")
+    anchor = _nearest_existing(state)
+    if anchor.is_dir() and os.access(anchor, os.W_OK | os.X_OK):
+        return DiagnosticCheck(name="State Directory", status="ok", message=f"{state} is writable.")
+    return DiagnosticCheck(
+        name="State Directory", status="warning",
+        message=f"State directory {state} is not writable (blocked at {anchor}).",
+        details={"action": f"chmod u+rwx {anchor}"},
+    )
+
+
+def check_disk_space() -> DiagnosticCheck:
+    """Read-only: free space where the Factory keeps state, warning below 1 GB."""
+    try:
+        anchor = _nearest_existing(_state_dir())
+        free = shutil.disk_usage(anchor).free
+    except Exception as exc:
+        return DiagnosticCheck(name="Disk Space", status="warning", message=f"Could not read free disk space: {exc}")
+    gb = free / 1024 ** 3
+    if free < MIN_FREE_BYTES:
+        return DiagnosticCheck(
+            name="Disk Space", status="warning",
+            message=f"Only {gb:.2f} GB free at {anchor}; the Factory needs at least 1 GB.",
+            details={"action": f"df -h {anchor}"},
+        )
+    return DiagnosticCheck(name="Disk Space", status="ok", message=f"{gb:.1f} GB free at {anchor}.")
+
+
+def check_linger() -> Optional[DiagnosticCheck]:
+    """Linux/systemd only: without linger the Factory stops when the user logs out.
+
+    Returns None (skipped silently) when systemd or loginctl is unavailable.
+    """
+    if not sys.platform.startswith("linux") or not shutil.which("loginctl"):
+        return None
+    if not Path("/run/systemd/system").is_dir():
+        return None
+    try:
+        user = os.environ.get("USER") or getpass.getuser()
+        res = subprocess.run(["loginctl", "show-user", user, "-p", "Linger"],
+                             capture_output=True, text=True, check=False, timeout=10.0)
+    except Exception:
+        return None
+    if res.returncode != 0:
+        return None
+    value = res.stdout.strip().partition("=")[2].strip().lower()
+    if value == "yes":
+        return DiagnosticCheck(name="Login Linger", status="ok",
+                               message="User services keep running after logout (Linger=yes).")
+    if value == "no":
+        return DiagnosticCheck(
+            name="Login Linger", status="warning",
+            message="Linger is off: the Factory stops when you log out, so it cannot run 24/7.",
+            details={"action": f"loginctl enable-linger {user}"},
+        )
+    return None
+
+
 def run_diagnostics(
     repo_root: Optional[Path] = None,
     provider_pool: Optional[Any] = None,
@@ -284,6 +395,11 @@ def run_diagnostics(
         check_operating_mode(),
     ]
     checks.extend(check_ai_resources(provider_pool))
+    checks.append(check_state_dir())
+    checks.append(check_disk_space())
+    linger = check_linger()
+    if linger is not None:
+        checks.append(linger)
     return checks
 
 

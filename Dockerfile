@@ -1,31 +1,20 @@
-# Stage 1: Build dependencies
-FROM python:3.14-slim AS builder
-WORKDIR /app
-RUN pip install --no-cache-dir uv
-
-COPY pyproject.toml .
-# Install dependencies into a virtualenv
-RUN uv venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-RUN uv pip install -e .
-
-# Stage 2: Runtime
 FROM python:3.14-slim
+
+# git is required by the control plane (baseline capture and verification).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Copy virtualenv from builder
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Install the package from source (see .dockerignore for what is excluded).
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-cache-dir .
 
-# Copy application code
-COPY . .
-
-# Create non-root user
-RUN useradd -m appuser && chown -R appuser:appuser /app
+RUN useradd -m appuser
 USER appuser
+WORKDIR /home/appuser
 
-# Expose Webhook server port
-EXPOSE 8000
-
-# Default command runs the webhook server
-CMD ["python", "src/infrastructure/webhook_server.py"]
+ENTRYPOINT ["howlplane"]
+CMD ["--help"]

@@ -7,6 +7,7 @@ trust, renders them as one checklist, and delegates preparation to
 
 import argparse
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -21,6 +22,19 @@ BLOCKED = "blocked"
 
 def _check(check_id: str, label: str, status: str, detail: str = "", fix: str = "") -> Dict[str, str]:
     return {"id": check_id, "label": label, "status": status, "detail": detail, "fix": fix}
+
+
+def _plain(text: str) -> str:
+    """Drop the raw 'ERROR:' prefix that low-level errors carry."""
+    return re.sub(r"^\s*ERROR:\s*", "", str(text)).strip()
+
+
+def _install_git_fix() -> str:
+    if sys.platform == "darwin":
+        return "brew install git"
+    if sys.platform.startswith("linux") and shutil.which("apt-get"):
+        return "sudo apt-get install -y git"
+    return "install Git from https://git-scm.com/downloads"
 
 
 def _agent_check(summary: Dict[str, Any], trust: Dict[str, Any]) -> Dict[str, str]:
@@ -49,17 +63,19 @@ def gather(repo: Path, live: bool = False) -> Dict[str, Any]:
     from howlplane.control_plane.factory.campaign import CampaignError, discover_repository
 
     checks: List[Dict[str, str]] = []
+    if not shutil.which("git"):
+        checks.append(_check("git", "Git", BLOCKED, "Git is not installed (no 'git' on PATH)",
+                             _install_git_fix()))
+        return {"checks": checks, "repo": str(repo), "needs_preparation": False,
+                "factory": "blocked"}
     try:
         repository = discover_repository(repo)
     except CampaignError as exc:
-        checks.append(_check("repository", "Repository", BLOCKED, str(exc),
-                             "run `git init` (or cd into a Git repository) and retry"))
+        checks.append(_check("repository", "Repository", BLOCKED, _plain(exc), "git init"))
         return {"checks": checks, "repo": str(repo), "needs_preparation": False,
                 "factory": "blocked"}
     checks.append(_check("repository", "Repository", READY, str(repository.root)))
-    checks.append(_check("git", "Git", READY if shutil.which("git") else BLOCKED,
-                         "" if shutil.which("git") else "git not found on PATH",
-                         "" if shutil.which("git") else "install Git"))
+    checks.append(_check("git", "Git", READY, "installed"))
     try:
         from importlib.metadata import version
         checks.append(_check("howlplane", "HowlPlane", READY, version("howlplane")))
@@ -70,7 +86,7 @@ def gather(repo: Path, live: bool = False) -> Dict[str, Any]:
         load_config()
         checks.append(_check("config", "Configuration", READY, "valid"))
     except Exception as exc:
-        checks.append(_check("config", "Configuration", BLOCKED, str(exc).splitlines()[0],
+        checks.append(_check("config", "Configuration", BLOCKED, _plain(str(exc).splitlines()[0]),
                              "fix the configuration file or environment variable named above"))
 
     workspace = str(repository.root)
@@ -100,6 +116,8 @@ def gather(repo: Path, live: bool = False) -> Dict[str, Any]:
 def _next_step(report: Dict[str, Any]) -> Dict[str, str]:
     for check in report["checks"]:
         if check["status"] == BLOCKED and check["fix"]:
+            if check["id"] in ("repository", "git") and not check["fix"].startswith("install "):
+                return {"message": f"{check['label']}: {check['detail']}", "command": check["fix"]}
             return {"message": check["fix"], "command": ""}
     if report["needs_preparation"]:
         return {"message": "Prepare this repository for autonomous work. The exact scope is shown first.",

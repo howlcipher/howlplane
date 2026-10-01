@@ -432,3 +432,22 @@ def test_is_baseline_restored_ignores_legitimate_control_plane_artifacts(tmp_pat
     log.write_text("provider log\n", encoding="utf-8")
     restored, reason = is_baseline_restored(repo, baseline)
     assert restored, reason
+
+
+def test_capture_baseline_and_delta_handle_spaces_and_unicode_paths(tmp_path):
+    repo = _init_git_repo(tmp_path / "repo", {"seed name.txt": "a\n", "café.txt": "b\n"})
+    baseline = capture_baseline(repo)
+    (repo / "new file.txt").write_text("x\n", encoding="utf-8")
+    (repo / "日本語.txt").write_text("y\n", encoding="utf-8")
+    (repo / "café.txt").write_text("changed\n", encoding="utf-8")
+    (repo / "seed name.txt").unlink()
+    delta = capture_delta(repo, baseline)
+    assert {"new file.txt", "日本語.txt"} <= set(delta.files_added)
+    assert "café.txt" in delta.files_modified
+    assert "seed name.txt" in delta.files_deleted
+
+
+def test_parse_porcelain_z_rename_with_spaces():
+    _, _, deleted, added = _parse_porcelain_lines("R  new name.py\0old name.py\0?? a b.txt\0")
+    assert deleted == {"old name.py"}
+    assert added == {"new name.py"}

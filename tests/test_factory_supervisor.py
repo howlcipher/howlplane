@@ -762,3 +762,57 @@ def test_backoff_never_overflows_after_many_failures(tmp_path):
     supervisor.tick = lambda: (_ for _ in ()).throw(RuntimeError("x"))
     result = supervisor._guarded_tick()
     assert (result.next_wake_at - now["t"]).total_seconds() == supervisor.max_backoff_seconds
+
+
+class _RecoveringPool(FakeProviderPool):
+    """Pool whose only resource is unavailable until it is re-probed."""
+
+    def __init__(self, retry_after=None, capacity="AUTH_REQUIRED"):
+        super().__init__(has_capacity=False)
+        self.row_retry_after = retry_after
+        self.capacity = capacity
+        self.reset_calls = []
+
+    def inventory(self):
+        return [{"identity": {"resource_id": "claude_code"}, "enabled": True,
+                 "capacity": self.capacity, "retry_after": self.row_retry_after}]
+
+    def reset_resource(self, resource_id, reprobe=True):
+        self.reset_calls.append((resource_id, reprobe))
+        self.has_capacity = True
+        self.capacity = "UNKNOWN"
+
+
+def test_waiting_supervisor_reprobes_provider_without_retry_after(tmp_path):
+    """A missing or lapsed provider with no wake time must be re-checked, not waited on forever."""
+    pool = _RecoveringPool()
+    supervisor, now, sleeps = _make_supervisor(tmp_path, pool=pool)
+    supervisor.tick()
+    assert pool.reset_calls == [("claude_code", True)]
+    assert supervisor._provider_has_capacity()
+
+
+def test_waiting_supervisor_reprobes_after_retry_after_expires_but_not_before(tmp_path):
+    future = (START + timedelta(seconds=600)).isoformat()
+    pool = _RecoveringPool(retry_after=future, capacity="QUOTA_EXHAUSTED")
+    supervisor, now, sleeps = _make_supervisor(tmp_path, pool=pool)
+    supervisor.tick()
+    assert pool.reset_calls == []
+    now["t"] = START + timedelta(seconds=601)
+    supervisor.tick()
+    assert pool.reset_calls == [("claude_code", True)]
+
+
+def test_reprobe_is_rate_limited_to_the_provider_retry_interval(tmp_path):
+    class _StillDown(_RecoveringPool):
+        def reset_resource(self, resource_id, reprobe=True):
+            self.reset_calls.append((resource_id, reprobe))
+
+    pool = _StillDown()
+    supervisor, now, sleeps = _make_supervisor(tmp_path, pool=pool)
+    supervisor.tick()
+    supervisor.tick()
+    assert len(pool.reset_calls) == 1
+    now["t"] = now["t"] + timedelta(seconds=supervisor.provider_retry_interval_seconds + 1)
+    supervisor.tick()
+    assert len(pool.reset_calls) == 2

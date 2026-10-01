@@ -334,6 +334,24 @@ def test_disabled_resource_is_neither_probed_nor_selected():
     assert decision.exclusion_for("disabled").reason == "OPERATOR_DISABLED"
 
 
+def test_persisted_disabled_state_does_not_outlive_enabling_configuration(tmp_path):
+    """A resource disabled by an earlier config must not stay parked after it is enabled."""
+    state_path = tmp_path / "capacity.json"
+    profile = make_profile("sample")
+    make_pool([profile], enabled={"sample": False}, state_path=state_path)
+    assert json.loads(state_path.read_text())["resources"]["sample"]["status"] == "DISABLED"
+
+    pool = make_pool(
+        [profile],
+        enabled={"sample": True},
+        state_path=state_path,
+        probe_on_start=False,
+    )
+
+    assert pool.get_status("sample") == ProviderAvailabilityStatus.UNKNOWN
+    assert pool.has_available_providers()
+
+
 def test_configured_missing_resource_is_skipped_honestly():
     missing = make_profile("missing")
     ready = make_profile("ready")

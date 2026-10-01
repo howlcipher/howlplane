@@ -89,6 +89,7 @@ class FactorySupervisor:
         self._state_dir = Path(state_dir) if state_dir else None
         self._lock = lock
         self._stop_requested: Optional[str] = None
+        self._last_provider_reprobe: Optional[datetime] = None
         self.instance_id: str = self._resolve_instance_id()
         self._state_record = self.state_store.load()
         self._oplog = OperationalLog(
@@ -965,6 +966,55 @@ class FactorySupervisor:
         except Exception:
             return False
 
+    _REPROBE_CAPACITY_STATUSES = frozenset({
+        "MISSING_EXECUTABLE", "AUTH_REQUIRED", "UNREACHABLE", "UNAVAILABLE",
+        "RATE_LIMITED", "SESSION_EXHAUSTED", "QUOTA_EXHAUSTED",
+    })
+
+    def _reprobe_unavailable_providers(self, now: datetime) -> None:
+        """Give an unavailable provider a chance to come back while waiting.
+
+        The pool only re-checks a resource inside ``select_resource``, which is
+        never reached while the supervisor sees no capacity, and a failure with
+        no ``retry_after`` (a missing CLI, a lapsed login, a stall) has no wake
+        time at all. Without this the supervisor reports "recovery: automatic"
+        and waits forever. Only non-generative readiness probes run, at most
+        once per provider retry interval, and never before a recorded
+        ``retry_after``.
+        """
+        last = self._last_provider_reprobe
+        if last is not None and (now - last).total_seconds() < self.provider_retry_interval_seconds:
+            return
+        reset = getattr(self.provider_pool, "reset_resource", None)
+        if reset is None:
+            return
+        self._last_provider_reprobe = now
+        try:
+            rows = self.provider_pool.inventory()
+        except Exception:
+            return
+        for row in rows:
+            if not row.get("enabled") or row.get("capacity") not in self._REPROBE_CAPACITY_STATUSES:
+                continue
+            retry_after = row.get("retry_after")
+            if retry_after:
+                try:
+                    when = datetime.fromisoformat(retry_after)
+                    if when.tzinfo is None:
+                        when = when.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    when = None
+                if when is not None and when > now:
+                    continue
+            resource_id = (row.get("identity") or {}).get("resource_id")
+            if not resource_id:
+                continue
+            try:
+                reset(resource_id, reprobe=True)
+            except Exception as exc:
+                self._log("PROVIDER_REPROBE_FAILED", f"Could not re-probe {resource_id}: {exc}",
+                          severity="WARNING")
+
     def _dispatch(self, item: WorkItem, now_iso: str) -> Optional[DispatchOutcome]:
         """Persist IN_PROGRESS, dispatch, and persist the resulting terminal/park state."""
         # Reload the item from the store in case state changed between selection
@@ -1212,6 +1262,8 @@ class FactorySupervisor:
         # Reconcile orphan IN_PROGRESS items even if the persisted state was not
         # DISPATCHING, then only requeue DEFERRED work whose retry_after is due.
         self._reconcile_in_progress_items(now_iso)
+        if not self._provider_has_capacity():
+            self._reprobe_unavailable_providers(now)
         self._requeue_deferred_items(now)
         self._unblock_resolved_dependencies()
 

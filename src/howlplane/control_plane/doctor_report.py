@@ -9,6 +9,7 @@ are reached with ``--agents`` / ``--factory``.
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -19,6 +20,22 @@ _SECTION_OF = {"git": "System", "howlplane": "System", "config": "System",
                "repository": "Repository", "workspace_trust": "Repository", "factory": "Factory"}
 _STATUS_OF = {"ready": "ok", "attention": "attention", "blocked": "error",
               "ok": "ok", "warning": "attention", "error": "error"}
+
+
+def _plain(text: str) -> str:
+    """Strip a raw 'ERROR:' prefix and a trailing full stop."""
+    return re.sub(r"^\s*ERROR:\s*", "", text or "").strip().rstrip(".")
+
+
+def format_issues(issues: List[Dict[str, str]], command_style: Any = None) -> List[str]:
+    """One layout for every format: numbered problem, then a single fix line."""
+    lines: List[str] = []
+    for index, issue in enumerate(issues, 1):
+        lines.append(f"  {index}. {issue['problem']}")
+        if issue["fix"]:
+            fix = command_style(issue["fix"]) if command_style else issue["fix"]
+            lines.append(f"     Fix: {fix}")
+    return lines
 
 
 def _entry(section: str, label: str, status: str, detail: str = "", fix: str = "") -> Dict[str, str]:
@@ -47,10 +64,17 @@ def build_report(repo: Path, live: bool = False) -> Dict[str, Any]:
         entries.append(_entry(section, check["label"], check["status"], check["detail"], check["fix"]))
 
     issues: List[Dict[str, str]] = []
+    git_missing = any(c["id"] == "git" and c["status"] == setup_cli.BLOCKED for c in gathered["checks"])
     for item in entries:
+        if git_missing and item["label"] == "Git Repository":
+            continue  # the Git row already says git is not installed
         if item["status"] == "error":
             fix = item["fix"] or ("howlplane doctor --agents" if item["label"] == "Factory" else "")
-            issues.append({"problem": f"{item['label']}: {item['detail']}".rstrip(": "), "fix": fix})
+            detail = _plain(item["detail"])
+            problem = f"{item['label']}: {detail}" if detail else item["label"]
+            issues.append({"problem": problem, "fix": fix})
+    advice = [{"problem": f"{e['label']}: {_plain(e['detail'])}", "fix": e["fix"]}
+              for e in entries if e["status"] == "attention" and e["section"] == "System" and e["fix"]]
     if gathered["needs_preparation"] and not any(i["fix"] == "howlplane setup" for i in issues):
         issues.append({"problem": "This repository is not prepared for autonomous work.", "fix": "howlplane setup"})
     repository_blocked = any(c["id"] == "repository" and c["status"] == setup_cli.BLOCKED for c in gathered["checks"])
@@ -63,7 +87,7 @@ def build_report(repo: Path, live: bool = False) -> Dict[str, Any]:
     ready = ready and not has_error
     overall = "READY" if ready and not has_error else "NOT READY"
     return {"schema": DOCTOR_SCHEMA, "overall": overall, "ready": ready, "has_error": has_error,
-            "repo": gathered["repo"], "entries": entries, "issues": issues, "factory": gathered["factory"]}
+            "repo": gathered["repo"], "entries": entries, "issues": issues, "advice": advice, "factory": gathered["factory"]}
 
 
 def render(report: Dict[str, Any], style: Any) -> List[str]:
@@ -84,10 +108,10 @@ def render(report: Dict[str, Any], style: Any) -> List[str]:
     lines.append(f"  {report['overall']}")
     if report["issues"]:
         lines += ["", style.section("Fix")]
-        for index, issue in enumerate(report["issues"], 1):
-            lines.append(f"  {index}. {issue['problem']}")
-            if issue["fix"]:
-                lines.append("     " + style.command(issue["fix"]))
+        lines += format_issues(report["issues"], style.command)
+    if report.get("advice"):
+        lines += ["", style.section("Recommended")]
+        lines += format_issues(report["advice"], style.command)
     return lines
 
 
@@ -124,10 +148,7 @@ def command(args: argparse.Namespace) -> int:
             print("READY")
         else:
             print("NOT READY")
-            for index, issue in enumerate(report["issues"], 1):
-                print(f"{index}. {issue['problem']}")
-                if issue["fix"]:
-                    print(f"   Fix: {issue['fix']}")
+            print("\n".join(format_issues(report["issues"])))
     else:
         from howlplane.control_plane.presentation.style import resolve_style
         print("\n".join(render(report, resolve_style(sys.stdout, cli_module._COLOR_MODE))))
