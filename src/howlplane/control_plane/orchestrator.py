@@ -1976,7 +1976,7 @@ class GovernedTaskOrchestrator:
         meta = metadata or {}
         entry = EvidenceEntry(
             task_id=task_id,
-            agent_id=agent_id,
+            agent_id=agent_id or "control_plane",
             action=action,
             command=command,
             result=result,
