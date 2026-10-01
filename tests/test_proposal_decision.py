@@ -138,7 +138,8 @@ def test_cli_requires_exactly_one_target(argv):
     assert err.value.error.code == "DECISION_TARGET_REQUIRED"
 
 
-def test_cli_proposal_needs_a_state_directory():
+def test_cli_proposal_needs_a_state_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # no repository to discover a campaign from
     with pytest.raises(OperatorFailure) as err:
         cli._handle_decision(cli.build_parser().parse_args(["approve", "--proposal", "RP-003"]), "approved")
     assert err.value.error.code == "MISSING_STATE_DIRECTORY"

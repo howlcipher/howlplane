@@ -59,6 +59,7 @@ from howlplane.control_plane.task_spec import TaskSpec
 from howlplane.control_plane.factory.factory_cli import (  # noqa: F401  re-exported for tests and monkeypatching
     _worker_display,
     _owner_decisions,
+    collect_factory_status,
     cmd_factory_status,
     cmd_factory_stop,
     cmd_factory_resume,
@@ -94,7 +95,7 @@ from howlplane.control_plane.factory.factory_run_cli import (  # noqa: F401  re-
     _factory_readiness,
     _factory_preflight,
 )
-from howlplane.control_plane.status_cli import cmd_status, cmd_doctor, cmd_agents  # noqa: F401
+from howlplane.control_plane.status_cli import cmd_status, cmd_doctor, cmd_system_doctor, cmd_agents  # noqa: F401
 
 
 class ControlPlaneError(Exception):
@@ -1174,8 +1175,10 @@ def _grouped_help_formatter(groups, default_title):
 
 
 _TOP_LEVEL_HELP_GROUPS = [
-    ("Get started", ["setup", "factory", "work", "status", "doctor", "agents", "create", "config"]),
-    ("Decisions and recovery", ["approve", "reject", "resume", "cancel", "unlock"]),
+    ("Everyday", ["setup", "start", "status", "logs", "stop", "approve", "reject", "doctor"]),
+    ("Governance and recovery", ["resume", "cancel", "unlock", "tia", "config"]),
+    ("Diagnostics and inspection", ["agents", "providers", "route", "trace", "explore", "metrics", "report"]),
+    ("Factory internals", ["factory"]),
 ]
 
 _FACTORY_HELP_GROUPS = [
@@ -1184,14 +1187,15 @@ _FACTORY_HELP_GROUPS = [
 ]
 
 _TOP_LEVEL_QUICKSTART = """\
-New here? Run these in a Git repository:
-  howlplane setup
-  howlplane factory start
-  howlplane factory status
-  howlplane factory logs --errors
-  howlplane factory stop      (howlplane factory resume to continue)
+New here? Run these inside a Git repository:
+  howlplane setup       get this repository ready (once)
+  howlplane start       start working
+  howlplane status      see what is happening and what, if anything, you need to do
+  howlplane logs        see the details (add --follow to watch)
+  howlplane stop        pause safely; howlplane start continues
 
-Something wrong? howlplane doctor, howlplane agents doctor, howlplane factory doctor.
+When it asks for you: howlplane approve ID  (or reject ID).
+Something wrong? howlplane doctor.
 Add --json for scripts. Add --debug for a full traceback; NO_COLOR or --color never for plain text.
 """
 
@@ -1218,7 +1222,7 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=program_name,
         description="Deterministic Multi-Agent Engineering Control Plane CLI\n\n" + _TOP_LEVEL_QUICKSTART,
-        formatter_class=_grouped_help_formatter(_TOP_LEVEL_HELP_GROUPS, "Advanced and engineering"),
+        formatter_class=_grouped_help_formatter(_TOP_LEVEL_HELP_GROUPS, "Advanced engineering"),
         parents=[common_parser],
     )
     parser.add_argument(
@@ -1285,7 +1289,17 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_providers.add_argument("--json", action="store_true", help="Output versioned JSON")
 
     # doctor
-    subparsers.add_parser("doctor", parents=[common_parser], help="Run deterministic workspace health diagnostics")
+    p_doctor = subparsers.add_parser(
+        "doctor", parents=[common_parser], help="Check that HowlPlane is ready and healthy (system, workers, Factory)")
+    doctor_scope = p_doctor.add_mutually_exclusive_group()
+    doctor_scope.add_argument("--system", action="store_true", help="Only the system checks (Python, Git, configuration)")
+    doctor_scope.add_argument("--agents", action="store_true", help="Only the AI worker checks")
+    doctor_scope.add_argument("--factory", action="store_true", help="Only the repository and Factory checks")
+    doctor_scope.add_argument("--ready", action="store_true",
+                              help="Print READY or NOT READY with the fix for each blocker; exit 1 when not ready")
+    p_doctor.add_argument("--live", action="store_true", help="Run a short read-only smoke test of each worker")
+    _add_workspace_trust_argument(p_doctor)
+    p_doctor.add_argument("--json", action="store_true", help="Output versioned JSON")
 
     # agents
     p_agents = subparsers.add_parser("agents", parents=[common_parser], help="Inspect supported agent CLIs")
@@ -1305,7 +1319,31 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     _add_workspace_trust_argument(p_agents_doctor)
 
     # status
-    subparsers.add_parser("status", parents=[common_parser], help="Show project status and verification plan")
+    p_status_top = subparsers.add_parser(
+        "status", parents=[common_parser], help="Show what HowlPlane is doing and what, if anything, you need to do")
+    p_status_top.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_status_top.add_argument("--target-repo", help="Repository to resolve (advanced)")
+    p_status_top.add_argument("--json", action="store_true", help="Output JSON result")
+    p_status_top.add_argument("--verbose", "-v", action="store_true",
+                              help="Show project diagnostics: verification plan, locks, task runs")
+
+    p_start_top = subparsers.add_parser(
+        "start", parents=[common_parser], help="Start HowlPlane working on this repository (or continue after a stop)")
+    p_start_top.add_argument("objective_text", nargs="?", metavar="OBJECTIVE",
+                             help="Optional goal, for example: \"continue building the search feature\"")
+    p_start_top.add_argument("--retry", action="store_true",
+                             help="Continue after a failure you have looked at")
+    _add_start_arguments(p_start_top, preflight=False)
+
+    p_logs_top = subparsers.add_parser(
+        "logs", parents=[common_parser], help="Show what HowlPlane has been doing",
+        epilog="examples:\n  howlplane logs --follow\n  howlplane logs --errors --since 1h\n  howlplane logs --work-item WI-042",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    _add_logs_arguments(p_logs_top)
+
+    p_stop_top = subparsers.add_parser(
+        "stop", parents=[common_parser], help="Pause HowlPlane safely; start again any time with: howlplane start")
+    _add_stop_arguments(p_stop_top)
 
     # init-task
     p_init = subparsers.add_parser("init-task", parents=[common_parser], help="Initialize a new task specification")
@@ -1623,9 +1661,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_stop = factory_sub.add_parser(
         "stop", help="Stop the factory supervisor loop", **kwargs
     )
-    p_stop.add_argument("--state-dir", help="Factory state directory (advanced)")
-    p_stop.add_argument("--target-repo", help="Repository to resolve (advanced)")
-    p_stop.add_argument("--json", action="store_true", help="Output JSON result")
+    _add_stop_arguments(p_stop)
 
     p_resume = factory_sub.add_parser(
         "resume", help="Resume a stopped factory supervisor", **kwargs
@@ -1635,41 +1671,14 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_resume.add_argument("--json", action="store_true", help="Output JSON result")
 
     p_start = factory_sub.add_parser("start", help="Start a persistent Factory campaign for this repository", **kwargs)
-    p_start.add_argument("--state-dir", help="Factory state directory (advanced)")
-    p_start.add_argument("--target-repo", help="Factory target worktree (advanced)")
-    _add_preflight_argument(p_start)
-    p_start.add_argument("--product-repo", help="Product repository slug to weight portfolio shares toward")
-    p_start.add_argument("--target", choices=["repo", "self", "ecosystem"], default="repo")
-    p_start.add_argument("--workspace", help="Workspace YAML for ecosystem mode")
-    p_start.add_argument("--objective", help="Durable campaign objective")
-    p_start.add_argument("--max-work-items", type=int, default=None,
-                         help="Stop after dispatching this many distinct work items.")
-    p_start.add_argument("--authority", choices=["safe", "standard", "autonomous"],
-                         help="Named first-run authority choice")
-    p_start.add_argument("--authority-profile", choices=["strict", "overnight-safe", "howlframe-overnight"],
-                         help="Existing authority profile id (advanced)")
-    p_start.add_argument("--json", action="store_true", help="Output JSON result")
-    p_start.add_argument("--verbose", action="store_true", help="Also show backend and worktree path")
-    _add_workspace_trust_argument(p_start)
+    _add_start_arguments(p_start)
 
     p_logs = factory_sub.add_parser(
         "logs", help="Show recent Factory logs for this repository",
         epilog="examples:\n  howlplane factory logs --errors --since 1h\n  howlplane factory logs --work-item WI-042\n"
                "  howlplane factory logs --follow",
         formatter_class=argparse.RawDescriptionHelpFormatter, **kwargs)
-    p_logs.add_argument("--state-dir", help="Factory state directory (advanced)")
-    p_logs.add_argument("--target-repo", help="Repository to resolve (advanced)")
-    p_logs.add_argument("--follow", action="store_true", help="Stream new log output")
-    p_logs.add_argument("--lines", "-n", type=int, default=80, help="Number of recent entries")
-    p_logs.add_argument("--errors", action="store_true", help="Only errors (same as --level ERROR)")
-    p_logs.add_argument("--level", type=str.upper, choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-                        help="Show this severity and above")
-    p_logs.add_argument("--work-item", help="Only entries for this work item, for example WI-042")
-    p_logs.add_argument("--provider", help="Only entries for this provider, for example codex")
-    p_logs.add_argument("--since", help="Only entries newer than 30m, 1h, 2d or an ISO timestamp")
-    p_logs.add_argument("--raw", action="store_true", help="Show raw process output instead of events")
-    p_logs.add_argument("--json", action="store_true", help="One JSON object per line")
-    p_logs.add_argument("--verbose", action="store_true", help="Include event codes and correlation ids")
+    _add_logs_arguments(p_logs)
 
     p_factory_doctor = factory_sub.add_parser("doctor", help="Check whether Factory can start safely", **kwargs)
     p_factory_doctor.add_argument("--state-dir", help="Factory state directory (advanced)")
@@ -2029,6 +2038,50 @@ def _add_readiness_arguments(parser: argparse.ArgumentParser) -> None:
 def _add_workspace_trust_argument(parser: argparse.ArgumentParser) -> None:
     from howlplane.control_plane.orchestration import add_workspace_trust_argument
     add_workspace_trust_argument(parser)
+
+
+def _add_start_arguments(p_start: argparse.ArgumentParser, preflight: bool = True) -> None:
+    """Arguments shared by `howlplane start` and `howlplane factory start`."""
+    p_start.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_start.add_argument("--target-repo", help="Factory target worktree (advanced)")
+    if preflight:
+        _add_preflight_argument(p_start)
+    p_start.add_argument("--product-repo", help="Product repository slug to weight portfolio shares toward")
+    p_start.add_argument("--target", choices=["repo", "self", "ecosystem"], default="repo")
+    p_start.add_argument("--workspace", help="Workspace YAML for ecosystem mode")
+    p_start.add_argument("--objective", help="Durable campaign objective")
+    p_start.add_argument("--max-work-items", type=int, default=None,
+                         help="Stop after dispatching this many distinct work items.")
+    p_start.add_argument("--authority", choices=["safe", "standard", "autonomous"],
+                         help="Named first-run authority choice")
+    p_start.add_argument("--authority-profile", choices=["strict", "overnight-safe", "howlframe-overnight"],
+                         help="Existing authority profile id (advanced)")
+    p_start.add_argument("--json", action="store_true", help="Output JSON result")
+    p_start.add_argument("--verbose", action="store_true", help="Also show backend and worktree path")
+    _add_workspace_trust_argument(p_start)
+
+
+def _add_logs_arguments(p_logs: argparse.ArgumentParser) -> None:
+    """Arguments shared by `howlplane logs` and `howlplane factory logs`."""
+    p_logs.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_logs.add_argument("--target-repo", help="Repository to resolve (advanced)")
+    p_logs.add_argument("--follow", action="store_true", help="Stream new log output")
+    p_logs.add_argument("--lines", "-n", type=int, default=80, help="Number of recent entries")
+    p_logs.add_argument("--errors", action="store_true", help="Only errors (same as --level ERROR)")
+    p_logs.add_argument("--level", type=str.upper, choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                        help="Show this severity and above")
+    p_logs.add_argument("--work-item", help="Only entries for this work item, for example WI-042")
+    p_logs.add_argument("--provider", help="Only entries for this provider, for example codex")
+    p_logs.add_argument("--since", help="Only entries newer than 30m, 1h, 2d or an ISO timestamp")
+    p_logs.add_argument("--raw", action="store_true", help="Show raw process output instead of events")
+    p_logs.add_argument("--json", action="store_true", help="One JSON object per line")
+    p_logs.add_argument("--verbose", action="store_true", help="Include event codes and correlation ids")
+
+
+def _add_stop_arguments(p_stop: argparse.ArgumentParser) -> None:
+    p_stop.add_argument("--state-dir", help="Factory state directory (advanced)")
+    p_stop.add_argument("--target-repo", help="Repository to resolve (advanced)")
+    p_stop.add_argument("--json", action="store_true", help="Output JSON result")
 
 
 def _add_preflight_argument(parser: argparse.ArgumentParser) -> None:
@@ -2429,13 +2482,36 @@ def _print_local_report(args: argparse.Namespace, report: Dict[str, Any]) -> Non
         print(f"\nResult: {report.get('result')}")
 
 
+def cmd_product_status(args: argparse.Namespace) -> int:
+    from howlplane.control_plane import product_cli
+    return product_cli.cmd_status(args)
+
+
+def cmd_product_start(args: argparse.Namespace) -> int:
+    from howlplane.control_plane import product_cli
+    return product_cli.cmd_start(args)
+
+
+def cmd_product_logs(args: argparse.Namespace) -> int:
+    from howlplane.control_plane import product_cli
+    return product_cli.cmd_logs(args)
+
+
+def cmd_product_stop(args: argparse.Namespace) -> int:
+    from howlplane.control_plane import product_cli
+    return product_cli.cmd_stop(args)
+
+
 # Every subcommand build_parser() registers must appear here; see the same note
 HANDLERS = {
     "orchestrate": lambda args: __import__("howlplane.control_plane.orchestration", fromlist=["command"]).command(args),
     "work": cmd_work,
     "route": cmd_route,
     "providers": cmd_providers,
-    "status": cmd_status,
+    "status": cmd_product_status,
+    "start": cmd_product_start,
+    "logs": cmd_product_logs,
+    "stop": cmd_product_stop,
     "unlock": cmd_unlock,
     "init-task": cmd_init_task,
     "route-task": cmd_route_task,
@@ -2472,6 +2548,11 @@ HANDLERS = {
 ACTIONS = HANDLERS
 
 
+def cmd_home(args: argparse.Namespace) -> int:
+    from howlplane.control_plane import product_cli
+    return product_cli.cmd_home(args)
+
+
 def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> int:
     """Runs the canonical HowlPlane control plane launcher."""
     if args is None:
@@ -2485,10 +2566,13 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
     parsed_args = parser.parse_args(args)
 
     if not parsed_args.subcommand:
-        parser.print_help()
-        return 1
-
-    handler = HANDLERS.get(parsed_args.subcommand)
+        if program_name != "howlplane":
+            # The deprecated `ai` entry point keeps its original behavior.
+            parser.print_help()
+            return 1
+        handler = cmd_home
+    else:
+        handler = HANDLERS.get(parsed_args.subcommand)
     if not handler:
         parser.print_help()
         return 1

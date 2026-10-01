@@ -31,4 +31,4 @@ def test_moved_handlers_resolve_helpers_on_cli_at_call_time(monkeypatch):
 
 
 def test_handlers_table_still_points_at_the_reexports():
-    assert cli.HANDLERS["approve"] is cli.cmd_approve and cli.HANDLERS["status"] is cli.cmd_status
+    assert cli.HANDLERS["approve"] is cli.cmd_approve and cli.HANDLERS["status"] is cli.cmd_product_status

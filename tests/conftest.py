@@ -28,7 +28,7 @@ _REAL_COMPILER_INTEGRATION_MODULES = {
 # collection time without hiding tests behind a changed default invocation.
 # Every test gets exactly one primary tier. ``slow`` is orthogonal and contains
 # families that appeared in the measured duration report, not name guesses.
-_ACCEPTANCE_MODULES = set()
+_ACCEPTANCE_MODULES = {"test_product_journey.py"}
 
 _INTEGRATION_MODULES = {
     "test_git_baseline.py",

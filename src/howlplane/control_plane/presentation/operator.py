@@ -157,7 +157,8 @@ def _blockers(status: Mapping[str, Any]) -> List[str]:
     blockers = []
     for item in status.get("parked_items") or []:
         reason = item.get("blocker") or item.get("state")
-        blockers.append(f"{item.get('work_item_id')}: {reason}")
+        title = f" ({item['title']})" if item.get("title") else ""
+        blockers.append(f"{item.get('work_item_id')}{title}: {reason}")
     for proposal in status.get("proposals_awaiting_authority") or []:
         blockers.append(f"proposal {proposal.get('proposal_id')}: {proposal.get('disposition')}")
     return blockers
@@ -190,8 +191,8 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
                 summary="No authority level is configured, so authority-required work is parked.",
                 reason_code=ReasonCode.AUTHORITY_NOT_CONFIGURED, owner_required=True,
                 next_action=OperatorAction(
-                    "Choose an authority level and restart the Factory.",
-                    "howlplane factory start --authority safe"),
+                    "Choose an authority level and start again.",
+                    "howlplane start --authority safe"),
                 **common)
         decisions = status.get("decisions") or []
         if decisions:
@@ -199,10 +200,12 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
             if first.get("kind") == "proposal":
                 subject = f"repository proposal {first['proposal_id']} ({first.get('repository_name')})"
             else:
-                subject = first["work_item_id"]
+                subject = first["work_item_id"] + (f" ({first['title']})" if first.get("title") else "")
+            # The short form needs no state directory; it is set only when repo discovery applies.
+            approve = first.get("short_approve") or first["approve"]
+            reject = first.get("short_reject") or first.get("reject")
             action = OperatorAction(
-                f"Review {subject} and decide:", first["approve"],
-                alternatives=[first["reject"]] if first.get("reject") else [])
+                f"Review {subject} and decide:", approve, alternatives=[reject] if reject else [])
         else:
             # Only commands that exist are printed; none can be built without a state directory.
             action = OperatorAction("Review the items awaiting an owner decision listed above.")
@@ -215,9 +218,9 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
     if process == "stale":
         return OperatorStatus(
             label="STALE", severity=Severity.ERROR,
-            summary="The Factory process record says it is running but the process is gone.",
+            summary="HowlPlane is recorded as running but its process is gone.",
             reason_code=ReasonCode.STALE_STATE,
-            next_action=OperatorAction("Restart the Factory.", "howlplane factory start"),
+            next_action=OperatorAction("Start it again.", "howlplane start"),
             **common)
 
     if state == SupervisorState.STOPPED.value:
@@ -226,22 +229,23 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
             return OperatorStatus(
                 label="COMPLETE", severity=Severity.INFO,
                 summary="The bounded run finished.", reason_code=ReasonCode.BOUNDED_RUN_COMPLETE,
-                next_action=OperatorAction("Start another run when ready.", "howlplane factory start"),
+                next_action=OperatorAction("Start another run when ready.", "howlplane start"),
                 **common)
         if status.get("last_error") and reason != "operator_stop":
             return OperatorStatus(
                 label="FAILED", severity=Severity.ERROR,
-                summary=f"The Factory stopped after an error: {status['last_error']}",
+                summary=f"HowlPlane stopped after an error: {status['last_error']}",
                 reason_code=ReasonCode.FACTORY_FAILURE,
                 next_action=OperatorAction(
-                    "Inspect the logs, then resume.", "howlplane factory logs"),
+                    "Look at what went wrong. When you are ready to continue:", "howlplane logs --errors",
+                    alternatives=["howlplane start --retry"]),
                 **common)
         code = ReasonCode.STOPPED_BY_OPERATOR if reason == "operator_stop" else ReasonCode.STOPPED
         return OperatorStatus(
             label="STOPPED", severity=Severity.INFO,
-            summary="The Factory is stopped." if not reason else f"The Factory is stopped ({reason}).",
+            summary="HowlPlane is stopped." if not reason else f"HowlPlane is stopped ({reason}).",
             reason_code=code,
-            next_action=OperatorAction("Resume the Factory.", "howlplane factory resume"),
+            next_action=OperatorAction("Continue when ready.", "howlplane start"),
             **common)
 
     if failure is ProviderFailureClass.AUTHENTICATION_REQUIRED:
@@ -250,7 +254,7 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
             summary="A provider needs you to sign in again.",
             reason_code=ReasonCode.AUTHENTICATION_REQUIRED, owner_required=True, recovery="manual",
             next_action=OperatorAction(
-                "Sign in to the provider CLI, then check readiness.", "howlplane agents doctor"),
+                "Sign in to the provider CLI, then check readiness.", "howlplane doctor --agents"),
             **common)
     if failure is ProviderFailureClass.SESSION_LIMIT or (
         state == SupervisorState.WAITING_FOR_PROVIDER.value
@@ -262,8 +266,8 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
             reason_code=(ReasonCode.SESSION_LIMIT if failure is ProviderFailureClass.SESSION_LIMIT
                          else ReasonCode.PROVIDER_UNAVAILABLE),
             next_action=OperatorAction(
-                "Nothing required; the Factory resumes when the provider recovers. "
-                "Check provider readiness for details.", "howlplane agents doctor"),
+                "Nothing required; HowlPlane resumes when the provider recovers. "
+                "Check provider readiness for details.", "howlplane doctor --agents"),
             **common)
     if failure is ProviderFailureClass.VERIFICATION_FAILURE:
         return OperatorStatus(
@@ -275,10 +279,10 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
     if state == SupervisorState.BACKOFF_AFTER_FAILURE.value:
         return OperatorStatus(
             label="BACKING OFF", severity=Severity.ATTENTION,
-            summary="The last attempt failed; the Factory will retry automatically.",
+            summary="The last attempt failed; HowlPlane will retry automatically.",
             recovery="automatic" if automatic else "manual",
             reason_code=ReasonCode.BACKOFF_AFTER_FAILURE,
-            next_action=OperatorAction("Inspect the failure.", "howlplane factory logs"),
+            next_action=OperatorAction("Inspect the failure.", "howlplane logs --errors"),
             **common)
     if state == SupervisorState.WAITING_FOR_DEPENDENCY.value:
         return OperatorStatus(
@@ -286,21 +290,40 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
             summary="Waiting for a dependency before continuing.",
             recovery="automatic" if automatic else "manual",
             reason_code=ReasonCode.WAITING_FOR_DEPENDENCY,
-            next_action=OperatorAction("None. The Factory continues automatically."), **common)
+            next_action=OperatorAction("None. HowlPlane continues automatically."), **common)
     if state == SupervisorState.WAITING_FOR_WORK.value or state == SupervisorState.IDLE.value:
         return OperatorStatus(
             label="IDLE", severity=Severity.OK,
-            summary="No work is ready. The Factory is waiting for new work.",
+            summary="No work is ready. HowlPlane is waiting for new work.",
             reason_code=ReasonCode.WAITING_FOR_WORK,
             next_action=OperatorAction("None. Add Pending backlog items to give it work."), **common)
     if state == SupervisorState.DISPATCHING.value:
         return OperatorStatus(
-            label="RUNNING", severity=Severity.OK, summary="The Factory is working normally.",
-            next_action=OperatorAction("None. The Factory is working normally."), **common)
+            label="RUNNING", severity=Severity.OK, summary="HowlPlane is working normally.",
+            next_action=OperatorAction("None. HowlPlane is working normally."), **common)
     return OperatorStatus(
-        label=state.upper(), severity=Severity.INFO, summary=f"Factory state: {state}.",
+        label=state.upper(), severity=Severity.INFO, summary=f"State: {state}.",
         next_action=OperatorAction("Inspect the details.", "howlplane factory status --verbose"),
         **common)
+
+
+def not_started_status(ready: bool, project: Optional[str] = None, next_command: Optional[str] = None,
+                       reason: Optional[str] = None, next_message: Optional[str] = None) -> OperatorStatus:
+    """The operator view of a repository where no Factory has run yet.
+
+    Same model as every other state, so text, JSON and any other consumer agree.
+    ``ready`` means setup has nothing left to do; otherwise setup is the next step.
+    """
+    if ready:
+        return OperatorStatus(
+            state="not_started", label="READY", severity=Severity.OK,
+            summary="Ready to work. Nothing has been started yet.", reason_code=ReasonCode.NOT_STARTED,
+            next_action=OperatorAction("Start working on this repository.", next_command or "howlplane start"))
+    return OperatorStatus(
+        state="not_started", label="NOT READY", severity=Severity.ATTENTION,
+        summary=reason or "This repository is not ready for autonomous work yet.",
+        reason_code=ReasonCode.NOT_STARTED,
+        next_action=OperatorAction(next_message or "Prepare this repository first.", next_command or "howlplane setup"))
 
 
 _HEALTH = {Severity.OK: "Healthy", Severity.INFO: "Healthy", Severity.ATTENTION: "Needs attention",
@@ -329,14 +352,16 @@ def _retry_text(op: "OperatorStatus") -> Optional[str]:
     return f"{text} ({', '.join(facts)})" if facts else text
 
 
-def render_operator_text(op: OperatorStatus, status: Mapping[str, Any], style: Optional[Style] = None) -> List[str]:
+def render_operator_text(op: OperatorStatus, status: Mapping[str, Any], style: Optional[Style] = None,
+                         title: str = "HowlPlane Factory",
+                         details: Optional[List[str]] = None) -> List[str]:
     """Human view: state -> meaning -> next action. Internals live under ``--verbose``.
 
     Every fact is spelled in words; ``style`` only adds emphasis, so the plain
     output (pipes, CI, NO_COLOR, screen readers) carries the same information.
     """
     style = style or Style()
-    lines = style.header("HowlPlane Factory", op.label, op.severity.value)
+    lines = style.header(title, op.label, op.severity.value)
     health_key = "Health"
     rows = [
         ("Project", status.get("project")),
@@ -385,8 +410,45 @@ def render_operator_text(op: OperatorStatus, status: Mapping[str, Any], style: O
             lines += [f"  {item['proposal_id']} ({item['repository_name']}): {item['bootstrap_state']}",
                       style.command_block(item["command"])]
 
-    details = ["howlplane factory status --verbose"]
-    details.append("howlplane factory logs --errors" if op.severity in (Severity.ATTENTION, Severity.ERROR)
-                   else "howlplane factory logs --follow")
+    if details is None:
+        details = ["howlplane factory status --verbose"]
+        details.append("howlplane factory logs --errors" if op.severity in (Severity.ATTENTION, Severity.ERROR)
+                       else "howlplane factory logs --follow")
     lines += ["", style.muted("Details")] + [style.command_block(d) for d in details]
+    return lines
+
+
+def render_home_text(op: OperatorStatus, status: Mapping[str, Any], style: Optional[Style] = None,
+                     workers_available: Optional[int] = None,
+                     follow_ups: Optional[List[str]] = None) -> List[str]:
+    """The compact contextual home screen shown by bare ``howlplane``.
+
+    Reads the same ``OperatorStatus`` as every other surface; it only chooses fewer rows.
+    """
+    style = style or Style()
+    lines = style.header("HowlPlane", op.label, op.severity.value)
+    working_on = None
+    if op.current_work:
+        working_on = f"{op.current_work} - {op.current_work_title}" if op.current_work_title else op.current_work
+    rows = [
+        ("Project", status.get("project")),
+        ("Working on", working_on),
+        ("Worker", op.worker),
+        ("Elapsed", format_duration(op.elapsed_seconds)),
+        ("Workers", f"{workers_available} available" if workers_available is not None else None),
+    ]
+    if op.severity is not Severity.OK:
+        rows.append(("Reason", op.summary))
+    lines += style.kv(rows)
+    lines += ["", style.section("Next")]
+    action = op.next_action
+    if action is None or not action.command:
+        lines.append(_next_text(action.message) if action else "No action required.")
+    else:
+        lines.append(_next_text(action.message))
+        lines += ["", style.command_block(action.command)]
+        for alt in action.alternatives:
+            lines.append(style.command_block(alt))
+    if follow_ups:
+        lines += [""] + [style.command_block(c) for c in follow_ups]
     return lines
