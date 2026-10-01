@@ -4,6 +4,7 @@ This folder stores standardized workflows, coding practices, and general knowled
 Reference this area for overarching principles that apply across multiple projects.
 
 - [Configurable AI Resource Pool](AI_RESOURCE_POOL.md)
+- [Semantic Recommendation (HowlInstinct)](SEMANTIC_RECOMMENDATION.md)
 - [Control Plane](CONTROL_PLANE.md)
 - [Data flows and network egress](data_flows.md)
 - [Factory task queue](FACTORY_QUEUE.md)

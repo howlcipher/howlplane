@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Shared configurable AI resource pool, capacity, and selection authority."""
 
-from dataclasses import dataclass, field
+from collections import OrderedDict
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
+import hashlib
 import re
+import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from howlplane.control_plane.agent_execution import (
@@ -42,11 +45,26 @@ from howlplane.control_plane.resource_models import (
     ResourceSelectionDecision,
     ResourceSelectionStatus,
 )
+from howlplane.control_plane.semantic.factory import build_semantic_recommender
+from howlplane.control_plane.semantic.models import (
+    INTEGRITY_FAILURES,
+    RecommendationContext,
+    SemanticMode,
+    SemanticRecommendation,
+    SemanticStatus,
+)
+from howlplane.control_plane.semantic.policy import apply_policy
+from howlplane.control_plane.semantic.recommender import (
+    DisabledSemanticRecommender,
+    SemanticRecommender,
+    candidate_ids,
+)
 from howlplane.control_plane.task_spec import DataClassSerializationMixin, TaskSpec
 from howlplane.control_plane.workspace_trust import result_is_trust_refusal
 from howlplane.control_plane.config_loader import (
     ProviderPolicySettings,
     ProviderResourceSettings,
+    SemanticRecommendationSettings,
 )
 
 PROVIDER_POOL_SCHEMA_VERSION = "howlplane.provider_pool/v2"
@@ -439,6 +457,8 @@ class ProviderPoolManager:
         state_path: Optional[Union[str, Path]] = None,
         probe_on_start: bool = True,
         read_only: bool = False,
+        semantic_recommender: Optional[SemanticRecommender] = None,
+        semantic_settings: Optional[SemanticRecommendationSettings] = None,
     ):
         self.registry = registry or AgentRegistry()
         self.avoid_provider = avoid_provider
@@ -453,6 +473,12 @@ class ProviderPoolManager:
         }
         self.resources = self._normalize_resources(configured)
         self.read_only = read_only
+        self.semantic_settings = semantic_settings or SemanticRecommendationSettings()
+        self._semantic_recommender: SemanticRecommender = (
+            semantic_recommender or DisabledSemanticRecommender()
+        )
+        self._semantic_cache: "OrderedDict[Tuple, SemanticRecommendation]" = OrderedDict()
+        self._semantic_retry_after = 0.0
         self._store = ProviderCapacityStore(state_path) if state_path else None
         self._provider_states: Dict[str, ProviderStatus] = (
             self._store.load() if self._store else {}
@@ -489,6 +515,8 @@ class ProviderPoolManager:
             state_path=state_path,
             read_only=read_only,
             probe_on_start=probe_on_start,
+            semantic_recommender=build_semantic_recommender(settings.semantic_recommendation),
+            semantic_settings=settings.semantic_recommendation,
         )
 
     @classmethod
@@ -1233,6 +1261,114 @@ class ProviderPoolManager:
             operator_preferences=preferences,
         )
 
+    def configure_semantic(
+        self,
+        settings: SemanticRecommendationSettings,
+        recommender: Optional[SemanticRecommender] = None,
+    ) -> None:
+        """Replaces semantic policy, for example from a CLI override."""
+        self.semantic_settings = settings
+        self._semantic_recommender = recommender or build_semantic_recommender(settings)
+        self._semantic_cache.clear()
+        self._semantic_retry_after = 0.0
+
+    def _semantic_assess(
+        self,
+        task: TaskSpec,
+        role: str,
+        candidates: List[AgentProfile],
+        *,
+        explicit_override: bool,
+        task_forbids_egress: bool,
+        deterministic: CognitiveRecommendation,
+    ) -> Optional[SemanticRecommendation]:
+        """Asks System 1 about already-eligible candidates and applies Plane policy.
+
+        Returns None when the feature is off so that evidence for existing
+        installations is unchanged. The candidates are exactly the survivors of
+        hard filtering; this method cannot add or remove one.
+        """
+        settings = self.semantic_settings
+        mode = settings.mode
+        if mode == SemanticMode.OFF.value:
+            return None
+        ids = candidate_ids(candidates)
+
+        def skipped(reason: str) -> SemanticRecommendation:
+            return SemanticRecommendation(
+                status=SemanticStatus.NOT_APPLICABLE,
+                mode=mode,
+                reason=reason,
+                candidate_ids=ids,
+                deterministic_recommendation=deterministic.resource_id,
+            )
+
+        if role not in settings.decision_roles:
+            return skipped("role is not a configured semantic decision role")
+        if explicit_override:
+            return skipped("an explicit resource override is authoritative")
+        if len(ids) < 2:
+            return skipped("fewer than two eligible candidates")
+        if task_forbids_egress:
+            return skipped("task forbids egress")
+        if self.operating_mode == "local_only" and not settings.allow_in_local_only:
+            return skipped("operating mode is local_only")
+
+        digest = hashlib.sha256(
+            f"{task.objective}|{task.task_class}|{task.risk_level}".encode("utf-8")
+        ).hexdigest()
+        key = (task.task_id, role, mode, tuple(ids), digest)
+        cached = self._semantic_cache.get(key)
+        if cached is not None:
+            self._semantic_cache.move_to_end(key)
+            return cached
+        if time.monotonic() < self._semantic_retry_after:
+            return SemanticRecommendation(
+                status=SemanticStatus.UNAVAILABLE,
+                mode=mode,
+                reason="recent failure; HowlInstinct not retried yet",
+                candidate_ids=ids,
+                deterministic_recommendation=deterministic.resource_id,
+            )
+
+        raw = self._semantic_recommender.recommend(
+            task=task,
+            candidates=sorted(candidates, key=lambda p: p.resource_id or p.agent_id),
+            role=role,
+            context=RecommendationContext(
+                capacity=self.get_all_statuses(),
+                timeout_seconds=settings.timeout_seconds,
+            ),
+        )
+        # Defence in depth: a judge may never name a resource Plane did not offer.
+        if raw.selected_resource_id is not None and raw.selected_resource_id not in ids:
+            raw = SemanticRecommendation(
+                status=SemanticStatus.UNKNOWN_RESOURCE,
+                mode=mode,
+                attempted=True,
+                reason="the judgment named a resource Plane did not offer",
+                candidate_ids=ids,
+            )
+        result = apply_policy(
+            replace(raw, mode=mode, candidate_ids=ids),
+            minimum_instinct_margin=settings.minimum_instinct_margin,
+        )
+        result = replace(
+            result,
+            deterministic_recommendation=deterministic.resource_id,
+            applied=(
+                mode == SemanticMode.ACTIVE.value
+                and result.status is SemanticStatus.ACCEPTED
+            ),
+        )
+        if result.status in (SemanticStatus.ACCEPTED, SemanticStatus.LOW_CONFIDENCE):
+            self._semantic_cache[key] = result
+            while len(self._semantic_cache) > 256:
+                self._semantic_cache.popitem(last=False)
+        elif result.status in (SemanticStatus.UNAVAILABLE, SemanticStatus.TIMEOUT):
+            self._semantic_retry_after = time.monotonic() + 30.0
+        return result
+
     def _ranking_key(
         self,
         profile: AgentProfile,
@@ -1377,10 +1513,33 @@ class ProviderPoolManager:
             candidates.append(profile)
 
         recommendation = self._recommend(task, role, candidates)
-        avoid_id = self._normalize(avoid_resource_id) if avoid_resource_id else None
-        candidates.sort(key=lambda profile: self._ranking_key(profile, recommendation, avoid_id))
         supplied_explicit = explicit_resource_id or task.preferred_agent
         explicit_id = self._normalize(supplied_explicit) if supplied_explicit else None
+        semantic = self._semantic_assess(
+            task,
+            role,
+            candidates,
+            explicit_override=explicit_id is not None,
+            task_forbids_egress=task_forbids_egress,
+            deterministic=recommendation,
+        )
+        rank_recommendation = recommendation
+        semantic_blocked = False
+        if semantic is not None:
+            if semantic.applied and semantic.selected_resource_id:
+                rank_recommendation = CognitiveRecommendation(
+                    resource_id=semantic.selected_resource_id,
+                    reason=f"HowlInstinct judgment accepted by Plane policy: {semantic.reason}",
+                    strategy_id="howlinstinct_semantic/v1",
+                )
+            if self.semantic_settings.strict and semantic.status in INTEGRITY_FAILURES:
+                semantic_blocked = True
+        avoid_id = self._normalize(avoid_resource_id) if avoid_resource_id else None
+        candidates.sort(
+            key=lambda profile: self._ranking_key(profile, rank_recommendation, avoid_id)
+        )
+        if semantic_blocked:
+            candidates = []
         selected: Optional[AgentProfile] = None
         if explicit_id:
             selected = next(
@@ -1404,6 +1563,25 @@ class ProviderPoolManager:
                 identity for identity in identities
                 if identity.resource_id != selected_identity.resource_id
             ]
+        if semantic is not None:
+            semantic = replace(
+                semantic,
+                final_selection=selected_identity.resource_id if selected_identity else None,
+                # Disagreement is semantic vs deterministic, so active mode
+                # (where the final pick follows System 1) does not hide it.
+                disagreement=(
+                    None
+                    if semantic.selected_resource_id is None or recommendation.resource_id is None
+                    else semantic.selected_resource_id != recommendation.resource_id
+                ),
+            )
+        blocked_reason = None
+        if selected is None:
+            blocked_reason = (
+                "SEMANTIC_RECOMMENDATION_FAILED"
+                if semantic_blocked
+                else "NO_ELIGIBLE_AI_RESOURCE"
+            )
         return ResourceSelectionDecision(
             task_class=task.task_class,
             role=role,
@@ -1418,9 +1596,8 @@ class ProviderPoolManager:
             cognitive_recommendation=recommendation,
             capacity_before=self.get_all_statuses(),
             explicit_override=explicit_id is not None,
-            blocked_reason=(
-                None if selected is not None else "NO_ELIGIBLE_AI_RESOURCE"
-            ),
+            blocked_reason=blocked_reason,
+            semantic_recommendation=semantic.to_dict() if semantic is not None else None,
         )
 
     @staticmethod

@@ -56,3 +56,17 @@ cooldown_seconds = 300
 #
 # [ai_resources.provider_policy]
 # allow_paid_api = false
+
+# Optional System 1 judgment from HowlInstinct (off by default). HowlInstinct
+# only ranks resources that Plane already approved; Plane owns every threshold.
+# mode: "off" (default), "shadow" (record the judgment, keep deterministic choice),
+# or "active" (an accepted judgment may reorder candidates that already tie on
+# economics and capacity). minimum_instinct_margin has no default on purpose.
+# [ai_resources.semantic_recommendation]
+# mode = "shadow"
+# command = "howlinstinct"
+# minimum_instinct_margin = 0.35
+# timeout_seconds = 5
+# decision_roles = ["implementation", "remediation"]
+# strict = false              # true blocks routing on an untrusted semantic result
+# allow_in_local_only = false # HowlInstinct may use a remote provider, so off in local_only
