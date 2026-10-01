@@ -268,7 +268,7 @@ def test_ai_doctor_subcommand(tmp_path, capsys):
     code = launcher_main(["doctor", "--repo", str(repo_dir)])
     assert code in (0, 1)
     captured = capsys.readouterr().out
-    assert "WORKSPACE HEALTH DIAGNOSTICS" in captured
+    assert "HowlPlane Doctor" in captured and "Component" in captured
 
 
 def test_ai_status_subcommand(tmp_path, capsys):

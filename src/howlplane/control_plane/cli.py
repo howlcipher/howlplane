@@ -1144,28 +1144,19 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     target_repo = _resolve_repo(args)
     results = run_diagnostics(repo_root=target_repo)
 
-    print("=" * 60)
-    print("WORKSPACE HEALTH DIAGNOSTICS (DOCTOR)")
-    print("=" * 60)
-    has_error = False
-    for res in results:
-        if res.status == "ok":
-            mark = "✓"
-        elif res.status == "warning":
-            mark = "!"
-        else:
-            mark = "✗"
-            has_error = True
-        print(f"[{mark}] {res.name}: {res.message}")
-        if res.details and isinstance(res.details, dict) and "action" in res.details:
-            print(f"    Action: {res.details['action']}")
-    print("=" * 60)
-    if not has_error:
-        print("Status: HEALTHY (All critical checks passed)")
-        return 0
-    else:
-        print("Status: DEGRADED (One or more critical checks failed)")
-        return 1
+    from howlplane.control_plane.presentation.doctor import render_checks_table
+    from howlplane.control_plane.presentation.style import resolve_style
+    style = resolve_style(sys.stdout, _COLOR_MODE)
+    has_error = any(res.status not in ("ok", "warning") for res in results)
+    warnings = sum(1 for res in results if res.status == "warning")
+    lines = style.header("HowlPlane Doctor", "DEGRADED" if has_error else "HEALTHY",
+                         "error" if has_error else "ok")
+    lines += render_checks_table(results, style)
+    ok = sum(1 for res in results if res.status == "ok")
+    errors = sum(1 for res in results if res.status not in ("ok", "warning"))
+    lines += ["", f"{ok} checks passed, {warnings} warning(s), {errors} failed."]
+    print("\n".join(lines))
+    return 1 if has_error else 0
 
 
 def cmd_howlframe_audit(args: argparse.Namespace) -> int:
@@ -1847,6 +1838,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_start.add_argument("--authority-profile", choices=["strict", "overnight-safe", "howlframe-overnight"],
                          help="Existing authority profile id (advanced)")
     p_start.add_argument("--json", action="store_true", help="Output JSON result")
+    p_start.add_argument("--verbose", action="store_true", help="Also show backend and worktree path")
     _add_workspace_trust_argument(p_start)
 
     p_logs = factory_sub.add_parser("logs", help="Show recent Factory logs for this repository", **kwargs)
@@ -2960,17 +2952,23 @@ def cmd_factory_stop(args: argparse.Namespace) -> int:
             record.transition_to(SupervisorState.STOPPED, reason="operator_stop")
             record.stopped_reason = "operator_stop"
             store.save(record)
-        print(stop_process(campaign))
+        _print_factory_result(
+            "STOPPED", "ok", stop_process(campaign),
+            [("Project", campaign.repository.remote or campaign.repository.root.name)],
+            "Campaign state and evidence are preserved. Resume when ready:",
+            ["howlplane factory resume", "howlplane factory status"])
         return 0
     store = _factory_state_store(args)
     record = store.load()
     if record.state == SupervisorState.STOPPED:
-        print("Already stopped.")
+        _print_factory_result("STOPPED", "ok", "The Factory was already stopped.", [],
+                              "Resume when ready:", ["howlplane factory resume"])
         return 0
     record.transition_to(SupervisorState.STOPPED, reason="operator_stop")
     record.stopped_reason = "operator_stop"
     store.save(record)
-    print("Factory supervisor stopped.")
+    _print_factory_result("STOPPED", "ok", "Factory supervisor stopped. Campaign state is preserved.", [],
+                          "Resume when ready:", ["howlplane factory resume"])
     return 0
 
 
@@ -2979,12 +2977,25 @@ def cmd_factory_resume(args: argparse.Namespace) -> int:
     store = _factory_state_store(args)
     record = store.load()
     if record.state != SupervisorState.STOPPED:
-        print(f"Factory supervisor is not stopped (state={record.state}).")
-        return 1
+        from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+        raise OperatorFailure(OperatorError(
+            "FACTORY_NOT_STOPPED", "The Factory is not stopped, so there is nothing to resume.",
+            f"Its current state is {record.state}.", "Check what it is doing.", "howlplane factory status"))
     record.transition_to(SupervisorState.IDLE, reason="operator_resume")
     record.stopped_reason = None
     store.save(record)
-    print("Factory supervisor resumed.")
+    running = False
+    try:
+        campaign = _resolve_factory_campaign(args)
+        if campaign is not None:
+            from howlplane.control_plane.factory.service import process_status
+            running = process_status(campaign) == "running"
+    except Exception:
+        running = False
+    next_commands = ["howlplane factory status"] if running else ["howlplane factory start"]
+    note = ("Campaign state restored to IDLE; the running Factory continues."
+            if running else "Campaign state restored to IDLE. The Factory process is not running; start it:")
+    _print_factory_result("RESUMED", "ok", "Campaign resumed.", [], note, next_commands)
     return 0
 
 
@@ -3014,20 +3025,35 @@ def cmd_factory_start(args: argparse.Namespace) -> int:
                           "state_dir": str(campaign.state_dir), "target_repo": str(campaign.target_dir),
                           "backend": record.backend, "authority": display_authority}, indent=2))
         return 0
+    project = campaign.repository.remote or campaign.repository.root.name
+    rows = [("Project", project), ("Authority", display_authority)]
+    if getattr(args, "verbose", False):
+        rows += [("Backend", record.backend), ("Target", str(campaign.target_dir))]
     if not started:
-        print("Factory is already running.\n")
-        print(f"Project: {campaign.repository.remote or campaign.repository.root.name}")
-        print("Use `howlplane factory status` for details.")
+        _print_factory_result("RUNNING", "ok", "The Factory was already running. Nothing changed.", rows,
+                              "See what it is doing:", ["howlplane factory status"])
         return 0
-    print("HowlPlane Factory\n")
-    print(f"Project: {campaign.repository.remote or campaign.repository.root.name}")
     if campaign.repository.dirty:
-        print("Working tree contains local changes. Your checkout will not be modified.")
-    print(f"Factory target: {campaign.target_dir}")
-    print(f"Authority: {display_authority}")
-    print(f"Backend: {record.backend}")
-    print("\nFactory started.\n\nUse:\n  howlplane factory status\n  howlplane factory logs --follow\n  howlplane factory stop")
+        rows.append(("Checkout", "has local changes; it will not be modified"))
+    _print_factory_result("STARTED", "ok", "Factory started in an isolated worktree.", rows,
+                          "Next:", ["howlplane factory status", "howlplane factory logs --follow",
+                                    "howlplane factory stop"])
     return 0
+
+
+def _print_factory_result(badge: str, severity: str, message: str, rows: List[tuple], next_note: str,
+                          commands: List[str]) -> None:
+    """Shared confirmation block for mutating Factory commands."""
+    from howlplane.control_plane.presentation.style import resolve_style
+    style = resolve_style(sys.stdout, _COLOR_MODE)
+    lines = style.header("HowlPlane Factory", badge, severity)
+    lines.append(message)
+    kv = style.kv(rows)
+    if kv:
+        lines += [""] + kv
+    lines += ["", style.section(next_note.rstrip(":") if not commands else next_note)]
+    lines += [style.command_block(c) for c in commands]
+    print("\n".join(lines))
 
 
 def cmd_factory_logs(args: argparse.Namespace) -> int:
@@ -3112,6 +3138,14 @@ def _factory_preflight(args: argparse.Namespace) -> Optional[int]:
     return None
 
 
+def _print_worker_table(report: Dict[str, Any]) -> None:
+    from howlplane.control_plane.presentation.doctor import render_worker_summary
+    from howlplane.control_plane.presentation.style import resolve_style
+    agents = report.get("agents")
+    if agents:
+        print("\n".join(render_worker_summary(agents, report.get("workspace"), resolve_style(sys.stdout, _COLOR_MODE))))
+
+
 def cmd_factory_doctor(args: argparse.Namespace) -> int:
     from howlplane.control_plane.factory.campaign import CampaignError
     from howlplane.control_plane.factory.service import _systemd_available, process_status
@@ -3123,7 +3157,8 @@ def cmd_factory_doctor(args: argparse.Namespace) -> int:
     try:
         campaign = _resolve_factory_campaign(args)
         if campaign is None:
-            print("Factory doctor: explicit state and target configuration accepted.")
+            print("Factory doctor: explicit state and target configuration accepted.\n")
+            _print_worker_table(report)
             print(agent_readiness.render_factory(report["readiness"], report["execution_budget"]), end="")
             return blocked
         target_state = "missing"
@@ -3141,11 +3176,16 @@ def cmd_factory_doctor(args: argparse.Namespace) -> int:
         print(f"State directory: {campaign.state_dir}")
         print(f"Process: {process_status(campaign)}")
         print(f"Backend: {'systemd user service' if _systemd_available() else 'portable detached process'}")
+        print()
+        _print_worker_table(report)
         print(agent_readiness.render_factory(report["readiness"], report["execution_budget"]), end="")
         return blocked
     except CampaignError as exc:
-        print(f"Factory doctor: cannot start safely: {exc}")
-        return 1
+        from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+        raise OperatorFailure(OperatorError(
+            "CAMPAIGN_ERROR", f"Factory doctor: cannot start safely: {exc}",
+            "The Factory cannot safely use this repository as configured.",
+            "Fix the problem above, then run the check again.", "howlplane factory doctor")) from exc
 
 
 def cmd_factory(args: argparse.Namespace) -> int:

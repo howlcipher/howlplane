@@ -803,8 +803,11 @@ def render_workspace(report: dict[str, Any]) -> list[str]:
     return lines
 
 
-def render(summaries: list[dict[str, Any]], workspace: dict[str, Any] | None = None) -> str:
-    lines = ["HOWLPLANE AGENT DOCTOR", "", "GLOBAL READINESS", ""]
+def render(summaries: list[dict[str, Any]], workspace: dict[str, Any] | None = None, style: Any = None) -> str:
+    from howlplane.control_plane.presentation.doctor import render_worker_summary
+    lines = ["HOWLPLANE AGENT DOCTOR", ""]
+    lines += render_worker_summary(summaries, workspace, style)
+    lines += ["GLOBAL READINESS", ""]
     for summary in summaries:
         lines.append(summary["name"])
         rows: list[tuple[str, str]] = [("Backend", summary["backend"]),
@@ -946,6 +949,10 @@ def command(args: Any) -> int:
     summaries = evaluate(selected, live=live, refresh=getattr(args, "refresh", False),
                          smoke_timeout=getattr(args, "smoke_timeout", DEFAULT_SMOKE_TIMEOUT_SECONDS), workspace=workspace)
     report = workspace_report(workspace, selected, live=live) if workspace else None
-    print(json.dumps(document(summaries, report), indent=2) if getattr(args, "json", False) else render(summaries, report),
-          end="" if not getattr(args, "json", False) else "\n")
+    if getattr(args, "json", False):
+        print(json.dumps(document(summaries, report), indent=2))
+    else:
+        from howlplane.control_plane import cli
+        from howlplane.control_plane.presentation.style import resolve_style
+        print(render(summaries, report, resolve_style(sys.stdout, getattr(cli, "_COLOR_MODE", None))), end="")
     return 0

@@ -62,8 +62,9 @@ def test_table_narrow_width_keeps_every_cell_readable():
     style = Style(width=40)
     lines = style.table(["Component", "Status", "Detail"],
                         [["Git", "OK", "x" * 100], ["Codex", "READY", "ok"]])
-    assert lines[1].startswith("Git") and lines[2].startswith("Codex")
-    assert lines[1].endswith("...")
+    assert lines[1].startswith("Git")
+    assert "".join(part.strip() for part in lines[1:-1]).count("x") == 100
+    assert lines[-1].startswith("Codex") and all(len(line) <= 40 for line in lines)
 
 
 def test_format_duration_never_invents():

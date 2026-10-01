@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import sys
+import textwrap
 from dataclasses import dataclass
 from typing import Iterable, List, Mapping, Optional, Sequence, TextIO
 
@@ -114,24 +115,20 @@ class Style:
         budget = self.width - sum(widths[:last]) - 2 * last
         if budget >= 12:
             widths[last] = min(widths[last], budget)
-        lines = ["  ".join(h.ljust(widths[i]) if i < last else h for i, h in enumerate(headers))]
-        lines[0] = self.muted(lines[0])
+        lines = [self.muted("  ".join(h.ljust(widths[i]) if i < last else h for i, h in enumerate(headers)))]
+        indent = " " * (sum(widths[:last]) + 2 * last)
         for row in rows:
             cells = []
-            for i, cell in enumerate(row):
-                text = cell if i < last else _clip(cell, widths[last])
-                padded = text.ljust(widths[i]) if i < last else text
+            for i, cell in enumerate(row[:last]):
+                padded = cell.ljust(widths[i])
                 if severity_col == i and severity_of:
                     padded = self.severity(severity_of(cell), padded)
                 cells.append(padded)
-            lines.append("  ".join(cells))
+            # The last column wraps (never truncates) so copied output keeps every detail.
+            wrapped = textwrap.wrap(row[last], widths[last], break_long_words=True) or [""]
+            lines.append("  ".join(cells + [wrapped[0]]).rstrip())
+            lines += [indent + part for part in wrapped[1:]]
         return lines
-
-
-def _clip(text: str, width: int) -> str:
-    if len(text) <= width:
-        return text
-    return text[: max(1, width - 3)] + "..."
 
 
 def resolve_style(stream: Optional[TextIO] = None, mode: Optional[str] = None,
