@@ -99,9 +99,19 @@ def test_waiting_for_provider_missing_executable_requires_owner():
     assert st.next_action.command == "howlplane doctor --agents"
 
 
-def test_waiting_for_provider_without_missing_executable_stays_automatic():
+def test_waiting_for_provider_without_missing_executable_stays_automatic(monkeypatch):
+    from howlplane.control_plane.presentation import operator
+    monkeypatch.setattr(operator, "_hosted_workers_blocked", lambda: False)
     st = derive_operator_status(_status(state="waiting_for_provider"))
     assert st.owner_required is False
+
+
+def test_waiting_for_provider_in_local_only_mode_says_so(monkeypatch):
+    from howlplane.control_plane.presentation import operator
+    monkeypatch.setattr(operator, "_hosted_workers_blocked", lambda: True)
+    st = derive_operator_status(_status(state="waiting_for_provider"))
+    assert st.owner_required is True
+    assert "local_only" in st.summary and "connected" in st.next_action.message
 
 
 def test_broken_pipe_is_quiet_not_an_internal_error(monkeypatch, capsys, tmp_path):

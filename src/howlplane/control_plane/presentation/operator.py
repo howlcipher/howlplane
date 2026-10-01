@@ -199,6 +199,14 @@ def _owner_items(status: Mapping[str, Any]) -> bool:
     return any(i.get("state") == "awaiting_owner" for i in status.get("parked_items") or [])
 
 
+def _hosted_workers_blocked() -> bool:
+    try:
+        from howlplane.control_plane.config_loader import is_local_only
+        return bool(is_local_only())
+    except Exception:  # noqa: BLE001 - status must never fail on config trouble
+        return False
+
+
 def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = None) -> OperatorStatus:
     """Project the ``factory status`` payload into the operator model."""
     state = str(getattr(status.get("state"), "value", status.get("state")) or "unknown")
@@ -295,6 +303,16 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
             next_action=OperatorAction(
                 f"Install {f'{chr(39)}{binary}{chr(39)}' if binary else 'the missing provider CLI'} "
                 "and make sure it is on PATH, then check readiness.", "howlplane doctor --agents"),
+            **common)
+    if failure is None and state == SupervisorState.WAITING_FOR_PROVIDER.value and _hosted_workers_blocked():
+        return OperatorStatus(
+            label="ATTENTION", severity=Severity.ATTENTION,
+            summary="No worker may run: operating_mode is local_only, which forbids hosted AI workers.",
+            reason_code=ReasonCode.PROVIDER_UNAVAILABLE, owner_required=True, recovery="manual",
+            next_action=OperatorAction(
+                'Set operating_mode = "connected" in ~/.config/howlplane/config.toml '
+                "to let HowlPlane use your installed AI workers, then start again.",
+                "howlplane doctor --agents"),
             **common)
     if failure is ProviderFailureClass.SESSION_LIMIT or (
         state == SupervisorState.WAITING_FOR_PROVIDER.value
