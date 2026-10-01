@@ -139,6 +139,9 @@ func runEngineFallback(cmd *cobra.Command, args []string) error {
 	}
 
 	wantsHelp := len(args) == 0 || args[0] == "-h" || args[0] == "--help"
+	if cmd.HasParent() && wantsHelp {
+		return cmd.Help()
+	}
 	entrypoint, err := enginepath.Resolve()
 	if err != nil {
 		if wantsHelp {
