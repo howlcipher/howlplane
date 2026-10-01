@@ -3,7 +3,41 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Changed
+
+- `cli.py` split finished (backlog rows 75 and 78), behavior-preserving. The agents, status and doctor handlers moved to `status_cli.py`, approve/reject/resume/cancel/unlock to `governance_cli.py`, and `cmd_factory_run*` with the `_factory_*` helpers to `factory/factory_run_cli.py`. `cli.py` re-exports every name as the same object and the moved handlers look shared helpers up on `cli` at call time, so imports and test monkeypatches keep working.
+
 ### Added
+
+- Stored backoff facts (backlog row 80). The supervisor persists `backoff_reason` (`failure_backoff`, `provider_retry_after`, `provider_retry_interval`), `backoff_attempt` (the failure count, only for failure backoff) and `backoff_delay_seconds` when it schedules a retry, and clears them when the wait ends. `factory status` (`--json` keys and the `operator` object `retry_reason`, `retry_attempt`, `retry_delay_seconds`), the `supervisor.state_changed` event and the remote snapshot `backoff` object report the same stored values. Fields are additive; older supervisor records load unchanged.
+
+- Owner decisions for parked work items (backlog row 79). `howlplane approve|reject --work-item ID --state-dir DIR [--repo PATH]` decides a Factory work item parked `awaiting_owner` that has no governed task awaiting approval (for example after a restart during dispatch). It only applies existing transitions (requeue to `ready`, or `rejected`), writes a `work_item_decision` evidence-ledger entry, refuses when a linked task is `awaiting_human` (that stays an `approve TASK` decision) and does not bypass authority gates on re-dispatch. `factory status` now prints the exact command for every parked item; the OWNER_REQUIRED error points at `howlplane factory status` instead of `howlplane status`. Repository proposals still have no decision command (row 81).
+
+- Operator diagnostics pass (backlog rows 75 to 77, see `improvements.md`).
+  `factory status` now names the active worker from the dispatch record (new
+  additive `current_provider`, `current_provider_attempt` and
+  `current_dispatch_started_at` supervisor fields; `worker`,
+  `worker_resource_id`, `dispatch_started_at` in the status JSON; `elapsed_seconds`,
+  `retry_in_seconds`, `recovery`, `attempt` in the `operator` object) and shows
+  elapsed time, retry countdown and whether recovery is automatic only when
+  durable state supports it. Parked work whose governed task awaits the owner
+  shows the exact `howlplane approve|reject TASK --repo WORKTREE` commands.
+  New structured operator event log `logs/factory_events.jsonl` (state
+  directory), separate from provider transcripts under `.task_runs`. New
+  `factory logs` flags `--errors --level --work-item --provider --since --raw
+  --json --verbose -n`; every source (tail, `--follow`, process log, systemd
+  journal) now passes one redaction pipeline, which fixes unredacted `--follow`
+  and journal output and the missed `sk-` token form. Global `--debug` and
+  `--color auto|always|never` flags (also `NO_COLOR`, `HOWLPLANE_DEBUG=1`).
+  Invalid configuration no longer crashes at import: the default loader is
+  built lazily and reported as `INVALID_CONFIGURATION`. Unexpected failures print
+  an `INTERNAL_ERROR` with a `HP-...` diagnostic id and keep the redacted
+  traceback in the diagnostics directory; `--debug` prints it. Factory input
+  errors, `resume` when not stopped and `factory logs` without a repository now
+  use the canonical `howlplane.error/v1` renderer. `doctor`, `factory doctor` and
+  `agents doctor` show diagnostic tables with one READY / LIMITED / NEEDS ACTION
+  / UNAVAILABLE vocabulary. `factory start|stop|resume` print confirmation blocks.
+  Factory handlers moved to `factory/factory_cli.py` behind `cli.py` re-exports.
 
 - Operator experience pass. `howlplane factory status` is human-first by
   default (state, project, current work, health, reason, exact next action) and
