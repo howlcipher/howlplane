@@ -166,7 +166,19 @@ class ResourceSelectionDecision(DataClassSerializationMixin):
     explicit_override: bool = False
     blocked_reason: Optional[str] = None
     diversity_achieved: Optional[bool] = None
+    semantic_recommendation: Optional[Dict[str, Any]] = None
     schema: str = RESOURCE_SELECTION_SCHEMA_VERSION
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializes the packet; omits the semantic block when it is absent.
+
+        Keeping the key out when the feature is off leaves existing evidence
+        byte-compatible for installations that never enable it.
+        """
+        payload = super().to_dict()
+        if payload.get("semantic_recommendation") is None:
+            payload.pop("semantic_recommendation", None)
+        return payload
 
     def exclusion_for(self, resource_id: str) -> ResourceExclusion:
         """Returns one resource's exclusion or raises a precise lookup error."""

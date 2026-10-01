@@ -425,6 +425,7 @@ The `howlplane` launcher locates the HowlPlane control plane using the following
 - [Control Plane Architecture](documentation/CONTROL_PLANE.md)
 - [ADR 0006 — Persistent Factory Supervisor](documentation/adr/0006_persistent_factory_supervisor.md)
 - [Configurable AI Resource Pool](documentation/AI_RESOURCE_POOL.md)
+- [Semantic Recommendation (HowlInstinct)](documentation/SEMANTIC_RECOMMENDATION.md)
 - [User Guide & Operator Reference](documentation/USER_GUIDE.md)
 - [Local AI Worker (Ollama) & Bounded Dogfooding](documentation/LOCAL_MODEL.md)
 - [Data Flows & Network Egress Reference](documentation/data_flows.md)

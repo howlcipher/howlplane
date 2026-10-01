@@ -1,0 +1,142 @@
+{
+  "schema": "howlplane.routing_eval_cases/v1",
+  "description": "Task classes for observing HowlInstinct against deterministic routing. These are inputs, not labeled ground truth: no case states which resource is correct, because resource quality is subjective until execution outcomes are collected.",
+  "cases": [
+    {
+      "id": "rr-routine-edit",
+      "task_class": "bug_fix",
+      "risk_level": "low",
+      "reasoning_tier": "tier_3",
+      "objective": "Fix an off by one error in the pagination helper and update its unit test.",
+      "required_skills": [],
+      "candidates": [
+        "claude_code",
+        "codex",
+        "cursor"
+      ],
+      "label": null
+    },
+    {
+      "id": "rr-large-autonomous",
+      "task_class": "feature",
+      "risk_level": "medium",
+      "reasoning_tier": "tier_2",
+      "objective": "Implement the export service end to end across the api, storage and cli layers with tests, working unattended for several hours.",
+      "required_skills": [
+        "automation"
+      ],
+      "candidates": [
+        "claude_code",
+        "codex",
+        "cursor"
+      ],
+      "label": null
+    },
+    {
+      "id": "rr-architecture",
+      "task_class": "refactor",
+      "risk_level": "high",
+      "reasoning_tier": "tier_1",
+      "objective": "Redesign the module boundaries between the scheduler and the worker pool and record the architecture decision.",
+      "required_skills": [
+        "architectural_guardrails"
+      ],
+      "candidates": [
+        "claude_code",
+        "codex",
+        "cursor"
+      ],
+      "label": null
+    },
+    {
+      "id": "rr-security-sensitive",
+      "task_class": "security_patch",
+      "risk_level": "critical",
+      "reasoning_tier": "tier_1",
+      "objective": "Fix an authorization bypass in the token validation path and review related call sites for the same flaw.",
+      "required_skills": [
+        "cyber_security"
+      ],
+      "candidates": [
+        "claude_code",
+        "codex",
+        "cursor"
+      ],
+      "label": null
+    },
+    {
+      "id": "rr-docs-only",
+      "task_class": "docs",
+      "risk_level": "low",
+      "reasoning_tier": "tier_3",
+      "objective": "Update the installation section of the readme to mention the new minimum runtime version.",
+      "required_skills": [
+        "technical_writing"
+      ],
+      "candidates": [
+        "claude_code",
+        "codex",
+        "cursor"
+      ],
+      "label": null
+    },
+    {
+      "id": "rr-debug-test-repair",
+      "task_class": "test_improvement",
+      "risk_level": "medium",
+      "reasoning_tier": "tier_2",
+      "objective": "Diagnose why the integration test is flaky on CI, repair the test and add a regression guard.",
+      "required_skills": [],
+      "candidates": [
+        "claude_code",
+        "codex",
+        "cursor"
+      ],
+      "label": null
+    },
+    {
+      "id": "rr-cicd",
+      "task_class": "infrastructure",
+      "risk_level": "medium",
+      "reasoning_tier": "tier_2",
+      "objective": "Add a caching step to the build pipeline and fix the failing lint job configuration.",
+      "required_skills": [
+        "devops"
+      ],
+      "candidates": [
+        "claude_code",
+        "codex",
+        "cursor"
+      ],
+      "label": null
+    },
+    {
+      "id": "rr-repo-wide-refactor",
+      "task_class": "refactor",
+      "risk_level": "high",
+      "reasoning_tier": "tier_1",
+      "objective": "Rename the core domain type across the whole repository, update every caller, and keep the public interface compatible.",
+      "required_skills": [],
+      "candidates": [
+        "claude_code",
+        "codex",
+        "cursor"
+      ],
+      "label": null
+    },
+    {
+      "id": "rr-bounded-research",
+      "task_class": "other",
+      "risk_level": "low",
+      "reasoning_tier": "tier_3",
+      "objective": "Summarize three candidate libraries for yaml parsing with their licenses and maintenance status. No code changes.",
+      "required_skills": [],
+      "candidates": [
+        "claude_code",
+        "codex",
+        "cursor"
+      ],
+      "label": null
+    }
+  ]
+}

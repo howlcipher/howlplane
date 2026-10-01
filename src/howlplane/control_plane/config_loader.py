@@ -45,7 +45,13 @@ def _deep_merge(base: dict, override: dict) -> dict:
 def _resource_local_config(local_data: dict) -> dict:
     """Extracts only supported application overrides from operator TOML."""
     source = local_data.get("ai_resources", local_data)
-    supported = ("operating_mode", "providers", "provider_policy", "roles")
+    supported = (
+        "operating_mode",
+        "providers",
+        "provider_policy",
+        "semantic_recommendation",
+        "roles",
+    )
     extracted = {key: source[key] for key in supported if key in source}
     if "roles" in local_data and "roles" not in extracted:
         extracted["roles"] = local_data["roles"]
@@ -187,6 +193,45 @@ class WorkspaceTrustSettings(BaseModel):
         return value.strip().lower() if isinstance(value, str) else value
 
 
+class SemanticRecommendationSettings(BaseModel):
+    """Plane-owned policy for optional HowlInstinct resource judgments.
+
+    HowlInstinct judges; these settings decide what Plane does with a judgment.
+    There is deliberately no default margin: enabling the feature without
+    choosing a threshold is a configuration error, never a hidden cutoff.
+    """
+
+    mode: Literal["off", "shadow", "active"] = "off"
+    provider: Literal["howlinstinct"] = "howlinstinct"
+    command: str = "howlinstinct"
+    minimum_instinct_margin: Optional[float] = None
+    timeout_seconds: float = 5.0
+    decision_roles: List[str] = Field(
+        default_factory=lambda: ["implementation", "remediation"]
+    )
+    on_low_confidence: Literal["deterministic"] = "deterministic"
+    strict: bool = False
+    allow_in_local_only: bool = False
+
+    model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def validate_enabled_policy(self):
+        if self.mode == "off":
+            return self
+        margin = self.minimum_instinct_margin
+        if margin is None or not (0.0 <= margin <= 1.0):
+            raise ValueError(
+                "semantic_recommendation.minimum_instinct_margin must be set "
+                "to a value between 0 and 1 when mode is not 'off'."
+            )
+        if self.timeout_seconds <= 0:
+            raise ValueError("semantic_recommendation.timeout_seconds must be positive.")
+        if not self.command.strip():
+            raise ValueError("semantic_recommendation.command must not be empty.")
+        return self
+
+
 class AppSettings(BaseSettings):
     operating_mode: Literal["local_only", "connected"] = "local_only"
     llm_model: str = "ollama/qwen3:30b-instruct"
@@ -204,6 +249,9 @@ class AppSettings(BaseSettings):
     payload_pipeline: PayloadPipelineSettings = PayloadPipelineSettings()
     providers: Dict[str, ProviderResourceSettings] = Field(default_factory=dict)
     provider_policy: ProviderPolicySettings = ProviderPolicySettings()
+    semantic_recommendation: SemanticRecommendationSettings = (
+        SemanticRecommendationSettings()
+    )
     roles: dict = Field(default_factory=dict)
     workspace_trust: WorkspaceTrustSettings = WorkspaceTrustSettings()
     active_mcps: list = []

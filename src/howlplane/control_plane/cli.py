@@ -55,6 +55,7 @@ from howlplane.control_plane.resource_cli import inventory_document, render_inve
 from howlplane.control_plane.reviewers import list_reviewer_roles, get_reviewer_role
 from howlplane.control_plane.router import TaskRouter, RoutingDecision
 from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
+from howlplane.control_plane.config_loader import SemanticRecommendationSettings
 from howlplane.control_plane.task_spec import TaskSpec
 from howlplane.control_plane.factory.factory_cli import (  # noqa: F401  re-exported for tests and monkeypatching
     _worker_display,
@@ -642,6 +643,17 @@ def cmd_route(args: argparse.Namespace) -> int:
     target_repo = _resolve_repo(args)
     ctx = ProjectAdapter.discover(target_repo)
     pool = ProviderPoolManager.from_config(read_only=True, probe_on_start=False)
+    semantic_mode = getattr(args, "semantic", None)
+    if semantic_mode:
+        try:
+            pool.configure_semantic(
+                SemanticRecommendationSettings.model_validate(
+                    {**pool.semantic_settings.model_dump(), "mode": semantic_mode}
+                )
+            )
+        except ValueError as exc:
+            print(f"Error: invalid semantic recommendation settings: {exc}", file=sys.stderr)
+            return 2
     spec, _decision = create_task_plan(
         ctx, target_repo, None, args, resource_pool=pool
     )
@@ -1279,6 +1291,12 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
         default="implementation",
     )
     p_route.add_argument("--json", action="store_true", help="Output JSON decision")
+    p_route.add_argument(
+        "--semantic",
+        choices=["off", "shadow", "active"],
+        default=None,
+        help="Override the configured HowlInstinct mode for this route only",
+    )
 
     # providers
     p_providers = subparsers.add_parser(

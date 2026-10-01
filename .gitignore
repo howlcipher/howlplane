@@ -12,6 +12,9 @@ client_secret.json
 !config/schemas/*.schema.json
 !schemas/*.schema.json
 !contracts/howl/*.schema.json
+# Vendored HowlInstinct receipt contract and routing evaluation cases are tracked
+!contracts/howlinstinct/*.schema.json
+!evals/resource_routing/*.json
 
 # Tracked run-artifact example fixtures are not credentials
 !examples/runs/*.json
