@@ -88,10 +88,13 @@ set. It cannot bypass local-only, no-egress, capability, paid API, authority, or
 review. An empty set returns a versioned `BLOCKED` outcome with reason
 `NO_ELIGIBLE_AI_RESOURCE` and explainable exclusions.
 
-`CognitiveRecommendation` is the stable future optimization seam. It receives
-only already eligible candidates and cannot alter permission, egress, spend,
-budget, repository scope, approval, or authority. Milestone #61 does not learn
-or persist provider-quality preferences.
+`CognitiveRecommendation` is the optimization seam. It receives only already
+eligible candidates and cannot alter permission, egress, spend, budget,
+repository scope, approval, or authority. The deterministic router fills it by
+default. An optional System 1 judgment from HowlInstinct can inform the same
+ranking position when an operator enables it; see
+[Semantic Recommendation](SEMANTIC_RECOMMENDATION.md). Plane does not learn or
+persist provider-quality preferences.
 
 ## Economics and capacity
 
