@@ -28,7 +28,8 @@ def test_check_python_environment(monkeypatch):
 
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     check_no_venv = check_python_environment()
-    assert check_no_venv.status == "warning"
+    assert check_no_venv.status == "ok"  # a missing virtualenv is only a note
+    assert "optional" in check_no_venv.message
 
 
 def test_check_dependencies():
@@ -51,6 +52,58 @@ def test_check_git_status(tmp_path):
     non_git.mkdir()
     check_bad = check_git_status(non_git)
     assert check_bad.status == "warning"
+
+
+def test_check_git_status_accepts_worktree_git_file(tmp_path):
+    (tmp_path / ".git").write_text("gitdir: /elsewhere/.git/worktrees/x\n")
+    assert check_git_status(tmp_path).status == "ok"
+
+
+def test_check_git_status_says_git_is_not_installed(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    check = check_git_status(tmp_path)
+    assert check.status == "error" and "not installed" in check.message
+    assert "git init" not in check.message + check.details["action"]
+
+
+def test_slopslint_problems_carry_an_action(monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    assert check_slopslint().details["action"] == "bash scripts/install_slopslint.sh"
+
+
+def test_state_dir_and_disk_checks(tmp_path, monkeypatch):
+    from howlplane.control_plane import doctor
+    monkeypatch.setattr(doctor, "_state_dir", lambda: tmp_path / "new" / "state")
+    assert doctor.check_state_dir().status == "ok"  # nothing is created
+    assert not (tmp_path / "new").exists()
+    assert doctor.check_disk_space().status == "ok"
+    monkeypatch.setattr(doctor.shutil, "disk_usage", lambda p: type("U", (), {"free": 10 * 1024 ** 2})())
+    low = doctor.check_disk_space()
+    assert low.status == "warning" and "1 GB" in low.message
+    monkeypatch.setattr(doctor.os, "access", lambda *a: False)
+    assert doctor.check_state_dir().status == "warning"
+
+
+def _fake_loginctl(monkeypatch, doctor, stdout, returncode=0, have=True):
+    monkeypatch.setattr(doctor.sys, "platform", "linux")
+    monkeypatch.setattr(doctor.shutil, "which", lambda n: "/bin/loginctl" if have else None)
+    monkeypatch.setattr(doctor.Path, "is_dir", lambda self: True)
+    monkeypatch.setenv("USER", "bob")
+    monkeypatch.setattr(doctor.subprocess, "run", lambda *a, **k: type(
+        "R", (), {"stdout": stdout, "returncode": returncode})())
+
+
+def test_linger_warns_with_fix_and_skips_when_unavailable(monkeypatch):
+    from howlplane.control_plane import doctor
+    _fake_loginctl(monkeypatch, doctor, "Linger=no\n")
+    check = doctor.check_linger()
+    assert check.status == "warning" and check.details["action"] == "loginctl enable-linger bob"
+    _fake_loginctl(monkeypatch, doctor, "Linger=yes\n")
+    assert doctor.check_linger().status == "ok"
+    _fake_loginctl(monkeypatch, doctor, "", have=False)
+    assert doctor.check_linger() is None
+    _fake_loginctl(monkeypatch, doctor, "", returncode=1)
+    assert doctor.check_linger() is None
 
 
 def test_check_git_hooks(tmp_path):

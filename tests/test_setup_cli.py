@@ -100,3 +100,11 @@ def test_json_contract_never_prompts(repo, monkeypatch, capsys):
     assert doc["schema"] == setup_cli.SETUP_SCHEMA
     assert doc["needs_preparation"] is True and doc["ready"] is False
     assert doc["next_action"]["command"] == "howlplane setup --yes"
+
+
+def test_missing_git_binary_says_so_instead_of_git_init(tmp_path, monkeypatch, capsys):
+    bare = tmp_path / "bin"
+    bare.mkdir()
+    monkeypatch.setenv("PATH", str(bare))
+    code, out = _run(capsys, tmp_path)
+    assert code == 1 and "not installed" in out and "git init" not in out
