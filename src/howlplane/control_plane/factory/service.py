@@ -260,6 +260,10 @@ def start_process(campaign: FactoryCampaign, authority_profile: Optional[str], o
                                            stdout=stream, stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
             record = FactoryProcessRecord(process.pid, get_process_create_time(process.pid), socket.gethostname(),
                                           "process", command, now, str(log_path))
+        # The launch lock is the supervisor's own lock file: free it now so the
+        # child can take it, then verify. Holding it through verification makes
+        # the child lose the lock every time.
+        launch_lock.release()
         _verify_started(campaign, record, process,
                         START_VERIFY_SECONDS if verify_seconds is None else verify_seconds)
         if record.backend == "systemd" and not record.pid:

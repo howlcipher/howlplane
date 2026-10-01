@@ -250,3 +250,24 @@ def test_portable_stop_does_not_persist_stopped_when_process_survives(tmp_path, 
     with pytest.raises(CampaignError):
         service.stop_process(campaign, timeout_seconds=3)
     assert service.load_process(campaign).status == "running"
+
+
+def test_supervisor_lock_is_free_while_start_verifies_the_child(tmp_path, monkeypatch):
+    """The child supervisor takes the same lock file; holding it during verification starves it."""
+    from howlplane.control_plane.locking import SupervisorLock
+
+    monkeypatch.setattr(service, "_systemd_available", lambda: False)
+    campaign = _campaign(tmp_path)
+    monkeypatch.setattr(service.subprocess, "Popen",
+                        lambda cmd, **kw: SimpleNamespace(pid=os.getpid(), poll=lambda: None))
+    seen = {}
+
+    def probe(camp, record, process, seconds):
+        child = SupervisorLock(camp.state_dir, command="child supervisor")
+        child.acquire()  # raises LockError if start still holds the launch lock
+        child.release()
+        seen["free"] = True
+
+    monkeypatch.setattr(service, "_verify_started", probe)
+    service.start_process(campaign, None, None, verify_seconds=0)
+    assert seen == {"free": True}
