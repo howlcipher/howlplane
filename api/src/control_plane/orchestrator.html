@@ -2407,7 +2407,7 @@ Human Authority Boundary Gate -> Complete Evidence Ledger.</p>
 </span><span id="L-1976"><a href="#L-1976"><span class="linenos">1976</span></a>        <span class="n">meta</span> <span class="o">=</span> <span class="n">metadata</span> <span class="ow">or</span> <span class="p">{}</span>
 </span><span id="L-1977"><a href="#L-1977"><span class="linenos">1977</span></a>        <span class="n">entry</span> <span class="o">=</span> <span class="n">EvidenceEntry</span><span class="p">(</span>
 </span><span id="L-1978"><a href="#L-1978"><span class="linenos">1978</span></a>            <span class="n">task_id</span><span class="o">=</span><span class="n">task_id</span><span class="p">,</span>
-</span><span id="L-1979"><a href="#L-1979"><span class="linenos">1979</span></a>            <span class="n">agent_id</span><span class="o">=</span><span class="n">agent_id</span><span class="p">,</span>
+</span><span id="L-1979"><a href="#L-1979"><span class="linenos">1979</span></a>            <span class="n">agent_id</span><span class="o">=</span><span class="n">agent_id</span> <span class="ow">or</span> <span class="s2">"control_plane"</span><span class="p">,</span>
 </span><span id="L-1980"><a href="#L-1980"><span class="linenos">1980</span></a>            <span class="n">action</span><span class="o">=</span><span class="n">action</span><span class="p">,</span>
 </span><span id="L-1981"><a href="#L-1981"><span class="linenos">1981</span></a>            <span class="n">command</span><span class="o">=</span><span class="n">command</span><span class="p">,</span>
 </span><span id="L-1982"><a href="#L-1982"><span class="linenos">1982</span></a>            <span class="n">result</span><span class="o">=</span><span class="n">result</span><span class="p">,</span>
@@ -4916,7 +4916,7 @@ Human Authority Boundary Gate -> Complete Evidence Ledger.</p>
                     <div class="attr variable">
             <span class="name">CONTROL_PLANE_RUN_ARTIFACTS</span>        =
 <input id="CONTROL_PLANE_RUN_ARTIFACTS-view-value" class="view-value-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
-            <label class="view-value-button pdoc-button" for="CONTROL_PLANE_RUN_ARTIFACTS-view-value"></label><span class="default_value">frozenset({&#39;checkpoints&#39;, &#39;provider_scratch&#39;, &#39;diff.patch&#39;, &#39;scratch_manifest.json&#39;, &#39;baseline.json&#39;, &#39;progress.json&#39;, &#39;initial_route.json&#39;, &#39;route.json&#39;, &#39;verification_plan.json&#39;, &#39;implementation&#39;, &#39;summary.md&#39;, &#39;reviews&#39;, &#39;.task.lock&#39;, &#39;decision_packet.md&#39;, &#39;project_context.json&#39;, &#39;candidate.json&#39;, &#39;execution_receipt.json&#39;, &#39;stage_checkpoint.json&#39;, &#39;remediation&#39;, &#39;findings_template.yaml&#39;, &#39;howlframe_audit.json&#39;, &#39;task.yaml&#39;, &#39;trajectories&#39;, &#39;effective_route.json&#39;})</span>
+            <label class="view-value-button pdoc-button" for="CONTROL_PLANE_RUN_ARTIFACTS-view-value"></label><span class="default_value">frozenset({&#39;effective_route.json&#39;, &#39;decision_packet.md&#39;, &#39;howlframe_audit.json&#39;, &#39;scratch_manifest.json&#39;, &#39;reviews&#39;, &#39;verification_plan.json&#39;, &#39;stage_checkpoint.json&#39;, &#39;remediation&#39;, &#39;execution_receipt.json&#39;, &#39;route.json&#39;, &#39;implementation&#39;, &#39;.task.lock&#39;, &#39;initial_route.json&#39;, &#39;diff.patch&#39;, &#39;findings_template.yaml&#39;, &#39;task.yaml&#39;, &#39;progress.json&#39;, &#39;provider_scratch&#39;, &#39;candidate.json&#39;, &#39;trajectories&#39;, &#39;checkpoints&#39;, &#39;baseline.json&#39;, &#39;project_context.json&#39;, &#39;summary.md&#39;})</span>
 
         
     </div>
@@ -5587,7 +5587,7 @@ Human Authority Boundary Gate -> Complete Evidence Ledger.</p>
                 <section id="TERMINAL_VERIFICATION_STATUSES">
                     <div class="attr variable">
             <span class="name">TERMINAL_VERIFICATION_STATUSES</span>        =
-<span class="default_value">frozenset({&#39;passed&#39;, &#39;partial&#39;, &#39;failed&#39;})</span>
+<span class="default_value">frozenset({&#39;partial&#39;, &#39;passed&#39;, &#39;failed&#39;})</span>
 
         
     </div>
@@ -7710,7 +7710,7 @@ Human Authority Boundary Gate -> Complete Evidence Ledger.</p>
 </span><span id="GovernedTaskOrchestrator-1977"><a href="#GovernedTaskOrchestrator-1977"><span class="linenos">1977</span></a>        <span class="n">meta</span> <span class="o">=</span> <span class="n">metadata</span> <span class="ow">or</span> <span class="p">{}</span>
 </span><span id="GovernedTaskOrchestrator-1978"><a href="#GovernedTaskOrchestrator-1978"><span class="linenos">1978</span></a>        <span class="n">entry</span> <span class="o">=</span> <span class="n">EvidenceEntry</span><span class="p">(</span>
 </span><span id="GovernedTaskOrchestrator-1979"><a href="#GovernedTaskOrchestrator-1979"><span class="linenos">1979</span></a>            <span class="n">task_id</span><span class="o">=</span><span class="n">task_id</span><span class="p">,</span>
-</span><span id="GovernedTaskOrchestrator-1980"><a href="#GovernedTaskOrchestrator-1980"><span class="linenos">1980</span></a>            <span class="n">agent_id</span><span class="o">=</span><span class="n">agent_id</span><span class="p">,</span>
+</span><span id="GovernedTaskOrchestrator-1980"><a href="#GovernedTaskOrchestrator-1980"><span class="linenos">1980</span></a>            <span class="n">agent_id</span><span class="o">=</span><span class="n">agent_id</span> <span class="ow">or</span> <span class="s2">"control_plane"</span><span class="p">,</span>
 </span><span id="GovernedTaskOrchestrator-1981"><a href="#GovernedTaskOrchestrator-1981"><span class="linenos">1981</span></a>            <span class="n">action</span><span class="o">=</span><span class="n">action</span><span class="p">,</span>
 </span><span id="GovernedTaskOrchestrator-1982"><a href="#GovernedTaskOrchestrator-1982"><span class="linenos">1982</span></a>            <span class="n">command</span><span class="o">=</span><span class="n">command</span><span class="p">,</span>
 </span><span id="GovernedTaskOrchestrator-1983"><a href="#GovernedTaskOrchestrator-1983"><span class="linenos">1983</span></a>            <span class="n">result</span><span class="o">=</span><span class="n">result</span><span class="p">,</span>
