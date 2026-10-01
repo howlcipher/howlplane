@@ -27,6 +27,10 @@ from tests._dogfood_test_helpers import init_minimal_python_repo
 from tests._factory_test_helpers import make_supervisor, ready_work_item
 
 
+from howlplane.control_plane.evidence_ledger import EvidenceLedger  # noqa: E402
+from tests._tia_helpers import record_valid_tia  # noqa: E402
+
+
 def _setup_engine(
     repo: Path, shared_traj_dir: Path, campaign_name: str, campaign_dir: Path
 ) -> MarathonDogfoodEngine:
@@ -38,20 +42,31 @@ def _setup_engine(
     for provider in ("codex", "agy", "devin_cli", "gemini_cli", "local_ollama"):
         pool.set_status(provider, ProviderAvailabilityStatus.SESSION_EXHAUSTED)
     pool.set_status("claude_code", ProviderAvailabilityStatus.AVAILABLE)
-    backend = FakeAgentBackend(
-        agent_id="claude_code",
-        side_effect=lambda task, cwd, prompt: (cwd / "src" / "feature.py").write_text(
+    # Shared across campaigns: both dispatch the same task id into the same repo.
+    cp_root = campaign_dir.parent / "control_plane"
+    ledger = EvidenceLedger(str(cp_root / "logs" / "control_plane" / "evidence_ledger.jsonl"))
+
+    def implement(task, cwd, prompt):
+        (cwd / "src" / "feature.py").write_text(
             f"def run():\n    # {task.task_id} {campaign_name}\n    return True\n"
-        ),
-    )
+        )
+
+    backend = FakeAgentBackend(agent_id="claude_code", side_effect=implement)
 
     def orch_factory(config: OrchestrationConfig) -> GovernedTaskOrchestrator:
         config.trajectory_store_dir = shared_traj_dir
         config.custom_backend = backend
-        config.custom_reviewer_fn = lambda role, diff, task: "findings: []\n"
+        def review(role, diff, task):
+            # The completion gate requires a TIA for code-changing work. The
+            # delta may already exist in the shared repo (no implementation
+            # call), so record it where the task id is always available.
+            record_valid_tia(ledger, task.task_id)
+            return "findings: []\n"
+
+        config.custom_reviewer_fn = review
         config.acquire_locks = False
         config.enable_howlframe_audit = False
-        return GovernedTaskOrchestrator(repo, config=config)
+        return GovernedTaskOrchestrator(repo, control_plane_root=cp_root, config=config)
 
     engine = MarathonDogfoodEngine(
         provider_pool=pool,

@@ -37,6 +37,7 @@ from howlplane.control_plane.launcher import cmd_approve, cmd_reject, cmd_resume
 from howlplane.control_plane.task_spec import TaskSpec
 from howlplane.control_plane.git_env import run_git_in_repo
 from tests._git_test_helpers import git_in_repo, init_git_repo
+from tests._tia_helpers import record_valid_tia
 
 
 def _init_git_repo(repo_path: Path) -> None:
@@ -102,6 +103,7 @@ def test_scenario_1_approve_and_resume_to_complete(tmp_path: Path):
     ledger = EvidenceLedger(str(ledger_file))
 
     run_dir = _create_awaiting_human_task_run(tmp_path, "TASK-101")
+    record_valid_tia(ledger, "TASK-101")
 
     # 1. Approve task
     record = HumanLifecycleManager.approve(
@@ -275,6 +277,7 @@ def test_scenario_9_evidence_ledger_lifecycle_events(tmp_path: Path):
     ledger = EvidenceLedger(str(ledger_file))
 
     _create_awaiting_human_task_run(tmp_path, "TASK-109")
+    record_valid_tia(ledger, "TASK-109")
 
     # Record human decision requested
     ledger.append_entry(
@@ -301,6 +304,8 @@ def test_scenario_10_status_ux_and_cli_dispatch(tmp_path: Path, capsys):
     """Scenario 10: Status UX surfaces pending, approved, and next actions accurately."""
     _init_git_repo(tmp_path)
     _create_awaiting_human_task_run(tmp_path, "TASK-110")
+    ledger_file = tmp_path / "cli-ledger.jsonl"
+    record_valid_tia(EvidenceLedger(str(ledger_file)), "TASK-110")
 
     parser = build_parser()
 
@@ -329,7 +334,7 @@ def test_scenario_10_status_ux_and_cli_dispatch(tmp_path: Path, capsys):
     assert "howlplane resume TASK-110" in out_status2
 
     # Test CLI resume command
-    opts_resume = parser.parse_args(["resume", "TASK-110", "--repo", str(tmp_path), "--json"])
+    opts_resume = parser.parse_args(["resume", "TASK-110", "--repo", str(tmp_path), "--ledger-file", str(ledger_file), "--json"])
     ret_resume = cmd_resume(opts_resume)
     assert ret_resume == 0
     out_resume = capsys.readouterr().out

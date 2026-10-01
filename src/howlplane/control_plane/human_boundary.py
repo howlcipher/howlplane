@@ -14,6 +14,7 @@ import hashlib, json, os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from howlplane.control_plane.completion_gate import GATE_BLOCKED_ACTION, evaluate_completion_gate
 from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
 from howlplane.control_plane.git_env import run_git_in_repo
 from howlplane.control_plane.hygiene_policy import (
@@ -951,6 +952,71 @@ class HumanLifecycleManager:
             )
         return status
 
+    @staticmethod
+    def _resume_changed_paths(
+        target_repo: Union[str, Path],
+        run_dir: Path,
+        current_fp: Any,
+    ) -> List[str]:
+        """Paths this task changed, from the recorded baseline when available."""
+        baseline_file = run_dir / "baseline.json"
+        if baseline_file.is_file():
+            try:
+                from howlplane.control_plane.git_baseline import GitBaseline, capture_delta
+
+                baseline = GitBaseline.from_dict(json.loads(baseline_file.read_text(encoding="utf-8")))
+                delta = capture_delta(Path(target_repo).resolve(), baseline)
+                return list(delta.files_added) + list(delta.files_modified) + list(delta.files_deleted)
+            except Exception:
+                pass
+        return list(current_fp.files_modified)
+
+    @classmethod
+    def _tia_blocked_terminal_result(
+        cls,
+        task_id: str,
+        task_spec: Any,
+        run_dir: Path,
+        reason: str,
+        decision: Any,
+        ledger: Optional[EvidenceLedger],
+    ) -> Any:
+        """Ends a resumed task as blocked when the TIA completion gate fails."""
+        from howlplane.control_plane.orchestrator import OrchestrationResult
+
+        task_spec.transition_to("blocked", reason)
+        task_spec.save_to_file(str(run_dir / "task.yaml"))
+        summary_file = run_dir / "summary.md"
+        if not summary_file.is_file():
+            summary_file.write_text(
+                f"# Governed Task Run Summary: `{task_id}`\n\n"
+                f"- **Objective:** {task_spec.objective}\n"
+                f"- **Final State:** `BLOCKED`\n"
+                f"- **Approved At:** {decision.timestamp}\n\n"
+                f"{reason}\n",
+                encoding="utf-8",
+            )
+        if ledger:
+            ledger.append_entry(
+                EvidenceEntry(
+                    task_id=task_id,
+                    agent_id="control_plane",
+                    action=GATE_BLOCKED_ACTION,
+                    result=reason,
+                    task_class=task_spec.task_class,
+                    risk_level=task_spec.risk_level,
+                    metadata={"human_approved": True, "resumed": True, "final_state": "blocked"},
+                )
+            )
+        return OrchestrationResult(
+            task_id=task_id,
+            task_spec=task_spec,
+            final_state="blocked",
+            exit_code=1,
+            run_dir=str(run_dir),
+            error_message=reason,
+        )
+
     @classmethod
     def _unverified_terminal_result(
         cls,
@@ -1335,6 +1401,23 @@ class HumanLifecycleManager:
                             task_spec=task_spec,
                             run_dir=run_dir,
                             verif_status=verif_status,
+                            decision=decision,
+                            ledger=ledger,
+                        )
+
+                    # Human approval is not permission to skip testing governance:
+                    # the same TIA completion gate as Stage 8 applies here.
+                    gate = evaluate_completion_gate(
+                        ledger,
+                        task_id,
+                        cls._resume_changed_paths(target_repo, run_dir, current_fp),
+                    )
+                    if not gate.allowed:
+                        return cls._tia_blocked_terminal_result(
+                            task_id=task_id,
+                            task_spec=task_spec,
+                            run_dir=run_dir,
+                            reason=gate.reason,
                             decision=decision,
                             ledger=ledger,
                         )
