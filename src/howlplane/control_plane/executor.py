@@ -187,12 +187,7 @@ def find_howlchangeops_binary() -> Optional[Path]:
     if which_co:
         return Path(which_co).resolve()
 
-    # 4. Sibling dev workspace path
-    sibling = Path("/run/media/system/tallgeese/dev/howlchangeops/howlchangeops")
-    if sibling.is_file() and os.access(sibling, os.X_OK):
-        return sibling.resolve()
-
-    # 5. ~/.local/bin/howlchangeops
+    # 4. ~/.local/bin/howlchangeops
     user_local = Path.home() / ".local" / "bin" / "howlchangeops"
     if user_local.is_file() and os.access(user_local, os.X_OK):
         return user_local.resolve()

@@ -47,7 +47,7 @@ def check_python_environment() -> DiagnosticCheck:
 
 
 def check_dependencies() -> DiagnosticCheck:
-    required = ["pytest", "yaml", "jsonschema"]
+    required = ["yaml", "jsonschema"]
     missing = []
     for pkg in required:
         try:

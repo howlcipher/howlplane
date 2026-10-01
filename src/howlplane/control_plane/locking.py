@@ -455,13 +455,25 @@ class _BaseFileLock:
         content = meta.to_json()
         try:
             self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(
-                str(self.lock_path),
-                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                0o644,
+            # Publish atomically: write the full metadata to a private temp
+            # file, then hard-link it into place. link() fails if the lock
+            # exists, so a competitor never observes a half-written lock and
+            # mistakes it for a corrupt one to delete.
+            tmp_path = self.lock_path.with_name(
+                f".{self.lock_path.name}.{my_pid}.{uuid.uuid4().hex}.tmp"
             )
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
+            fd = os.open(str(tmp_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.link(str(tmp_path), str(self.lock_path))
+            finally:
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
             own = LockOwnership(
                 lineage_id=uuid.uuid4().hex,
                 lock_path=str(self.lock_path),

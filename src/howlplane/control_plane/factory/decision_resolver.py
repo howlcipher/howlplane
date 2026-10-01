@@ -97,25 +97,21 @@ def waiting_for_decision(args: argparse.Namespace) -> List[str]:
 
 
 def resolve_decision_target(args: argparse.Namespace) -> Optional[DecisionTarget]:
-    """The single target the positional id names, or None to use the plain task path.
+    """The single target the positional id names.
 
-    None means nothing in a Factory campaign carries the id and no campaign state
-    exists to search, so the established task command reports its own error.
+    Raises DECISION_TARGET_NOT_FOUND when nothing carries the id.
     """
     from howlplane.control_plane.factory.repo_proposal import RepoProposalStore
     from howlplane.control_plane.factory.work_item import WorkItemStore
     item_id = args.task_id
     campaign = discover_campaign(args)
     matches: List[DecisionTarget] = []
-    searched_state = False
     if campaign is not None:
         state = Path(campaign.state_dir)
         if (state / "work_items").is_dir():
-            searched_state = True
             if _exists(WorkItemStore(state / "work_items"), item_id):
                 matches.append(DecisionTarget(WORK_ITEM, item_id, state_dir=str(state)))
         if (state / "repo_proposals").is_dir():
-            searched_state = True
             if _exists(RepoProposalStore(state / "repo_proposals"), item_id):
                 matches.append(DecisionTarget(PROPOSAL, item_id, state_dir=str(state)))
     for base in _task_dirs(args, campaign):
@@ -130,8 +126,6 @@ def resolve_decision_target(args: argparse.Namespace) -> Optional[DecisionTarget
             "DECISION_TARGET_AMBIGUOUS", f"'{item_id}' names more than one thing.",
             f"It matches: {kinds}. HowlPlane will not guess which one you mean.",
             "Say which one.", f"howlplane approve --work-item {item_id}"))
-    if not searched_state:
-        return None
     waiting = waiting_for_decision(args)
     raise OperatorFailure(OperatorError(
         "DECISION_TARGET_NOT_FOUND", f"Nothing called '{item_id}' is waiting for a decision.",

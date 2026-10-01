@@ -2,6 +2,12 @@
 # Deprecated compatibility launcher for the HowlPlane control plane.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+SELF="${BASH_SOURCE[0]}"
+while [[ -L "${SELF}" ]]; do
+    SELF_DIR="$(cd -P "$(dirname "${SELF}")" && pwd)"
+    SELF="$(readlink "${SELF}")"
+    [[ "${SELF}" == /* ]] || SELF="${SELF_DIR}/${SELF}"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "${SELF}")" 2>/dev/null && pwd || true)"
 export HOWLPLANE_LEGACY_AI=1
 exec "${SCRIPT_DIR}/howlplane" "$@"

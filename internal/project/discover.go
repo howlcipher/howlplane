@@ -8,7 +8,7 @@ import (
 
 // DiscoverRoot traverses upwards from the given starting directory
 // to find the root of the project, identified by the presence of .ai-project.toml
-// If that is not found, it falls back to the presence of a .git directory.
+// If that is not found, it falls back to the presence of a .git directory or file (worktrees and submodules).
 func DiscoverRoot(startDir string) (string, error) {
 	absStart, err := filepath.Abs(startDir)
 	if err != nil {
@@ -24,7 +24,7 @@ func DiscoverRoot(startDir string) (string, error) {
 
 		// Fallback to git root
 		gitPath := filepath.Join(current, ".git")
-		if info, err := os.Stat(gitPath); err == nil && info.IsDir() {
+		if info, err := os.Stat(gitPath); err == nil && (info.IsDir() || info.Mode().IsRegular()) {
 			return current, nil
 		}
 

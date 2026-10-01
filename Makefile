@@ -4,7 +4,7 @@
 install:
 	@echo "Installing Go and Python dependencies and global launchers..."
 	go mod tidy
-	go build -o build/howlplane ./cmd/howlplane
+	go build -ldflags "$(GO_LDFLAGS)" -o build/howlplane ./cmd/howlplane
 	pip install -e ".[dev]"
 	mkdir -p $(HOME)/.config/howlplane
 	printf '[control_plane]\npath = "%s"\n' "$$(pwd)" > $(HOME)/.config/howlplane/config.toml
@@ -14,11 +14,17 @@ install:
 	ln -sf $$(pwd)/bin/howlplane $(HOME)/.local/bin/howlplane
 	ln -sf $$(pwd)/bin/ai $(HOME)/.local/bin/ai
 
-PYTEST ?= $(shell if [ -f /run/media/system/tallgeese/dev/.ci_verify_venv/bin/pytest ]; then echo /run/media/system/tallgeese/dev/.ci_verify_venv/bin/pytest; elif [ -f venv/bin/pytest ]; then echo venv/bin/pytest; else echo pytest; fi)
-PYTHON ?= $(shell if [ -f /run/media/system/tallgeese/dev/.ci_verify_venv/bin/python3 ]; then echo /run/media/system/tallgeese/dev/.ci_verify_venv/bin/python3; elif [ -f venv/bin/python3 ]; then echo venv/bin/python3; else echo python3; fi)
-FLAKE8 ?= $(shell if [ -f /run/media/system/tallgeese/dev/.ci_verify_venv/bin/flake8 ]; then echo /run/media/system/tallgeese/dev/.ci_verify_venv/bin/flake8; elif [ -f venv/bin/flake8 ]; then echo venv/bin/flake8; else echo flake8; fi)
-BANDIT ?= $(shell if [ -f /run/media/system/tallgeese/dev/.ci_verify_venv/bin/bandit ]; then echo /run/media/system/tallgeese/dev/.ci_verify_venv/bin/bandit; elif [ -f venv/bin/bandit ]; then echo venv/bin/bandit; else echo bandit; fi)
-PDOC ?= $(shell if [ -f /run/media/system/tallgeese/dev/.ci_verify_venv/bin/pdoc ]; then echo /run/media/system/tallgeese/dev/.ci_verify_venv/bin/pdoc; elif [ -f venv/bin/pdoc ]; then echo venv/bin/pdoc; else echo pdoc; fi)
+VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//' || true)
+ifeq ($(VERSION),)
+VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+endif
+GO_LDFLAGS := -X github.com/howlcipher/howlplane/internal/version.Version=$(VERSION)
+
+PYTEST ?= $(shell if [ -f venv/bin/pytest ]; then echo venv/bin/pytest; else echo pytest; fi)
+PYTHON ?= $(shell if [ -f venv/bin/python3 ]; then echo venv/bin/python3; else echo python3; fi)
+FLAKE8 ?= $(shell if [ -f venv/bin/flake8 ]; then echo venv/bin/flake8; else echo flake8; fi)
+BANDIT ?= $(shell if [ -f venv/bin/bandit ]; then echo venv/bin/bandit; else echo bandit; fi)
+PDOC ?= $(shell if [ -f venv/bin/pdoc ]; then echo venv/bin/pdoc; else echo pdoc; fi)
 
 # Testing and Coverage
 test:
@@ -106,7 +112,7 @@ clean:
 # Build
 build:
 	@echo "Building Go binary..."
-	go build -o howlplane ./cmd/howlplane
+	go build -ldflags "$(GO_LDFLAGS)" -o howlplane ./cmd/howlplane
 	@echo "Build complete: ./howlplane"
 
 # Documentation

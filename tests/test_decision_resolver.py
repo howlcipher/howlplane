@@ -94,9 +94,10 @@ def test_no_prefix_matching(product):
     assert code == 1 and "DECISION_TARGET_NOT_FOUND" in err
 
 
-def test_without_a_factory_the_plain_task_error_is_unchanged(product):
+def test_unknown_id_without_a_factory_is_a_friendly_error_not_a_bug_report(product):
     code, out, err = product.run("approve", "TASK-404")
-    assert code == 1 and "DECISION_TARGET_NOT_FOUND" not in err
+    assert code == 1
+    assert "DECISION_TARGET_NOT_FOUND" in err and "INTERNAL_ERROR" not in err
 
 
 def test_explicit_flags_still_work_and_state_dir_stays_an_override(product):

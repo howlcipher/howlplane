@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/howlcipher/howlplane/internal/enginepath"
 	"github.com/howlcipher/howlplane/internal/project"
@@ -68,7 +70,33 @@ func newPlaneCommand(use, short string) *cobra.Command {
 		SilenceUsage:       true,
 	}
 	command.AddCommand(newProjectCommand())
+	// Replace Cobra's built-in help command so "help <cmd>" can be
+	// forwarded to the engine when it is available.
+	command.SetHelpCommand(&cobra.Command{
+		Use:                "help [command]",
+		Short:              "Help about any command",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && args[0] == "project" {
+				return showNativeHelp(cmd.Root(), "project")
+			}
+			if entrypoint, err := enginepath.Resolve(); err == nil {
+				return runEngine(cmd, entrypoint, append([]string{"help"}, args...))
+			}
+			return showNativeHelp(cmd.Root(), args...)
+		},
+	})
 	return command
+}
+
+func showNativeHelp(root *cobra.Command, args ...string) error {
+	target := root
+	if len(args) > 0 {
+		if found, _, err := root.Find(args); err == nil && found != nil {
+			target = found
+		}
+	}
+	return target.Help()
 }
 
 // EngineExitError reports the sibling Python engine's own exit code, so
@@ -90,8 +118,11 @@ func (e *EngineExitError) Error() string {
 // bin/howlplane performed before Howl could install this binary directly
 // onto PATH.
 //
-// --version and -h/--help are handled here directly rather than
-// forwarded. Cobra's own automatic handling for both requires flag
+// --version/-v is handled here directly rather than forwarded; -h/--help
+// and no-args are forwarded to the engine when it can be located, and fall
+// back to native help otherwise.
+//
+// Historical rationale for --version: Cobra's own automatic handling for both requires flag
 // parsing this command deliberately disables (see newPlaneCommand):
 //   - delegating --version to the engine would report the Python
 //     engine's version instead of this compiled Go binary's -- exactly
@@ -102,31 +133,69 @@ func (e *EngineExitError) Error() string {
 //     composed under another CLI's root via NewPlaneCommand) with the
 //     engine's argparse help text, which knows nothing about "project".
 func runEngineFallback(cmd *cobra.Command, args []string) error {
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
-		return cmd.Help()
-	}
-	if args[0] == "--version" {
+	if len(args) > 0 && (args[0] == "--version" || args[0] == "-v") {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s version %s\n", cmd.Name(), cmd.Version)
 		return nil
 	}
 
+	wantsHelp := len(args) == 0 || args[0] == "-h" || args[0] == "--help"
 	entrypoint, err := enginepath.Resolve()
 	if err != nil {
+		if wantsHelp {
+			// Without an engine, native help is the best available answer.
+			return cmd.Help()
+		}
 		return err
 	}
+	return runEngine(cmd, entrypoint, args)
+}
 
+// runEngine runs the engine with args, forwarding SIGINT/SIGTERM to it and
+// mapping death-by-signal to the conventional 128+signal exit status.
+func runEngine(cmd *cobra.Command, entrypoint string, args []string) error {
 	// #nosec G204 -- entrypoint is validated by enginepath.Resolve and args are forwarded operator CLI inputs
 	sub := exec.Command(entrypoint, args...)
 	sub.Stdin = cmd.InOrStdin()
 	sub.Stdout = cmd.OutOrStdout()
 	sub.Stderr = cmd.ErrOrStderr()
-	if err := sub.Run(); err != nil {
+
+	sigs := make(chan os.Signal, 4)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigs)
+
+	if err := sub.Start(); err != nil {
+		return fmt.Errorf("failed to run the control-plane engine: %w", err)
+	}
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		for {
+			select {
+			case sig := <-sigs:
+				_ = sub.Process.Signal(sig)
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	if err := sub.Wait(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return &EngineExitError{Code: exitErr.ExitCode()}
+			return &EngineExitError{Code: engineExitCode(exitErr)}
 		}
 		return fmt.Errorf("failed to run the control-plane engine: %w", err)
 	}
 	return nil
+}
+
+func engineExitCode(exitErr *exec.ExitError) int {
+	if code := exitErr.ExitCode(); code >= 0 {
+		return code
+	}
+	if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+		return 128 + int(ws.Signal())
+	}
+	return 1
 }
 
 func newProjectCommand() *cobra.Command {

@@ -25,6 +25,7 @@ def _copy_script_to_tmp(tmp_path: pathlib.Path) -> pathlib.Path:
 
 
 def test_install_pre_commit_hook_creates_literal_filename(tmp_path: pathlib.Path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     hooks_dir = tmp_path / ".git" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
