@@ -45,15 +45,46 @@ def _handle_work_item_decision(args: argparse.Namespace, decision: str) -> int:
     return 0
 
 
+def _handle_proposal_decision(args: argparse.Namespace, decision: str) -> int:
+    from howlplane.control_plane.factory.proposal_decision import ProposalDecisionError, decide_proposal
+    from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+    if not getattr(args, "state_dir", None):
+        raise OperatorFailure(OperatorError(
+            "MISSING_STATE_DIRECTORY", "--proposal needs --state-dir.",
+            "The Factory state directory says where the proposal is stored.",
+            "Copy the exact command from the Factory status.", "howlplane factory status"))
+    ledger_file = _cli()._resolve_ledger_file(args)
+    ledger = _cli().EvidenceLedger(ledger_file) if ledger_file else None
+    try:
+        result = decide_proposal(args.state_dir, args.proposal, decision,
+                                 reason=getattr(args, "reason", None), ledger=ledger)
+    except ProposalDecisionError as exc:
+        raise OperatorFailure(OperatorError(exc.code, str(exc), exc.why, exc.next_action, exc.command))
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(result, indent=2))
+    else:
+        title = "PROPOSAL ACCEPTED" if decision == "approved" else "PROPOSAL REJECTED"
+        print(f"{title}: {result['proposal_id']} ({result['from_state']} -> {result['state']})")
+        if decision == "approved":
+            print("Recorded as accepted. No repository was created; a later governed bootstrap step acts on it.")
+        if result.get("reason"):
+            print(f"Reason: {result['reason']}")
+    return 0
+
+
 def _handle_decision(args: argparse.Namespace, decision: str) -> int:
     from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
-    if bool(getattr(args, "work_item", None)) == bool(getattr(args, "task_id", None)):
+    targets = [getattr(args, name, None) for name in ("task_id", "work_item", "proposal")]
+    if sum(1 for target in targets if target) != 1:
         raise OperatorFailure(OperatorError(
-            "DECISION_TARGET_REQUIRED", "Give exactly one of TASK_ID or --work-item.",
-            "A decision applies either to a governed task or to a parked Factory work item.",
+            "DECISION_TARGET_REQUIRED", "Give exactly one of TASK_ID, --work-item or --proposal.",
+            "A decision applies to one governed task, one parked Factory work item, or one repository proposal.",
             "List what is waiting and copy the exact command.", "howlplane factory status"))
     if getattr(args, "work_item", None):
         return _cli()._handle_work_item_decision(args, decision)
+    if getattr(args, "proposal", None):
+        return _cli()._handle_proposal_decision(args, decision)
     target_repo = str(_cli()._resolve_repo(args))
     ledger_file = _cli()._resolve_ledger_file(args)
     ledger = _cli().EvidenceLedger(ledger_file) if ledger_file else None

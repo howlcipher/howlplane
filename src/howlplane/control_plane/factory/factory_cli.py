@@ -62,6 +62,18 @@ def _owner_decisions(work_store: Any, target_dir: Any, state_dir: Any = None) ->
     return decisions
 
 
+def _proposal_decisions(proposal_store: Any, state_dir: Any) -> List[Dict[str, str]]:
+    """Exact approve/reject commands for every repository proposal awaiting authority."""
+    from howlplane.control_plane.factory.proposal_decision import proposal_commands
+    if state_dir is None:
+        return []
+    return [
+        {"proposal_id": p.proposal_id, "repository_name": p.repository_name, "kind": "proposal",
+         **proposal_commands(p.proposal_id, str(state_dir))}
+        for p in proposal_store.list_awaiting_authority()
+    ]
+
+
 def cmd_factory_status(args: argparse.Namespace) -> int:
     from pathlib import Path
     from howlplane.control_plane.factory.campaign import campaign_from_state_dir
@@ -149,9 +161,10 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         })
     from howlplane.control_plane.factory.status_publish import publish_cli_status
     published = publish_cli_status(status, args)
-    if campaign is not None:
-        # Local commands name local paths, so they are added after the redacted publish.
-        status["decisions"] = _cli()._owner_decisions(work_store, campaign.target_dir, args.state_dir)
+    # Local commands name local paths, so they are added after the redacted publish.
+    status["decisions"] = (
+        (_cli()._owner_decisions(work_store, campaign.target_dir, args.state_dir) if campaign is not None else [])
+        + _proposal_decisions(proposal_store, args.state_dir))
     from howlplane.control_plane.presentation.operator import (
         derive_operator_status,
         render_operator_text,

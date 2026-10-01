@@ -71,6 +71,7 @@ from howlplane.control_plane.factory.factory_cli import (  # noqa: F401  re-expo
 from howlplane.control_plane.verification import VerificationPlan
 from howlplane.control_plane.governance_cli import (  # noqa: F401  re-exported for tests and monkeypatching
     _handle_work_item_decision,
+    _handle_proposal_decision,
     _handle_decision,
     cmd_approve,
     cmd_reject,
@@ -1388,19 +1389,21 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_ha.add_argument("--json", action="store_true", help="Output JSON result")
 
     # approve
-    p_appr = subparsers.add_parser("approve", parents=[common_parser], help="Approve an awaiting_human task or a parked Factory work item")
+    p_appr = subparsers.add_parser("approve", parents=[common_parser], help="Approve an awaiting_human task, a parked work item, or a repository proposal")
     p_appr.add_argument("task_id", nargs="?", help="Task ID to approve")
     p_appr.add_argument("--work-item", help="Parked Factory work item to approve (instead of a task ID)")
-    p_appr.add_argument("--state-dir", help="Factory state directory holding the work item")
+    p_appr.add_argument("--proposal", help="Repository proposal awaiting authority to approve (instead of a task ID)")
+    p_appr.add_argument("--state-dir", help="Factory state directory holding the work item or proposal")
     p_appr.add_argument("--reason", help="Optional human reason for approval")
     p_appr.add_argument("--ledger-file", help="Ledger file path")
     p_appr.add_argument("--json", action="store_true", help="Output JSON result")
 
     # reject
-    p_rej = subparsers.add_parser("reject", parents=[common_parser], help="Reject an awaiting_human task or a parked Factory work item")
+    p_rej = subparsers.add_parser("reject", parents=[common_parser], help="Reject an awaiting_human task, a parked work item, or a repository proposal")
     p_rej.add_argument("task_id", nargs="?", help="Task ID to reject")
     p_rej.add_argument("--work-item", help="Parked Factory work item to reject (instead of a task ID)")
-    p_rej.add_argument("--state-dir", help="Factory state directory holding the work item")
+    p_rej.add_argument("--proposal", help="Repository proposal awaiting authority to reject (instead of a task ID)")
+    p_rej.add_argument("--state-dir", help="Factory state directory holding the work item or proposal")
     p_rej.add_argument("--reason", help="Optional human reason for rejection")
     p_rej.add_argument("--ledger-file", help="Ledger file path")
     p_rej.add_argument("--json", action="store_true", help="Output JSON result")
