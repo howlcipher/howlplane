@@ -3,7 +3,10 @@ import sys
 import subprocess
 import tempfile
 
+from tests._requirements import requires_module
 
+
+@requires_module("pdoc", "chromadb", "litellm")
 def test_pdoc_api_generation():
     """
     Regression test to ensure pdoc can successfully import and generate

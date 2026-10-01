@@ -13,64 +13,62 @@ def _cli():
     return cli
 
 
-def _handle_work_item_decision(args: argparse.Namespace, decision: str) -> int:
-    from howlplane.control_plane.factory.work_item_decision import WorkItemDecisionError, decide_work_item
+def _owner_decision_spec(args: argparse.Namespace, decision: str, flag: str):
+    """(decide, error class, titles) for the ``--work-item`` or ``--proposal`` decision."""
+    reason = getattr(args, "reason", None)
+    if flag == "work-item":
+        from howlplane.control_plane.factory.work_item_decision import WorkItemDecisionError, decide_work_item
+        try:
+            target = str(_cli()._resolve_repo(args))
+        except Exception:
+            target = None
+        return (lambda ledger: decide_work_item(args.state_dir, args.work_item, decision, target_dir=target,
+                                                reason=reason, ledger=ledger),
+                WorkItemDecisionError,
+                ("WORK ITEM REQUEUED", "WORK ITEM REJECTED",
+                 "The Factory will pick it up again. Governed checks and authority limits still apply."))
+    from howlplane.control_plane.factory.proposal_decision import ProposalDecisionError, decide_proposal
+    return (lambda ledger: decide_proposal(args.state_dir, args.proposal, decision, reason=reason, ledger=ledger),
+            ProposalDecisionError,
+            ("PROPOSAL ACCEPTED", "PROPOSAL REJECTED",
+             "Recorded as accepted. No repository was created; a later governed bootstrap step acts on it."))
+
+
+def _run_owner_decision(args: argparse.Namespace, decision: str, flag: str) -> int:
+    """Shared body of the ``--work-item`` and ``--proposal`` decisions (one authority path)."""
     from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
     if not getattr(args, "state_dir", None):
         raise OperatorFailure(OperatorError(
-            "MISSING_STATE_DIRECTORY", "--work-item needs --state-dir.",
-            "The Factory state directory says where the parked work item is stored.",
+            "MISSING_STATE_DIRECTORY", f"--{flag} needs --state-dir.",
+            f"The Factory state directory says where the {flag.replace('-', ' ')} is stored.",
             "Copy the exact command from the Factory status.", "howlplane factory status"))
     ledger_file = _cli()._resolve_ledger_file(args)
     ledger = _cli().EvidenceLedger(ledger_file) if ledger_file else None
+    decide, error_cls, (approved_title, rejected_title, approved_note) = _owner_decision_spec(args, decision, flag)
     try:
-        target = str(_cli()._resolve_repo(args))
-    except Exception:
-        target = None
-    try:
-        result = decide_work_item(args.state_dir, args.work_item, decision, target_dir=target,
-                                  reason=getattr(args, "reason", None), ledger=ledger)
-    except WorkItemDecisionError as exc:
+        result = decide(ledger)
+    except error_cls as exc:
         raise OperatorFailure(OperatorError(exc.code, str(exc), exc.why, exc.next_action, exc.command))
     if getattr(args, "json", False):
         import json
         print(json.dumps(result, indent=2))
-    else:
-        title = "WORK ITEM REQUEUED" if decision == "approved" else "WORK ITEM REJECTED"
-        print(f"{title}: {result['work_item_id']} ({result['from_state']} -> {result['state']})")
-        if decision == "approved":
-            print("The Factory will pick it up again. Governed checks and authority limits still apply.")
-        if result.get("reason"):
-            print(f"Reason: {result['reason']}")
+        return 0
+    item_id = result.get("work_item_id") or result["proposal_id"]
+    print(f"{approved_title if decision == 'approved' else rejected_title}: "
+          f"{item_id} ({result['from_state']} -> {result['state']})")
+    if decision == "approved":
+        print(approved_note)
+    if result.get("reason"):
+        print(f"Reason: {result['reason']}")
     return 0
+
+
+def _handle_work_item_decision(args: argparse.Namespace, decision: str) -> int:
+    return _run_owner_decision(args, decision, "work-item")
 
 
 def _handle_proposal_decision(args: argparse.Namespace, decision: str) -> int:
-    from howlplane.control_plane.factory.proposal_decision import ProposalDecisionError, decide_proposal
-    from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
-    if not getattr(args, "state_dir", None):
-        raise OperatorFailure(OperatorError(
-            "MISSING_STATE_DIRECTORY", "--proposal needs --state-dir.",
-            "The Factory state directory says where the proposal is stored.",
-            "Copy the exact command from the Factory status.", "howlplane factory status"))
-    ledger_file = _cli()._resolve_ledger_file(args)
-    ledger = _cli().EvidenceLedger(ledger_file) if ledger_file else None
-    try:
-        result = decide_proposal(args.state_dir, args.proposal, decision,
-                                 reason=getattr(args, "reason", None), ledger=ledger)
-    except ProposalDecisionError as exc:
-        raise OperatorFailure(OperatorError(exc.code, str(exc), exc.why, exc.next_action, exc.command))
-    if getattr(args, "json", False):
-        import json
-        print(json.dumps(result, indent=2))
-    else:
-        title = "PROPOSAL ACCEPTED" if decision == "approved" else "PROPOSAL REJECTED"
-        print(f"{title}: {result['proposal_id']} ({result['from_state']} -> {result['state']})")
-        if decision == "approved":
-            print("Recorded as accepted. No repository was created; a later governed bootstrap step acts on it.")
-        if result.get("reason"):
-            print(f"Reason: {result['reason']}")
-    return 0
+    return _run_owner_decision(args, decision, "proposal")
 
 
 def _handle_decision(args: argparse.Namespace, decision: str) -> int:

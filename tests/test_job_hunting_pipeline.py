@@ -1,4 +1,8 @@
 import unittest
+
+from tests._requirements import import_or_skip
+
+import_or_skip("litellm")
 from unittest.mock import patch, mock_open, MagicMock
 import json
 import sys

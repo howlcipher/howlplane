@@ -61,6 +61,9 @@ from howlplane.control_plane.human_boundary import (
     BoundaryCheckResult,
 )
 from howlplane.control_plane.cli import main as cli_main
+from tests._requirements import requires_binary
+
+requires_slopslint = requires_binary("slopslint", version_substring="0.1.0")
 
 
 # ============================================================================
@@ -885,6 +888,7 @@ def test_reviewer_requirements_replace_baseline():
 # 12. Repository Hygiene & SlopsLint Gate Tests
 # ============================================================================
 
+@requires_slopslint
 def test_repository_hygiene_verification_category():
     step = VerificationStep(
         step_id="step-hygiene-01",
@@ -963,6 +967,7 @@ def test_human_boundary_gate_slop_debt_acceptance():
     assert "Accepting new repository debt tombstone" in md
 
 
+@requires_slopslint
 def test_tombstone_human_boundary_lifecycle_fail_closed():
     # Prove that an agent cannot bypass debt acceptance without human approval
     task = TaskSpec(

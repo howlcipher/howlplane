@@ -22,6 +22,9 @@ jobs:
     name: Fast Python (${{ matrix.python-version }})
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
+    env:
+      # CI installs every optional tool, so a missing one must fail, not skip (tests/_requirements.py).
+      HOWLPLANE_REQUIRE_TOOLS: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -61,6 +64,9 @@ jobs:
     name: Full Python regression (3.12)
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
+    env:
+      # CI installs every optional tool, so a missing one must fail, not skip (tests/_requirements.py).
+      HOWLPLANE_REQUIRE_TOOLS: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -110,6 +116,9 @@ jobs:
     name: Nightly full Python (${{ matrix.python-version }})
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    env:
+      # CI installs every optional tool, so a missing one must fail, not skip (tests/_requirements.py).
+      HOWLPLANE_REQUIRE_TOOLS: "1"
     strategy:
       fail-fast: false
       matrix:
