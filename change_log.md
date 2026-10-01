@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Changed
+
+- `cli.py` split finished (backlog rows 75 and 78), behavior-preserving. The agents, status and doctor handlers moved to `status_cli.py`, approve/reject/resume/cancel/unlock to `governance_cli.py`, and `cmd_factory_run*` with the `_factory_*` helpers to `factory/factory_run_cli.py`. `cli.py` re-exports every name as the same object and the moved handlers look shared helpers up on `cli` at call time, so imports and test monkeypatches keep working.
+
 ### Added
 
 - Stored backoff facts (backlog row 80). The supervisor persists `backoff_reason` (`failure_backoff`, `provider_retry_after`, `provider_retry_interval`), `backoff_attempt` (the failure count, only for failure backoff) and `backoff_delay_seconds` when it schedules a retry, and clears them when the wait ends. `factory status` (`--json` keys and the `operator` object `retry_reason`, `retry_attempt`, `retry_delay_seconds`), the `supervisor.state_changed` event and the remote snapshot `backoff` object report the same stored values. Fields are additive; older supervisor records load unchanged.
