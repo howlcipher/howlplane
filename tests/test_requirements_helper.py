@@ -1,8 +1,5 @@
 """Optional-tool gating skips locally and stops hiding anything where tools are required."""
 
-import os
-import stat
-
 import pytest
 
 from tests import _requirements as req
@@ -30,23 +27,6 @@ def test_present_module_is_never_skipped(monkeypatch):
 def test_require_flag_values(monkeypatch, value, expected):
     monkeypatch.setenv(req.REQUIRE_ENV, value)
     assert req.tools_required() is expected
-
-
-def _script(tmp_path, body):
-    path = tmp_path / "faketool"
-    path.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC)
-    return path
-
-
-def test_binary_status_distinguishes_missing_broken_and_wrong_version(tmp_path, monkeypatch):
-    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
-    assert "not on PATH" in req.binary_status("definitely-not-installed-xyz")
-    _script(tmp_path, "echo 'unknown option: --smol' >&2; exit 1")
-    assert "installed but failed to run: unknown option: --smol" in req.binary_status("faketool")
-    _script(tmp_path, "echo 'faketool 0.2.0'")
-    assert "expected version 0.1.0" in req.binary_status("faketool", version_substring="0.1.0")
-    assert req.binary_status("faketool", version_substring="0.2.0") is None
 
 
 def test_ci_python_jobs_require_their_tools():

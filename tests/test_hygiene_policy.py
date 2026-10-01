@@ -23,9 +23,6 @@ from howlplane.control_plane.evidence_ledger import (
     EvidenceEntry,
 )
 from howlplane.control_plane.metrics import MetricsCalculator
-from tests._requirements import requires_binary
-
-requires_slopslint = requires_binary("slopslint", version_substring="0.1.0")
 
 
 # ============================================================================
@@ -63,7 +60,6 @@ def test_case_1_ceiling_increase_must_fail_or_require_human():
     assert "HARD REJECT" in gate_res.decision_packet.recommended_action
 
 
-@requires_slopslint
 def test_case_2_ceiling_decrease_autonomously_permissible_after_proof():
     """
     CASE 2:
@@ -332,7 +328,6 @@ def test_config_deletion_is_hard_reject():
 # 3. Phase 5: Provider / Tool Integrity
 # ============================================================================
 
-@requires_slopslint
 def test_provider_integrity_verification():
     # 1. Pinned version verification on live system
     ok, msg, meta = HygienePolicyClassifier.verify_provider_integrity(
@@ -361,7 +356,6 @@ def test_provider_integrity_verification():
     assert miss_meta["status"] == "missing"
 
 
-@requires_slopslint
 def test_verification_plan_executes_with_hygiene_integrity_checks():
     plan = VerificationPlan(task_id="TASK-INTEGRITY-RUN")
     plan.add_step(

@@ -127,25 +127,35 @@ skills, and the verify and ship prompts:
 
 ## Default suite and optional tools
 
-The default suite runs in a normal developer or CI environment with the
-declared development dependencies (`pip install -e ".[dev,research,server,cloud,google,queue,agent-frameworks]"`,
-or `.[all,dev]`, which CI uses) and needs no authenticated provider or live
-service. A few tests need something outside that contract:
+Run `make check-tools` first: it reports which tools each tier needs and what is
+missing here, instead of letting a long run fail to explain it.
 
-| Needs | Tests | Where it comes from |
+- **Default hermetic tier (`make test-fast-python`)** needs the declared
+  development dependencies (`pip install -e ".[dev]"` plus the extras below, or
+  `.[all,dev]`, which CI uses) and `slopslint` 0.1.0
+  (`bash scripts/install_slopslint.sh`; the hygiene tests verify the live tool and
+  fail closed without it). It needs no authenticated provider, live service, or
+  HowlFrame binary: the dogfood suite is `slow` and is excluded here.
+- **Full gate (`make test-full`)** additionally needs Go and a real `howlframe`
+  binary (built from `howlcipher/howlframe`, pinned in `test.yml`, or via
+  `HOWLFRAME_BIN`). `test_howlframe_dogfood` fails closed without it by design
+  (HOWL-CANON-009, proved by `test_clean_environment_regression`); that failure is
+  never converted into a skip.
+- **Optional Python extras** skip with an explicit reason when absent
+  (`tests/_requirements.py`):
+
+| Needs | Tests | Install |
 | --- | --- | --- |
-| `chromadb` (the `vector` extra) | `test_chromadb`, `test_docs::test_pdoc_api_generation` | `pip install ".[vector]"` |
-| `litellm`, `bs4`, `pdoc` | `test_job_hunting_pipeline`, `test_frontend`, `test_docs` | `agent-frameworks`, `research`, `dev` extras |
-| `slopslint` 0.1.0 | five hygiene tests in `test_hygiene_policy` and `test_control_plane` | `scripts/install_slopslint.sh` |
-| a real `howlframe` binary | `test_howlframe_dogfood` (12 tests) | built from `howlcipher/howlframe`, as `test.yml` does |
+| `chromadb` | `test_chromadb`, `test_docs::test_pdoc_api_generation` | `pip install ".[vector]"` |
+| `litellm` | `test_job_hunting_pipeline` | `pip install ".[agent-frameworks]"` |
+| `bs4` | `test_frontend` | `pip install ".[research]"` |
+| `pdoc` | `test_docs` | `pip install ".[dev]"` |
 
-Without one of these, the test **skips with an explicit reason** locally
-(`tests/_requirements.py`). CI sets `HOWLPLANE_REQUIRE_TOOLS=1` and installs
-everything, so there a missing dependency does not skip: it fails. Set the same
-variable locally to prove an environment is complete. A tool that is installed
-but cannot run (for example `slopslint` with `BUN_OPTIONS=--smol` in the
-environment) is reported as such, not as missing. Genuine failures are never
-converted to skips.
+CI sets `HOWLPLANE_REQUIRE_TOOLS=1` and installs everything, so there a missing
+extra does not skip: it fails. Set the same variable locally to prove an
+environment is complete. A tool that is installed but cannot run (for example
+`slopslint` with `BUN_OPTIONS=--smol` in the environment) is reported by
+`make check-tools` as installed-but-failing, not as missing.
 
 ## Continuous Test Impact Assessment
 

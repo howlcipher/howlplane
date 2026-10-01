@@ -19,12 +19,6 @@ from howlplane.control_plane.howlframe_runner import (
 from howlplane.control_plane.project_adapter import ProjectAdapter, ProjectContext
 from howlplane.control_plane.router import TaskRouter
 from howlplane.control_plane.task_spec import TaskSpec
-from tests._requirements import _skip_unless
-
-requires_howlframe = _skip_unless(
-    find_howlframe_binary() is not None,
-    "real howlframe binary not found on PATH or via HOWLFRAME_BIN (CI builds the pinned one)",
-)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = REPO_ROOT / "schemas" / "project-context-contract.schema.json"
@@ -66,7 +60,6 @@ def test_schema_and_artifacts():
         ("DevOps-Learn-by-Doing", ["python"], False),
     ],
 )
-@requires_howlframe
 def test_dogfood_matrix(name: str, types: list, has_agents: bool):
     h_bin = find_howlframe_binary()
     assert h_bin is not None, "Real howlframe binary is required for integration tests; not found on PATH or via HOWLFRAME_BIN"
@@ -97,7 +90,6 @@ def test_dogfood_matrix(name: str, types: list, has_agents: bool):
         assert "missing AGENTS.md" in res.findings
 
 
-@requires_howlframe
 @pytest.mark.parametrize(
     "payload_str, expected_msg",
     [
@@ -132,7 +124,6 @@ def test_falsifications_subproc(tmp_path, script, expected_outcome):
         assert res.status == expected_outcome
 
 
-@requires_howlframe
 def test_falsifications_bounds_and_lifecycle(tmp_path):
     ctx = ProjectAdapter.discover(REPO_ROOT)
     h_bin = find_howlframe_binary()
@@ -181,7 +172,6 @@ def test_falsifications_bounds_and_lifecycle(tmp_path):
     assert len(ldg.list_all_entries()) == 1
 
 
-@requires_howlframe
 def test_bytecode_compilation_deterministic_reproducibility(tmp_path: Path):
     """Proves that compiling project_context_audit.howl reproduces the exact committed .hfbc artifact."""
     h_bin = find_howlframe_binary()

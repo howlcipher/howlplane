@@ -1,4 +1,4 @@
-.PHONY: install test test-changed test-fast test-fast-python test-unit test-contract test-integration test-acceptance test-slow test-live test-full test-coverage lint format clean coverage build docs sync
+.PHONY: check-tools install test test-changed test-fast test-fast-python test-unit test-contract test-integration test-acceptance test-slow test-live test-full test-coverage lint format clean coverage build docs sync
 
 # Environment and Setup
 install:
@@ -33,6 +33,9 @@ test-full:
 test-changed:
 	@echo "Selecting tests relevant to the current change set..."
 	PYTHONPATH=. $(PYTHON) scripts/select_relevant_tests.py
+
+check-tools:
+	@PYTHONPATH=. $(PYTHON) scripts/check_test_tools.py --tier full
 
 test-fast:
 	@echo "Running fast deterministic Python tests (all tiers except measured slow/live)..."
