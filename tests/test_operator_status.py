@@ -41,6 +41,19 @@ CASES = [
 ]
 
 
+def test_idle_after_only_failures_is_not_reported_as_healthy_empty_queue():
+    failed = [{"work_item_id": "A", "reason": "boom", "at": "2026-01-01T00:00:02+00:00"}]
+    done = [{"work_item_id": "B", "at": "2026-01-01T00:00:01+00:00"}]
+    op = derive_operator_status(_status(state="waiting_for_work", last_error="boom", recent_failed=failed))
+    assert (op.label, op.reason_code, op.severity) == ("IDLE", ReasonCode.FACTORY_FAILURE, Severity.ATTENTION)
+    assert op.next_action.command == "howlplane logs --errors"
+    # A later success supersedes the failure.
+    healthy = derive_operator_status(
+        _status(state="waiting_for_work", recent_failed=failed, recent_completed=done + [
+            {"work_item_id": "C", "at": "2026-01-01T00:00:03+00:00"}]))
+    assert (healthy.reason_code, healthy.severity) == (ReasonCode.WAITING_FOR_WORK, Severity.OK)
+
+
 @pytest.mark.parametrize("status,label,code,severity", CASES)
 def test_states_map_to_label_reason_and_severity(status, label, code, severity):
     op = derive_operator_status(status)
@@ -89,3 +102,18 @@ def test_waiting_for_provider_missing_executable_requires_owner():
 def test_waiting_for_provider_without_missing_executable_stays_automatic():
     st = derive_operator_status(_status(state="waiting_for_provider"))
     assert st.owner_required is False
+
+
+def test_broken_pipe_is_quiet_not_an_internal_error(monkeypatch, capsys, tmp_path):
+    """`howlplane logs | head` closes the pipe; that must not be reported as a HowlPlane bug."""
+    from howlplane.control_plane import cli
+
+    def closed_pipe(_args):
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setitem(cli.HANDLERS, "logs", closed_pipe)
+    monkeypatch.setenv("HOWLPLANE_DIAGNOSTICS_DIR", str(tmp_path))
+    monkeypatch.setattr(cli.os, "dup2", lambda *a, **k: None)
+    assert cli.main(["logs"]) == 141
+    assert "INTERNAL_ERROR" not in capsys.readouterr().err
+    assert not list(tmp_path.iterdir())

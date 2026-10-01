@@ -641,6 +641,15 @@ class ProviderPoolManager:
             if self._egress_forbidden(profile):
                 self._disable_without_probe(state, "EGRESS_FORBIDDEN")
                 continue
+            if state.status == ProviderAvailabilityStatus.DISABLED:
+                # DISABLED is only ever set by _disable_without_probe above, and
+                # the persisted copy outlives the configuration that caused it.
+                # A resource that is now configured, enabled and egress-allowed
+                # must not stay parked by that stale record (a run started
+                # without probing would otherwise wait for it forever).
+                state.status = ProviderAvailabilityStatus.UNKNOWN
+                state.readiness = ReadinessStatus.NOT_PROBED
+                state.unavailable_reason = None
             if resource_config.model_id:
                 state.model_id = resource_config.model_id
             if probe_on_start:
@@ -1046,6 +1055,7 @@ class ProviderPoolManager:
                 ProviderFailureClass.RATE_LIMITED,
                 ProviderFailureClass.TRANSPORT_UNAVAILABLE,
                 ProviderFailureClass.PROVIDER_UNAVAILABLE,
+                ProviderFailureClass.PROVIDER_STALLED,
                 ProviderFailureClass.EXECUTION_BUDGET_EXCEEDED,
             }
             cooldown = None
