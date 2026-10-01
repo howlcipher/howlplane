@@ -1430,6 +1430,9 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
         action="version",
         version=f"{program_name} {__version__}",
     )
+    # Handled by main() before parsing so they work before or after the command.
+    parser.add_argument("--color", metavar="MODE", help="auto (default), always or never; NO_COLOR is honored")
+    parser.add_argument("--debug", action="store_true", help="Print full tracebacks for unexpected failures")
 
     parser._positionals.title = "Commands"
     subparsers = parser.add_subparsers(dest="subcommand", metavar="<command>", help="Command to execute")
@@ -3122,8 +3125,12 @@ def cmd_factory(args: argparse.Namespace) -> int:
         print("Unknown factory action.")
         return 1
     except (OSError, ValueError) as exc:
-        print(f"Factory: {exc}", file=sys.stderr)
-        return 1
+        from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+        raise OperatorFailure(OperatorError(
+            "FACTORY_INPUT_ERROR", f"Factory: {exc}",
+            "The Factory command could not use the repository, state directory or arguments given.",
+            "Check the arguments and the repository, then run the readiness check.",
+            "howlplane factory doctor")) from exc
 
 
 def cmd_create(args: argparse.Namespace) -> int:
@@ -3555,6 +3562,11 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
     """Runs the canonical HowlPlane control plane launcher."""
     if args is None:
         args = sys.argv[1:]
+    global _COLOR_MODE
+    args, debug, _COLOR_MODE = _extract_global_flags(list(args))
+    if _COLOR_MODE is not None and _COLOR_MODE not in ("auto", "always", "never"):
+        print("--color must be one of: auto, always, never", file=sys.stderr)
+        return 2
     parser = build_parser(program_name=program_name)
     parsed_args = parser.parse_args(args)
 
@@ -3573,28 +3585,59 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
         from howlplane.control_plane import workspace_trust
         workspace_trust.set_cli_policy(getattr(parsed_args, "workspace_trust", None))
         # Fail fast on an invalid environment or config value, before any work starts.
-        workspace_trust.resolve_policy()
+        # `config` explains invalid values itself, so it must be reachable when they are wrong.
+        if parsed_args.subcommand != "config":
+            workspace_trust.resolve_policy()
         return handler(parsed_args)
-    except ControlPlaneError as err:
-        print(_operator_error_text(err, parsed_args) or str(err), file=sys.stderr)
-        return 1
     except Exception as err:
-        print(_operator_error_text(err, parsed_args) or f"ERROR: {err}", file=sys.stderr)
-        return 1
+        return _report_failure(err, parsed_args, debug)
 
 
-def _operator_error_text(err: BaseException, parsed_args: argparse.Namespace) -> Optional[str]:
-    """What/why/next for recognized failures; None keeps the original message."""
+def _report_failure(err: BaseException, parsed_args: argparse.Namespace, debug: bool) -> int:
+    """The one canonical error boundary: howlplane.error/v1 for every failure."""
+    from howlplane.control_plane.presentation import errors as presentation_errors
+    from howlplane.control_plane.presentation.style import resolve_style
+    as_json = getattr(parsed_args, "json", False)
+    explained = None
     try:
-        from howlplane.control_plane.presentation.errors import explain
-        explained = explain(err)
+        explained = presentation_errors.explain(err)
     except Exception:
-        return None
+        explained = None
     if explained is None:
-        return None
-    if getattr(parsed_args, "json", False):
-        return json.dumps(explained.to_dict())
-    return explained.render()
+        explained = presentation_errors.internal_error(err)
+    if as_json:
+        print(json.dumps(explained.to_dict()), file=sys.stderr)
+    else:
+        print(explained.render(resolve_style(sys.stderr, _COLOR_MODE)), file=sys.stderr)
+    if debug:
+        import traceback
+        traceback.print_exception(type(err), err, err.__traceback__, file=sys.stderr)
+    return 1
+
+
+_COLOR_MODE: Optional[str] = None
+
+
+def _extract_global_flags(args: List[str]) -> tuple:
+    """Pull ``--debug`` and ``--color MODE`` out of argv wherever they appear."""
+    debug = os.environ.get("HOWLPLANE_DEBUG") == "1"
+    color = None
+    rest: List[str] = []
+    it = iter(args)
+    for token in it:
+        if token == "--":
+            rest.append(token)
+            rest.extend(it)
+            break
+        if token == "--debug":
+            debug = True
+        elif token == "--color":
+            color = next(it, None)
+        elif token.startswith("--color="):
+            color = token.split("=", 1)[1]
+        else:
+            rest.append(token)
+    return rest, debug, color
 
 
 def legacy_main(args: Optional[List[str]] = None) -> int:

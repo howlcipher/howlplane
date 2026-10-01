@@ -6,7 +6,13 @@ exception it does not recognize returns None so the CLI keeps its original
 message; nothing is hidden or rewritten.
 """
 
+import os
+import re
+import time
+import traceback
+import uuid
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Optional
 
 ERROR_SCHEMA = "howlplane.error/v1"
@@ -21,15 +27,102 @@ class OperatorError:
     command: Optional[str] = None
     schema: str = ERROR_SCHEMA
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+    diagnostic_id: Optional[str] = None
+    expected_recovery: Optional[str] = None
 
-    def render(self) -> str:
-        lines = [self.message, f"Why: {self.why}", f"Next: {self.next_action}"]
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        for key in ("diagnostic_id", "expected_recovery"):
+            if data[key] is None:
+                del data[key]
+        return data
+
+    def render(self, style=None) -> str:
+        """Plain text by default; ``style`` (presentation.style.Style) adds emphasis only."""
+        def paint(kind, text):
+            return style.paint(kind, text) if style else text
+        lines = [paint("error", self.message), f"Why: {self.why}"]
+        if self.expected_recovery:
+            lines.append(f"Recovery: {self.expected_recovery}")
+        lines.append(f"Next: {self.next_action}")
         if self.command:
-            lines.append(f"  {self.command}")
+            lines.append("  " + paint("command", self.command))
+        if self.diagnostic_id:
+            lines.append(f"Diagnostic ID: {self.diagnostic_id}")
         lines.append(f"Code: {self.code}")
         return "\n".join(lines)
+
+
+class OperatorFailure(Exception):
+    """An expected failure that already carries its canonical explanation."""
+
+    def __init__(self, error: "OperatorError"):
+        super().__init__(error.message)
+        self.error = error
+
+
+_SECRET = re.compile(r"(?i)(sk[-_][A-Za-z0-9_\-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}|"
+                     r"(authorization|api[_-]?key|token|secret|password)\s*[:=]\s*\S+)")
+
+
+def redact_text(text: str) -> str:
+    """Single redaction primitive for operator-visible text (logs, diagnostics, errors)."""
+    return _SECRET.sub("[REDACTED]", text)
+
+
+def diagnostics_dir() -> Path:
+    base = os.environ.get("HOWLPLANE_DIAGNOSTICS_DIR")
+    if base:
+        return Path(base)
+    state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(state) / "howlplane" / "diagnostics"
+
+
+def internal_error(exc: BaseException) -> "OperatorError":
+    """Wrap an unexpected exception. The traceback is kept (redacted) in a diagnostics file."""
+    diag = "HP-" + time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
+    path = None
+    try:
+        directory = diagnostics_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{diag}.txt"
+        trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        path.write_text(redact_text(trace), encoding="utf-8")
+    except OSError:
+        path = None
+    where = f"Traceback saved to {path}." if path else "The traceback could not be saved."
+    return OperatorError(
+        "INTERNAL_ERROR", f"Something unexpected failed: {redact_text(str(exc)) or type(exc).__name__}",
+        f"This is likely a HowlPlane bug or an unhandled condition ({type(exc).__name__}). {where}",
+        "Re-run with --debug to print the traceback, and include the diagnostic ID in a bug report.",
+        None, diagnostic_id=diag)
+
+
+def _config_error(exc: BaseException) -> Optional["OperatorError"]:
+    try:
+        from pydantic import ValidationError
+    except ImportError:  # pragma: no cover
+        return None
+    if not isinstance(exc, ValidationError):
+        return None
+    problems = []
+    for item in exc.errors():
+        name = ".".join(str(p) for p in item.get("loc", ())) or "setting"
+        ctx = item.get("ctx") or {}
+        expected = ctx.get("expected")
+        got = item.get("input")
+        text = f"{name}: {item.get('msg', 'invalid value')}"
+        if got is not None and not isinstance(got, (dict, list)):
+            text += f" (got {got!r})"
+        if expected and expected not in text:
+            text += f" Expected {expected}."
+        problems.append(text)
+    shown = "; ".join(problems[:3]) + (f" (+{len(problems) - 3} more)" if len(problems) > 3 else "")
+    names = ", ".join(sorted({(i.get("loc") or ("setting",))[0] for i in exc.errors()}))
+    return OperatorError(
+        "INVALID_CONFIGURATION", f"Invalid configuration: {names}.", shown,
+        "Fix the setting (environment variable, config/settings.yaml or ~/.config/howlplane/config.toml).",
+        "howlplane config validate")
 
 
 def _by_message(text: str) -> Optional[tuple]:
@@ -49,6 +142,11 @@ def _by_message(text: str) -> Optional[tuple]:
 
 def explain(exc: BaseException) -> Optional[OperatorError]:
     text = str(exc)
+    if isinstance(exc, OperatorFailure):
+        return exc.error
+    config_err = _config_error(exc)
+    if config_err:
+        return config_err
     from howlplane.control_plane import cli, human_boundary, locking, workspace_trust
     from howlplane.control_plane.agent_execution import AgentUnavailableError
     from howlplane.control_plane.factory.campaign import CampaignError
@@ -80,4 +178,11 @@ def explain(exc: BaseException) -> Optional[OperatorError]:
     if isinstance(exc, CampaignError):
         return OperatorError("CAMPAIGN_ERROR", text, "The Factory cannot safely use this repository as configured.",
                              "Run the Factory readiness check.", "howlplane factory doctor")
+    if isinstance(exc, ValueError) and "workspace trust policy" in text:
+        return OperatorError("INVALID_CONFIGURATION", text, "The workspace trust policy value is not recognized.",
+                             "Use one of the listed policies in --workspace-trust or HOWLPLANE_WORKSPACE_TRUST.",
+                             "howlplane config validate")
+    if isinstance(exc, cli.ControlPlaneError):
+        return OperatorError("CONTROL_PLANE_ERROR", text, "HowlPlane could not complete the request.",
+                             "Check the message above and the readiness of this repository.", "howlplane doctor")
     return None

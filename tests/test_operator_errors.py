@@ -54,7 +54,44 @@ def test_main_prints_explanation_and_json_form(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().err)["code"] == "OWNER_REQUIRED"
 
 
-def test_unrecognized_exception_keeps_legacy_error_line(monkeypatch, capsys):
+def test_unrecognized_exception_is_internal_error_with_diagnostic_id(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("HOWLPLANE_DIAGNOSTICS_DIR", str(tmp_path))
     monkeypatch.setitem(cli.HANDLERS, "doctor", lambda a: (_ for _ in ()).throw(RuntimeError("boom")))
     assert main(["doctor"]) == 1
-    assert capsys.readouterr().err.strip() == "ERROR: boom"
+    err = capsys.readouterr().err
+    assert "Something unexpected failed: boom" in err
+    assert "Traceback (most recent" not in err
+    assert "Code: INTERNAL_ERROR" in err
+    diag = next(line.split(": ", 1)[1] for line in err.splitlines() if line.startswith("Diagnostic ID"))
+    assert "RuntimeError: boom" in (tmp_path / f"{diag}.txt").read_text()
+
+
+def test_debug_flag_prints_traceback(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("HOWLPLANE_DIAGNOSTICS_DIR", str(tmp_path))
+    monkeypatch.setitem(cli.HANDLERS, "doctor", lambda a: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert main(["doctor", "--debug"]) == 1
+    assert "Traceback (most recent" in capsys.readouterr().err
+
+
+def test_internal_error_json_form(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("HOWLPLANE_DIAGNOSTICS_DIR", str(tmp_path))
+    monkeypatch.setattr(cli, "cmd_factory_status", lambda a: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert main(["factory", "status", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["code"] == "INTERNAL_ERROR" and payload["diagnostic_id"].startswith("HP-")
+
+
+def test_diagnostic_traceback_is_redacted(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("HOWLPLANE_DIAGNOSTICS_DIR", str(tmp_path))
+    monkeypatch.setitem(cli.HANDLERS, "doctor",
+                        lambda a: (_ for _ in ()).throw(RuntimeError("bad ghp_abcdefgh12345678")))
+    main(["doctor"])
+    assert "ghp_abcdefgh" not in capsys.readouterr().err
+    assert all("ghp_abcdefgh" not in f.read_text() for f in tmp_path.iterdir())
+
+
+def test_factory_input_errors_use_canonical_presentation(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "cmd_factory_status", lambda a: (_ for _ in ()).throw(ValueError("bad state dir")))
+    assert main(["factory", "status", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["code"] == "FACTORY_INPUT_ERROR" and payload["command"] == "howlplane factory doctor"

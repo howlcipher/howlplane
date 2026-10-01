@@ -21,7 +21,7 @@ from typing import Callable, List, Optional, Tuple
 
 import yaml
 
-from howlplane.control_plane.config_loader import default_loader, load_config
+from howlplane.control_plane.config_loader import get_default_loader, load_config
 
 FRONTMATTER_PATTERN = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 
@@ -76,7 +76,7 @@ class SkillRouter:
 
         if skills_dir is None:
             skills_dir = os.path.join(
-                default_loader.get_repo_root(),
+                get_default_loader().get_repo_root(),
                 router_cfg.get("skills_dir", os.path.join(".agents", "skills")),
             )
         self.skills_dir = skills_dir
