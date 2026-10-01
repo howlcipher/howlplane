@@ -1,51 +1,6 @@
-version: '3.8'
-
 services:
-  webhook_server:
+  howlplane:
     build: .
-    volumes:
-      - .:/app
-    ports:
-      - "8000:8000"
-    environment:
-      - CHROMA_DB_DIR=/app/.chroma
-      - REDIS_URL=redis://redis:6379/0
-    depends_on:
-      - redis
-      - ollama
-
-  celery_worker:
-    build: .
-    command: celery -A src.infrastructure.celery_worker.app worker --loglevel=info
-    volumes:
-      - .:/app
-    environment:
-      - CHROMA_DB_DIR=/app/.chroma
-      - REDIS_URL=redis://redis:6379/0
-    depends_on:
-      - redis
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-volumes:
-  redis_data:
-  ollama_data:
+    # Runs the packaged CLI from the image. Override with e.g.
+    # `docker compose run --rm howlplane <subcommand>`.
+    command: ["--help"]

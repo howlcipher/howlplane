@@ -44,11 +44,8 @@ func LoadManifest(path string) (*Manifest, error) {
 }
 
 func parseManifest(r io.Reader) (*Manifest, error) {
+	// Unknown fields are deliberately tolerated (forward-compatible manifests).
 	decoder := toml.NewDecoder(r)
-	decoder.DisallowUnknownFields() // For strict validation of known blocks? Wait, the blueprint says: "tests covering ... forward-compatible unknown fields". So we should NOT disallow unknown fields.
-
-	// Recreating decoder to allow unknown fields.
-	decoder = toml.NewDecoder(r)
 
 	var m Manifest
 	if err := decoder.Decode(&m); err != nil {

@@ -176,8 +176,17 @@ class EvidenceLedger:
                 f"evidence entry {entry.entry_id} (action={entry.action!r}) violates "
                 f"{_SCHEMA_PATH.name}: " + "; ".join(violations)
             )
-        with open(self.ledger_file, "a", encoding="utf-8") as f:
-            f.write(line)
+        # One O_APPEND write of the whole line keeps concurrent appenders from
+        # interleaving records; fsync makes the entry durable before returning.
+        data = line.encode("utf-8")
+        fd = os.open(self.ledger_file, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
+        try:
+            written = os.write(fd, data)
+            while written < len(data):
+                written += os.write(fd, data[written:])
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
     def read_entries(self, strict: bool = False) -> Tuple[List[EvidenceEntry], List[LedgerDiagnostic]]:
         """Reads the ledger and reports every record that is not clean.

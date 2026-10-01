@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import os
 from pathlib import Path
 import subprocess
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
 from howlplane.control_plane.git_env import run_git_in_repo
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
@@ -109,20 +109,44 @@ def is_internal_control_plane_path(path: str) -> bool:
     return norm in (".task_runs", ".git", ".howlchangeops") or norm.startswith((".task_runs/", ".git/", ".howlchangeops/"))
 
 
+def _iter_porcelain_records(status_text: str) -> Iterator[Tuple[str, str, Optional[str]]]:
+    """Yields (XY code, path, rename/copy source or None) from git status output.
+
+    `--porcelain=v1 -z` output is NUL-separated with unquoted paths, so spaces
+    and non-ASCII names survive; a rename/copy record is followed by an extra
+    NUL field holding its source. Text without NUL (legacy `--porcelain`
+    lines) is still accepted.
+    """
+    if "\0" not in status_text:
+        for line in status_text.splitlines():
+            if not line.strip():
+                continue
+            code, path_part = line[:2], line[3:].strip()
+            if " -> " in path_part:
+                source_part, dest_part = path_part.split(" -> ", 1)
+                yield code, dest_part.strip(), source_part.strip()
+            else:
+                yield code, path_part, None
+        return
+    fields = status_text.split("\0")
+    i = 0
+    while i < len(fields):
+        record = fields[i]
+        i += 1
+        if len(record) < 4:
+            continue
+        code, path = record[:2], record[3:]
+        source: Optional[str] = None
+        if ("R" in code or "C" in code) and i < len(fields):
+            source = fields[i]
+            i += 1
+        yield code, path, source
+
+
 def _parse_porcelain_lines(status_text: str) -> Tuple[Set[str], Set[str], Set[str], Set[str]]:
     """Extracts (untracked, modified, deleted, added) file sets from git status --porcelain."""
     untracked, modified, deleted, added = set(), set(), set(), set()
-    for line in status_text.splitlines():
-        if not line.strip():
-            continue
-        code, path_part = line[:2], line[3:].strip()
-        source_path: Optional[str] = None
-        if " -> " in path_part:
-            source_part, dest_part = path_part.split(" -> ", 1)
-            source_path = source_part.strip()
-            f_path = dest_part.strip()
-        else:
-            f_path = path_part
+    for code, f_path, source_path in _iter_porcelain_records(status_text):
 
         # A staged rename ("R  old -> new") carries no D and no A, so it used to
         # fall through to `modified` carrying only the destination -- the source
@@ -203,7 +227,7 @@ def describe_working_tree(
     the engine's own state, not a change it should refuse to start over.
     """
     root = Path(repo_dir).resolve()
-    status_out = _run_git_cmd(root, ["status", "--porcelain"]).stdout or ""
+    status_out = _run_git_cmd(root, ["status", "--porcelain=v1", "-z"]).stdout or ""
     untracked, modified, deleted, added = _parse_porcelain_lines(status_out)
 
     if extra_internal_prefixes:
@@ -319,7 +343,7 @@ def capture_baseline(repo_dir: Union[str, Path], snapshot_size_limit_bytes: int 
     sha_proc = _run_git_cmd(root, ["rev-parse", "HEAD"])
     sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else "HEAD_UNKNOWN"
 
-    status_out = _run_git_cmd(root, ["status", "--porcelain"]).stdout or ""
+    status_out = _run_git_cmd(root, ["status", "--porcelain=v1", "-z"]).stdout or ""
     untracked, modified, _, _ = _parse_porcelain_lines(status_out)
 
     snapshots: Dict[str, bytes] = {}
@@ -401,7 +425,7 @@ def _generate_untracked_diff(repo_root: Path, rel_path: str) -> str:
 def capture_delta(repo_dir: Union[str, Path], baseline: GitBaseline) -> RepositoryDelta:
     """Computes task-attributable repository delta, isolating pre-existing dirt."""
     root = Path(repo_dir).resolve()
-    status_out = _run_git_cmd(root, ["status", "--porcelain"]).stdout or ""
+    status_out = _run_git_cmd(root, ["status", "--porcelain=v1", "-z"]).stdout or ""
     cur_untracked, cur_modified, cur_deleted, cur_added = _parse_porcelain_lines(status_out)
 
     pre_untracked = set(baseline.pre_existing_untracked)

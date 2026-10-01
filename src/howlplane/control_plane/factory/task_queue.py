@@ -29,7 +29,10 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import fcntl
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows has no fcntl
+    fcntl = None  # type: ignore[assignment]
 import hashlib
 import json
 import os
@@ -325,6 +328,8 @@ class Ledger:
 
     @contextlib.contextmanager
     def exclusive(self) -> Iterator[None]:
+        if fcntl is None:
+            raise RuntimeError("Queue locking requires fcntl, which is unavailable on this platform (Windows)")
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         with self.path.with_suffix(".lock").open("a+") as handle:
             try:
