@@ -1847,6 +1847,21 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
             p_cfg.add_argument("key", help="Dotted setting name, for example server.port")
         p_cfg.add_argument("--json", action="store_true", help="Output JSON result")
 
+    p_tia = subparsers.add_parser(
+        "tia", help="Record and check the Test Impact Assessment required before a code change ships", **kwargs)
+    tia_sub = p_tia.add_subparsers(dest="tia_action", required=True, metavar="<action>")
+    p_tia_record = tia_sub.add_parser("record", help="Validate a Test Impact Assessment and append it to the evidence ledger")
+    p_tia_record.add_argument("--task-id", required=True)
+    p_tia_record.add_argument("--file", required=True, help="JSON file ('-' for stdin) matching schemas/test-impact-assessment.schema.json")
+    p_tia_record.add_argument("--agent-id", default="agent")
+    p_tia_check = tia_sub.add_parser("check", help="Fail unless the task has a valid recorded Test Impact Assessment")
+    p_tia_check.add_argument("task_id")
+    p_tia_check.add_argument("--no-code-change", action="store_true",
+                             help="Declare that the task changed no code or tests (nothing to assess)")
+    for p_t in (p_tia_record, p_tia_check):
+        p_t.add_argument("--ledger-file", help="Ledger file path")
+        p_t.add_argument("--json", action="store_true", help="Output JSON result")
+
     # local (local Ollama model setup/health check, #58 Phase 3)
     p_local = subparsers.add_parser("local", help="Local (Ollama) model utilities", **kwargs)
     p_local.add_argument("local_action", choices=["setup"], help="Action to perform")
@@ -2420,6 +2435,7 @@ HANDLERS = {
     "acceptance": cmd_acceptance,
     "marathon": cmd_marathon,
     "authority": cmd_authority,
+    "tia": lambda args: __import__("howlplane.control_plane.tia_cli", fromlist=["cmd_tia"]).cmd_tia(args),
     "config": lambda args: __import__("howlplane.control_plane.config_cli", fromlist=["command"]).command(args),
     "setup": lambda args: __import__("howlplane.control_plane.setup_cli", fromlist=["command"]).command(args),
     "local": cmd_local,

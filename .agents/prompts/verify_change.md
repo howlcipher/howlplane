@@ -22,3 +22,8 @@ Execute deterministic, project-specific verification suites and capture verifiab
    ```bash
    python -m src.control_plane record --task-id <task_id> --agent-id <agent_id> --action verification_executed --result <passed|failed>
    ```
+4. For a code-changing task, perform and record the Test Impact Assessment (policy: `AGENTS.md`, `documentation/TESTING.md`). State the behavior that changed, the tests that protect it, which tests were added, updated, or removed, whether duplicate, obsolete, or misnamed tests were reviewed, and whether the risk requires the full regression gate. Save it as JSON matching `schemas/test-impact-assessment.schema.json`, then:
+   ```bash
+   python -m src.control_plane tia record --task-id <task_id> --file tia.json
+   ```
+   Run the regression scope the assessment calls for against the final tree. Any later source, test, or configuration edit invalidates that run and requires it again.

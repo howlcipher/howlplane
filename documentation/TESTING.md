@@ -103,6 +103,50 @@ and deleted paths are expanded from Git name-status output so their previous
 behavioral contract is still considered. The selector prints every changed path, selected test, reason,
 and fallback decision.
 
+## Verification policy
+
+One policy, used by `AGENTS.md`, the `test_and_verify` and `quality_assurance`
+skills, and the verify and ship prompts:
+
+- **While iterating**, run the directly affected tests and the relevant fast
+  tier (`make test-changed`, `make test-fast-python`). Do not run the full suite
+  after every small edit.
+- **Before pull-request integration or final completion**, run the regression
+  scope the Test Impact Assessment calls for. The full gate is `make test-full`
+  when risk, shared infrastructure, authority or security behavior, or
+  orchestration warrants it. The result must correspond to the final tree.
+- **Failures and warnings:** a failing test, compiler or linter error, or a
+  warning from the project's configured gate keeps a task from being marked
+  complete. A required check that failed is never reported as done.
+- **Coverage is a signal, not a quota.** Use it to find untested risk, and do not
+  add tests only to raise it. A coverage gate the project actually enforces
+  (`--cov-fail-under` in `make coverage-python` and CI) is still a gate.
+- **Tests are not append-only.** Do not add redundant tests to raise counts;
+  consolidate or remove a test only with written evidence that equivalent
+  protection remains.
+
+## Default suite and optional tools
+
+The default suite runs in a normal developer or CI environment with the
+declared development dependencies (`pip install -e ".[dev,research,server,cloud,google,queue,agent-frameworks]"`,
+or `.[all,dev]`, which CI uses) and needs no authenticated provider or live
+service. A few tests need something outside that contract:
+
+| Needs | Tests | Where it comes from |
+| --- | --- | --- |
+| `chromadb` (the `vector` extra) | `test_chromadb`, `test_docs::test_pdoc_api_generation` | `pip install ".[vector]"` |
+| `litellm`, `bs4`, `pdoc` | `test_job_hunting_pipeline`, `test_frontend`, `test_docs` | `agent-frameworks`, `research`, `dev` extras |
+| `slopslint` 0.1.0 | five hygiene tests in `test_hygiene_policy` and `test_control_plane` | `scripts/install_slopslint.sh` |
+| a real `howlframe` binary | `test_howlframe_dogfood` (12 tests) | built from `howlcipher/howlframe`, as `test.yml` does |
+
+Without one of these, the test **skips with an explicit reason** locally
+(`tests/_requirements.py`). CI sets `HOWLPLANE_REQUIRE_TOOLS=1` and installs
+everything, so there a missing dependency does not skip: it fails. Set the same
+variable locally to prove an environment is complete. A tool that is installed
+but cannot run (for example `slopslint` with `BUN_OPTIONS=--smol` in the
+environment) is reported as such, not as missing. Genuine failures are never
+converted to skips.
+
 ## Continuous Test Impact Assessment
 
 Before finishing every code-changing task, answer and act on:
@@ -120,6 +164,14 @@ test, then run relevant regression. For new behavior, define and test the
 observable contract before implementation. Do not add tests merely for line
 coverage. Remove or consolidate a test only with written evidence that better
 or equivalent protection remains.
+
+For a code-changing task, record the assessment as structured evidence and let
+the ship check enforce it:
+
+```bash
+howlplane tia record --task-id TASK --file tia.json   # validated against schemas/test-impact-assessment.schema.json
+howlplane tia check TASK                              # fails without a valid record; --no-code-change for tasks that changed no code or tests
+```
 
 Final reported regression results must correspond to the final working-tree
 state. Any source, test, test configuration, CI, or testing-policy modification

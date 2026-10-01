@@ -267,7 +267,7 @@ The QA agent's own system prompt (`src/core/orchestrator.py:221`) instructs it t
 
 **Required automated tests:** unit tests on `qa_node` (or a refactored-out pure decision function) covering: exact `"APPROVED"`, `"APPROVED"` with surrounding whitespace/newlines, a rejection containing the substring "APPROVED" inside prose, and a plain rejection with no such substring.
 
-**Verification commands:** `make test-changed`, then `make test` for the full suite.
+**Verification commands:** `make test-changed` while iterating, then `make test-full` at final completion.
 
 **Value/Effort/Decay/Score:** Value 6 (the pipeline's only quality/safety checkpoint can be defeated by ordinary rejection prose, not even adversarial input), Effort 2 (isolated, well-understood parsing fix plus tests), Decay 1.0 (new-theme correctness bug, not a polish pass). Score = 6×1.0÷2 = 3.0.
 
@@ -308,7 +308,7 @@ An empty string (the user pressing Enter with no input — a misclick, an accide
 
 **Required automated tests:** unit test on `human_proxy_intercept` mocking `input()` to return `""` first then a valid response, asserting the empty response does not short-circuit to `True` and the function re-prompts; existing-behavior regression tests for `"y"`/`"yes"`/`"n"`/`"no"`.
 
-**Verification commands:** `make test-changed`, then `make test` for the full suite.
+**Verification commands:** `make test-changed` while iterating, then `make test-full` at final completion.
 
 **Value/Effort/Decay/Score:** Value 7 (governs real executable command authorization, the highest-impact of the four bugs), Effort 2 (one-line condition change plus tests), Decay 1.0 (new-theme authorization bug). Score = 7×1.0÷2 = 3.5.
 
@@ -348,7 +348,7 @@ When the iteration cap is reached without QA ever approving, the graph routes to
 
 **Required automated tests:** a graph-level test driving `should_continue`/the compiled workflow through repeated QA rejection to exhaustion, asserting the exhaustion marker/flag is present in the final state; a companion test asserting a normal-approval run has no such marker.
 
-**Verification commands:** `make test-changed`, then `make test` for the full suite.
+**Verification commands:** `make test-changed` while iterating, then `make test-full` at final completion.
 
 **Value/Effort/Decay/Score:** Value 5 (silently ships rejected content as if reviewed; lower than bug 8's execution-authorization impact but still a real quality/trust gap), Effort 2 (state threading plus tests, contained to one function and its consumers), Decay 1.0 (distinct failure mode from bug 7, not a repeat of the same fix). Score = 5×1.0÷2 = 2.5.
 
@@ -381,7 +381,7 @@ Live-verified: `pre-commit` (framework version 4.6.0) is installed on this machi
 
 **Required automated tests:** if adopting a real config, a test or documented manual verification step showing a deliberately non-compliant file causes `pre-commit run --all-files` to exit non-zero and the Makefile target to propagate that failure (no `|| true`). If removing the step, confirm no test or doc still asserts the pre-commit line's presence/behavior (`grep -rn "pre-commit run" tests/ Makefile` should show the intended post-fix state only).
 
-**Verification commands:** `pre-commit run --all-files` (or its removal, confirmed via `grep -n "pre-commit" Makefile`), then `make lint` end to end, then `make test`.
+**Verification commands:** `pre-commit run --all-files` (or its removal, confirmed via `grep -n "pre-commit" Makefile`), then `make lint` end to end, then `make test-full` at final completion.
 
 **Value/Effort/Decay/Score:** Value 5 (a "required" gate on the default push path that has never once actually run), Effort 3 (requires a real scoping decision between adopt vs. remove, not just a mechanical fix), Decay 1.0 (new-theme CI-gate bug, distinct from the chr()-obfuscation lint-evasion theme already closed in bugs 1/2/4). Score = 5×1.0÷3 ≈ 1.7.
 

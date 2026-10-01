@@ -40,6 +40,7 @@
         "human_decision",
       "work_item_decision",
       "repo_proposal_decision",
+      "test_impact_assessed",
         "control_plane_defect_caught",
         "slop_check_executed",
         "debt_acceptance_requested",
