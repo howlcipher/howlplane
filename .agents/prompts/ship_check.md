@@ -17,6 +17,8 @@ Evaluate evidence, verification status, and human authority boundaries before ma
 2. If boundaries are triggered (exit code 2), transition task state to `awaiting_human` and present the decision packet to the human operator.
 3. If clean and authorized:
    - Ensure evidence ledger has recorded all milestones.
+   - For a code-changing task, require a valid Test Impact Assessment: `python -m src.control_plane tia check <task_id>` must pass. Use `--no-code-change` only when the task changed no code or tests. A missing or invalid assessment blocks completion; do not skip it.
+   - Confirm the regression run it records covers the final working tree. If anything changed after that run, rerun the required gate.
    - Run final project verification.
    - Transition task state to `complete`.
    - Close out task journal and push verified commits.
