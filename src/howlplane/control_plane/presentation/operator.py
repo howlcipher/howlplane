@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from howlplane.control_plane.factory.status_publish import OWNER_REQUIRED
 from howlplane.control_plane.factory.supervisor_state import SupervisorState
+from howlplane.control_plane.presentation.redact import redact_operator_text
 from howlplane.control_plane.presentation.style import Style, format_duration
 from howlplane.control_plane.resource_models import ProviderFailureClass
 
@@ -327,6 +328,10 @@ def render_operator_text(op: OperatorStatus, status: Mapping[str, Any], style: O
         rows.insert(4, ("Reason", op.summary))
         if op.reason_code is not ReasonCode.NONE:
             rows.insert(5, ("Code", op.reason_code.value))
+        last_error = str(status.get("last_error") or "")
+        if last_error and last_error not in op.summary:
+            shown = redact_operator_text(last_error)
+            rows.insert(5, ("Last error", shown if len(shown) <= 120 else shown[:117] + "..."))
     lines += style.kv(rows, severities={health_key: op.severity.value})
 
     lines += ["", style.section("Current work"), op.current_work or "none"]

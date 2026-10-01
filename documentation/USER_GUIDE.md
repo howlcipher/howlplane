@@ -18,6 +18,32 @@ howlplane factory logs --follow
 and `howlplane config explain <setting>` show effective configuration and where
 each value came from. The sections below are the full reference.
 
+### Operating the Factory day to day
+
+| You want to know | Run | Look for |
+| --- | --- | --- |
+| Is it healthy, what is it doing, who is working? | `howlplane factory status` | the state in the heading, `Worker`, `Elapsed`, `Next` |
+| Why is it waiting, and will it recover? | `howlplane factory status` | `Reason`, `Recovery`, `Retry` |
+| What happened? | `howlplane factory logs` | compact `time LEVEL message` lines |
+| Only the problems | `howlplane factory logs --errors --since 1h` | ERROR lines |
+| One work item or provider | `howlplane factory logs --work-item WI-042` / `--provider codex` | |
+| Can it start safely? Which workers work? | `howlplane factory doctor`, `howlplane agents doctor` | the Worker table and its `Next` step |
+| Pause and continue | `howlplane factory stop`, then `howlplane factory resume` and `howlplane factory start` | state is preserved |
+
+`factory logs` shows the operator event log (what HowlPlane did). Worker
+transcripts and run evidence stay under the target repository's
+`.task_runs/<task>/` directories and are never mixed into it; `--raw` shows the
+process output instead. Every line is redacted before display, including under
+`--follow` and for the systemd journal.
+
+Output adapts to where it goes: color and Unicode only on an interactive
+terminal, plain ASCII when piped or in CI, never in `--json`. Use `NO_COLOR=1`
+or `--color never` to disable color. A recommended command is printed only when
+it exists and is valid for the situation. If something unexpected fails you get
+an `INTERNAL_ERROR` with a diagnostic id (`HP-...`); re-run with `--debug` for
+the traceback, which is also saved, redacted, in
+`~/.local/state/howlplane/diagnostics/`.
+
 ---
 
 ## 1. 🚀 Everyday Workflow: The `howlplane` Command

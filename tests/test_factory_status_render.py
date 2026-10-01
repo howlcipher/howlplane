@@ -108,3 +108,9 @@ def test_every_printed_command_exists(status):
 def test_plain_output_has_no_ansi_or_wide_glyphs():
     text = _text(_status(state="dispatching", current_work_item_id="WI-1"))
     assert text.isascii()
+
+
+def test_backoff_shows_the_real_last_error_redacted():
+    status = _status(state="backoff_after_failure", last_error="transport failure token=abcd1234efgh")
+    text = _text(status)
+    assert "Last error" in text and "transport failure" in text and "abcd1234" not in text
