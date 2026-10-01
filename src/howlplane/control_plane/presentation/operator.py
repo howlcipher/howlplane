@@ -85,6 +85,10 @@ class OperatorStatus:
     attempt: Optional[int] = None
     elapsed_seconds: Optional[int] = None
     retry_in_seconds: Optional[int] = None
+    # The stored backoff facts (reason, attempt, scheduled delay), copied unchanged.
+    retry_reason: Optional[str] = None
+    retry_attempt: Optional[int] = None
+    retry_delay_seconds: Optional[int] = None
     recovery: Optional[str] = None  # "automatic" or "manual" when the state is a wait or failure
 
     def to_dict(self) -> Dict[str, Any]:
@@ -134,6 +138,10 @@ def _runtime(status: Mapping[str, Any], state: str, now: Optional[datetime]) -> 
     waiting = state in (SupervisorState.BACKOFF_AFTER_FAILURE.value, SupervisorState.WAITING_FOR_PROVIDER.value)
     if waiting and wake and wake > now:
         out["retry_in_seconds"] = int((wake - now).total_seconds())
+        for key, source in (("retry_reason", "backoff_reason"), ("retry_attempt", "backoff_attempt"),
+                            ("retry_delay_seconds", "backoff_delay_seconds")):
+            if status.get(source) is not None:
+                out[key] = status[source]
     return out
 
 
@@ -303,6 +311,20 @@ def _next_text(message: str) -> str:
     return message
 
 
+def _retry_text(op: "OperatorStatus") -> Optional[str]:
+    if op.retry_in_seconds is None:
+        return None
+    text = f"in {format_duration(op.retry_in_seconds)}"
+    facts = []
+    if op.retry_reason:
+        facts.append(op.retry_reason.replace("_", " "))
+    if op.retry_attempt is not None:
+        facts.append(f"attempt {op.retry_attempt}")
+    if op.retry_delay_seconds is not None:
+        facts.append(f"delay {format_duration(op.retry_delay_seconds)}")
+    return f"{text} ({', '.join(facts)})" if facts else text
+
+
 def render_operator_text(op: OperatorStatus, status: Mapping[str, Any], style: Optional[Style] = None) -> List[str]:
     """Human view: state -> meaning -> next action. Internals live under ``--verbose``.
 
@@ -321,7 +343,7 @@ def render_operator_text(op: OperatorStatus, status: Mapping[str, Any], style: O
         ("Elapsed", format_duration(op.elapsed_seconds)),
         ("Attempt", op.attempt),
         ("Recovery", {"automatic": "Automatic", "manual": "Needs you"}.get(op.recovery or "")),
-        ("Retry", f"in {format_duration(op.retry_in_seconds)}" if op.retry_in_seconds is not None else None),
+        ("Retry", _retry_text(op)),
         ("Completed", len(status.get("recent_completed") or [])),
         ("Failed", len(status.get("recent_failed") or [])),
     ]

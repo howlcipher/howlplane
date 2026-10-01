@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 
+- Stored backoff facts (backlog row 80). The supervisor persists `backoff_reason` (`failure_backoff`, `provider_retry_after`, `provider_retry_interval`), `backoff_attempt` (the failure count, only for failure backoff) and `backoff_delay_seconds` when it schedules a retry, and clears them when the wait ends. `factory status` (`--json` keys and the `operator` object `retry_reason`, `retry_attempt`, `retry_delay_seconds`), the `supervisor.state_changed` event and the remote snapshot `backoff` object report the same stored values. Fields are additive; older supervisor records load unchanged.
+
 - Owner decisions for parked work items (backlog row 79). `howlplane approve|reject --work-item ID --state-dir DIR [--repo PATH]` decides a Factory work item parked `awaiting_owner` that has no governed task awaiting approval (for example after a restart during dispatch). It only applies existing transitions (requeue to `ready`, or `rejected`), writes a `work_item_decision` evidence-ledger entry, refuses when a linked task is `awaiting_human` (that stays an `approve TASK` decision) and does not bypass authority gates on re-dispatch. `factory status` now prints the exact command for every parked item; the OWNER_REQUIRED error points at `howlplane factory status` instead of `howlplane status`. Repository proposals still have no decision command (row 81).
 
 - Operator diagnostics pass (backlog rows 75 to 77, see `improvements.md`).

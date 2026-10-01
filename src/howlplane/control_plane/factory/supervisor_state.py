@@ -110,6 +110,12 @@ class SupervisorStateRecord(DataClassSerializationMixin):
     current_provider: Optional[str] = None
     current_provider_attempt: Optional[int] = None
     current_dispatch_started_at: Optional[str] = None
+    # Backoff facts stored when the supervisor schedules a retry, so status, the
+    # event log and the remote snapshot read one value instead of re-deriving it.
+    # Additive; absent in old records, cleared when the supervisor stops waiting.
+    backoff_reason: Optional[str] = None
+    backoff_attempt: Optional[int] = None
+    backoff_delay_seconds: Optional[int] = None
     observations_consumed: int = 0
     merges_count: int = 0
     admission_decisions: List[Dict[str, Any]] = field(default_factory=list)
@@ -240,6 +246,15 @@ class SupervisorStateRecord(DataClassSerializationMixin):
             "details": details or {},
         })
         self.alerts = self.alerts[-50:]
+
+    def set_backoff(self, reason: Optional[str], attempt: Optional[int], delay_seconds: Optional[float]) -> None:
+        self.backoff_reason = reason
+        self.backoff_attempt = attempt
+        self.backoff_delay_seconds = None if delay_seconds is None else max(0, int(round(delay_seconds)))
+
+    def backoff_facts(self) -> Dict[str, Any]:
+        return {"backoff_reason": self.backoff_reason, "backoff_attempt": self.backoff_attempt,
+                "backoff_delay_seconds": self.backoff_delay_seconds}
 
     def clear_current_dispatch(self) -> None:
         self.current_work_item_id = None

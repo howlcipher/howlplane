@@ -665,6 +665,7 @@ class FactorySupervisor:
             "last_tick_at": self._state_record.last_tick_at,
             "last_successful_tick_at": self._state_record.last_successful_tick_at,
             "next_wake_at": self._state_record.next_wake_at,
+            **self._state_record.backoff_facts(),
             "current_work_item_id": self._state_record.current_work_item_id,
             "last_work_item_id": self._state_record.last_work_item_id,
             "current_task_id": self._state_record.current_task_id,
@@ -742,6 +743,8 @@ class FactorySupervisor:
         self._log("supervisor.state_changed", f"Factory state {previous} -> {record.state}", severity,
                   from_state=previous, reason=history.get("reason") or None,
                   failure_count=record.failure_count or None,
+                  backoff_reason=record.backoff_reason, backoff_attempt=record.backoff_attempt,
+                  backoff_delay_seconds=record.backoff_delay_seconds,
                   retry_after=record.next_wake_at if record.state in (
                       SupervisorState.BACKOFF_AFTER_FAILURE, SupervisorState.WAITING_FOR_PROVIDER) else None)
 
@@ -936,17 +939,23 @@ class FactorySupervisor:
         return soonest
 
     def _compute_next_wake(self, state: str, now: datetime) -> datetime:
+        """Next wake time; also stores the reason, attempt and delay behind a retry wait."""
+        record = self._state_record
         if state == SupervisorState.WAITING_FOR_PROVIDER:
             retry_after = self._provider_retry_after()
             if retry_after is not None and retry_after > now:
+                record.set_backoff("provider_retry_after", None, (retry_after - now).total_seconds())
                 return retry_after
+            record.set_backoff("provider_retry_interval", None, self.provider_retry_interval_seconds)
             return now + timedelta(seconds=self.provider_retry_interval_seconds)
         if state == SupervisorState.BACKOFF_AFTER_FAILURE:
             backoff = min(
-                self.backoff_base_seconds * (2 ** self._state_record.failure_count),
+                self.backoff_base_seconds * (2 ** record.failure_count),
                 self.max_backoff_seconds,
             )
+            record.set_backoff("failure_backoff", record.failure_count, backoff)
             return now + timedelta(seconds=backoff)
+        record.set_backoff(None, None, None)
         return now + timedelta(seconds=self.tick_interval_seconds)
 
     def _provider_has_capacity(self) -> bool:
