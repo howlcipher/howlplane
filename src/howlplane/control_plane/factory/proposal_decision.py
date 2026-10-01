@@ -67,12 +67,16 @@ def decide_proposal(
     proposal.decided_by = decided_by
     proposal.decision_reason = reason
     store.save_object(proposal)
-    od.record_decision(
+    entry_id = od.record_decision(
         ledger, proposal_id, EVIDENCE_ACTION, decision,
         {"reason": reason, "previous_state": previous, "new_state": proposal.state,
          "repository_name": proposal.repository_name,
          "evidence_fingerprints": list(proposal.evidence_fingerprints),
          "bootstrap_contract_sha256": fingerprint})
+    if decision == APPROVED:
+        proposal.approved_contract_sha256 = fingerprint
+        proposal.approved_decision_entry_id = entry_id
+        store.save_object(proposal)
     return {"proposal_id": proposal_id, "decision": decision, "from_state": previous,
             "state": proposal.state, "reason": reason, "repository_name": proposal.repository_name,
             "bootstrap_contract_sha256": fingerprint}

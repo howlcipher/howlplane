@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, Set
 
 _CONSTANTS = {"TIA_ACTION", "EVIDENCE_ACTION", "GATE_BLOCKED_ACTION"}
-_POSITIONAL_EMITTERS = {"audit", "_record_evidence", "record_decision"}
+_POSITIONAL_EMITTERS = {"audit", "record_decision"}
 _NOT_EMITTERS = {"add_argument", "add_parser"}  # argparse `action=` is not evidence
 
 

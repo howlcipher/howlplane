@@ -378,6 +378,13 @@ def render_operator_text(op: OperatorStatus, status: Mapping[str, Any], style: O
         for alt in action.alternatives:
             lines.append(style.command_block(alt))
 
+    ready = status.get("bootstrap_ready") or []
+    if ready:
+        lines += ["", style.section("Accepted, not yet bootstrapped")]
+        for item in ready:
+            lines += [f"  {item['proposal_id']} ({item['repository_name']}): {item['bootstrap_state']}",
+                      style.command_block(item["command"])]
+
     details = ["howlplane factory status --verbose"]
     details.append("howlplane factory logs --errors" if op.severity in (Severity.ATTENTION, Severity.ERROR)
                    else "howlplane factory logs --follow")

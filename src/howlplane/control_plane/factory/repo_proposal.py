@@ -203,6 +203,11 @@ class RepoProposal(DataClassSerializationMixin):
     decided_at: Optional[str] = None
     decided_by: Optional[str] = None
     decision_reason: Optional[str] = None
+    # Set only when an owner approves: the contract fingerprint that was
+    # decided and the ledger entry that recorded it. The bootstrap consumer
+    # refuses to act on a contract that no longer matches (#82).
+    approved_contract_sha256: Optional[str] = None
+    approved_decision_entry_id: Optional[str] = None
 
     def __post_init__(self):
         self.disposition = str(self.disposition)

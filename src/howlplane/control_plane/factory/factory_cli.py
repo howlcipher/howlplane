@@ -74,6 +74,56 @@ def _proposal_decisions(proposal_store: Any, state_dir: Any) -> List[Dict[str, s
     ]
 
 
+def _bootstrap_ready(proposal_store: Any, state_dir: Any) -> List[Dict[str, str]]:
+    """Accepted proposals that have not been bootstrapped yet, with the one command that consumes them."""
+    from howlplane.control_plane.factory.bootstrap import BootstrapRunStore, COMPLETED, bootstrap_command
+    from howlplane.control_plane.factory.repo_proposal import ProposalState
+    if state_dir is None:
+        return []
+    runs = BootstrapRunStore(Path(state_dir).resolve() / "bootstrap_runs")
+    ready = []
+    for p in proposal_store.list_all():
+        if p.state != ProposalState.ACCEPTED.value:
+            continue
+        run = runs.load(p.proposal_id) if runs.exists(p.proposal_id) else None
+        if run is not None and run.state == COMPLETED:
+            continue
+        ready.append({"proposal_id": p.proposal_id, "repository_name": p.repository_name,
+                      "bootstrap_state": run.state if run else "accepted",
+                      "command": bootstrap_command(p.proposal_id, str(state_dir))})
+    return ready
+
+
+def cmd_factory_bootstrap(args: argparse.Namespace) -> int:
+    """The single governed consumer of an accepted repository proposal (#82)."""
+    from howlplane.control_plane.factory import bootstrap
+    from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+    if not getattr(args, "state_dir", None):
+        raise OperatorFailure(OperatorError(
+            "MISSING_STATE_DIRECTORY", "factory bootstrap needs --state-dir.",
+            "The Factory state directory says where the accepted proposal is stored.",
+            "Copy the exact command from the Factory status.", "howlplane factory status"))
+    ledger_file = _cli()._resolve_ledger_file(args)
+    ledger = _cli().EvidenceLedger(ledger_file) if ledger_file else None
+    try:
+        result = bootstrap.bootstrap_proposal(
+            args.state_dir, args.proposal, ledger=ledger,
+            target_root=getattr(args, "target_root", None), retry=getattr(args, "retry", False))
+    except bootstrap.BootstrapError as exc:
+        raise OperatorFailure(OperatorError(exc.code, str(exc), exc.why, exc.next_action, exc.command))
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(result, indent=2))
+    elif result["state"] == bootstrap.COMPLETED:
+        print(f"Bootstrapped {result['repository_name']} at {result['target_path']}")
+        print(f"Verification passed; capability {result['capability_id']} is registered as verified.")
+        print("No remote repository was created.")
+    else:
+        print(f"Bootstrap of {result['repository_name']} FAILED: {result['error']}")
+        print(f"Left in place for inspection: {result['target_path']}")
+    return 0 if result["state"] == bootstrap.COMPLETED else 1
+
+
 def cmd_factory_status(args: argparse.Namespace) -> int:
     from pathlib import Path
     from howlplane.control_plane.factory.campaign import campaign_from_state_dir
@@ -165,6 +215,7 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
     status["decisions"] = (
         (_cli()._owner_decisions(work_store, campaign.target_dir, args.state_dir) if campaign is not None else [])
         + _proposal_decisions(proposal_store, args.state_dir))
+    status["bootstrap_ready"] = _bootstrap_ready(proposal_store, args.state_dir)
     from howlplane.control_plane.presentation.operator import (
         derive_operator_status,
         render_operator_text,
@@ -449,6 +500,8 @@ def cmd_factory(args: argparse.Namespace) -> int:
             return prepare.command(args)
         if action == "doctor":
             return _cli().cmd_factory_doctor(args)
+        if action == "bootstrap":
+            return _cli().cmd_factory_bootstrap(args)
         if action == "canary":
             args.max_work_items = 1
             if not getattr(args, "until", None):

@@ -67,6 +67,7 @@ from howlplane.control_plane.factory.factory_cli import (  # noqa: F401  re-expo
     cmd_factory_logs,
     _print_worker_table,
     cmd_factory_doctor,
+    cmd_factory_bootstrap,
     cmd_factory,
 )
 from howlplane.control_plane.verification import VerificationPlan
@@ -1675,6 +1676,17 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_factory_doctor.add_argument("--target-repo", help="Repository to resolve (advanced)")
     _add_readiness_arguments(p_factory_doctor)
     _add_workspace_trust_argument(p_factory_doctor)
+
+    p_bootstrap = factory_sub.add_parser(
+        "bootstrap", help="Bootstrap a local repository from an owner-accepted proposal (fingerprint-bound)", **kwargs
+    )
+    p_bootstrap.add_argument("--proposal", required=True, help="Accepted repository proposal id")
+    p_bootstrap.add_argument("--state-dir", help="Factory state directory")
+    p_bootstrap.add_argument("--target-root", help="Directory that will hold the new repository "
+                                                   "(default: <state-dir>/bootstrapped_repositories)")
+    p_bootstrap.add_argument("--retry", action="store_true", help="Retry a bootstrap that previously failed")
+    p_bootstrap.add_argument("--ledger-file", help="Ledger file path")
+    p_bootstrap.add_argument("--json", action="store_true", help="Output JSON result")
 
     p_prepare = factory_sub.add_parser(
         "prepare", help="Authorize a repository for unattended Factory use and prepare agent workspace trust", **kwargs
