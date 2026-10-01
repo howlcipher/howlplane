@@ -37,6 +37,7 @@
 2. `cd` into a Git repository.
 3. `howlplane setup` checks the repository, your AI workers and workspace trust, offers to prepare the repository (it asks before authorizing anything), and tells you what to run next.
 4. `howlplane start` starts HowlPlane working on the repository. In scripts or any non-interactive shell, choose the authority explicitly: `howlplane start --authority safe`.
+   HowlPlane starts in `local_only` mode, which forbids hosted AI workers. To let it use your installed AI CLIs, set `operating_mode = "connected"` in `~/.config/howlplane/config.toml`; `status` tells you when this is what is blocking work.
 5. `howlplane status` shows whether it is healthy, what it is working on, and exactly what you need to do, if anything.
 6. `howlplane logs --follow` shows the details as they happen.
 7. If status says `OWNER REQUIRED`, run the command it prints: `howlplane approve ID` or `howlplane reject ID`. The id can be a task, a parked work item or a repository proposal; HowlPlane works out which.
