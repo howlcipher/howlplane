@@ -1,7 +1,10 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
+from tests._requirements import requires_module
 
+
+@requires_module("chromadb")
 @patch("chromadb.PersistentClient")
 def test_chroma_db_mock(mock_client):
     # Setup mock

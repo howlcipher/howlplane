@@ -198,6 +198,11 @@ class RepoProposal(DataClassSerializationMixin):
     bootstrap_plan: Dict[str, Any] = field(default_factory=dict)
     state: str = _plain(ProposalState.AWAITING_AUTHORITY)
     schema_version: str = REPO_PROPOSAL_SCHEMA_VERSION
+    # Set only by an owner decision (factory/proposal_decision.py). Optional so
+    # records written before decisions existed still load.
+    decided_at: Optional[str] = None
+    decided_by: Optional[str] = None
+    decision_reason: Optional[str] = None
 
     def __post_init__(self):
         self.disposition = str(self.disposition)
@@ -213,6 +218,15 @@ class RepoProposal(DataClassSerializationMixin):
             "bootstrap_plan": self.bootstrap_plan,
             "state": self.state,
         }
+
+
+def contract_fingerprint(proposal: "RepoProposal") -> str:
+    """Identity of the bootstrap contract being decided, independent of its state."""
+    import hashlib
+    import json
+    contract = proposal.as_bootstrap_contract()
+    contract.pop("state", None)
+    return hashlib.sha256(json.dumps(contract, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 class RepoProposalStore(DurableObjectStore):

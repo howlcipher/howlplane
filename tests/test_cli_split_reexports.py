@@ -8,7 +8,7 @@ from howlplane.control_plane.factory import factory_run_cli
 pytestmark = pytest.mark.unit
 
 MOVED = {
-    governance_cli: ["_handle_work_item_decision", "_handle_decision", "cmd_approve", "cmd_reject",
+    governance_cli: ["_handle_work_item_decision", "_handle_proposal_decision", "_handle_decision", "cmd_approve", "cmd_reject",
                      "cmd_resume", "cmd_cancel", "_lock_candidates", "_lock_relevance", "cmd_unlock"],
     factory_run_cli: ["_resolve_factory_campaign", "_select_factory_authority", "_build_factory_supervisor",
                       "cmd_factory_run_once", "cmd_factory_run", "_factory_state_store",

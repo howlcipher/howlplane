@@ -196,11 +196,15 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
         decisions = status.get("decisions") or []
         if decisions:
             first = decisions[0]
+            if first.get("kind") == "proposal":
+                subject = f"repository proposal {first['proposal_id']} ({first.get('repository_name')})"
+            else:
+                subject = first["work_item_id"]
             action = OperatorAction(
-                f"Review {first['work_item_id']} and decide:", first["approve"],
+                f"Review {subject} and decide:", first["approve"],
                 alternatives=[first["reject"]] if first.get("reject") else [])
         else:
-            # Repository proposals have no decision command yet, so none is invented.
+            # Only commands that exist are printed; none can be built without a state directory.
             action = OperatorAction("Review the items awaiting an owner decision listed above.")
         return OperatorStatus(
             label="OWNER REQUIRED", severity=Severity.ATTENTION,

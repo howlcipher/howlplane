@@ -14,7 +14,7 @@ Execute the recommended specialized reviewer roles from:
 - `correctness-reviewer`: logic defects, unhandled edge cases, contract mismatches.
 - `regression-reviewer`: backwards compatibility breaks, call-site drift, side-effects.
 - `security-reviewer`: trust boundaries, credential leaks, injection risks, authorization.
-- `test-falsifier`: vacuous assertions, inaccurate mocks, untested branches, falsified tests.
+- `test-falsifier`: vacuous assertions, inaccurate mocks, untested branches, falsified tests. Also duplicate test contracts, obsolete tests, tests whose names claim behavior they do not exercise, and append-only test accumulation. Check the recorded Test Impact Assessment against the diff, and require written evidence that equivalent protection remains for any test removed or consolidated.
 - `architecture-reviewer`: unnecessary coupling, leaky abstractions, boundary violations.
 - `simplicity-reviewer`: needless complexity, overengineering, dead code, minimal alternatives.
 

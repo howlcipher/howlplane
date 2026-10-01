@@ -1,5 +1,8 @@
 import os
-from bs4 import BeautifulSoup
+
+from tests._requirements import import_or_skip
+
+BeautifulSoup = import_or_skip("bs4").BeautifulSoup
 
 
 def test_frontend_has_systems_console_elements():

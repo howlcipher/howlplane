@@ -76,6 +76,12 @@ next action. Add `--verbose` for supervisor IDs, ticks and history counts, and
 `--json` for the stable contract (its `operator` object carries the state,
 severity, `reason_code` and next action).
 
+When `factory status` shows `OWNER REQUIRED` it prints the exact command to run.
+For a repository proposal awaiting authority that is
+`howlplane approve --proposal PROPOSAL_ID --state-dir DIR` (or `reject`, with an
+optional `--reason`). Approving records the decision and its evidence and marks
+the proposal `accepted`; it does not create a repository by itself.
+
 On its first interactive start, Factory asks for an explicit authority choice.
 The safe default uses the existing `strict` authority profile. In automation,
 pass `--authority safe` or an approved `--authority-profile`; Factory never
@@ -355,6 +361,8 @@ The repository's shared context layer operates as an integrated subsystem within
 ---
 
 ## Global Installation & Setup
+
+HowlPlane's Python engine requires **Python 3.11 or newer** (tested on 3.11 to 3.14); pip refuses older interpreters at install time.
 
 ### Option 0: Howl Ecosystem Installer (Recommended)
 `howl install` downloads and verifies the `howlplane` CLI (a checksummed release binary, from [GitHub Releases](https://github.com/howlcipher/howlplane/releases)) and the Python control-plane engine (a checksummed wheel from the same release, installed into an isolated venv Howl manages) together, as one dependency-ordered ecosystem install -- no local Go toolchain, source checkout, or `pip install -e` required. Everything except `project`-family subcommands is transparently delegated from the `howlplane` binary to the managed engine; see `internal/enginepath` for the resolution order.

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "howlplane.test_impact_assessment/v1",
+  "title": "HowlPlane Test Impact Assessment",
+  "description": "Structured Test Impact Assessment recorded in the evidence ledger (action test_impact_assessed) before a code-changing task is declared complete.",
+  "type": "object",
+  "properties": {
+    "schema": { "type": "string", "const": "howlplane.test_impact_assessment/v1" },
+    "changed_behavior": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The observable behavior that changed."
+    },
+    "tests_added": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "tests_updated": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "tests_removed": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "duplicate_or_obsolete_tests_reviewed": {
+      "type": "boolean",
+      "description": "True once existing tests were reviewed for duplicate, obsolete or misnamed contracts."
+    },
+    "full_regression_required": {
+      "type": "boolean",
+      "description": "Whether the risk of this change requires the full regression gate before completion."
+    },
+    "regression_commands_run": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Commands actually run against the final tree. Required when full_regression_required is true."
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Why this test scope is sufficient, including why any removed test no longer adds protection."
+    }
+  },
+  "required": [
+    "changed_behavior",
+    "tests_added",
+    "tests_updated",
+    "tests_removed",
+    "duplicate_or_obsolete_tests_reviewed",
+    "full_regression_required",
+    "rationale"
+  ],
+  "additionalProperties": false
+}

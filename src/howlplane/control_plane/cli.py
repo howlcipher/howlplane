@@ -71,6 +71,7 @@ from howlplane.control_plane.factory.factory_cli import (  # noqa: F401  re-expo
 from howlplane.control_plane.verification import VerificationPlan
 from howlplane.control_plane.governance_cli import (  # noqa: F401  re-exported for tests and monkeypatching
     _handle_work_item_decision,
+    _handle_proposal_decision,
     _handle_decision,
     cmd_approve,
     cmd_reject,
@@ -1388,19 +1389,21 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_ha.add_argument("--json", action="store_true", help="Output JSON result")
 
     # approve
-    p_appr = subparsers.add_parser("approve", parents=[common_parser], help="Approve an awaiting_human task or a parked Factory work item")
+    p_appr = subparsers.add_parser("approve", parents=[common_parser], help="Approve an awaiting_human task, a parked work item, or a repository proposal")
     p_appr.add_argument("task_id", nargs="?", help="Task ID to approve")
     p_appr.add_argument("--work-item", help="Parked Factory work item to approve (instead of a task ID)")
-    p_appr.add_argument("--state-dir", help="Factory state directory holding the work item")
+    p_appr.add_argument("--proposal", help="Repository proposal awaiting authority to approve (instead of a task ID)")
+    p_appr.add_argument("--state-dir", help="Factory state directory holding the work item or proposal")
     p_appr.add_argument("--reason", help="Optional human reason for approval")
     p_appr.add_argument("--ledger-file", help="Ledger file path")
     p_appr.add_argument("--json", action="store_true", help="Output JSON result")
 
     # reject
-    p_rej = subparsers.add_parser("reject", parents=[common_parser], help="Reject an awaiting_human task or a parked Factory work item")
+    p_rej = subparsers.add_parser("reject", parents=[common_parser], help="Reject an awaiting_human task, a parked work item, or a repository proposal")
     p_rej.add_argument("task_id", nargs="?", help="Task ID to reject")
     p_rej.add_argument("--work-item", help="Parked Factory work item to reject (instead of a task ID)")
-    p_rej.add_argument("--state-dir", help="Factory state directory holding the work item")
+    p_rej.add_argument("--proposal", help="Repository proposal awaiting authority to reject (instead of a task ID)")
+    p_rej.add_argument("--state-dir", help="Factory state directory holding the work item or proposal")
     p_rej.add_argument("--reason", help="Optional human reason for rejection")
     p_rej.add_argument("--ledger-file", help="Ledger file path")
     p_rej.add_argument("--json", action="store_true", help="Output JSON result")
@@ -1843,6 +1846,21 @@ def register_synthesis_subparsers(subparsers: Any, parents: Optional[List[Any]] 
         if name == "explain":
             p_cfg.add_argument("key", help="Dotted setting name, for example server.port")
         p_cfg.add_argument("--json", action="store_true", help="Output JSON result")
+
+    p_tia = subparsers.add_parser(
+        "tia", help="Record and check the Test Impact Assessment required before a code change ships", **kwargs)
+    tia_sub = p_tia.add_subparsers(dest="tia_action", required=True, metavar="<action>")
+    p_tia_record = tia_sub.add_parser("record", help="Validate a Test Impact Assessment and append it to the evidence ledger")
+    p_tia_record.add_argument("--task-id", required=True)
+    p_tia_record.add_argument("--file", required=True, help="JSON file ('-' for stdin) matching schemas/test-impact-assessment.schema.json")
+    p_tia_record.add_argument("--agent-id", default="agent")
+    p_tia_check = tia_sub.add_parser("check", help="Fail unless the task has a valid recorded Test Impact Assessment")
+    p_tia_check.add_argument("task_id")
+    p_tia_check.add_argument("--no-code-change", action="store_true",
+                             help="Declare that the task changed no code or tests (nothing to assess)")
+    for p_t in (p_tia_record, p_tia_check):
+        p_t.add_argument("--ledger-file", help="Ledger file path")
+        p_t.add_argument("--json", action="store_true", help="Output JSON result")
 
     # local (local Ollama model setup/health check, #58 Phase 3)
     p_local = subparsers.add_parser("local", help="Local (Ollama) model utilities", **kwargs)
@@ -2417,6 +2435,7 @@ HANDLERS = {
     "acceptance": cmd_acceptance,
     "marathon": cmd_marathon,
     "authority": cmd_authority,
+    "tia": lambda args: __import__("howlplane.control_plane.tia_cli", fromlist=["cmd_tia"]).cmd_tia(args),
     "config": lambda args: __import__("howlplane.control_plane.config_cli", fromlist=["command"]).command(args),
     "setup": lambda args: __import__("howlplane.control_plane.setup_cli", fromlist=["command"]).command(args),
     "local": cmd_local,

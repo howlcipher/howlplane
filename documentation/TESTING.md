@@ -103,6 +103,60 @@ and deleted paths are expanded from Git name-status output so their previous
 behavioral contract is still considered. The selector prints every changed path, selected test, reason,
 and fallback decision.
 
+## Verification policy
+
+One policy, used by `AGENTS.md`, the `test_and_verify` and `quality_assurance`
+skills, and the verify and ship prompts:
+
+- **While iterating**, run the directly affected tests and the relevant fast
+  tier (`make test-changed`, `make test-fast-python`). Do not run the full suite
+  after every small edit.
+- **Before pull-request integration or final completion**, run the regression
+  scope the Test Impact Assessment calls for. The full gate is `make test-full`
+  when risk, shared infrastructure, authority or security behavior, or
+  orchestration warrants it. The result must correspond to the final tree.
+- **Failures and warnings:** a failing test, compiler or linter error, or a
+  warning from the project's configured gate keeps a task from being marked
+  complete. A required check that failed is never reported as done.
+- **Coverage is a signal, not a quota.** Use it to find untested risk, and do not
+  add tests only to raise it. A coverage gate the project actually enforces
+  (`--cov-fail-under` in `make coverage-python` and CI) is still a gate.
+- **Tests are not append-only.** Do not add redundant tests to raise counts;
+  consolidate or remove a test only with written evidence that equivalent
+  protection remains.
+
+## Default suite and optional tools
+
+Run `make check-tools` first: it reports which tools each tier needs and what is
+missing here, instead of letting a long run fail to explain it.
+
+- **Default hermetic tier (`make test-fast-python`)** needs the declared
+  development dependencies (`pip install -e ".[dev]"` plus the extras below, or
+  `.[all,dev]`, which CI uses) and `slopslint` 0.1.0
+  (`bash scripts/install_slopslint.sh`; the hygiene tests verify the live tool and
+  fail closed without it). It needs no authenticated provider, live service, or
+  HowlFrame binary: the dogfood suite is `slow` and is excluded here.
+- **Full gate (`make test-full`)** additionally needs Go and a real `howlframe`
+  binary (built from `howlcipher/howlframe`, pinned in `test.yml`, or via
+  `HOWLFRAME_BIN`). `test_howlframe_dogfood` fails closed without it by design
+  (HOWL-CANON-009, proved by `test_clean_environment_regression`); that failure is
+  never converted into a skip.
+- **Optional Python extras** skip with an explicit reason when absent
+  (`tests/_requirements.py`):
+
+| Needs | Tests | Install |
+| --- | --- | --- |
+| `chromadb` | `test_chromadb`, `test_docs::test_pdoc_api_generation` | `pip install ".[vector]"` |
+| `litellm` | `test_job_hunting_pipeline` | `pip install ".[agent-frameworks]"` |
+| `bs4` | `test_frontend` | `pip install ".[research]"` |
+| `pdoc` | `test_docs` | `pip install ".[dev]"` |
+
+CI sets `HOWLPLANE_REQUIRE_TOOLS=1` and installs everything, so there a missing
+extra does not skip: it fails. Set the same variable locally to prove an
+environment is complete. A tool that is installed but cannot run (for example
+`slopslint` with `BUN_OPTIONS=--smol` in the environment) is reported by
+`make check-tools` as installed-but-failing, not as missing.
+
 ## Continuous Test Impact Assessment
 
 Before finishing every code-changing task, answer and act on:
@@ -120,6 +174,14 @@ test, then run relevant regression. For new behavior, define and test the
 observable contract before implementation. Do not add tests merely for line
 coverage. Remove or consolidate a test only with written evidence that better
 or equivalent protection remains.
+
+For a code-changing task, record the assessment as structured evidence and let
+the ship check enforce it:
+
+```bash
+howlplane tia record --task-id TASK --file tia.json   # validated against schemas/test-impact-assessment.schema.json
+howlplane tia check TASK                              # fails without a valid record; --no-code-change for tasks that changed no code or tests
+```
 
 Final reported regression results must correspond to the final working-tree
 state. Any source, test, test configuration, CI, or testing-policy modification
@@ -158,10 +220,12 @@ Python jobs install the pinned SlopsLint binary
 hygiene verification steps verify it on the live system and fail closed when it
 is absent).
 
-The current package metadata says `>=3.9`, but the live source imports
-`tomllib`, which is standard-library only from Python 3.11. CI therefore treats
-3.11, 3.12, and 3.13 as the tested compatibility set. Aligning the package metadata is
-a separate compatibility decision; it is not hidden by this test optimization.
+HowlPlane requires Python 3.11 or newer (`requires-python = ">=3.11"`): the
+source imports the standard-library `tomllib`, which exists from 3.11. CI tests
+3.11, 3.12, 3.13, and 3.14 (the Docker image runs 3.14). `tests/test_python_support_contract.py`
+fails if the declared floor, the classifiers, the CI matrix, or a `tomllib`
+import drift apart. Older interpreters are refused by pip at install time
+rather than failing after installation; no `tomli` backport is carried.
 
 ## Audit record
 

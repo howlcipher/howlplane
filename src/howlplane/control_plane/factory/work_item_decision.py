@@ -18,20 +18,16 @@ is not a second authority path:
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+from howlplane.control_plane.evidence_ledger import EvidenceLedger
+from howlplane.control_plane.factory import owner_decision as od
 from howlplane.control_plane.factory.work_item import WorkItem, WorkItemState, WorkItemStore
 from howlplane.control_plane.task_spec import TaskSpec
 
-APPROVED = "approved"
-REJECTED = "rejected"
+APPROVED, REJECTED = od.APPROVED, od.REJECTED
 
 
-class WorkItemDecisionError(Exception):
-    """The decision cannot be applied; ``code`` is a stable operator error code."""
-
-    def __init__(self, code: str, message: str, why: str, next_action: str, command: Optional[str] = None):
-        super().__init__(message)
-        self.code, self.why, self.next_action, self.command = code, why, next_action, command
+class WorkItemDecisionError(od.OwnerDecisionError):
+    """A work item decision cannot be applied."""
 
 
 def awaiting_human_task(item: Any, target_dir: Union[str, Path, None]) -> Optional[str]:
@@ -60,17 +56,12 @@ def decide_work_item(
     """Apply the owner's decision to one parked work item and record it."""
     store = WorkItemStore(Path(state_dir).resolve() / "work_items")
     if not store.exists(work_item_id):
-        raise WorkItemDecisionError(
-            "WORK_ITEM_NOT_FOUND", f"No work item '{work_item_id}' in {state_dir}.",
-            "The id or the state directory is wrong.",
-            "List the parked work and copy the exact command.", "howlplane factory status")
+        raise od.not_found_error(WorkItemDecisionError, "WORK_ITEM_NOT_FOUND", "work item", work_item_id, state_dir)
     item: WorkItem = store.load(work_item_id)
     if item.state != WorkItemState.AWAITING_OWNER:
-        raise WorkItemDecisionError(
-            "WORK_ITEM_NOT_AWAITING_OWNER",
-            f"Work item '{work_item_id}' is '{item.state}', not awaiting an owner decision.",
-            "Only items parked for the owner can be decided.",
-            "List the parked work.", "howlplane factory status")
+        raise od.not_awaiting_error(
+            WorkItemDecisionError, "WORK_ITEM_NOT_AWAITING_OWNER", "work item", work_item_id, item.state,
+            "an owner decision", "Only items parked for the owner can be decided.")
     task_id = awaiting_human_task(item, target_dir)
     if task_id:
         verb = "approve" if decision == APPROVED else "reject"
@@ -86,21 +77,17 @@ def decide_work_item(
     else:
         item.transition_to(WorkItemState.REJECTED, reason=reason or "owner_rejected")
     store.save_object(item)
-    if ledger:
-        ledger.append_entry(EvidenceEntry(
-            task_id=work_item_id, agent_id="human_operator", action="work_item_decision",
-            result=decision, human_decision=decision,
-            metadata={"reason": reason, "operator_source": "cli", "from_state": previous,
-                      "to_state": item.state, "linked_task_ids": list(item.task_ids)}))
+    od.record_decision(
+        ledger, work_item_id, "work_item_decision", decision,
+        {"reason": reason, "from_state": previous, "to_state": item.state,
+         "linked_task_ids": list(item.task_ids)})
     return {"work_item_id": work_item_id, "decision": decision, "from_state": previous,
             "state": item.state, "reason": reason}
 
 
 def work_item_commands(work_item_id: str, state_dir: str, target_dir: str) -> Dict[str, str]:
     """Exact approve and reject commands for a parked work item."""
-    import shlex
-    tail = f"--work-item {shlex.quote(work_item_id)} --state-dir {shlex.quote(str(state_dir))} --repo {shlex.quote(str(target_dir))}"
-    return {"approve": f"howlplane approve {tail}", "reject": f"howlplane reject {tail}"}
+    return od.decision_commands("work-item", work_item_id, state_dir, repo=target_dir)
 
 
 __all__: List[str] = ["decide_work_item", "work_item_commands", "awaiting_human_task",
