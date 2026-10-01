@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from howlplane.control_plane.factory.oplog import OperationalLog
+
 logger = logging.getLogger("howlplane.factory.supervisor")
 
 from howlplane.control_plane.atomic_io import atomic_write_json, atomic_write_text, safe_load_json
@@ -89,6 +91,12 @@ class FactorySupervisor:
         self._stop_requested: Optional[str] = None
         self.instance_id: str = self._resolve_instance_id()
         self._state_record = self.state_store.load()
+        self._oplog = OperationalLog(
+            self._state_dir or Path(self.state_store.base_dir),
+            context={"supervisor_id": self.instance_id},
+            clock=clock,
+        )
+        self._logged_state = self._state_record.state
 
         # Dynamically parameterize policy product_repository
         def _resolve_repo_slug(val: Optional[Union[str, Path]]) -> Optional[str]:
@@ -417,6 +425,7 @@ class FactorySupervisor:
                 if att_end and att_end > now_iso:
                     now_iso = att_end
         self._state_record.bounded_run_completed_at = now_iso
+        self._log("run.bounded_complete", f"Bounded run complete: {reason}", reason=reason)
         self._state_record.clear_current_dispatch()
         self._state_record.transition_to(
             SupervisorState.STOPPED, reason=reason, at=now_iso
@@ -656,6 +665,7 @@ class FactorySupervisor:
             "last_tick_at": self._state_record.last_tick_at,
             "last_successful_tick_at": self._state_record.last_successful_tick_at,
             "next_wake_at": self._state_record.next_wake_at,
+            **self._state_record.backoff_facts(),
             "current_work_item_id": self._state_record.current_work_item_id,
             "last_work_item_id": self._state_record.last_work_item_id,
             "current_task_id": self._state_record.current_task_id,
@@ -707,6 +717,36 @@ class FactorySupervisor:
 
     def _persist(self) -> None:
         self.state_store.save(self._state_record)
+        self._log_state_change()
+
+    def _log(self, code: str, message: str, severity: str = "INFO", **fields: Any) -> None:
+        record = self._state_record
+        self._oplog.emit(
+            code, message, severity,
+            state=record.state,
+            work_item_id=fields.pop("work_item_id", record.current_work_item_id),
+            task_id=fields.pop("task_id", record.current_task_id),
+            dispatch_id=fields.pop("dispatch_id", record.current_dispatch_id),
+            provider=fields.pop("provider", record.current_provider),
+            **fields,
+        )
+
+    def _log_state_change(self) -> None:
+        record = self._state_record
+        if record.state == self._logged_state:
+            return
+        previous, self._logged_state = self._logged_state, record.state
+        history = record.transition_history[-1] if record.transition_history else {}
+        severity = "WARNING" if record.state in (
+            SupervisorState.BACKOFF_AFTER_FAILURE, SupervisorState.WAITING_FOR_PROVIDER,
+            SupervisorState.WAITING_FOR_AUTHORITY) else "INFO"
+        self._log("supervisor.state_changed", f"Factory state {previous} -> {record.state}", severity,
+                  from_state=previous, reason=history.get("reason") or None,
+                  failure_count=record.failure_count or None,
+                  backoff_reason=record.backoff_reason, backoff_attempt=record.backoff_attempt,
+                  backoff_delay_seconds=record.backoff_delay_seconds,
+                  retry_after=record.next_wake_at if record.state in (
+                      SupervisorState.BACKOFF_AFTER_FAILURE, SupervisorState.WAITING_FOR_PROVIDER) else None)
 
     @staticmethod
     def _decision_key(decision: Dict[str, Any]) -> Tuple:
@@ -899,17 +939,23 @@ class FactorySupervisor:
         return soonest
 
     def _compute_next_wake(self, state: str, now: datetime) -> datetime:
+        """Next wake time; also stores the reason, attempt and delay behind a retry wait."""
+        record = self._state_record
         if state == SupervisorState.WAITING_FOR_PROVIDER:
             retry_after = self._provider_retry_after()
             if retry_after is not None and retry_after > now:
+                record.set_backoff("provider_retry_after", None, (retry_after - now).total_seconds())
                 return retry_after
+            record.set_backoff("provider_retry_interval", None, self.provider_retry_interval_seconds)
             return now + timedelta(seconds=self.provider_retry_interval_seconds)
         if state == SupervisorState.BACKOFF_AFTER_FAILURE:
             backoff = min(
-                self.backoff_base_seconds * (2 ** self._state_record.failure_count),
+                self.backoff_base_seconds * (2 ** record.failure_count),
                 self.max_backoff_seconds,
             )
+            record.set_backoff("failure_backoff", record.failure_count, backoff)
             return now + timedelta(seconds=backoff)
+        record.set_backoff(None, None, None)
         return now + timedelta(seconds=self.tick_interval_seconds)
 
     def _provider_has_capacity(self) -> bool:
@@ -945,6 +991,7 @@ class FactorySupervisor:
             origin=item.origin,
             repository=item.repository,
         )
+        self._log("dispatch.started", f"{item.work_item_id} dispatched", attempt=item.attempts)
         # Bounded execution: count distinct work items committed to dispatch.
         if self._state_record.run_mode == "bounded":
             self._state_record.work_items_dispatched += 1
@@ -952,6 +999,20 @@ class FactorySupervisor:
                 self._state_record.bounded_dispatched_ids.append(item.work_item_id)
         self._state_record.transition_to(SupervisorState.DISPATCHING, reason="item_selected", at=now_iso)
         self._persist()
+
+        def _observe_provider(provider: str, attempt: int) -> None:
+            previous = self._state_record.current_provider
+            self._state_record.record_provider(provider, attempt)
+            self._persist()
+            if previous and previous != provider:
+                self._log("provider.failover", f"Failover {previous} -> {provider}", "WARNING",
+                          from_provider=previous, attempt=attempt)
+            else:
+                self._log("provider.selected", f"{item.work_item_id} running on {provider}", attempt=attempt)
+
+        setter = getattr(self.dispatcher, "set_provider_observer", None)
+        if callable(setter):
+            setter(_observe_provider)
         try:
             dispatch_result = self.dispatcher.dispatch(
                 item, dispatch_id=dispatch_id, task_id=task_id, run_mode=self._state_record.run_mode
@@ -960,6 +1021,10 @@ class FactorySupervisor:
             dispatch_result = self.dispatcher.dispatch(
                 item, dispatch_id=dispatch_id, task_id=task_id
             )
+        final_provider = (dispatch_result.git_record or {}).get("provider")
+        if final_provider and self._state_record.current_provider is None:
+            self._state_record.record_provider(final_provider, 1)
+            self._persist()
         if (
             dispatch_result.success
             and dispatch_result.git_record
@@ -967,6 +1032,7 @@ class FactorySupervisor:
         ):
             self._state_record.merges_count += 1
             self._persist()
+        self._log_dispatch_outcome(item, dispatch_result)
         item.transition_to(dispatch_result.next_work_item_state, reason=dispatch_result.reason)
         item.blocked_by = item.blocked_by or []
         if dispatch_result.blocker:
@@ -997,6 +1063,24 @@ class FactorySupervisor:
             )
         self.work_item_store.save_object(item)
         return dispatch_result
+
+    def _log_dispatch_outcome(self, item: WorkItem, result: DispatchOutcome) -> None:
+        wid = item.work_item_id
+        common = {"work_item_id": wid, "failure_class": result.failure_class}
+        if result.success:
+            self._log("dispatch.completed", f"{wid} completed", **common)
+            if (result.git_record or {}).get("merged"):
+                self._log("merge.completed", f"{wid} merged", **common)
+        elif result.requires_authority:
+            self._log("owner.decision_required", f"{wid} needs an owner decision", "WARNING",
+                      reason=result.reason, **common)
+        elif result.provider_unavailable:
+            self._log("provider.unavailable", f"Provider unavailable for {wid}", "WARNING",
+                      reason=result.reason, retry_after=result.retry_after, **common)
+        elif result.next_work_item_state == WorkItemState.BLOCKED:
+            self._log("work.parked", f"{wid} parked: {result.reason}", "WARNING", reason=result.reason, **common)
+        else:
+            self._log("dispatch.failed", f"{wid} failed: {result.reason}", "ERROR", reason=result.reason, **common)
 
     def _apply_dispatch_result(
         self,

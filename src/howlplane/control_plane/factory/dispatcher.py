@@ -34,6 +34,11 @@ class MarathonDispatcherAdapter:
         engine_factory: Callable[[], MarathonDogfoodEngine],
     ):
         self._engine_factory = engine_factory
+        self._provider_observer: Optional[Callable[[str, int], None]] = None
+
+    def set_provider_observer(self, observer: Optional[Callable[[str, int], None]]) -> None:
+        """Called with (provider_resource_id, attempt_index) when a worker is actually selected."""
+        self._provider_observer = observer
 
     @staticmethod
     def _files_changed_from_work_item(work_item: WorkItem) -> List[str]:
@@ -57,6 +62,8 @@ class MarathonDispatcherAdapter:
         run_mode: str = "continuous",
     ) -> DispatchOutcome:
         engine = self._engine_factory()
+        if self._provider_observer is not None:
+            engine.provider_observer = self._provider_observer
         files_changed = self._files_changed_from_work_item(work_item)
         try:
             success, git_record = engine.execute_factory_work_item(

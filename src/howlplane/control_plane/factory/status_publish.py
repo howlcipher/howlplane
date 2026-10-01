@@ -155,6 +155,12 @@ def build_redacted_status(
         "last_successful_tick_at": _plain(status.get("last_successful_tick_at")),
         "last_error": _optional_text(status.get("last_error"), repository),
         "failure_count": _count(status.get("failure_count")),
+        "backoff": {
+            "reason": _plain(status.get("backoff_reason")),
+            "attempt": status.get("backoff_attempt") if isinstance(status.get("backoff_attempt"), int) else None,
+            "delay_seconds": status.get("backoff_delay_seconds")
+            if isinstance(status.get("backoff_delay_seconds"), int) else None,
+        },
         "stopped_reason": _optional_text(status.get("stopped_reason"), repository),
         "objective": _optional_text(status.get("objective"), repository),
         "target_mode": _plain(status.get("target_mode")),

@@ -55,7 +55,43 @@ from howlplane.control_plane.reviewers import list_reviewer_roles, get_reviewer_
 from howlplane.control_plane.router import TaskRouter, RoutingDecision
 from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 from howlplane.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.factory.factory_cli import (  # noqa: F401  re-exported for tests and monkeypatching
+    _worker_display,
+    _owner_decisions,
+    cmd_factory_status,
+    cmd_factory_stop,
+    cmd_factory_resume,
+    cmd_factory_start,
+    _print_factory_result,
+    cmd_factory_logs,
+    _print_worker_table,
+    cmd_factory_doctor,
+    cmd_factory,
+)
 from howlplane.control_plane.verification import VerificationPlan
+from howlplane.control_plane.governance_cli import (  # noqa: F401  re-exported for tests and monkeypatching
+    _handle_work_item_decision,
+    _handle_decision,
+    cmd_approve,
+    cmd_reject,
+    cmd_resume,
+    cmd_cancel,
+    _lock_candidates,
+    _lock_relevance,
+    cmd_unlock,
+)
+from howlplane.control_plane.factory.factory_run_cli import (  # noqa: F401  re-exported for tests and monkeypatching
+    _resolve_factory_campaign,
+    _select_factory_authority,
+    _build_factory_supervisor,
+    cmd_factory_run_once,
+    cmd_factory_run,
+    _factory_state_store,
+    _factory_workspace,
+    _factory_readiness,
+    _factory_preflight,
+)
+from howlplane.control_plane.status_cli import cmd_status, cmd_doctor, cmd_agents  # noqa: F401
 
 
 class ControlPlaneError(Exception):
@@ -658,238 +694,6 @@ def cmd_providers(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_status(args: argparse.Namespace) -> int:
-    """Displays project status, active task runs, lock status, and crash recovery diagnostics."""
-    target_repo = _resolve_repo(args)
-    cp_root = find_control_plane_root(getattr(args, "control_plane_dir", None))
-    ctx = ProjectAdapter.discover(target_repo)
-
-    print("=" * 60)
-    print(f"AI CONTROL PLANE — PROJECT STATUS: {ctx.name}")
-    print("=" * 60)
-    print(f"Repository Path:    {target_repo}")
-    print(f"Control Plane:      {cp_root}")
-    print(f"Project Stack:      {', '.join(ctx.project_types) or 'generic'}")
-    print(f"Project AGENTS.md:  {'Present' if ctx.has_agents_md else 'Not found'}")
-    print(f"Hygiene Status:     {ctx.hygiene_status}")
-
-    # Inspect Repository Lock
-    repo_lock_file = get_repo_lock_path(target_repo)
-    if repo_lock_file.exists():
-        try:
-            l_data = json.loads(repo_lock_file.read_text(encoding="utf-8"))
-            alive, _ = is_process_alive(l_data.get("pid", 0), l_data.get("hostname", ""))
-            status_str = "ACTIVE" if alive else "STALE (Reclaimable)"
-            print(f"Repository Lock:    {status_str} — Task: {l_data.get('task_id')}, PID: {l_data.get('pid')}, Command: '{l_data.get('command')}'")
-        except Exception:
-            print("Repository Lock:    Present (Unparseable)")
-    else:
-        print("Repository Lock:    Unlocked (Available)")
-
-    print("-" * 60)
-    print("VERIFICATION COMMANDS DISCOVERED:")
-    plan = ProjectAdapter.create_verification_plan(ctx, task_id="STATUS-CHECK")
-    if plan.steps:
-        for idx, s in enumerate(plan.steps, 1):
-            cmd_display = ' '.join(s.command) if isinstance(s.command, list) else s.command
-            print(f"  {idx}. [{s.category}] {cmd_display}")
-    else:
-        print("  (No automatic test/build commands detected)")
-
-    df_mode = get_dogfood_mode()
-    h_bin = find_howlframe_binary()
-    h_ver = get_howlframe_version(h_bin) if h_bin else None
-    print("-" * 60)
-    print("HOWLFRAME DOGFOOD STATUS:")
-    print(f"  Mode:               {df_mode}")
-    if h_bin:
-        print(f"  Binary:             {h_bin} ({h_ver or '0.1.0'})")
-        if df_mode == "shadow":
-            audit_res = HowlFrameAuditRunner.run_audit(ctx, record_evidence=False, dogfood_mode="shadow")
-            print(f"  Audit Result:       {audit_res.audit_status or 'N/A'} ({audit_res.status}) [{audit_res.duration_seconds}s]")
-            if audit_res.findings:
-                print(f"  Findings:           {', '.join(audit_res.findings)}")
-            if audit_res.comparison_notes:
-                print(f"  Disagreements:      {', '.join(audit_res.comparison_notes)}")
-    else:
-        print("  Binary:             Not available (PATH)")
-
-    task_runs_dir = target_repo / ".task_runs"
-    runs = []
-    if task_runs_dir.is_dir():
-        runs = [d.name for d in task_runs_dir.iterdir() if d.is_dir() and (d / "task.yaml").exists()]
-
-    print("-" * 60)
-    print(f"ACTIVE TASK RUNS ({len(runs)}):")
-    if runs:
-        for r in sorted(runs):
-            t_dir = task_runs_dir / r
-            t_file = t_dir / "task.yaml"
-            try:
-                rec_diag = CrashRecoveryEngine.inspect_task(target_repo, r)
-                t_spec = TaskSpec.load_from_file(str(t_file))
-                rec_file = t_dir / "reconciliation.json"
-                blockers = 0
-                highs = 0
-                if rec_file.exists():
-                    try:
-                        rec_data = json.loads(rec_file.read_text(encoding="utf-8"))
-                        blockers = rec_data.get("summary", {}).get("unresolved_blockers", 0)
-                        highs = rec_data.get("summary", {}).get("unresolved_highs", 0)
-                    except Exception:
-                        pass
-                ver_file = t_dir / "verification_result.json"
-                ver_status = "unverified"
-                if ver_file.exists():
-                    try:
-                        ver_data = json.loads(ver_file.read_text(encoding="utf-8"))
-                        ver_status = ver_data.get("overall_status", "unverified")
-                    except Exception:
-                        pass
-
-                dp_file = t_dir / "decision_packet.md"
-                dp_rel = (
-                    str(dp_file.relative_to(target_repo))
-                    if dp_file.is_file() and dp_file.is_relative_to(target_repo)
-                    else str(dp_file)
-                )
-
-                prog_file = t_dir / "progress.json"
-                prog_data = None
-                if prog_file.is_file():
-                    try:
-                        prog_data = safe_load_json(prog_file)
-                    except Exception:
-                        prog_data = None
-
-                if t_spec.current_state == "awaiting_human":
-                    dec_record = HumanLifecycleManager.load_decision(t_dir)
-                    current_fp = compute_repository_fingerprint(target_repo, t_dir)
-                    boundaries_list = t_spec.human_approval_requirements or ["human_authority_boundary"]
-                    boundaries_str = ", ".join(boundaries_list)
-                    receipt_file = t_dir / "execution_receipt.json"
-
-                    print(f"  Task:               {t_spec.task_id}")
-                    print(f"  State:              AWAITING_HUMAN (Stage: {rec_diag.get('last_stage', 'awaiting_human')})")
-                    print(f"  Verification:       {ver_status.upper()}")
-                    if dec_record and dec_record.changeops_decision_id:
-                        print(f"  ChangeOps Decision: {dec_record.changeops_decision_id}")
-                    if receipt_file.is_file():
-                        try:
-                            rc_data = json.loads(receipt_file.read_text(encoding="utf-8"))
-                            print(f"  Execution Receipt:  {rc_data.get('status', 'unknown').upper()} (Verification: {rc_data.get('verification_status', 'PASS')})")
-                        except Exception:
-                            pass
-                    elif rec_diag.get("native_receipt_found"):
-                        print("  Execution Receipt:  PENDING_RECONCILIATION (Found in HowlChangeOps native receipts)")
-
-                    if not dec_record:
-                        print(f"  Repository State:   CURRENT")
-                        print(f"  Boundary:           {boundaries_str}")
-                        print(f"  Decision:           pending")
-                        if dp_file.is_file():
-                            print(f"  Decision Packet:    {dp_rel}")
-                        print("")
-                        print("  Next Action:")
-                        print(f"    howlplane approve {t_spec.task_id}")
-                        print(f"    howlplane reject {t_spec.task_id}")
-                    elif dec_record.decision == "approved":
-                        has_drift, drift_reason = (
-                            check_repository_drift(dec_record.repository_state, current_fp)
-                            if dec_record.repository_state
-                            else (False, None)
-                        )
-                        appr_state = f"STALE ({drift_reason})" if has_drift else "CURRENT"
-                        print(f"  Boundary:           {boundaries_str}")
-                        print(f"  Decision:           APPROVED")
-                        print(f"  Approval State:     {appr_state}")
-                        if dp_file.is_file():
-                            print(f"  Decision Packet:    {dp_rel}")
-                        print("")
-                        print("  Next Action:")
-                        if has_drift:
-                            print(f"    howlplane approve {t_spec.task_id} --reason \"re-approved after drift\"")
-                        else:
-                            print(f"    howlplane resume {t_spec.task_id}")
-                    elif dec_record.decision == "rejected":
-                        print(f"  Decision:           REJECTED")
-                        if dec_record.reason:
-                            print(f"  Reason:             {dec_record.reason}")
-                        print("  Terminal state:     FAILED (Rejected)")
-                    print("-" * 40)
-                elif (
-                    prog_data
-                    and prog_data.get("state") == "RUNNING"
-                    and t_spec.current_state not in TERMINAL_TASK_STATES
-                ):
-                    p_phase = prog_data.get("phase", t_spec.current_state.upper())
-                    p_resource = prog_data.get("resource_id") or t_spec.actual_agent or t_spec.recommended_agent or "N/A"
-                    p_elapsed = format_elapsed(prog_data.get("elapsed_seconds", 0))
-                    p_heartbeat = format_last_heartbeat(prog_data.get("updated_at"))
-                    p_pid = prog_data.get("pid")
-
-                    is_proc_alive = False
-                    if rec_diag.get("is_process_running"):
-                        is_proc_alive = True
-                    elif p_pid:
-                        import socket
-                        from howlplane.control_plane.locking import is_process_alive as check_pid_alive
-                        is_proc_alive, _ = check_pid_alive(p_pid, socket.gethostname())
-
-                    state_label = "RUNNING" if is_proc_alive else "STALE (Process not running)"
-
-                    print(f"  {t_spec.task_id}")
-                    print(f"    State:          {state_label}")
-                    print(f"    Phase:          {p_phase}")
-                    print(f"    Resource:       {p_resource}")
-                    print(f"    Elapsed:        {p_elapsed}")
-                    print(f"    Last heartbeat: {p_heartbeat}")
-                    c_revs = rec_diag.get("completed_reviewers", [])
-                    if c_revs:
-                        print(f"    Completed Reviews: {', '.join(c_revs)}")
-                    for role, disposition in (rec_diag.get("reviewer_dispositions") or {}).items():
-                        if disposition not in ("completed_clean", "completed_with_findings"):
-                            print(f"      - {role}: {disposition.upper()}")
-                    if not is_proc_alive:
-                        rec_action = rec_diag.get('recommendation') or f"howlplane resume {t_spec.task_id}"
-                        print(f"    Recommendation:    {rec_action}")
-                    print("-" * 40)
-                elif t_spec.current_state in ("interrupted", "cancelled", "implementing", "reviewing", "remediating", "verifying"):
-                    print(f"  Task:               {t_spec.task_id}")
-                    print(f"  State:              {t_spec.current_state.upper()} (Last Stage: {rec_diag.get('last_stage')})")
-                    print(f"  Classification:     {rec_diag.get('classification', 'RECONCILE_FIRST')}")
-                    if rec_diag.get("is_process_running"):
-                        p_info = rec_diag.get("process_info") or {}
-                        print(f"  Process:            RUNNING (PID: {p_info.get('pid')}, Backend: {p_info.get('backend')})")
-                    if rec_diag.get("completed_reviewers"):
-                        print(f"  Completed Reviews:  {', '.join(rec_diag.get('completed_reviewers'))}")
-                    if rec_diag.get("incomplete_reviewers"):
-                        print(f"  Pending Reviews:    {', '.join(rec_diag.get('incomplete_reviewers'))}")
-                    for role, disposition in (rec_diag.get("reviewer_dispositions") or {}).items():
-                        if disposition not in ("completed_clean", "completed_with_findings"):
-                            print(f"    - {role}: {disposition.upper()}")
-                    print(f"  Recommendation:     {rec_diag.get('recommendation')}")
-                    print("-" * 40)
-                else:
-                    print(f"  - {r}: [{t_spec.current_state.upper()}] {t_spec.objective} (Risk: {t_spec.risk_level.upper()}, Agent: {t_spec.actual_agent or t_spec.recommended_agent or 'N/A'}, Blockers: {blockers}, Highs: {highs}, Verification: {ver_status})")
-            except Exception:
-                print(f"  - {r}")
-    else:
-        print("  (No task runs in .task_runs/)")
-
-    journal_dir = target_repo / "documentation" / "task_journals"
-    journals = []
-    if journal_dir.is_dir():
-        journals = [f.name for f in journal_dir.glob("*.md") if f.name != "TEMPLATE.md"]
-
-    if journals:
-        print("-" * 60)
-        print(f"TASK JOURNALS ({len(journals)}):")
-        for j in sorted(journals):
-            print(f"  - {j}")
-
-    print("=" * 60)
-    return 0
 
 
 def cmd_init_task(args: argparse.Namespace) -> int:
@@ -1138,34 +942,6 @@ def cmd_boundary(args: argparse.Namespace) -> int:
         return 0
 
 
-def cmd_doctor(args: argparse.Namespace) -> int:
-    """Executes workspace health diagnostics."""
-    from howlplane.control_plane.doctor import run_diagnostics
-    target_repo = _resolve_repo(args)
-    results = run_diagnostics(repo_root=target_repo)
-
-    print("=" * 60)
-    print("WORKSPACE HEALTH DIAGNOSTICS (DOCTOR)")
-    print("=" * 60)
-    has_error = False
-    for res in results:
-        if res.status == "ok":
-            mark = "✓"
-        elif res.status == "warning":
-            mark = "!"
-        else:
-            mark = "✗"
-            has_error = True
-        print(f"[{mark}] {res.name}: {res.message}")
-        if res.details and isinstance(res.details, dict) and "action" in res.details:
-            print(f"    Action: {res.details['action']}")
-    print("=" * 60)
-    if not has_error:
-        print("Status: HEALTHY (All critical checks passed)")
-        return 0
-    else:
-        print("Status: DEGRADED (One or more critical checks failed)")
-        return 1
 
 
 def cmd_howlframe_audit(args: argparse.Namespace) -> int:
@@ -1397,6 +1173,11 @@ New here? Run these in a Git repository:
   howlplane setup
   howlplane factory start
   howlplane factory status
+  howlplane factory logs --errors
+  howlplane factory stop      (howlplane factory resume to continue)
+
+Something wrong? howlplane doctor, howlplane agents doctor, howlplane factory doctor.
+Add --json for scripts. Add --debug for a full traceback; NO_COLOR or --color never for plain text.
 """
 
 def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
@@ -1430,6 +1211,9 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
         action="version",
         version=f"{program_name} {__version__}",
     )
+    # Handled by main() before parsing so they work before or after the command.
+    parser.add_argument("--color", metavar="MODE", help="auto (default), always or never; NO_COLOR is honored")
+    parser.add_argument("--debug", action="store_true", help="Print full tracebacks for unexpected failures")
 
     parser._positionals.title = "Commands"
     subparsers = parser.add_subparsers(dest="subcommand", metavar="<command>", help="Command to execute")
@@ -1604,15 +1388,19 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_ha.add_argument("--json", action="store_true", help="Output JSON result")
 
     # approve
-    p_appr = subparsers.add_parser("approve", parents=[common_parser], help="Approve an awaiting_human task")
-    p_appr.add_argument("task_id", help="Task ID to approve")
+    p_appr = subparsers.add_parser("approve", parents=[common_parser], help="Approve an awaiting_human task or a parked Factory work item")
+    p_appr.add_argument("task_id", nargs="?", help="Task ID to approve")
+    p_appr.add_argument("--work-item", help="Parked Factory work item to approve (instead of a task ID)")
+    p_appr.add_argument("--state-dir", help="Factory state directory holding the work item")
     p_appr.add_argument("--reason", help="Optional human reason for approval")
     p_appr.add_argument("--ledger-file", help="Ledger file path")
     p_appr.add_argument("--json", action="store_true", help="Output JSON result")
 
     # reject
-    p_rej = subparsers.add_parser("reject", parents=[common_parser], help="Reject an awaiting_human task")
-    p_rej.add_argument("task_id", help="Task ID to reject")
+    p_rej = subparsers.add_parser("reject", parents=[common_parser], help="Reject an awaiting_human task or a parked Factory work item")
+    p_rej.add_argument("task_id", nargs="?", help="Task ID to reject")
+    p_rej.add_argument("--work-item", help="Parked Factory work item to reject (instead of a task ID)")
+    p_rej.add_argument("--state-dir", help="Factory state directory holding the work item")
     p_rej.add_argument("--reason", help="Optional human reason for rejection")
     p_rej.add_argument("--ledger-file", help="Ledger file path")
     p_rej.add_argument("--json", action="store_true", help="Output JSON result")
@@ -1844,13 +1632,27 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_start.add_argument("--authority-profile", choices=["strict", "overnight-safe", "howlframe-overnight"],
                          help="Existing authority profile id (advanced)")
     p_start.add_argument("--json", action="store_true", help="Output JSON result")
+    p_start.add_argument("--verbose", action="store_true", help="Also show backend and worktree path")
     _add_workspace_trust_argument(p_start)
 
-    p_logs = factory_sub.add_parser("logs", help="Show recent Factory logs for this repository", **kwargs)
+    p_logs = factory_sub.add_parser(
+        "logs", help="Show recent Factory logs for this repository",
+        epilog="examples:\n  howlplane factory logs --errors --since 1h\n  howlplane factory logs --work-item WI-042\n"
+               "  howlplane factory logs --follow",
+        formatter_class=argparse.RawDescriptionHelpFormatter, **kwargs)
     p_logs.add_argument("--state-dir", help="Factory state directory (advanced)")
     p_logs.add_argument("--target-repo", help="Repository to resolve (advanced)")
     p_logs.add_argument("--follow", action="store_true", help="Stream new log output")
-    p_logs.add_argument("--lines", type=int, default=80, help="Number of recent lines")
+    p_logs.add_argument("--lines", "-n", type=int, default=80, help="Number of recent entries")
+    p_logs.add_argument("--errors", action="store_true", help="Only errors (same as --level ERROR)")
+    p_logs.add_argument("--level", type=str.upper, choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                        help="Show this severity and above")
+    p_logs.add_argument("--work-item", help="Only entries for this work item, for example WI-042")
+    p_logs.add_argument("--provider", help="Only entries for this provider, for example codex")
+    p_logs.add_argument("--since", help="Only entries newer than 30m, 1h, 2d or an ISO timestamp")
+    p_logs.add_argument("--raw", action="store_true", help="Show raw process output instead of events")
+    p_logs.add_argument("--json", action="store_true", help="One JSON object per line")
+    p_logs.add_argument("--verbose", action="store_true", help="Include event codes and correlation ids")
 
     p_factory_doctor = factory_sub.add_parser("doctor", help="Check whether Factory can start safely", **kwargs)
     p_factory_doctor.add_argument("--state-dir", help="Factory state directory (advanced)")
@@ -2145,839 +1947,34 @@ def cmd_marathon(args: argparse.Namespace) -> int:
     return 0 if not report["tasks_failed"] else 1
 
 
-def _handle_decision(args: argparse.Namespace, decision: str) -> int:
-    target_repo = str(_resolve_repo(args))
-    ledger_file = _resolve_ledger_file(args)
-    ledger = EvidenceLedger(ledger_file) if ledger_file else None
-    fn = HumanLifecycleManager.approve if decision == "approved" else HumanLifecycleManager.reject
-    record = fn(
-        target_repo=target_repo,
-        task_id=args.task_id,
-        reason=getattr(args, "reason", None),
-        operator_source="cli",
-        ledger=ledger,
-    )
-    if getattr(args, "json", False):
-        print(record.to_json())
-    else:
-        title = "TASK AUTHORIZED" if decision == "approved" else "TASK REJECTED"
-        print("=" * 60)
-        print(f"HOWLPLANE — {title}: {record.task_id}")
-        print("=" * 60)
-        print(f"Task:               {record.task_id}")
-        print(f"Decision:           {decision.upper()}")
-        print(f"Timestamp:          {record.timestamp}")
-        if record.reason:
-            print(f"Reason:             {record.reason}")
-        if decision == "approved":
-            print("")
-            print("Next Action:")
-            print(f"  howlplane resume {record.task_id}")
-        else:
-            print("Terminal state:     FAILED (Rejected)")
-        print("=" * 60)
-    return 0
 
 
-def cmd_approve(args: argparse.Namespace) -> int:
-    return _handle_decision(args, "approved")
 
 
-def cmd_reject(args: argparse.Namespace) -> int:
-    return _handle_decision(args, "rejected")
 
 
-def cmd_resume(args: argparse.Namespace) -> int:
-    target_repo = str(_resolve_repo(args))
-    ledger_file = _resolve_ledger_file(args)
-    ledger = EvidenceLedger(ledger_file) if ledger_file else None
-    res = HumanLifecycleManager.resume(
-        target_repo=target_repo,
-        task_id=args.task_id,
-        ledger=ledger,
-    )
-    if getattr(args, "json", False):
-        import json
-        print(json.dumps(res.to_dict(), indent=2))
-    else:
-        print(f"Task '{res.task_id}' RESUMED. Final state: {res.final_state.upper()} (Exit {res.exit_code}).")
-    return res.exit_code
 
 
-def cmd_cancel(args: argparse.Namespace) -> int:
-    target_repo = str(_resolve_repo(args))
-    ledger_file = _resolve_ledger_file(args)
-    ledger = EvidenceLedger(ledger_file) if ledger_file else None
-    res = HumanLifecycleManager.cancel(
-        target_repo=target_repo,
-        task_id=args.task_id,
-        reason=getattr(args, "reason", None),
-        ledger=ledger,
-    )
-    if getattr(args, "json", False):
-        import json
-        print(json.dumps(res.to_dict(), indent=2))
-    else:
-        print(f"Task '{res.task_id}' CANCELLED safely. Code changes preserved in working tree.")
-    return res.exit_code
 
 
-def _lock_candidates(repo_dir, task_id):
-    """Every lock that could be holding this task back, in reclaim order.
 
-    `ai status` reports the repository lock, so `ai unlock` has to be able to
-    act on it. Reclaiming only `.task.lock` meant the command truthfully said
-    "nothing to reclaim" while `.git/howlplane.lock` kept the task unrecoverable
-    (HOWLFRAM-SLOPFIX-06).
-    """
-    from howlplane.control_plane.locking import get_repo_lock_path, get_task_lock_path
 
-    return [
-        ("task run", get_task_lock_path(repo_dir, task_id)),
-        ("repository", get_repo_lock_path(repo_dir)),
-    ]
 
 
-def _lock_relevance(owner: dict, task_id: str):
-    """Reports whether a lock belongs to this task, and why not when it does not.
 
-    Deliberately narrow: this is a reclaim path, not a general lock remover. A
-    lock written for another task, or for an operation that is not a task's
-    repository mutation, is never this command's business.
-    """
-    if owner.get("task_id") != task_id:
-        return False, (
-            f"held for task '{owner.get('task_id')}', not '{task_id}'"
-        )
-    if owner.get("lock_type") not in ("task_run", "repository_mutation"):
-        return False, (
-            f"lock type '{owner.get('lock_type')}' is not a task-owned lock"
-        )
-    return True, ""
 
 
-def cmd_unlock(args: argparse.Namespace) -> int:
-    """Reclaims the locks holding a task back, when their owners are gone.
 
-    The one explicit, audited takeover path. `ai resume` deliberately keeps its
-    fail-closed behavior, so nothing ever steals a lock implicitly; a person
-    asks for this, and the reclamation is recorded (HOWLFRAM-SLOPFIX-05).
-    Both the task-run lock and the repository lock are inspected, so what this
-    command acts on matches what `ai status` reports (HOWLFRAM-SLOPFIX-06).
-    """
-    from howlplane.control_plane.locking import (
-        LockError,
-        classify_lock_owner,
-        reclaim_lock,
-    )
-    from howlplane.control_plane.atomic_io import safe_load_json
 
-    target_repo = str(_resolve_repo(args))
-    ledger_file = _resolve_ledger_file(args)
-    ledger = EvidenceLedger(ledger_file) if ledger_file else None
-    as_json = bool(getattr(args, "json", False))
 
-    def audit(action, result, artifact=None, metadata=None):
-        if ledger is None:
-            return
-        ledger.append_entry(
-            EvidenceEntry(
-                task_id=args.task_id,
-                agent_id="human_operator",
-                action=action,
-                command=f"ai unlock {args.task_id}",
-                result=result,
-                artifact=artifact,
-                repository=str(target_repo),
-                metadata=metadata or {},
-            )
-        )
 
-    audit("unlock_requested", "REQUESTED")
 
-    inspected = []
-    reclaimed = []
-    refusals = []
 
-    for label, lock_path in _lock_candidates(target_repo, args.task_id):
-        if not lock_path.exists():
-            continue
-        try:
-            owner = safe_load_json(lock_path)
-        except Exception as err:
-            refusals.append(f"{label} lock at '{lock_path}' is unreadable: {err}")
-            continue
 
-        relevant, why_not = _lock_relevance(owner, args.task_id)
-        state, reason = classify_lock_owner(
-            owner.get("pid", -1),
-            owner.get("hostname", ""),
-            owner.get("process_create_time", 0.0),
-        )
-        inspected.append(
-            {
-                "scope": label,
-                "path": str(lock_path),
-                "owner_state": state.value,
-                "reason": reason,
-                "relevant": relevant,
-                "pid": owner.get("pid"),
-                "hostname": owner.get("hostname"),
-                "operation": owner.get("operation"),
-                "task_id": owner.get("task_id"),
-            }
-        )
 
-        if not as_json:
-            print(f"{label.capitalize()} lock: {lock_path}")
-            print(
-                f"  Owner: pid {owner.get('pid')} @ {owner.get('hostname')} "
-                f"({owner.get('command')}) -- {state.value}"
-            )
-            print(f"  {reason}")
 
-        if not relevant:
-            msg = f"Refusing to reclaim {label} lock: {why_not}."
-            refusals.append(msg)
-            if not as_json:
-                print(f"  {msg}")
-            audit(
-                "unlock_refused",
-                "NOT_THIS_TASK",
-                artifact=str(lock_path),
-                metadata={"scope": label, "reason": why_not},
-            )
-            continue
 
-        try:
-            record = reclaim_lock(lock_path)
-        except LockError as err:
-            refusals.append(str(err))
-            if not as_json:
-                print(f"  ERROR: {err}")
-            audit(
-                "unlock_refused",
-                state.value,
-                artifact=str(lock_path),
-                metadata={"scope": label, "reason": str(err)},
-            )
-            continue
 
-        payload = record.to_dict()
-        payload["scope"] = label
-        reclaimed.append(payload)
-        # Keeps the established ledger vocabulary rather than introducing a
-        # second name for the same event.
-        audit(
-            "stale_lock_reclaimed",
-            record.owner_state,
-            artifact=record.lock_path,
-            metadata=payload,
-        )
-        if not as_json:
-            print(f"  Reclaimed {record.owner_state} {label} lock.")
-
-    if as_json:
-        import json
-        print(
-            json.dumps(
-                {
-                    "task_id": args.task_id,
-                    "inspected": inspected,
-                    "reclaimed": reclaimed,
-                    "refused": refusals,
-                },
-                indent=2,
-            )
-        )
-
-    if not inspected:
-        if not as_json:
-            print(f"No locks held for '{args.task_id}'. Nothing to reclaim.")
-        audit("unlock_requested", "NO_OP")
-        return 0
-
-    if reclaimed:
-        if not as_json:
-            print(f"You can now run: howlplane resume {args.task_id}")
-        return 0
-
-    return 1 if refusals else 0
-
-
-def _resolve_factory_campaign(
-    args: argparse.Namespace, *, prepare: bool = False, force_resolve: bool = False
-):
-    """Resolve the zero-configuration campaign and attach its paths to args.
-
-    When no explicit state directory is given, prefer any currently-running
-    campaign for this repository over a stopped historical one. Explicit
-    --state-dir always wins and is surfaced directly in args.state_dir.
-    """
-    from howlplane.control_plane.factory.campaign import prepare_campaign, resolve_campaign
-
-    # Preserve the established explicit interface exactly. It can point at a
-    # deliberately prepared target unrelated to the caller's current checkout.
-    if (not force_resolve and getattr(args, "state_dir", None)
-            and getattr(args, "target_repo", None)):
-        return None
-    if not force_resolve and getattr(args, "state_dir", None):
-        # Historical commands accepted only --state-dir and used the caller's
-        # checkout. Keep that advanced/debug contract intact.
-        args.target_repo = "."
-        return None
-
-    is_bounded = (getattr(args, "max_work_items", None) is not None and args.max_work_items > 0) or getattr(args, "factory_action", None) == "canary"
-    campaign = resolve_campaign(
-        state_dir=getattr(args, "state_dir", None),
-        target_repo=getattr(args, "target_repo", None),
-        prefer_active=True,
-        bounded=is_bounded if prepare else False,
-    )
-    if prepare:
-        campaign = prepare_campaign(campaign)
-    args.state_dir = str(campaign.state_dir)
-    # The supervisor must always operate on the isolated target for convenience
-    # commands. Explicit target-repo remains an advanced override, validated by
-    # prepare_campaign against the discovered source repository.
-    args.target_repo = str(campaign.target_dir)
-    return campaign
-
-
-def _select_factory_authority(args: argparse.Namespace, campaign: Any) -> Optional[str]:
-    """Obtain explicit first-run authority without inventing a new policy model."""
-    from howlplane.control_plane.authority_envelope import ENVELOPE_FILENAME, load_envelope
-    from howlplane.control_plane.authority_profile import CANONICAL_PROFILES
-
-    envelope_dir = campaign.state_dir / "campaign"
-    existing_profile = None
-    if (envelope_dir / ENVELOPE_FILENAME).is_file():
-        existing_profile = load_envelope(envelope_dir).profile_id
-
-    requested = getattr(args, "authority_profile", None)
-    choice = getattr(args, "authority", None)
-    if choice:
-        remote = campaign.repository.remote
-        # Resolve only profiles already approved for this exact repository.
-        # `strict` is intentionally universal but loses to any repository grant.
-        compatible = [
-            profile for profile in CANONICAL_PROFILES.values()
-            if not profile.authorized_repositories
-            or any(remote.endswith(repository) for repository in profile.authorized_repositories)
-        ]
-        delegated = [profile for profile in compatible if profile.authorized_repositories]
-        # Explicit, auditable ordering of already-granted authority. This does
-        # not construct or broaden a profile.
-        strongest = max(
-            delegated or compatible,
-            key=lambda profile: (
-                len(profile.allowed_action_classes), profile.max_merges,
-                profile.ttl_hours, profile.profile_id,
-            ),
-            default=None,
-        )
-        mappings = {
-            "safe": "strict",
-            "standard": strongest.profile_id if strongest else None,
-            "autonomous": strongest.profile_id if strongest else None,
-        }
-        requested = mappings[choice]
-        if choice != "safe" and not delegated:
-            raise ValueError(
-                "No existing delegated authority profile is compatible with this repository. "
-                "Use --authority safe, or configure an approved --authority-profile."
-            )
-
-    if existing_profile is not None:
-        if requested is not None and requested != existing_profile:
-            display_choice = choice or getattr(args, "authority_profile", None)
-            raise ValueError(
-                f"Requested authority '{display_choice}' ({requested}) conflicts with existing "
-                f"campaign authority envelope '{existing_profile}'. Startup refused to prevent "
-                "silent authority override."
-            )
-        args.authority_profile = existing_profile
-        return existing_profile
-
-    if requested:
-        args.authority_profile = requested
-        return requested
-
-    if not sys.stdin.isatty():
-        raise ValueError(
-            "Factory needs an explicit authority choice in a non-interactive environment. "
-            "Use --authority safe or --authority-profile strict."
-        )
-    print("Choose Factory authority:\n  1. Safe: no consequential Git or GitHub actions.\n"
-          "  2. Standard: use an existing repository-compatible delegated profile.\n"
-          "  3. Autonomous: use the most permissive existing compatible profile.\n")
-    answer = input("Choice [1]: ").strip() or "1"
-    choices = {"1": "safe", "2": "standard", "3": "autonomous"}
-    if answer not in choices:
-        raise ValueError("Authority choice must be 1, 2, or 3")
-    args.authority = choices[answer]
-    return _select_factory_authority(args, campaign)
-
-
-def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
-    from datetime import datetime, timezone
-    from pathlib import Path
-    import getpass
-    import socket
-    import time
-
-    from howlplane.control_plane.authority_envelope import (
-        ENVELOPE_FILENAME,
-        create_envelope,
-        load_envelope,
-        save_envelope,
-    )
-    from howlplane.control_plane.authority_profile import get_profile
-    from howlplane.control_plane.backlog_source import BacklogSource, source_file_rank
-    from howlplane.control_plane.factory.dispatcher import MarathonDispatcherAdapter
-    from howlplane.control_plane.factory.repo_proposal import CapabilityStore, RepoProposalStore
-    from howlplane.control_plane.factory.supervisor import FactorySupervisor
-    from howlplane.control_plane.factory.supervisor_state import SupervisorStateRecord, SupervisorStateStore
-    from howlplane.control_plane.factory.target import FactoryTarget, FactoryTargetMode, Workspace
-    from howlplane.control_plane.factory.work_item import WorkItemStore
-    from howlplane.control_plane.git_integration import detect_repo_slug
-    from howlplane.control_plane.synthesis import MarathonDogfoodEngine
-    from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
-
-    state_dir = Path(args.state_dir).resolve()
-    state_store = SupervisorStateStore(state_dir / "supervisor")
-    work_item_store = WorkItemStore(state_dir / "work_items")
-    repo_proposal_store = RepoProposalStore(state_dir / "repo_proposals")
-    capability_store = CapabilityStore(state_dir / "capabilities")
-    target_repo = Path(getattr(args, "target_repo", None) or ".").resolve()
-    target_mode = getattr(args, "target", "repo")
-    workspace_path = getattr(args, "workspace", None)
-    objective = getattr(args, "objective", None)
-
-    target = FactoryTarget(
-        mode=FactoryTargetMode(target_mode),
-        target_repo=target_repo,
-        workspace=Workspace.from_file(workspace_path) if workspace_path else None,
-        controller_checkout=Path.cwd().resolve(),
-    )
-    if target.mode == FactoryTargetMode.SELF:
-        target.ensure_isolated_self_target()
-
-    # Persist campaign objective and target metadata so they survive restart.
-    state_record = state_store.load()
-    if objective is not None:
-        state_record.objective = objective
-    state_record.target_mode = target_mode
-    state_record.target_repository = str(target_repo)
-    state_record.workspace_file = str(Path(workspace_path).resolve()) if workspace_path else None
-    state_store.save(state_record)
-
-    def _backlog_rank(value: Any) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return 0
-
-    def _discover_repo(repo_path: Path, repo_name: str):
-        try:
-            source = BacklogSource(repo_path)
-            selection = source.select()
-        except Exception:
-            return []
-        return [
-            {
-                "origin": "existing_backlog",
-                "repository": repo_name,
-                "title": item.title,
-                "description": source.item_detail(item),
-                "identity_keys": [item.source_file, item.item_id],
-                "evidence_refs": [f"{item.source_file}#{item.item_id}"],
-                "evidence_fingerprints": [f"backlog:{item.source_file}:{item.item_id}"],
-                "source_file_rank": source_file_rank(item),
-                "source_rank": _backlog_rank(item.item_id),
-                "kind": item.kind,
-            }
-            for item in selection.eligible
-        ]
-
-    def _discovery():
-        if target.mode == FactoryTargetMode.ECOSYSTEM:
-            if target.workspace is None:
-                return []
-            evidence: List[Dict[str, Any]] = []
-            for repo in target.workspace.repositories:
-                repo_name = repo.repository or detect_repo_slug(repo.path) or str(repo.path)
-                evidence.extend(_discover_repo(repo.path, repo_name))
-            return evidence
-
-        repo = detect_repo_slug(target_repo) or str(target_repo)
-        return _discover_repo(target_repo, repo)
-
-    provider_pool = ProviderPoolManager.from_config(probe_on_start=False)
-
-    # Bind operator-selected delegated authority once.  Without an authority
-    # profile the engine truthfully parks anything requiring authority rather
-    # than silently renewing or expanding its own grant per tick.
-    authority_profile_id = getattr(args, "authority_profile", None)
-    envelope = None
-    campaign_dir = state_dir / "campaign"
-    campaign_dir.mkdir(parents=True, exist_ok=True)
-    envelope_path = campaign_dir / ENVELOPE_FILENAME
-    if envelope_path.is_file():
-        envelope = load_envelope(campaign_dir)
-        if authority_profile_id and envelope.profile_id != authority_profile_id:
-            raise ValueError(
-                "Requested authority profile does not match the saved "
-                f"envelope: {authority_profile_id!r} != {envelope.profile_id!r}"
-            )
-    elif authority_profile_id:
-        operator_origin = f"cli:{getpass.getuser()}@{socket.gethostname()}"
-        envelope = create_envelope(
-            get_profile(authority_profile_id), "FACTORY-CAMPAIGN", operator_origin
-        )
-        save_envelope(envelope, campaign_dir)
-
-    engine = MarathonDogfoodEngine(
-        provider_pool=provider_pool,
-        target_repo=target_repo,
-        repo_slug=detect_repo_slug(target_repo) or "",
-    )
-    engine.authority_envelope = envelope
-    if envelope is not None:
-        engine.git_executor = engine._git_executor_factory(
-            envelope, state_store.load().merges_count
-        )
-
-    dispatcher = MarathonDispatcherAdapter(engine_factory=lambda: engine)
-
-    return FactorySupervisor(
-        state_store=state_store,
-        work_item_store=work_item_store,
-        repo_proposal_store=repo_proposal_store,
-        capability_store=capability_store,
-        dispatcher=dispatcher,
-        discovery=_discovery,
-        provider_pool=provider_pool,
-        policy=None,
-        product_repo=getattr(args, "product_repo", None),
-        clock=lambda: datetime.now(timezone.utc),
-        sleep=sleep or time.sleep,
-        state_dir=state_dir,
-        lock=None,
-        max_work_items=getattr(args, "max_work_items", None),
-    )
-
-
-def cmd_factory_run_once(args: argparse.Namespace) -> int:
-    campaign = _resolve_factory_campaign(args, prepare=True)
-    if campaign is not None:
-        _select_factory_authority(args, campaign)
-    supervisor = _build_factory_supervisor(args)
-    result = supervisor.run_once()
-    status = supervisor.status()
-    if getattr(args, "json", False):
-        import json
-        print(json.dumps({"tick": result.__dict__, "status": status}, indent=2, default=str))
-    else:
-        print(f"State: {status['state']}")
-        print(f"Next wake: {status['next_wake_at']}")
-        print(f"Reason: {result.reason}")
-        print(f"Observations consumed: {status['observations_consumed']}")
-        if result.selected_work_item_id:
-            print(f"Selected: {result.selected_work_item_id}")
-    return 0
-
-
-def cmd_factory_run(args: argparse.Namespace) -> int:
-    from datetime import datetime, timedelta, timezone
-    import signal
-    import threading
-
-    refused = _factory_preflight(args)
-    if refused is not None:
-        return refused
-    campaign = _resolve_factory_campaign(args, prepare=True)
-    if campaign is not None:
-        _select_factory_authority(args, campaign)
-    wake = threading.Event()
-    supervisor = _build_factory_supervisor(args, sleep=wake.wait)
-
-    def request_stop(signum, _frame):
-        supervisor.request_stop(f"signal_{signal.Signals(signum).name.lower()}")
-        wake.set()
-
-    until = None
-    if getattr(args, "until", None):
-        until = datetime.now(timezone.utc) + timedelta(seconds=args.until)
-    previous = {}
-    try:
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            previous[sig] = signal.signal(sig, request_stop)
-        if getattr(args, "resume_stopped", False):
-            supervisor.run(until=until, resume_stopped=True)
-        else:
-            supervisor.run(until=until)
-    finally:
-        for sig, handler in previous.items():
-            signal.signal(sig, handler)
-    status = supervisor.status()
-    if getattr(args, "json", False):
-        import json
-        print(json.dumps({"status": status}, indent=2, default=str))
-    else:
-        print(f"Factory stopped. State: {status['state']}")
-        print(f"Run mode: {status.get('run_mode', 'continuous')}")
-        if status.get('max_work_items') is not None:
-            print(f"Work item limit: {status['max_work_items']}")
-            print(f"Work items dispatched: {status.get('work_items_dispatched', 0)}")
-            remaining = max(0, (status['max_work_items'] or 0) - (status.get('work_items_dispatched') or 0))
-            print(f"Remaining: {remaining}")
-        print(f"Stopped reason: {status['stopped_reason']}")
-        print(f"Dispatches: {status['dispatch_history_count']}")
-        print(f"Completed: {len(status['recent_completed'])}")
-        print(f"Failed: {len(status['recent_failed'])}")
-    return 0
-
-
-def _factory_state_store(args: argparse.Namespace):
-    from pathlib import Path
-    from howlplane.control_plane.factory.supervisor_state import SupervisorStateStore
-    return SupervisorStateStore(Path(args.state_dir).resolve() / "supervisor")
-
-
-def cmd_factory_status(args: argparse.Namespace) -> int:
-    from pathlib import Path
-    from howlplane.control_plane.factory.campaign import campaign_from_state_dir
-    from howlplane.control_plane.factory.repo_proposal import RepoProposalStore
-    from howlplane.control_plane.factory.work_item import WorkItemState, WorkItemStore
-    campaign = _resolve_factory_campaign(args)
-    if campaign is None:
-        campaign = campaign_from_state_dir(args.state_dir)
-    store = _factory_state_store(args)
-    record = store.load(reconcile_restart=False)
-    work_store = WorkItemStore(Path(args.state_dir).resolve() / "work_items")
-    proposal_store = RepoProposalStore(Path(args.state_dir).resolve() / "repo_proposals")
-    parked = [
-        {"work_item_id": i.work_item_id, "state": i.state, "blocker": i.admission_blocked_reason}
-        for i in work_store.list_all()
-        if i.state in (WorkItemState.AWAITING_OWNER, WorkItemState.BLOCKED, WorkItemState.DEFERRED)
-    ]
-    proposals = [
-        {"proposal_id": p.proposal_id, "repository_name": p.repository_name, "disposition": p.disposition}
-        for p in proposal_store.list_awaiting_authority()
-    ]
-    status = {
-        "supervisor_id": record.supervisor_id,
-        "state": record.state,
-        "objective": record.objective,
-        "target_mode": record.target_mode,
-        "target_repository": record.target_repository,
-        "workspace_file": record.workspace_file,
-        "created_at": record.created_at,
-        "last_tick_at": record.last_tick_at,
-        "last_successful_tick_at": record.last_successful_tick_at,
-        "next_wake_at": record.next_wake_at,
-        "current_work_item_id": record.current_work_item_id,
-        "current_task_id": record.current_task_id,
-        "current_dispatch_id": record.current_dispatch_id,
-        "observations_consumed": record.observations_consumed,
-        "failure_count": record.failure_count,
-        "last_error": record.last_error,
-        "stopped_reason": record.stopped_reason,
-        "provider_wake_conditions": record.provider_wake_conditions,
-        "recent_completed": record.recent_completed,
-        "recent_failed": record.recent_failed,
-        "dispatch_history_count": len(record.dispatch_history),
-        "transition_history_count": len(record.transition_history),
-        "run_mode": record.run_mode if hasattr(record, "run_mode") else "continuous",
-        "max_work_items": getattr(record, "max_work_items", None),
-        "work_items_dispatched": getattr(record, "work_items_dispatched", 0),
-        "bounded_run_started_at": getattr(record, "bounded_run_started_at", None),
-        "bounded_run_completed_at": getattr(record, "bounded_run_completed_at", None),
-        "bounded_run_stop_reason": getattr(record, "bounded_run_stop_reason", None),
-        "bounded_dispatched_ids": list(getattr(record, "bounded_dispatched_ids", [])),
-        "parked_items": parked,
-        "proposals_awaiting_authority": proposals,
-        "consecutive_capped_ticks": getattr(record, "consecutive_capped_ticks", 0),
-        "alerts": list(getattr(record, "alerts", [])),
-    }
-    if campaign is not None:
-        from howlplane.control_plane.factory.service import process_status
-        from howlplane.control_plane.authority_envelope import ENVELOPE_FILENAME, load_envelope
-        profile = None
-        envelope_dir = campaign.state_dir / "campaign"
-        if (envelope_dir / ENVELOPE_FILENAME).is_file():
-            profile = load_envelope(envelope_dir).profile_id
-        display_authority = "safe" if profile == "strict" else profile
-        status.update({
-            "campaign_id": campaign.repository.campaign_id,
-            "project": campaign.repository.remote or campaign.repository.root.name,
-            "worktree": str(campaign.target_dir),
-            "authority": display_authority or "not configured",
-            "process": process_status(campaign),
-        })
-    from howlplane.control_plane.factory.status_publish import publish_cli_status
-    published = publish_cli_status(status, args)
-    from howlplane.control_plane.presentation.operator import (
-        derive_operator_status,
-        render_operator_text,
-    )
-    operator = derive_operator_status(status)
-    if getattr(args, "json", False):
-        import json
-        print(json.dumps({**status, "operator": operator.to_dict()}, indent=2, default=str))
-    elif not getattr(args, "verbose", False):
-        print("\n".join(render_operator_text(operator, status)))
-    else:
-        print("HowlPlane Factory\n")
-        if campaign is not None:
-            print(f"Project: {status['project']}")
-            print(f"Process: {status['process']}")
-            print(f"Target: isolated worktree ({status['worktree']})")
-            print(f"Authority: {status['authority']}")
-        print(f"State: {status['state']}")
-        run_mode = status.get("run_mode", "continuous")
-        print(f"Run mode: {run_mode}")
-        if status.get("max_work_items") is not None:
-            print(f"Work item limit: {status['max_work_items']}")
-            print(f"Work items dispatched: {status.get('work_items_dispatched', 0)}")
-            remaining = max(0, (status["max_work_items"] or 0) - (status.get("work_items_dispatched") or 0))
-            print(f"Remaining: {remaining}")
-        if status.get("bounded_run_stop_reason"):
-            print(f"Stopped reason: {status['bounded_run_stop_reason']}")
-        if record.objective:
-            print(f"Objective: {record.objective}")
-        if record.target_mode:
-            print(f"Target mode: {record.target_mode}")
-        if record.target_repository:
-            print(f"Target repository: {record.target_repository}")
-        print(f"Created: {status['created_at']}")
-        print(f"Last tick: {status['last_tick_at']}")
-        print(f"Last successful tick: {status['last_successful_tick_at']}")
-        print(f"Next wake: {status['next_wake_at']}")
-        print(f"Current item: {status['current_work_item_id']}")
-        print(f"Current task: {status['current_task_id']}")
-        print(f"Current dispatch: {status['current_dispatch_id']}")
-        print(f"Observations: {status['observations_consumed']}")
-        print(f"Failures: {status['failure_count']}")
-        print(f"Last error: {status['last_error']}")
-        print(f"Provider wake: {status['provider_wake_conditions']}")
-        print(f"Recent completed: {len(status['recent_completed'])}")
-        print(f"Recent failed: {len(status['recent_failed'])}")
-        if parked:
-            print("Parked items:")
-            for p in parked:
-                print(f"  - {p['work_item_id']}: {p['state']} ({p['blocker'] or 'no blocker'})")
-        if proposals:
-            print("Proposals awaiting authority:")
-            for p in proposals:
-                print(f"  - {p['proposal_id']}: {p['repository_name']} ({p['disposition']})")
-        alerts = status.get("alerts", [])
-        if alerts:
-            print("Active alerts:")
-            for a in alerts[-5:]:
-                print(f"  - [{a.get('type')}] {a.get('message')}")
-    if published is not None:
-        stream = sys.stderr if getattr(args, "json", False) else sys.stdout
-        print(f"Published redacted status: {published}", file=stream)
-    return 0
-
-
-def cmd_factory_stop(args: argparse.Namespace) -> int:
-    from howlplane.control_plane.factory.campaign import campaign_from_state_dir
-    from howlplane.control_plane.factory.supervisor_state import SupervisorState
-    campaign = _resolve_factory_campaign(args)
-    if campaign is None:
-        campaign = campaign_from_state_dir(args.state_dir)
-    if campaign is not None:
-        from howlplane.control_plane.factory.service import stop_process
-        # Persisting STOPPED first makes a crash during backend shutdown fail
-        # closed. The run loop receives SIGTERM and reconciles its active tick.
-        store = _factory_state_store(args)
-        record = store.load(reconcile_restart=False)
-        if record.state != SupervisorState.STOPPED:
-            record.transition_to(SupervisorState.STOPPED, reason="operator_stop")
-            record.stopped_reason = "operator_stop"
-            store.save(record)
-        print(stop_process(campaign))
-        return 0
-    store = _factory_state_store(args)
-    record = store.load()
-    if record.state == SupervisorState.STOPPED:
-        print("Already stopped.")
-        return 0
-    record.transition_to(SupervisorState.STOPPED, reason="operator_stop")
-    record.stopped_reason = "operator_stop"
-    store.save(record)
-    print("Factory supervisor stopped.")
-    return 0
-
-
-def cmd_factory_resume(args: argparse.Namespace) -> int:
-    from howlplane.control_plane.factory.supervisor_state import SupervisorState
-    store = _factory_state_store(args)
-    record = store.load()
-    if record.state != SupervisorState.STOPPED:
-        print(f"Factory supervisor is not stopped (state={record.state}).")
-        return 1
-    record.transition_to(SupervisorState.IDLE, reason="operator_resume")
-    record.stopped_reason = None
-    store.save(record)
-    print("Factory supervisor resumed.")
-    return 0
-
-
-def cmd_factory_start(args: argparse.Namespace) -> int:
-    """Normal persistent Factory entrypoint over the existing run loop."""
-    from howlplane.control_plane.factory.service import start_process
-
-    refused = _factory_preflight(args)
-    if refused is not None:
-        return refused
-    campaign = _resolve_factory_campaign(args, prepare=True, force_resolve=True)
-    profile = _select_factory_authority(args, campaign)
-    # Bind the selected existing envelope before detaching. This keeps the
-    # operator choice durable even if the new backend exits before its first
-    # tick, while still using the same supervisor builder and authority path.
-    _build_factory_supervisor(args)
-    start_kwargs = {}
-    if getattr(args, "max_work_items", None) is not None:
-        start_kwargs["max_work_items"] = args.max_work_items
-    started, record = start_process(
-        campaign, profile, getattr(args, "objective", None), **start_kwargs
-    )
-    display_authority = "safe" if profile == "strict" else profile
-    if getattr(args, "json", False):
-        import json
-        print(json.dumps({"started": started, "campaign_id": campaign.repository.campaign_id,
-                          "state_dir": str(campaign.state_dir), "target_repo": str(campaign.target_dir),
-                          "backend": record.backend, "authority": display_authority}, indent=2))
-        return 0
-    if not started:
-        print("Factory is already running.\n")
-        print(f"Project: {campaign.repository.remote or campaign.repository.root.name}")
-        print("Use `howlplane factory status` for details.")
-        return 0
-    print("HowlPlane Factory\n")
-    print(f"Project: {campaign.repository.remote or campaign.repository.root.name}")
-    if campaign.repository.dirty:
-        print("Working tree contains local changes. Your checkout will not be modified.")
-    print(f"Factory target: {campaign.target_dir}")
-    print(f"Authority: {display_authority}")
-    print(f"Backend: {record.backend}")
-    print("\nFactory started.\n\nUse:\n  howlplane factory status\n  howlplane factory logs --follow\n  howlplane factory stop")
-    return 0
-
-
-def cmd_factory_logs(args: argparse.Namespace) -> int:
-    from howlplane.control_plane.factory.campaign import campaign_from_state_dir
-    from howlplane.control_plane.factory.service import recent_logs
-    campaign = _resolve_factory_campaign(args)
-    if campaign is None:
-        campaign = campaign_from_state_dir(args.state_dir)
-    if campaign is None:
-        raise ValueError("factory logs without campaign resolution requires a repository working directory")
-    return recent_logs(campaign, follow=getattr(args, "follow", False), lines=getattr(args, "lines", 80))
 
 
 def _add_readiness_arguments(parser: argparse.ArgumentParser) -> None:
@@ -2998,132 +1995,12 @@ def _add_preflight_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def cmd_agents(args: argparse.Namespace) -> int:
-    if getattr(args, "agents_action", None) != "doctor":
-        print("Usage: howlplane agents doctor [--repo PATH] [--live] [--json]")
-        return 1
-    return agent_readiness.command(args)
 
 
-def _factory_workspace(args: argparse.Namespace) -> Optional[str]:
-    """The directory Factory workers will run in, without creating anything."""
-    from howlplane.control_plane.factory.campaign import CampaignError, resolve_campaign
-    if getattr(args, "state_dir", None) and getattr(args, "target_repo", None):
-        return str(Path(args.target_repo).expanduser().resolve())
-    try:
-        bounded = (getattr(args, "max_work_items", None) or 0) > 0 or getattr(args, "factory_action", None) == "canary"
-        return str(resolve_campaign(state_dir=getattr(args, "state_dir", None), target_repo=getattr(args, "target_repo", None),
-                                    prefer_active=True, bounded=bounded).target_dir)
-    except (CampaignError, OSError):
-        return None
 
 
-def _factory_readiness(live: bool = False, workspace: Optional[str] = None) -> dict:
-    """Agent readiness for Factory; with a workspace, trust there decides who can work."""
-    from howlplane.control_plane.orchestration import default_execution_budget
-    summaries = agent_readiness.evaluate(live=live, workspace=workspace if live and workspace and Path(workspace).is_dir() else None)
-    report = agent_readiness.workspace_report(workspace) if workspace else None
-    return {"readiness": agent_readiness.factory_readiness(summaries, report),
-            "execution_budget": default_execution_budget(), "agents": summaries, "workspace": report}
 
 
-def _factory_preflight(args: argparse.Namespace) -> Optional[int]:
-    """Level-1 agent and workspace readiness before a campaign.
-
-    No worker is dispatched until trust for the Factory workspace is known.
-    `require` refuses to start when no implementation worker can run there
-    unattended; agents that would meet a trust prompt are excluded, not fatal.
-    """
-    mode = getattr(args, "preflight", "off")
-    if mode == "off":
-        return None
-    report = _factory_readiness(workspace=_factory_workspace(args))
-    readiness = report["readiness"]
-    if readiness["status"] != "READY":
-        print(agent_readiness.render_factory(readiness, report["execution_budget"]), end="", file=sys.stderr)
-    if mode == "require" and readiness["status"] == "BLOCKED":
-        print("Factory preflight: no autonomous implementation worker is usable; not starting.", file=sys.stderr)
-        return 1
-    return None
-
-
-def cmd_factory_doctor(args: argparse.Namespace) -> int:
-    from howlplane.control_plane.factory.campaign import CampaignError
-    from howlplane.control_plane.factory.service import _systemd_available, process_status
-    report = _factory_readiness(live=getattr(args, "live", False), workspace=_factory_workspace(args))
-    blocked = 1 if report["readiness"]["status"] == "BLOCKED" else 0
-    if getattr(args, "json", False):
-        print(json.dumps({"schema": agent_readiness.SCHEMA, **report}, indent=2))
-        return blocked
-    try:
-        campaign = _resolve_factory_campaign(args)
-        if campaign is None:
-            print("Factory doctor: explicit state and target configuration accepted.")
-            print(agent_readiness.render_factory(report["readiness"], report["execution_budget"]), end="")
-            return blocked
-        target_state = "missing"
-        if campaign.target_dir.exists():
-            try:
-                from howlplane.control_plane.factory.campaign import _validate_target
-                _validate_target(campaign)
-                target_state = "healthy"
-            except CampaignError as exc:
-                target_state = f"unhealthy: {exc}"
-        print("HowlPlane Factory doctor")
-        print(f"Repository: healthy ({campaign.repository.root})")
-        print(f"Campaign: {campaign.repository.campaign_id}")
-        print(f"Worktree: {target_state}")
-        print(f"State directory: {campaign.state_dir}")
-        print(f"Process: {process_status(campaign)}")
-        print(f"Backend: {'systemd user service' if _systemd_available() else 'portable detached process'}")
-        print(agent_readiness.render_factory(report["readiness"], report["execution_budget"]), end="")
-        return blocked
-    except CampaignError as exc:
-        print(f"Factory doctor: cannot start safely: {exc}")
-        return 1
-
-
-def cmd_factory(args: argparse.Namespace) -> int:
-    try:
-        action = getattr(args, "factory_action", None)
-        if action == "run-once":
-            return cmd_factory_run_once(args)
-        if action == "run":
-            return cmd_factory_run(args)
-        if action == "status":
-            return cmd_factory_status(args)
-        if action == "pending":
-            from howlplane.control_plane.factory import remote_cli
-            return remote_cli.cmd_factory_pending(args)
-        if action == "snapshot":
-            from howlplane.control_plane.factory import remote_cli
-            return remote_cli.cmd_factory_snapshot(args)
-        if action == "stop":
-            return cmd_factory_stop(args)
-        if action == "resume":
-            return cmd_factory_resume(args)
-        if action == "start":
-            return cmd_factory_start(args)
-        if action == "logs":
-            return cmd_factory_logs(args)
-        if action == "prepare":
-            from howlplane.control_plane.factory import prepare
-            return prepare.command(args)
-        if action == "doctor":
-            return cmd_factory_doctor(args)
-        if action == "canary":
-            args.max_work_items = 1
-            if not getattr(args, "until", None):
-                args.until = None
-            return cmd_factory_run(args)
-        if action == "queue":
-            from howlplane.control_plane.factory import task_queue
-            return task_queue.command(args)
-        print("Unknown factory action.")
-        return 1
-    except (OSError, ValueError) as exc:
-        print(f"Factory: {exc}", file=sys.stderr)
-        return 1
 
 
 def cmd_create(args: argparse.Namespace) -> int:
@@ -3555,6 +2432,11 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
     """Runs the canonical HowlPlane control plane launcher."""
     if args is None:
         args = sys.argv[1:]
+    global _COLOR_MODE
+    args, debug, _COLOR_MODE = _extract_global_flags(list(args))
+    if _COLOR_MODE is not None and _COLOR_MODE not in ("auto", "always", "never"):
+        print("--color must be one of: auto, always, never", file=sys.stderr)
+        return 2
     parser = build_parser(program_name=program_name)
     parsed_args = parser.parse_args(args)
 
@@ -3573,28 +2455,59 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
         from howlplane.control_plane import workspace_trust
         workspace_trust.set_cli_policy(getattr(parsed_args, "workspace_trust", None))
         # Fail fast on an invalid environment or config value, before any work starts.
-        workspace_trust.resolve_policy()
+        # `config` explains invalid values itself, so it must be reachable when they are wrong.
+        if parsed_args.subcommand != "config":
+            workspace_trust.resolve_policy()
         return handler(parsed_args)
-    except ControlPlaneError as err:
-        print(_operator_error_text(err, parsed_args) or str(err), file=sys.stderr)
-        return 1
     except Exception as err:
-        print(_operator_error_text(err, parsed_args) or f"ERROR: {err}", file=sys.stderr)
-        return 1
+        return _report_failure(err, parsed_args, debug)
 
 
-def _operator_error_text(err: BaseException, parsed_args: argparse.Namespace) -> Optional[str]:
-    """What/why/next for recognized failures; None keeps the original message."""
+def _report_failure(err: BaseException, parsed_args: argparse.Namespace, debug: bool) -> int:
+    """The one canonical error boundary: howlplane.error/v1 for every failure."""
+    from howlplane.control_plane.presentation import errors as presentation_errors
+    from howlplane.control_plane.presentation.style import resolve_style
+    as_json = getattr(parsed_args, "json", False)
+    explained = None
     try:
-        from howlplane.control_plane.presentation.errors import explain
-        explained = explain(err)
+        explained = presentation_errors.explain(err)
     except Exception:
-        return None
+        explained = None
     if explained is None:
-        return None
-    if getattr(parsed_args, "json", False):
-        return json.dumps(explained.to_dict())
-    return explained.render()
+        explained = presentation_errors.internal_error(err)
+    if as_json:
+        print(json.dumps(explained.to_dict()), file=sys.stderr)
+    else:
+        print(explained.render(resolve_style(sys.stderr, _COLOR_MODE)), file=sys.stderr)
+    if debug:
+        import traceback
+        traceback.print_exception(type(err), err, err.__traceback__, file=sys.stderr)
+    return 1
+
+
+_COLOR_MODE: Optional[str] = None
+
+
+def _extract_global_flags(args: List[str]) -> tuple:
+    """Pull ``--debug`` and ``--color MODE`` out of argv wherever they appear."""
+    debug = os.environ.get("HOWLPLANE_DEBUG") == "1"
+    color = None
+    rest: List[str] = []
+    it = iter(args)
+    for token in it:
+        if token == "--":
+            rest.append(token)
+            rest.extend(it)
+            break
+        if token == "--debug":
+            debug = True
+        elif token == "--color":
+            color = next(it, None)
+        elif token.startswith("--color="):
+            color = token.split("=", 1)[1]
+        else:
+            rest.append(token)
+    return rest, debug, color
 
 
 def legacy_main(args: Optional[List[str]] = None) -> int:

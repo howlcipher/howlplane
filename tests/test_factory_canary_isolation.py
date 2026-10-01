@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic regression tests for bounded canary isolation and activity resolution."""
 
+import re
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -207,7 +208,7 @@ def test_fresh_bounded_authority_safe_persisted(tmp_path, monkeypatch, capsys):
     status_args = parser.parse_args(["factory", "status", "--state-dir", str(campaign.state_dir)])
     cmd_factory_status(status_args)
     captured = capsys.readouterr().out
-    assert "Authority: safe" in captured
+    assert re.search(r"Authority\s+safe", captured)
 
 
 def test_max_work_items_command_propagation(tmp_path):

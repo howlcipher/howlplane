@@ -321,37 +321,59 @@ class ConfigLoader:
         return self.get("operating_mode", "local_only") == "connected"
 
 
-# Provide a default instance and config dictionary for backward compatibility
-default_loader = ConfigLoader()
-config = default_loader.config
+def get_default_loader() -> "ConfigLoader":
+    """Build the shared loader on first use, not at import.
+
+    Constructing it validates the environment, so doing that at import killed
+    every command (including ``howlplane config validate``) with a raw pydantic
+    traceback before the CLI could explain it. ``default_loader`` and ``config``
+    stay importable for backward compatibility through ``__getattr__``; the
+    first access builds and caches them in module globals, so tests can still
+    replace them with ``monkeypatch.setattr``.
+    """
+    loader = globals().get("default_loader")
+    if loader is None:
+        loader = ConfigLoader()
+        globals()["default_loader"] = loader
+        globals()["config"] = loader.config
+    return loader
+
+
+def __getattr__(name):
+    if name == "default_loader":
+        return get_default_loader()
+    if name == "config":
+        get_default_loader()
+        return globals()["config"]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def load_config():
     """
     Legacy function to load config directly.
     """
-    return default_loader.config
+    return get_default_loader().config
 
 
 def is_local_only() -> bool:
     """
     Convenience function to check if the current configuration enforces local_only mode.
     """
-    return default_loader.is_local_only()
+    return get_default_loader().is_local_only()
 
 
 def is_connected() -> bool:
     """
     Convenience function to check if the current configuration permits connected mode.
     """
-    return default_loader.is_connected()
+    return get_default_loader().is_connected()
 
 
 def main():
     """
     Main entry point for testing the ConfigLoader.
     """
-    print(f"Loaded config: {config}")
+    print(f"Loaded config: {get_default_loader().config}")
 
 
 if __name__ == "__main__":
@@ -362,8 +384,9 @@ def get_chroma_db_path():
     """
     Returns the absolute path to the ChromaDB directory.
     """
-    db_path = default_loader.get("database", {}).get("chroma_db_path", ".chromadb")
-    return os.path.abspath(os.path.join(default_loader.get_repo_root(), db_path))
+    loader = get_default_loader()
+    db_path = loader.get("database", {}).get("chroma_db_path", ".chromadb")
+    return os.path.abspath(os.path.join(loader.get_repo_root(), db_path))
 
 
 def resolve_utility_llm(cfg=None):
@@ -373,7 +396,7 @@ def resolve_utility_llm(cfg=None):
     is configured. Returns a (model, api_key) tuple, or (None, None) if
     no provider key is available.
     """
-    cfg = cfg or default_loader.config
+    cfg = cfg or get_default_loader().config
     gemini_key = cfg.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY")
     if gemini_key:
         return "gemini/gemini-1.5-flash", gemini_key

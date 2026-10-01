@@ -54,16 +54,16 @@ def test_owner_required_flags_owner_and_abnormal_text_explains_why_and_what_next
     op = derive_operator_status(status)
     assert op.owner_required
     text = "\n".join(render_operator_text(op, status))
-    assert "OWNER REQUIRED" in text and "Reason:" in text and "HOWL-014" in text
-    assert "Next action:" in text and "howlplane status" in text
+    assert "OWNER REQUIRED" in text and "Reason" in text and "HOWL-014" in text
+    assert "Next" in text and "howlplane status" not in text
 
 
 def test_healthy_text_hides_internals_and_says_no_action():
     status = _status(state="dispatching", current_work_item_id="HOWL-014", project="grocery")
     text = "\n".join(render_operator_text(derive_operator_status(status), status))
     assert "Reason:" not in text and "dispatch" not in text.lower().replace("dispatching", "")
-    assert "Next action: None" in text
-    assert "Project: grocery" in text
+    assert "No action required." in text
+    assert "Project" in text and "grocery" in text
 
 
 def test_every_suggested_command_is_a_real_howlplane_command():

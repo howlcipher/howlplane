@@ -18,6 +18,7 @@ from typing import Optional
 from howlplane.control_plane import workspace_trust
 from howlplane.control_plane.atomic_io import atomic_write_json, safe_load_json
 from howlplane.control_plane.factory.campaign import CampaignError, FactoryCampaign
+from howlplane.control_plane.factory.oplog import OperationalLog
 from howlplane.control_plane.locking import LockError, SupervisorLock, get_process_create_time, is_process_record_active
 
 
@@ -196,6 +197,8 @@ def start_process(campaign: FactoryCampaign, authority_profile: Optional[str], o
             record = FactoryProcessRecord(process.pid, get_process_create_time(process.pid), socket.gethostname(),
                                           "process", command, now, str(log_path))
         _save_process(campaign, record)
+        OperationalLog(campaign.state_dir, {"campaign_id": campaign.repository.campaign_id}).emit(
+            "process.started", f"Factory process started ({record.backend})", backend=record.backend)
         return True, record
     finally:
         launch_lock.release()
@@ -223,40 +226,6 @@ def stop_process(campaign: FactoryCampaign, timeout_seconds: float = 30.0) -> st
             raise CampaignError("Factory did not stop after its graceful reconciliation window")
     record.status = "stopped"
     _save_process(campaign, record)
+    OperationalLog(campaign.state_dir, {"campaign_id": campaign.repository.campaign_id}).emit(
+        "process.stopped", "Factory process stopped by operator", backend=record.backend)
     return "Factory stopped. Durable campaign state and evidence were preserved."
-
-
-_SECRET_PATTERNS = [
-    re.compile(r"\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]+"),
-    re.compile(r"(?i)(authorization\s*[:=]\s*)(?:bearer\s+)?\S+"),
-]
-
-
-def recent_logs(campaign: FactoryCampaign, follow: bool = False, lines: int = 80) -> int:
-    record = load_process(campaign)
-    if record and record.backend == "systemd" and record.unit_name:
-        command = ["journalctl", "--user", "--unit", record.unit_name, "--no-pager", "-n", str(lines)]
-        if follow:
-            command.append("--follow")
-        return subprocess.call(command)
-    path = _log_path(campaign)
-    if not path.exists():
-        print("No Factory logs have been recorded for this campaign.")
-        return 0
-    def emit() -> None:
-        content = path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]
-        for line in content:
-            for pattern in _SECRET_PATTERNS:
-                line = pattern.sub("[REDACTED]", line)
-            print(line)
-    emit()
-    if follow:
-        with path.open("r", encoding="utf-8", errors="replace") as stream:
-            stream.seek(0, os.SEEK_END)
-            while True:
-                line = stream.readline()
-                if line:
-                    print(line.rstrip())
-                else:
-                    time.sleep(0.25)
-    return 0

@@ -12,11 +12,14 @@ only new codes name conditions that previously had no stable token.
 """
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional
 
 from howlplane.control_plane.factory.status_publish import OWNER_REQUIRED
 from howlplane.control_plane.factory.supervisor_state import SupervisorState
+from howlplane.control_plane.presentation.redact import redact_operator_text
+from howlplane.control_plane.presentation.style import Style, format_duration
 from howlplane.control_plane.resource_models import ProviderFailureClass
 
 OPERATOR_STATUS_SCHEMA = "howlplane.operator.status/v1"
@@ -59,6 +62,8 @@ class OperatorAction:
 
     message: str
     command: Optional[str] = None
+    # Other real commands that are equally valid here (for example reject next to approve).
+    alternatives: List[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -69,17 +74,75 @@ class OperatorStatus:
     summary: str
     reason_code: ReasonCode = ReasonCode.NONE
     current_work: Optional[str] = None
+    current_work_title: Optional[str] = None
     worker: Optional[str] = None
     blockers: List[str] = field(default_factory=list)
     owner_required: bool = False
     next_action: Optional[OperatorAction] = None
     schema: str = OPERATOR_STATUS_SCHEMA
+    # Additive in v1. Only populated from durable state; never estimated.
+    worker_resource_id: Optional[str] = None
+    attempt: Optional[int] = None
+    elapsed_seconds: Optional[int] = None
+    retry_in_seconds: Optional[int] = None
+    # The stored backoff facts (reason, attempt, scheduled delay), copied unchanged.
+    retry_reason: Optional[str] = None
+    retry_attempt: Optional[int] = None
+    retry_delay_seconds: Optional[int] = None
+    recovery: Optional[str] = None  # "automatic" or "manual" when the state is a wait or failure
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["severity"] = self.severity.value
         data["reason_code"] = self.reason_code.value
         return data
+
+
+_WORKER_NAMES = {"claude_code": "Claude", "claude": "Claude", "codex": "Codex", "cursor": "Cursor",
+                 "agy": "AGY", "devin_cli": "Devin", "devin": "Devin", "gemini": "Gemini"}
+
+
+def worker_display(resource_id: Optional[str]) -> Optional[str]:
+    """Friendly worker name; an unknown id is shown as-is rather than guessed."""
+    if not resource_id:
+        return None
+    return _WORKER_NAMES.get(str(resource_id), str(resource_id))
+
+
+def _parse(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _runtime(status: Mapping[str, Any], state: str, now: Optional[datetime]) -> Dict[str, Any]:
+    """Elapsed/retry/recovery facts that durable state truthfully supports."""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    out: Dict[str, Any] = {}
+    resource = status.get("worker_resource_id")
+    if resource:
+        out["worker_resource_id"] = resource
+        out["worker"] = status.get("worker") or worker_display(resource)
+    if status.get("current_attempt") is not None:
+        out["attempt"] = status["current_attempt"]
+    started = _parse(status.get("dispatch_started_at"))
+    if started and state == SupervisorState.DISPATCHING.value:
+        out["elapsed_seconds"] = max(0, int((now - started).total_seconds()))
+    wake = _parse(status.get("next_wake_at"))
+    waiting = state in (SupervisorState.BACKOFF_AFTER_FAILURE.value, SupervisorState.WAITING_FOR_PROVIDER.value)
+    if waiting and wake and wake > now:
+        out["retry_in_seconds"] = int((wake - now).total_seconds())
+        for key, source in (("retry_reason", "backoff_reason"), ("retry_attempt", "backoff_attempt"),
+                            ("retry_delay_seconds", "backoff_delay_seconds")):
+            if status.get(source) is not None:
+                out[key] = status[source]
+    return out
 
 
 def _classified_failure(status: Mapping[str, Any]) -> Optional[ProviderFailureClass]:
@@ -106,13 +169,17 @@ def _owner_items(status: Mapping[str, Any]) -> bool:
     return any(i.get("state") == "awaiting_owner" for i in status.get("parked_items") or [])
 
 
-def derive_operator_status(status: Mapping[str, Any]) -> OperatorStatus:
+def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = None) -> OperatorStatus:
     """Project the ``factory status`` payload into the operator model."""
     state = str(getattr(status.get("state"), "value", status.get("state")) or "unknown")
     process = status.get("process")
     work = status.get("current_work_item_id")
     blockers = _blockers(status)
-    common = {"state": state, "current_work": work, "worker": status.get("worker"), "blockers": blockers}
+    runtime = _runtime(status, state, now)
+    work_title = status.get("current_work_title")
+    common = {"state": state, "current_work": work, "current_work_title": work_title,
+              "worker": runtime.pop("worker", status.get("worker")), "blockers": blockers, **runtime}
+    automatic = process in (None, "running")
     failure = _classified_failure(status)
     not_configured = status.get("authority") == "not configured"
 
@@ -126,13 +193,20 @@ def derive_operator_status(status: Mapping[str, Any]) -> OperatorStatus:
                     "Choose an authority level and restart the Factory.",
                     "howlplane factory start --authority safe"),
                 **common)
+        decisions = status.get("decisions") or []
+        if decisions:
+            first = decisions[0]
+            action = OperatorAction(
+                f"Review {first['work_item_id']} and decide:", first["approve"],
+                alternatives=[first["reject"]] if first.get("reject") else [])
+        else:
+            # Repository proposals have no decision command yet, so none is invented.
+            action = OperatorAction("Review the items awaiting an owner decision listed above.")
         return OperatorStatus(
             label="OWNER REQUIRED", severity=Severity.ATTENTION,
             summary="Work is waiting for an owner decision.",
-            reason_code=ReasonCode.OWNER_REQUIRED, owner_required=True,
-            next_action=OperatorAction(
-                "Review the items awaiting an owner decision.", "howlplane status"),
-            **common)
+            reason_code=ReasonCode.OWNER_REQUIRED, owner_required=True, recovery="manual",
+            next_action=action, **common)
 
     if process == "stale":
         return OperatorStatus(
@@ -170,7 +244,7 @@ def derive_operator_status(status: Mapping[str, Any]) -> OperatorStatus:
         return OperatorStatus(
             label="ATTENTION", severity=Severity.ATTENTION,
             summary="A provider needs you to sign in again.",
-            reason_code=ReasonCode.AUTHENTICATION_REQUIRED, owner_required=True,
+            reason_code=ReasonCode.AUTHENTICATION_REQUIRED, owner_required=True, recovery="manual",
             next_action=OperatorAction(
                 "Sign in to the provider CLI, then check readiness.", "howlplane agents doctor"),
             **common)
@@ -180,6 +254,7 @@ def derive_operator_status(status: Mapping[str, Any]) -> OperatorStatus:
         return OperatorStatus(
             label="WAITING", severity=Severity.ATTENTION,
             summary="Waiting for a provider to become available.",
+            recovery="automatic" if automatic else "manual",
             reason_code=(ReasonCode.SESSION_LIMIT if failure is ProviderFailureClass.SESSION_LIMIT
                          else ReasonCode.PROVIDER_UNAVAILABLE),
             next_action=OperatorAction(
@@ -197,6 +272,7 @@ def derive_operator_status(status: Mapping[str, Any]) -> OperatorStatus:
         return OperatorStatus(
             label="BACKING OFF", severity=Severity.ATTENTION,
             summary="The last attempt failed; the Factory will retry automatically.",
+            recovery="automatic" if automatic else "manual",
             reason_code=ReasonCode.BACKOFF_AFTER_FAILURE,
             next_action=OperatorAction("Inspect the failure.", "howlplane factory logs"),
             **common)
@@ -204,6 +280,7 @@ def derive_operator_status(status: Mapping[str, Any]) -> OperatorStatus:
         return OperatorStatus(
             label="WAITING", severity=Severity.INFO,
             summary="Waiting for a dependency before continuing.",
+            recovery="automatic" if automatic else "manual",
             reason_code=ReasonCode.WAITING_FOR_DEPENDENCY,
             next_action=OperatorAction("None. The Factory continues automatically."), **common)
     if state == SupervisorState.WAITING_FOR_WORK.value or state == SupervisorState.IDLE.value:
@@ -222,35 +299,83 @@ def derive_operator_status(status: Mapping[str, Any]) -> OperatorStatus:
         **common)
 
 
-def render_operator_text(op: OperatorStatus, status: Mapping[str, Any]) -> List[str]:
-    """Concise human view. Internal IDs and timestamps live under ``--verbose``."""
-    lines = [f"HowlPlane Factory — {op.label}", ""]
-    if status.get("project"):
-        lines.append(f"Project: {status['project']}")
-    if status.get("authority"):
-        lines.append(f"Authority: {status['authority']}")
-    if status.get("objective"):
-        lines.append(f"Objective: {status['objective']}")
-    lines.append(f"Current work: {op.current_work or 'none'}")
-    if op.worker:
-        lines.append(f"Worker: {op.worker}")
-    health = {Severity.OK: "Healthy", Severity.INFO: "Healthy", Severity.ATTENTION: "Needs attention",
-              Severity.ERROR: "Unhealthy"}[op.severity]
-    lines.append(f"Health: {health}")
-    lines.append(f"Completed: {len(status.get('recent_completed') or [])}")
-    lines.append(f"Failed: {len(status.get('recent_failed') or [])}")
+_HEALTH = {Severity.OK: "Healthy", Severity.INFO: "Healthy", Severity.ATTENTION: "Needs attention",
+           Severity.ERROR: "Unhealthy"}
+
+
+def _next_text(message: str) -> str:
+    """Spell "None. ..." as the clearer "No action required. ..."."""
+    if message.startswith("None"):
+        rest = message[4:].lstrip(". ").strip()
+        return "No action required." + (f" {rest}" if rest else "")
+    return message
+
+
+def _retry_text(op: "OperatorStatus") -> Optional[str]:
+    if op.retry_in_seconds is None:
+        return None
+    text = f"in {format_duration(op.retry_in_seconds)}"
+    facts = []
+    if op.retry_reason:
+        facts.append(op.retry_reason.replace("_", " "))
+    if op.retry_attempt is not None:
+        facts.append(f"attempt {op.retry_attempt}")
+    if op.retry_delay_seconds is not None:
+        facts.append(f"delay {format_duration(op.retry_delay_seconds)}")
+    return f"{text} ({', '.join(facts)})" if facts else text
+
+
+def render_operator_text(op: OperatorStatus, status: Mapping[str, Any], style: Optional[Style] = None) -> List[str]:
+    """Human view: state -> meaning -> next action. Internals live under ``--verbose``.
+
+    Every fact is spelled in words; ``style`` only adds emphasis, so the plain
+    output (pipes, CI, NO_COLOR, screen readers) carries the same information.
+    """
+    style = style or Style()
+    lines = style.header("HowlPlane Factory", op.label, op.severity.value)
+    health_key = "Health"
+    rows = [
+        ("Project", status.get("project")),
+        ("Authority", status.get("authority")),
+        ("Objective", status.get("objective")),
+        (health_key, _HEALTH[op.severity]),
+        ("Worker", op.worker),
+        ("Elapsed", format_duration(op.elapsed_seconds)),
+        ("Attempt", op.attempt),
+        ("Recovery", {"automatic": "Automatic", "manual": "Needs you"}.get(op.recovery or "")),
+        ("Retry", _retry_text(op)),
+        ("Completed", len(status.get("recent_completed") or [])),
+        ("Failed", len(status.get("recent_failed") or [])),
+    ]
     if op.severity is not Severity.OK or op.blockers:
-        lines.append(f"Reason: {op.summary}")
+        rows.insert(4, ("Reason", op.summary))
+        if op.reason_code is not ReasonCode.NONE:
+            rows.insert(5, ("Code", op.reason_code.value))
+        last_error = str(status.get("last_error") or "")
+        if last_error and last_error not in op.summary:
+            shown = redact_operator_text(last_error)
+            rows.insert(5, ("Last error", shown if len(shown) <= 120 else shown[:117] + "..."))
+    lines += style.kv(rows, severities={health_key: op.severity.value})
+
+    lines += ["", style.section("Current work"), op.current_work or "none"]
+    if op.current_work_title:
+        lines[-1] = f"{op.current_work}: {op.current_work_title}"
     for blocker in op.blockers:
         lines.append(f"  - {blocker}")
-    lines.append("")
+
+    lines += ["", style.section("Next")]
     action = op.next_action
-    if action is None or (action.command is None and action.message.startswith("None")):
-        lines.append(f"Next action: {action.message if action else 'None'}")
-    elif action.command:
-        lines.append(f"Next action: {action.message}")
-        lines.append(f"  {action.command}")
+    if action is None:
+        lines.append("No action required.")
     else:
-        lines.append(f"Next action: {action.message}")
-    lines += ["", "Details:", "  howlplane factory status --verbose", "  howlplane factory logs --follow"]
+        lines.append(_next_text(action.message))
+        if action.command:
+            lines += ["", style.command_block(action.command)]
+        for alt in action.alternatives:
+            lines.append(style.command_block(alt))
+
+    details = ["howlplane factory status --verbose"]
+    details.append("howlplane factory logs --errors" if op.severity in (Severity.ATTENTION, Severity.ERROR)
+                   else "howlplane factory logs --follow")
+    lines += ["", style.muted("Details")] + [style.command_block(d) for d in details]
     return lines

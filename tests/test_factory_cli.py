@@ -43,7 +43,7 @@ def test_status_observes_active_dispatch_without_restarting(tmp_path, capsys, mo
         assert "Restart during dispatch" not in output
     else:
         assert "RUNNING" in output
-        assert "Current work: WI-live" in output
+        assert "Current work\nWI-live" in output
         assert "Current dispatch" not in output
         assert "Failures:" not in output
     assert state_path.read_bytes() == original
