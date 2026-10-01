@@ -354,6 +354,33 @@ def _validate_target(campaign: FactoryCampaign) -> bool:
     return True
 
 
+def _advance_idle_target(campaign: FactoryCampaign) -> None:
+    """Fast-forward an idle managed worktree to the repository's current commit.
+
+    The worktree is created once, at the commit current on first start. Without
+    this, backlog items committed afterwards are never discovered. It only moves
+    when it is provably idle: detached, clean, and a strict ancestor of the
+    target commit. Anything else (work in flight, a branch, local edits) is left
+    untouched.
+    """
+    target = campaign.target_dir
+    commit = campaign.repository.commit
+    try:
+        if _run_git(target, ["rev-parse", "HEAD"]) == commit:
+            return
+        if subprocess.run(["git", "-C", str(target), "symbolic-ref", "-q", "HEAD"],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30).returncode == 0:
+            return  # on a branch: work in flight
+        if _run_git(target, ["status", "--porcelain"]):
+            return
+        if subprocess.run(["git", "-C", str(target), "merge-base", "--is-ancestor", "HEAD", commit],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30).returncode != 0:
+            return
+        _run_git(target, ["checkout", "--detach", commit])
+    except (CampaignError, OSError, subprocess.TimeoutExpired):
+        return  # staying on the older snapshot is safe; never fail a start over it
+
+
 def prepare_campaign(campaign: FactoryCampaign) -> FactoryCampaign:
     """Persist metadata and create or validate the one managed worktree."""
     _refuse_symlink(campaign.state_dir)
@@ -370,5 +397,7 @@ def prepare_campaign(campaign: FactoryCampaign) -> FactoryCampaign:
         except CampaignError as exc:
             raise CampaignError(f"Could not prepare isolated Factory worktree: {exc}") from exc
         _validate_target(campaign)
+    else:
+        _advance_idle_target(campaign)
     atomic_write_json(campaign.metadata_path, _metadata(campaign))
     return campaign
