@@ -430,7 +430,6 @@ The `howlplane` launcher locates the HowlPlane control plane using the following
 - [Local AI Worker (Ollama) & Bounded Dogfooding](documentation/LOCAL_MODEL.md)
 - [Data Flows & Network Egress Reference](documentation/data_flows.md)
 - [Coding Standards & Hygiene](documentation/coding_standards.md)
-- [AI Framework Blueprint](documentation/AI_FRAMEWORK_BLUEPRINT.md)
 - [Localizations & Languages](documentation/languages/README_en_US.md)
 - [Change Log](change_log.md)
 - [2026-09-29 remote snapshot follow-ons](documentation/journals/2026-09-29_team_howlplane_backlog.md)
