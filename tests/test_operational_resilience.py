@@ -7,6 +7,7 @@ Operational Resilience: Crash Recovery, Durable Resume, Repository Locking,
 Cancellation, and Exactly-Once Consequential Execution Semantics.
 """
 
+from tests._tia_helpers import record_valid_tia
 import argparse
 from datetime import datetime, timezone
 import json
@@ -149,7 +150,10 @@ def test_interrupted_implementation_recovers_delta_without_blind_rerun(tmp_path)
 
     # Resume must capture recorded delta against baseline and proceed through reviews
     backend2 = MockFailingBackend()
-    orch2 = GovernedTaskOrchestrator(target_repo=tmp_path, config=OrchestrationConfig(custom_backend=backend2))
+    orch2 = GovernedTaskOrchestrator(
+        target_repo=tmp_path, control_plane_root=tmp_path / "cp", config=OrchestrationConfig(custom_backend=backend2)
+    )
+    record_valid_tia(orch2.ledger, spec.task_id)
     res = orch2.run(spec)
     assert res.exit_code == 0
     assert res.initial_delta is not None

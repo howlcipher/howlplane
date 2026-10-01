@@ -8,6 +8,7 @@ loop with fake backends and temporary Git repositories, verifying rollback,
 evidence preservation, progress messaging, and final identity/reviewer behavior.
 """
 
+from tests._tia_helpers import record_valid_tia
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -199,7 +200,8 @@ def _run_failover_task(
         trajectory_store_dir=str(repo / ".task_runs" / task.task_id / "trajectories"),
         **config_overrides,
     )
-    orch = GovernedTaskOrchestrator(target_repo=repo, config=config)
+    orch = GovernedTaskOrchestrator(target_repo=repo, control_plane_root=repo.parent / "control_plane", config=config)
+    record_valid_tia(orch.ledger, task.task_id)  # the completion gate requires a TIA
     return orch.run(task)
 
 

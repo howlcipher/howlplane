@@ -37,11 +37,8 @@ def _owner_decision_spec(args: argparse.Namespace, decision: str, flag: str):
 def _run_owner_decision(args: argparse.Namespace, decision: str, flag: str) -> int:
     """Shared body of the ``--work-item`` and ``--proposal`` decisions (one authority path)."""
     from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
-    if not getattr(args, "state_dir", None):
-        raise OperatorFailure(OperatorError(
-            "MISSING_STATE_DIRECTORY", f"--{flag} needs --state-dir.",
-            f"The Factory state directory says where the {flag.replace('-', ' ')} is stored.",
-            "Copy the exact command from the Factory status.", "howlplane factory status"))
+    from howlplane.control_plane.factory.owner_decision import require_state_dir
+    require_state_dir(args, f"--{flag}", flag.replace("-", " "))
     ledger_file = _cli()._resolve_ledger_file(args)
     ledger = _cli().EvidenceLedger(ledger_file) if ledger_file else None
     decide, error_cls, (approved_title, rejected_title, approved_note) = _owner_decision_spec(args, decision, flag)

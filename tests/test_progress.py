@@ -309,6 +309,9 @@ def test_verification_plan_progress_tracking(tmp_path):
 # -----------------------------------------------------------------------------
 
 
+from tests._tia_helpers import record_valid_tia  # noqa: E402
+
+
 def test_orchestrator_progress_full_governed_cycle(tmp_path):
     """Verify orchestrator runs progress phases with mock provider."""
     repo = tmp_path / "target_repo"
@@ -346,6 +349,7 @@ def test_orchestrator_progress_full_governed_cycle(tmp_path):
         task_class="feature",
         risk_level="low",
     )
+    record_valid_tia(orchestrator.ledger, spec.task_id)
 
     res = orchestrator.run(spec)
     assert res.exit_code == 0

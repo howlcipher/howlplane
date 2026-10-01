@@ -14,7 +14,8 @@ import hashlib, json, os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+from howlplane.control_plane.completion_gate import GATE_BLOCKED_ACTION, evaluate_completion_gate
+from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, EvidenceSchemaError
 from howlplane.control_plane.git_env import run_git_in_repo
 from howlplane.control_plane.hygiene_policy import (
     PolicyChangeType,
@@ -951,6 +952,25 @@ class HumanLifecycleManager:
             )
         return status
 
+    @staticmethod
+    def _resume_changed_paths(
+        target_repo: Union[str, Path],
+        run_dir: Path,
+        current_fp: Any,
+    ) -> List[str]:
+        """Paths this task changed, from the recorded baseline when available."""
+        baseline_file = run_dir / "baseline.json"
+        if baseline_file.is_file():
+            try:
+                from howlplane.control_plane.git_baseline import GitBaseline, capture_delta
+
+                baseline = GitBaseline.from_dict(json.loads(baseline_file.read_text(encoding="utf-8")))
+                delta = capture_delta(Path(target_repo).resolve(), baseline)
+                return list(delta.files_added) + list(delta.files_modified) + list(delta.files_deleted)
+            except Exception:
+                pass
+        return list(current_fp.files_modified)
+
     @classmethod
     def _unverified_terminal_result(
         cls,
@@ -969,8 +989,6 @@ class HumanLifecycleManager:
         operation with its own evidence and its own terminal semantics, and does
         not exist (issues.md #12).
         """
-        from howlplane.control_plane.orchestrator import OrchestrationResult
-
         # `failed` is what the ordinary Stage 6 gate uses for a plan that ran
         # and failed, so a resumed run reaches the same terminal state by the
         # same evidence. Anything short of a completed run -- a plan that
@@ -983,6 +1001,38 @@ class HumanLifecycleManager:
             f"reported '{verif_status}', so this task cannot be recorded as "
             f"verified-complete."
         )
+        return cls._resumed_terminal_result(
+            task_id=task_id,
+            task_spec=task_spec,
+            run_dir=run_dir,
+            terminal=terminal,
+            reason=reason,
+            decision=decision,
+            ledger=ledger,
+            action="resume_blocked_on_verification",
+            result=verif_status,
+            metadata={"verification_status": verif_status},
+            summary_extra=f"- **Deterministic Verification:** `{verif_status}`\n",
+        )
+
+    @classmethod
+    def _resumed_terminal_result(
+        cls,
+        task_id: str,
+        task_spec: Any,
+        run_dir: Path,
+        terminal: str,
+        reason: str,
+        decision: Any,
+        ledger: Optional[EvidenceLedger],
+        action: str,
+        result: str,
+        metadata: Dict[str, Any],
+        summary_extra: str = "",
+    ) -> Any:
+        """Ends a resumed task in a non-complete terminal state, with summary and evidence."""
+        from howlplane.control_plane.orchestrator import OrchestrationResult
+
         task_spec.transition_to(terminal, reason)
         task_spec.save_to_file(str(run_dir / "task.yaml"))
 
@@ -992,7 +1042,7 @@ class HumanLifecycleManager:
                 f"# Governed Task Run Summary: `{task_id}`\n\n"
                 f"- **Objective:** {task_spec.objective}\n"
                 f"- **Final State:** `{terminal.upper()}`\n"
-                f"- **Deterministic Verification:** `{verif_status}`\n"
+                f"{summary_extra}"
                 f"- **Approved At:** {decision.timestamp}\n\n"
                 f"{reason}\n",
                 encoding="utf-8",
@@ -1003,15 +1053,11 @@ class HumanLifecycleManager:
                 EvidenceEntry(
                     task_id=task_id,
                     agent_id="control_plane",
-                    action="resume_blocked_on_verification",
-                    result=verif_status,
+                    action=action,
+                    result=result,
                     task_class=task_spec.task_class,
                     risk_level=task_spec.risk_level,
-                    metadata={
-                        "human_approved": True,
-                        "verification_status": verif_status,
-                        "final_state": terminal,
-                    },
+                    metadata={"human_approved": True, "final_state": terminal, **metadata},
                 )
             )
 
@@ -1021,6 +1067,23 @@ class HumanLifecycleManager:
             final_state=terminal,
             exit_code=1,
             run_dir=str(run_dir),
+            error_message=reason if terminal == "blocked" and action == GATE_BLOCKED_ACTION else None,
+        )
+
+    @classmethod
+    def _tia_blocked_terminal_result(
+        cls,
+        task_id: str,
+        task_spec: Any,
+        run_dir: Path,
+        reason: str,
+        decision: Any,
+        ledger: Optional[EvidenceLedger],
+    ) -> Any:
+        """Ends a resumed task as blocked when the TIA completion gate fails."""
+        return cls._resumed_terminal_result(
+            task_id, task_spec, run_dir, "blocked", reason, decision, ledger,
+            action=GATE_BLOCKED_ACTION, result=reason, metadata={"resumed": True},
         )
 
     @classmethod
@@ -1071,6 +1134,8 @@ class HumanLifecycleManager:
                         metadata=metadata,
                     )
                 )
+            except EvidenceSchemaError:
+                raise  # a schema violation is a control-plane defect, never swallowed
             except Exception:
                 pass
 
@@ -1335,6 +1400,23 @@ class HumanLifecycleManager:
                             task_spec=task_spec,
                             run_dir=run_dir,
                             verif_status=verif_status,
+                            decision=decision,
+                            ledger=ledger,
+                        )
+
+                    # Human approval is not permission to skip testing governance:
+                    # the same TIA completion gate as Stage 8 applies here.
+                    gate = evaluate_completion_gate(
+                        ledger,
+                        task_id,
+                        cls._resume_changed_paths(target_repo, run_dir, current_fp),
+                    )
+                    if not gate.allowed:
+                        return cls._tia_blocked_terminal_result(
+                            task_id=task_id,
+                            task_spec=task_spec,
+                            run_dir=run_dir,
+                            reason=gate.reason,
                             decision=decision,
                             ledger=ledger,
                         )

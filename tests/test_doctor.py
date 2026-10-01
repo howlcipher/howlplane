@@ -4,6 +4,7 @@ test_doctor.py
 Unit tests for src/infrastructure/doctor.py diagnostics.
 """
 
+from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
 from pathlib import Path
 from howlplane.control_plane.doctor import (
     check_python_environment,
@@ -85,11 +86,19 @@ def test_check_control_plane_ledger(tmp_path):
     logs_dir = tmp_path / "logs" / "control_plane"
     logs_dir.mkdir(parents=True)
     ledger_file = logs_dir / "evidence_ledger.jsonl"
-    ledger_file.write_text('{"task_id": "T1"}\n{"task_id": "T2"}\n', encoding="utf-8")
+    ledger = EvidenceLedger(str(ledger_file))
+    for task_id in ("T1", "T2"):
+        ledger.append_entry(EvidenceEntry(task_id=task_id, agent_id="a", action="task_created"))
 
     check_valid = check_control_plane_ledger(tmp_path)
     assert check_valid.status == "ok"
-    assert "2 valid" in check_valid.message
+    assert "2 schema-valid" in check_valid.message
+
+    with open(ledger_file, "a", encoding="utf-8") as f:
+        f.write("{not json\n")
+    check_bad = check_control_plane_ledger(tmp_path)
+    assert check_bad.status == "error"
+    assert "line 3" in check_bad.message and "malformed" in check_bad.message
 
 
 def test_check_operating_mode():

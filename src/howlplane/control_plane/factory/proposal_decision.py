@@ -33,6 +33,21 @@ class ProposalDecisionError(od.OwnerDecisionError):
     """A repository proposal decision cannot be applied."""
 
 
+def load_proposal(store: RepoProposalStore, proposal_id: str, state_dir: Union[str, Path], error_cls: type,
+                  consequence: str) -> RepoProposal:
+    """Load one proposal, refusing an unknown id or a damaged record with ``error_cls``."""
+    if not store.exists(proposal_id):
+        raise od.not_found_error(error_cls, "PROPOSAL_NOT_FOUND", "repository proposal", proposal_id, state_dir)
+    try:
+        return store.load(proposal_id)
+    except Exception as exc:
+        raise error_cls(
+            "PROPOSAL_MALFORMED", f"Repository proposal '{proposal_id}' cannot be read: {exc}",
+            f"The stored record is damaged, so {consequence}.",
+            "Inspect the proposal file in the Factory state directory; nothing was changed.",
+            "howlplane factory status --verbose")
+
+
 def decide_proposal(
     state_dir: Union[str, Path],
     proposal_id: str,
@@ -44,16 +59,7 @@ def decide_proposal(
 ) -> Dict[str, Any]:
     """Apply the owner's decision to one proposal awaiting authority and record it."""
     store = RepoProposalStore(Path(state_dir).resolve() / "repo_proposals")
-    if not store.exists(proposal_id):
-        raise od.not_found_error(ProposalDecisionError, "PROPOSAL_NOT_FOUND", "repository proposal", proposal_id, state_dir)
-    try:
-        proposal: RepoProposal = store.load(proposal_id)
-    except Exception as exc:
-        raise ProposalDecisionError(
-            "PROPOSAL_MALFORMED", f"Repository proposal '{proposal_id}' cannot be read: {exc}",
-            "The stored record is damaged, so no decision is recorded on it.",
-            "Inspect the proposal file in the Factory state directory; nothing was changed.",
-            "howlplane factory status --verbose")
+    proposal = load_proposal(store, proposal_id, state_dir, ProposalDecisionError, "no decision is recorded on it")
     if proposal.state != ProposalState.AWAITING_AUTHORITY.value:
         raise od.not_awaiting_error(
             ProposalDecisionError, "PROPOSAL_NOT_AWAITING_AUTHORITY", "repository proposal", proposal_id,
@@ -67,12 +73,16 @@ def decide_proposal(
     proposal.decided_by = decided_by
     proposal.decision_reason = reason
     store.save_object(proposal)
-    od.record_decision(
+    entry_id = od.record_decision(
         ledger, proposal_id, EVIDENCE_ACTION, decision,
         {"reason": reason, "previous_state": previous, "new_state": proposal.state,
          "repository_name": proposal.repository_name,
          "evidence_fingerprints": list(proposal.evidence_fingerprints),
          "bootstrap_contract_sha256": fingerprint})
+    if decision == APPROVED:
+        proposal.approved_contract_sha256 = fingerprint
+        proposal.approved_decision_entry_id = entry_id
+        store.save_object(proposal)
     return {"proposal_id": proposal_id, "decision": decision, "from_state": previous,
             "state": proposal.state, "reason": reason, "repository_name": proposal.repository_name,
             "bootstrap_contract_sha256": fingerprint}
@@ -83,4 +93,4 @@ def proposal_commands(proposal_id: str, state_dir: str) -> Dict[str, str]:
     return od.decision_commands("proposal", proposal_id, state_dir)
 
 
-__all__ = ["decide_proposal", "proposal_commands", "ProposalDecisionError", "APPROVED", "REJECTED", "EVIDENCE_ACTION"]
+__all__ = ["decide_proposal", "load_proposal", "proposal_commands", "ProposalDecisionError", "APPROVED", "REJECTED", "EVIDENCE_ACTION"]

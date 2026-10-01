@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from howlplane.control_plane.evidence_ledger import EvidenceLedger
+from tests._tia_helpers import record_valid_tia
 from howlplane.control_plane.human_boundary import (
     HumanLifecycleManager,
     VERIFICATION_NO_PLAN,
@@ -89,7 +90,13 @@ def _recorded_plan(run_dir: Path) -> dict:
     return json.loads((run_dir / "verification_plan.json").read_text(encoding="utf-8"))
 
 
-def _approve_and_resume(repo: Path, task_id: str, ledger=None):
+def _approve_and_resume(repo: Path, task_id: str, ledger=None, tia=True):
+    # The resume path applies the TIA completion gate; seed a valid assessment
+    # unless a test is exercising the gate itself.
+    if ledger is None:
+        ledger = EvidenceLedger(str(repo.parent / f"{repo.name}-{task_id}-ledger.jsonl"))
+    if tia:
+        record_valid_tia(ledger, task_id)
     HumanLifecycleManager.approve(
         target_repo=repo,
         task_id=task_id,

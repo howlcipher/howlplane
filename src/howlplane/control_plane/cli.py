@@ -27,7 +27,8 @@ if _src not in sys.path:
 from howlplane.control_plane import __version__, agent_readiness
 from howlplane.control_plane.agent_registry import AgentRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
-from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, EvidenceSchemaError
+from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
 from howlplane.control_plane.git_env import run_git_in_repo
 from howlplane.control_plane.locking import get_repo_lock_path, get_task_lock_path, is_process_alive
 from howlplane.control_plane.recovery import CrashRecoveryEngine
@@ -66,6 +67,7 @@ from howlplane.control_plane.factory.factory_cli import (  # noqa: F401  re-expo
     cmd_factory_logs,
     _print_worker_table,
     cmd_factory_doctor,
+    cmd_factory_bootstrap,
     cmd_factory,
 )
 from howlplane.control_plane.verification import VerificationPlan
@@ -903,7 +905,13 @@ def cmd_record(args: argparse.Namespace) -> int:
         findings_summary=findings_sum,
         metadata=meta,
     )
-    ledger.append_entry(entry)
+    try:
+        ledger.append_entry(entry)
+    except EvidenceSchemaError as exc:
+        raise OperatorFailure(OperatorError(
+            "EVIDENCE_SCHEMA_INVALID", f"The evidence entry was not recorded: {exc}",
+            "Evidence must match schemas/evidence-entry.schema.json before it is written.",
+            "Use a known action name (see the schema's action list) and valid field types."))
     print(f"Recorded evidence entry '{entry.entry_id}' for task '{entry.task_id}'.")
     return 0
 
@@ -911,7 +919,13 @@ def cmd_record(args: argparse.Namespace) -> int:
 def cmd_metrics(args: argparse.Namespace) -> int:
     """Calculates and displays engineering history metrics."""
     ledger = EvidenceLedger(args.ledger_file)
-    entries = ledger.list_all_entries()
+    entries, diagnostics = ledger.read_entries()
+    if diagnostics:
+        print(
+            f"warning: {len(diagnostics)} evidence record(s) are malformed or schema-invalid "
+            f"(first: line {diagnostics[0].line_number}, {diagnostics[0].kind}); run `howlplane doctor`.",
+            file=sys.stderr,
+        )
     summary = MetricsCalculator.calculate(entries)
     if getattr(args, "format", "markdown") == "json":
         import json
@@ -1662,6 +1676,17 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_factory_doctor.add_argument("--target-repo", help="Repository to resolve (advanced)")
     _add_readiness_arguments(p_factory_doctor)
     _add_workspace_trust_argument(p_factory_doctor)
+
+    p_bootstrap = factory_sub.add_parser(
+        "bootstrap", help="Bootstrap a local repository from an owner-accepted proposal (fingerprint-bound)", **kwargs
+    )
+    p_bootstrap.add_argument("--proposal", required=True, help="Accepted repository proposal id")
+    p_bootstrap.add_argument("--state-dir", help="Factory state directory")
+    p_bootstrap.add_argument("--target-root", help="Directory that will hold the new repository "
+                                                   "(default: <state-dir>/bootstrapped_repositories)")
+    p_bootstrap.add_argument("--retry", action="store_true", help="Retry a bootstrap that previously failed")
+    p_bootstrap.add_argument("--ledger-file", help="Ledger file path")
+    p_bootstrap.add_argument("--json", action="store_true", help="Output JSON result")
 
     p_prepare = factory_sub.add_parser(
         "prepare", help="Authorize a repository for unattended Factory use and prepare agent workspace trust", **kwargs

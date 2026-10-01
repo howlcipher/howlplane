@@ -876,6 +876,7 @@ class FactorySupervisor:
                     "clear_purpose": need.get("clear_purpose", False),
                     "bounded_maintenance": need.get("bounded_maintenance", False),
                     "deterministic_verification": need.get("deterministic_verification", False),
+                    "language": need.get("language"),
                 },
             )
             return

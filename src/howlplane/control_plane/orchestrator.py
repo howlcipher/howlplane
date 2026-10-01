@@ -35,7 +35,8 @@ from howlplane.control_plane.atomic_io import (
     safe_load_yaml,
 )
 from howlplane.control_plane.checkpoints import CheckpointManager, StageCheckpoint
-from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+from howlplane.control_plane.completion_gate import GATE_BLOCKED_ACTION, evaluate_completion_gate
+from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, EvidenceSchemaError
 from howlplane.control_plane.git_baseline import (
     GitBaseline,
     RepositoryDelta,
@@ -92,6 +93,8 @@ FAILOVER_SUMMARY_SCHEMA_VERSION = "howlplane.failover_summary/v1"
 FAILURE_CLASS_ENGINEERING = "ENGINEERING_FAILURE"
 FAILURE_CLASS_AUTHORITY_BLOCKED = "AUTHORITY_BLOCKED"
 FAILURE_CLASS_VERIFICATION = "VERIFICATION_FAILURE"
+# A code-changing task reached the completion gate without a valid Test Impact Assessment.
+FAILURE_CLASS_TEST_GOVERNANCE = "TEST_GOVERNANCE_BLOCKED"
 FAILURE_CLASS_PROVIDER_EXHAUSTED = "PROVIDER_EXHAUSTED"
 FAILURE_CLASS_PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
 FAILURE_CLASS_NO_ELIGIBLE_RESOURCE = "NO_ELIGIBLE_AI_RESOURCE"
@@ -1989,6 +1992,8 @@ class GovernedTaskOrchestrator:
         )
         try:
             self.ledger.append_entry(entry)
+        except EvidenceSchemaError:
+            raise  # a schema violation is a control-plane defect, never swallowed
         except Exception:
             pass
 
@@ -3653,6 +3658,21 @@ class GovernedTaskOrchestrator:
             )
 
         # --------------------------------------------------------------------
+        # Stage 7b: Test Impact Assessment completion gate
+        # --------------------------------------------------------------------
+        gate = evaluate_completion_gate(
+            self.ledger,
+            task_spec.task_id,
+            list(current_delta.files_added)
+            + list(current_delta.files_modified)
+            + list(current_delta.files_deleted),
+        )
+        if not gate.allowed:
+            return self._block_completion(
+                task_spec, gate.reason, progress, **stage_kwargs
+            )
+
+        # --------------------------------------------------------------------
         # Stage 8: Governed Completion (complete)
         # --------------------------------------------------------------------
         CheckpointManager.start_stage(
@@ -3877,6 +3897,50 @@ class GovernedTaskOrchestrator:
             **kwargs,
         )
 
+    def _block_completion(
+        self,
+        task_spec: TaskSpec,
+        reason: str,
+        progress_tracker: Optional[Any] = None,
+        **kwargs,
+    ) -> OrchestrationResult:
+        """Park a task that failed the completion gate as ``blocked``; never records completion."""
+        run_dir = kwargs["run_dir"]
+        try:
+            CheckpointManager.fail_stage(
+                run_dir,
+                stage=task_spec.current_state,
+                reason=reason,
+                result_summary={"failure_class": FAILURE_CLASS_TEST_GOVERNANCE, "error": reason},
+            )
+        except Exception:
+            pass
+        if progress_tracker is not None:
+            progress_tracker.record_terminal(
+                TaskProgressState.FAILED, TaskPhase.FAILED, error_message=reason
+            )
+        task_spec.transition_to("blocked", reason)
+        task_spec.save_to_file(str(run_dir / "task.yaml"))
+        (run_dir / "summary.md").write_text(
+            f"# Task {task_spec.task_id}: blocked\n\n{reason}\n", encoding="utf-8"
+        )
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id="control_plane",
+            action=GATE_BLOCKED_ACTION,
+            result=reason,
+            spec=task_spec,
+        )
+        self._prune_ephemeral_scratch(run_dir, task_spec.task_id)
+        return self._make_result(
+            task_spec=task_spec,
+            final_state="blocked",
+            exit_code=1,
+            err_msg=reason,
+            failure_class=FAILURE_CLASS_TEST_GOVERNANCE,
+            **{k: v for k, v in kwargs.items() if k != "failure_class"},
+        )
+
     def _build_implementation_prompt(
         self,
         task: TaskSpec,
@@ -3909,6 +3973,17 @@ class GovernedTaskOrchestrator:
         lines.append(
             f"- Everything else under `.task_runs/{task.task_id}/` is "
             "control-plane evidence. Do not create or edit files there."
+        )
+        lines.append("")
+        lines.append("## Test Impact Assessment (required if you change code or tests)")
+        lines.append(
+            "- The task cannot complete without a valid Test Impact Assessment. "
+            "Record it before finishing, with a JSON document matching "
+            "`schemas/test-impact-assessment.schema.json`:"
+        )
+        lines.append(
+            f"  `howlplane tia record --task-id {task.task_id} "
+            f"--ledger-file {self.ledger.ledger_file} --file tia.json`"
         )
         if "howlframe-app-development" in (task.required_skills or []):
             lines.append("")

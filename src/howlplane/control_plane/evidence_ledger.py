@@ -8,16 +8,59 @@ of secrets, credentials, and sensitive data.
 
 from dataclasses import dataclass, field, asdict, fields
 from datetime import datetime, timezone
+import functools
 import json
+import logging
 import os
 from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
+
+from jsonschema import Draft202012Validator, FormatChecker
 
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
 
 EVIDENCE_ENTRY_SCHEMA_VERSION = "ai.evidence_entry/v1"
+
+_SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schemas" / "evidence-entry.schema.json"
+_LOG = logging.getLogger(__name__)
+
+
+class EvidenceSchemaError(ValueError):
+    """An evidence entry violates the published schema. This is a control-plane defect."""
+
+
+class EvidenceCorruptionError(ValueError):
+    """The ledger holds a malformed or schema-invalid record (strict read)."""
+
+
+@dataclass(frozen=True)
+class LedgerDiagnostic:
+    """One unreadable or schema-invalid ledger line."""
+
+    line_number: int
+    kind: str  # "malformed" (unparseable, skipped) or "schema_invalid" (readable, flagged)
+    reason: str
+
+
+@functools.lru_cache(maxsize=1)
+def _entry_validator() -> Draft202012Validator:
+    return Draft202012Validator(
+        json.loads(_SCHEMA_PATH.read_text(encoding="utf-8")), format_checker=FormatChecker()
+    )
+
+
+def schema_violations(record: Any) -> List[str]:
+    """Every way ``record`` violates the evidence schema, as ``path: message`` strings."""
+    errors = sorted(_entry_validator().iter_errors(record), key=lambda e: list(map(str, e.absolute_path)))
+    out = []
+    for e in errors:
+        where = "/".join(map(str, e.absolute_path))
+        # An enum message would list every known action; the offending value is enough.
+        message = f"{e.instance!r} is not a recognised value" if e.validator == "enum" else e.message
+        out.append(f"{where}: {message}" if where else message)
+    return out
 
 # Patterns for sensitive data redaction
 REDACTION_PATTERNS = [
@@ -120,16 +163,63 @@ class EvidenceLedger:
         self.ledger_file.parent.mkdir(parents=True, exist_ok=True)
 
     def append_entry(self, entry: EvidenceEntry) -> None:
-        """Appends a new sanitized entry to the JSON Lines log."""
-        line = json.dumps(entry.to_dict()) + "\n"
+        """Validates against the schema, then appends the sanitized entry to the JSON Lines log.
+
+        Nothing is written when validation or serialization fails.
+        """
+        record = entry.to_dict()
+        line = json.dumps(record) + "\n"
+        violations = schema_violations(json.loads(line))
+        if violations:
+            _LOG.error("evidence entry %s (%s) violates the schema: %s", entry.entry_id, entry.action, violations)
+            raise EvidenceSchemaError(
+                f"evidence entry {entry.entry_id} (action={entry.action!r}) violates "
+                f"{_SCHEMA_PATH.name}: " + "; ".join(violations)
+            )
         with open(self.ledger_file, "a", encoding="utf-8") as f:
             f.write(line)
 
+    def read_entries(self, strict: bool = False) -> Tuple[List[EvidenceEntry], List[LedgerDiagnostic]]:
+        """Reads the ledger and reports every record that is not clean.
+
+        Malformed lines cannot be returned and are listed as diagnostics instead of
+        disappearing. Schema-invalid but parseable (for example historical) records are
+        still returned and flagged. With ``strict`` any diagnostic raises
+        :class:`EvidenceCorruptionError`.
+        """
+        entries: List[EvidenceEntry] = []
+        diagnostics: List[LedgerDiagnostic] = []
+        if not self.ledger_file.exists():
+            return entries, diagnostics
+        with open(self.ledger_file, "r", encoding="utf-8") as f:
+            for number, raw in enumerate(f, start=1):
+                text = raw.strip()
+                if not text:
+                    continue
+                try:
+                    record = json.loads(text)
+                    entry = EvidenceEntry.from_dict(record)
+                except Exception as exc:
+                    diagnostics.append(LedgerDiagnostic(number, "malformed", f"{type(exc).__name__}: {exc}"))
+                    continue
+                entries.append(entry)
+                violations = schema_violations(record)
+                if violations:
+                    diagnostics.append(LedgerDiagnostic(number, "schema_invalid", "; ".join(violations)))
+        if strict and diagnostics:
+            first = diagnostics[0]
+            raise EvidenceCorruptionError(
+                f"{self.ledger_file}: {len(diagnostics)} unclean record(s); first is line "
+                f"{first.line_number} ({first.kind}): {first.reason}"
+            )
+        return entries, diagnostics
+
     def list_all_entries(self) -> List[EvidenceEntry]:
-        """Reads all entries from the ledger."""
+        """Reads all parseable entries. Skipped malformed lines are logged, never silent."""
         if not self.ledger_file.exists():
             return []
-        entries = []
+        entries: List[EvidenceEntry] = []
+        skipped = 0
         with open(self.ledger_file, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -137,7 +227,9 @@ class EvidenceLedger:
                     try:
                         entries.append(EvidenceEntry.from_dict(json.loads(line)))
                     except Exception:
-                        continue
+                        skipped += 1
+        if skipped:
+            _LOG.warning("%s: skipped %d malformed evidence line(s); run `howlplane doctor`", self.ledger_file, skipped)
         return entries
 
     def get_task_entries(self, task_id: str) -> List[EvidenceEntry]:

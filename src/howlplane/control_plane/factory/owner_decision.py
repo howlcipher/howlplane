@@ -33,12 +33,26 @@ def decision_commands(flag: str, item_id: str, state_dir: str, repo: Optional[st
 
 def record_decision(
     ledger: Optional[EvidenceLedger], item_id: str, action: str, decision: str, metadata: Dict[str, Any]
-) -> None:
-    """Append the evidence entry for one owner decision, when a ledger is configured."""
-    if ledger:
-        ledger.append_entry(EvidenceEntry(
-            task_id=item_id, agent_id="human_operator", action=action, result=decision,
-            human_decision=decision, metadata={"operator_source": "cli", **metadata}))
+) -> Optional[str]:
+    """Append the evidence entry for one owner decision; returns its entry id (None without a ledger)."""
+    if not ledger:
+        return None
+    entry = EvidenceEntry(
+        task_id=item_id, agent_id="human_operator", action=action, result=decision,
+        human_decision=decision, metadata={"operator_source": "cli", **metadata})
+    ledger.append_entry(entry)
+    return entry.entry_id
+
+
+def require_state_dir(args: Any, subject: str, what: str) -> None:
+    """Refuse an owner-facing command that was given no Factory ``--state-dir``."""
+    if getattr(args, "state_dir", None):
+        return
+    from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+    raise OperatorFailure(OperatorError(
+        "MISSING_STATE_DIRECTORY", f"{subject} needs --state-dir.",
+        f"The Factory state directory says where the {what} is stored.",
+        "Copy the exact command from the Factory status.", "howlplane factory status"))
 
 
 def not_found_error(error_cls, code: str, label: str, item_id: str, state_dir: Any) -> OwnerDecisionError:

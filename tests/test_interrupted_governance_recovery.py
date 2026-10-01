@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+from tests._tia_helpers import record_valid_tia
 from pathlib import Path
 
 import pytest
@@ -765,7 +766,9 @@ def _fake_orchestrator(repo: Path, task_id: str, registry):
         progress_mode="never",
         trajectory_store_dir=str(repo / ".task_runs" / task_id / "trajectories"),
     )
-    return GovernedTaskOrchestrator(target_repo=repo, config=config)
+    orch = GovernedTaskOrchestrator(target_repo=repo, control_plane_root=repo.parent / "control_plane", config=config)
+    record_valid_tia(orch.ledger, task_id)  # the completion gate requires a TIA
+    return orch
 
 
 def test_interrupted_candidate_review_resumes_and_completes(tmp_path):
