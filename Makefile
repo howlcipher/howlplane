@@ -69,7 +69,7 @@ test-live:
 
 coverage-python:
 	@echo "Generating Python coverage..."
-	PYTHONPATH=. $(PYTEST) tests/ -v --cov=src --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=42
+	PYTHONPATH=. $(PYTEST) tests/ -v --cov=src --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=70
 
 test-coverage: coverage-python
 

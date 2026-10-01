@@ -103,7 +103,7 @@ jobs:
       - name: Run full regression, branch coverage, and timing report
         shell: bash
         run: |
-          PYTHONPATH=. python -m pytest tests/ -v --cov=src --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=42 --durations=25 | tee pytest-full.log
+          PYTHONPATH=. python -m pytest tests/ -v --cov=src --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=70 --durations=25 | tee pytest-full.log
       # The timing report is most worth reading on the runs that failed.
       - name: Publish timing report
         if: always()

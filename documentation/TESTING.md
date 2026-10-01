@@ -120,7 +120,7 @@ skills, and the verify and ship prompts:
   complete. A required check that failed is never reported as done.
 - **Coverage is a signal, not a quota.** Use it to find untested risk, and do not
   add tests only to raise it. A coverage gate the project actually enforces
-  (`--cov-fail-under` in `make coverage-python` and CI) is still a gate.
+  (`--cov-fail-under=70` in `make coverage-python` and CI; the last CI measurement was 80.1%) is still a gate. Raise it only from a measured CI run, and keep it below normal variance.
 - **Tests are not append-only.** Do not add redundant tests to raise counts;
   consolidate or remove a test only with written evidence that equivalent
   protection remains.
@@ -190,13 +190,13 @@ final verification gate to be rerun.
 
 ## CI and runtime governance
 
-Pull requests and normal pushes run `test-fast` on Python 3.11, 3.12, and 3.13, then
+Pull requests and normal pushes run `test-fast` on Python 3.11, 3.12, 3.13, and 3.14, then
 one full branch-coverage regression on Python 3.12. Go coverage runs once.
 This preserves compatibility validation without multiplying every slow
 behavioral flow by every interpreter. The full job publishes its duration
 report as an artifact, on failing runs as well as passing ones. Nightly and
-manual runs execute the full pytest suite on all three versions (3.11, 3.12,
-3.13), including slow and acceptance markers. A live marker only runs when the
+manual runs execute the full pytest suite on all four versions (3.11, 3.12,
+3.13, 3.14), including slow and acceptance markers. A live marker only runs when the
 repository variable `HOWLPLANE_RUN_LIVE_TESTS` explicitly enables it, and that
 step tolerates pytest's exit code 5 so an empty `live` selection does not fail
 the job the moment the gate is switched on.
