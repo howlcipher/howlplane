@@ -81,7 +81,9 @@ def test_owner_required_names_exact_decision_commands():
 def test_owner_required_without_task_falls_back_to_real_command():
     status = _status(state="waiting_for_authority", parked_items=[
         {"work_item_id": "WI-042", "state": "awaiting_owner", "blocker": "x"}])
-    assert derive_operator_status(status, now=NOW).next_action.command == "howlplane status"
+    action = derive_operator_status(status, now=NOW).next_action
+    assert action.command is None  # no decision command exists for it, so none is invented
+    assert "howlplane status" not in action.message
 
 
 @pytest.mark.parametrize("status", [

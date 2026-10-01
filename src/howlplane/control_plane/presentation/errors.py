@@ -159,7 +159,8 @@ def explain(exc: BaseException) -> Optional[OperatorError]:
                              "See who holds it. Use unlock only if its owner is gone.", "howlplane status")
     if isinstance(exc, human_boundary.ApprovalRequiredError):
         return OperatorError("OWNER_REQUIRED", text, "This step needs an owner decision.",
-                             "List tasks awaiting approval, then approve or reject the task.", "howlplane status")
+                             "List what is waiting, then approve or reject it with the exact command shown.",
+                             "howlplane factory status")
     if isinstance(exc, (human_boundary.StaleApprovalError, human_boundary.RepositoryDriftError)):
         return OperatorError("APPROVAL_STALE", text, "The repository changed after the approval was recorded.",
                              "Review the change, then approve the task again (howlplane approve TASK_ID).",

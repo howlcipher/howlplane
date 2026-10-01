@@ -55,7 +55,7 @@ def test_owner_required_flags_owner_and_abnormal_text_explains_why_and_what_next
     assert op.owner_required
     text = "\n".join(render_operator_text(op, status))
     assert "OWNER REQUIRED" in text and "Reason" in text and "HOWL-014" in text
-    assert "Next" in text and "howlplane status" in text
+    assert "Next" in text and "howlplane status" not in text
 
 
 def test_healthy_text_hides_internals_and_says_no_action():

@@ -1616,15 +1616,19 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_ha.add_argument("--json", action="store_true", help="Output JSON result")
 
     # approve
-    p_appr = subparsers.add_parser("approve", parents=[common_parser], help="Approve an awaiting_human task")
-    p_appr.add_argument("task_id", help="Task ID to approve")
+    p_appr = subparsers.add_parser("approve", parents=[common_parser], help="Approve an awaiting_human task or a parked Factory work item")
+    p_appr.add_argument("task_id", nargs="?", help="Task ID to approve")
+    p_appr.add_argument("--work-item", help="Parked Factory work item to approve (instead of a task ID)")
+    p_appr.add_argument("--state-dir", help="Factory state directory holding the work item")
     p_appr.add_argument("--reason", help="Optional human reason for approval")
     p_appr.add_argument("--ledger-file", help="Ledger file path")
     p_appr.add_argument("--json", action="store_true", help="Output JSON result")
 
     # reject
-    p_rej = subparsers.add_parser("reject", parents=[common_parser], help="Reject an awaiting_human task")
-    p_rej.add_argument("task_id", help="Task ID to reject")
+    p_rej = subparsers.add_parser("reject", parents=[common_parser], help="Reject an awaiting_human task or a parked Factory work item")
+    p_rej.add_argument("task_id", nargs="?", help="Task ID to reject")
+    p_rej.add_argument("--work-item", help="Parked Factory work item to reject (instead of a task ID)")
+    p_rej.add_argument("--state-dir", help="Factory state directory holding the work item")
     p_rej.add_argument("--reason", help="Optional human reason for rejection")
     p_rej.add_argument("--ledger-file", help="Ledger file path")
     p_rej.add_argument("--json", action="store_true", help="Output JSON result")
@@ -2171,7 +2175,47 @@ def cmd_marathon(args: argparse.Namespace) -> int:
     return 0 if not report["tasks_failed"] else 1
 
 
+def _handle_work_item_decision(args: argparse.Namespace, decision: str) -> int:
+    from howlplane.control_plane.factory.work_item_decision import WorkItemDecisionError, decide_work_item
+    from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+    if not getattr(args, "state_dir", None):
+        raise OperatorFailure(OperatorError(
+            "MISSING_STATE_DIRECTORY", "--work-item needs --state-dir.",
+            "The Factory state directory says where the parked work item is stored.",
+            "Copy the exact command from the Factory status.", "howlplane factory status"))
+    ledger_file = _resolve_ledger_file(args)
+    ledger = EvidenceLedger(ledger_file) if ledger_file else None
+    try:
+        target = str(_resolve_repo(args))
+    except Exception:
+        target = None
+    try:
+        result = decide_work_item(args.state_dir, args.work_item, decision, target_dir=target,
+                                  reason=getattr(args, "reason", None), ledger=ledger)
+    except WorkItemDecisionError as exc:
+        raise OperatorFailure(OperatorError(exc.code, str(exc), exc.why, exc.next_action, exc.command))
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(result, indent=2))
+    else:
+        title = "WORK ITEM REQUEUED" if decision == "approved" else "WORK ITEM REJECTED"
+        print(f"{title}: {result['work_item_id']} ({result['from_state']} -> {result['state']})")
+        if decision == "approved":
+            print("The Factory will pick it up again. Governed checks and authority limits still apply.")
+        if result.get("reason"):
+            print(f"Reason: {result['reason']}")
+    return 0
+
+
 def _handle_decision(args: argparse.Namespace, decision: str) -> int:
+    from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+    if bool(getattr(args, "work_item", None)) == bool(getattr(args, "task_id", None)):
+        raise OperatorFailure(OperatorError(
+            "DECISION_TARGET_REQUIRED", "Give exactly one of TASK_ID or --work-item.",
+            "A decision applies either to a governed task or to a parked Factory work item.",
+            "List what is waiting and copy the exact command.", "howlplane factory status"))
+    if getattr(args, "work_item", None):
+        return _handle_work_item_decision(args, decision)
     target_repo = str(_resolve_repo(args))
     ledger_file = _resolve_ledger_file(args)
     ledger = EvidenceLedger(ledger_file) if ledger_file else None

@@ -192,7 +192,8 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
                 f"Review {first['work_item_id']} and decide:", first["approve"],
                 alternatives=[first["reject"]] if first.get("reject") else [])
         else:
-            action = OperatorAction("Review the items awaiting an owner decision.", "howlplane status")
+            # Repository proposals have no decision command yet, so none is invented.
+            action = OperatorAction("Review the items awaiting an owner decision listed above.")
         return OperatorStatus(
             label="OWNER REQUIRED", severity=Severity.ATTENTION,
             summary="Work is waiting for an owner decision.",

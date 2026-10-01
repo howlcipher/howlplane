@@ -25,18 +25,21 @@ def _worker_display(resource_id: Optional[str]) -> Optional[str]:
     return worker_display(resource_id)
 
 
-def _owner_decisions(work_store: Any, target_dir: Any) -> List[Dict[str, str]]:
-    """Exact approve/reject commands for parked work whose governed task awaits the owner.
+def _owner_decisions(work_store: Any, target_dir: Any, state_dir: Any = None) -> List[Dict[str, str]]:
+    """Exact approve/reject commands for every work item parked for the owner.
 
-    Only a task that really is ``awaiting_human`` gets a command; ``approve`` and
-    ``reject`` decide governed tasks, so nothing is suggested for any other parked item.
+    A governed task that really is ``awaiting_human`` gets the task command, so its
+    drift and verification checks apply. Any other ``awaiting_owner`` item gets the
+    work-item command (``factory/work_item_decision.py``) when ``state_dir`` is known.
     """
     import shlex
     from howlplane.control_plane.factory.work_item import WorkItemState
+    from howlplane.control_plane.factory.work_item_decision import work_item_commands
     decisions: List[Dict[str, str]] = []
     for item in work_store.list_all():
         if item.state != WorkItemState.AWAITING_OWNER:
             continue
+        entry: Optional[Dict[str, str]] = None
         for task_id in item.task_ids:
             task_file = Path(target_dir) / ".task_runs" / task_id / "task.yaml"
             try:
@@ -45,12 +48,17 @@ def _owner_decisions(work_store: Any, target_dir: Any) -> List[Dict[str, str]]:
             except Exception:
                 continue
             repo = shlex.quote(str(target_dir))
-            decisions.append({
-                "work_item_id": item.work_item_id, "task_id": task_id,
+            entry = {
+                "work_item_id": item.work_item_id, "task_id": task_id, "kind": "task",
                 "approve": f"howlplane approve {task_id} --repo {repo}",
                 "reject": f"howlplane reject {task_id} --repo {repo}",
-            })
+            }
             break
+        if entry is None and state_dir is not None:
+            entry = {"work_item_id": item.work_item_id, "kind": "work_item",
+                     **work_item_commands(item.work_item_id, str(state_dir), str(target_dir))}
+        if entry is not None:
+            decisions.append(entry)
     return decisions
 
 
@@ -140,7 +148,7 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
     published = publish_cli_status(status, args)
     if campaign is not None:
         # Local commands name local paths, so they are added after the redacted publish.
-        status["decisions"] = _cli()._owner_decisions(work_store, campaign.target_dir)
+        status["decisions"] = _cli()._owner_decisions(work_store, campaign.target_dir, args.state_dir)
     from howlplane.control_plane.presentation.operator import (
         derive_operator_status,
         render_operator_text,
