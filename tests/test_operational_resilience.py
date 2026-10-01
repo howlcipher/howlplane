@@ -52,6 +52,7 @@ from howlplane.control_plane.locking import (
     TaskLock,
     TaskLockedError,
     classify_lock_owner,
+    get_process_create_time,
     get_repo_lock_path,
     get_task_lock_path,
     is_process_alive,
@@ -830,16 +831,24 @@ def test_recovery_does_not_recommend_resume_behind_a_held_lock(tmp_path):
     assert "howlplane resume TASK-RECO" in diag["recommendation"]
 
 
+@pytest.mark.skipif(not os.path.exists("/proc/self/stat"), reason="Linux /proc")
 def test_process_create_time_is_real_start_time_not_stat_mtime():
-    import time as _time
-    from howlplane.control_plane.locking import classify_lock_owner, get_process_create_time, LockOwnerState
-    t = get_process_create_time(os.getpid())
-    assert 0 < t <= _time.time() + 1
-    if os.path.exists("/proc/self/stat"):
-        assert t < _time.time() - 0.0001 or True
-        # A live process is never judged recycled against its own start time.
-        state, _ = classify_lock_owner(os.getpid(), socket.gethostname(), t)
-        assert state is LockOwnerState.ACTIVE
+    import socket
+    owner = subprocess.Popen(["sleep", "30"])
+    try:
+        started = time.time()
+        time.sleep(1.5)
+        t = get_process_create_time(owner.pid)
+        # The real start time is stable and precedes "now" by the sleep; the old
+        # st_mtime of /proc/<pid>/stat tracked the moment of the read instead.
+        assert abs(t - started) < 2.0
+        assert time.time() - t >= 1.4
+        assert get_process_create_time(owner.pid) == t
+        state, _ = classify_lock_owner(owner.pid, socket.gethostname(), t)
+        assert state.value == "ACTIVE"
+    finally:
+        owner.kill()
+        owner.wait()
 
 
 def test_ambiguous_supervisor_lock_message_names_real_lock_path(tmp_path):
