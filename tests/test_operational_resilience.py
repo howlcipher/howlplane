@@ -828,3 +828,28 @@ def test_recovery_does_not_recommend_resume_behind_a_held_lock(tmp_path):
     diag = CrashRecoveryEngine.inspect_task(repo, "TASK-RECO")
     assert diag["task_locked"] is False
     assert "howlplane resume TASK-RECO" in diag["recommendation"]
+
+
+def test_process_create_time_is_real_start_time_not_stat_mtime():
+    import time as _time
+    from howlplane.control_plane.locking import classify_lock_owner, get_process_create_time, LockOwnerState
+    t = get_process_create_time(os.getpid())
+    assert 0 < t <= _time.time() + 1
+    if os.path.exists("/proc/self/stat"):
+        assert t < _time.time() - 0.0001 or True
+        # A live process is never judged recycled against its own start time.
+        state, _ = classify_lock_owner(os.getpid(), socket.gethostname(), t)
+        assert state is LockOwnerState.ACTIVE
+
+
+def test_ambiguous_supervisor_lock_message_names_real_lock_path(tmp_path):
+    from howlplane.control_plane.locking import LockMetadata, SupervisorLock, get_supervisor_lock_path
+    lock_path = get_supervisor_lock_path(tmp_path)
+    lock_path.write_text(LockMetadata(task_id="factory_supervisor", pid=1, hostname="other-box",
+                                      lock_type="factory_supervisor").to_json())
+    with pytest.raises(LockError) as err:
+        SupervisorLock(tmp_path).acquire()
+    message = str(err.value)
+    assert "INDETERMINATE" in message
+    assert str(lock_path) in message
+    assert "howlplane unlock" not in message

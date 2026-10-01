@@ -7,6 +7,7 @@ Canonical machine-readable representation of an engineering task and its lifecyc
 
 from dataclasses import dataclass, field, asdict, fields
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import yaml
@@ -125,6 +126,9 @@ class TaskSpecValidationError(ValueError):
     pass
 
 
+_TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
 @dataclass
 class TaskSpec(DataClassSerializationMixin):
     """Represents a discrete engineering task handled by the multi-agent control plane."""
@@ -195,6 +199,10 @@ class TaskSpec(DataClassSerializationMixin):
         """Validates internal fields against allowed enums and non-empty constraints."""
         if not self.task_id or not isinstance(self.task_id, str):
             raise TaskSpecValidationError("task_id must be a non-empty string")
+        if not _TASK_ID_RE.match(self.task_id) or ".." in self.task_id:
+            raise TaskSpecValidationError(
+                f"task_id {self.task_id!r} must match {_TASK_ID_RE.pattern} and not contain '..'"
+            )
         if not self.repository or not isinstance(self.repository, str):
             raise TaskSpecValidationError("repository must be a non-empty string")
         if not self.objective or not isinstance(self.objective, str):

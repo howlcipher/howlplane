@@ -152,7 +152,22 @@ def process_lines(lines: Iterable[str], log_filter: LogFilter, style: Style, as_
 # Sources ---------------------------------------------------------------------
 
 def _tail(path: Path, count: int) -> List[str]:
-    return path.read_text(encoding="utf-8", errors="replace").splitlines()[-count:]
+    """Last `count` lines, read by seeking back from the end of the file."""
+    if count <= 0:
+        return []
+    block = 65536
+    with path.open("rb") as handle:
+        size = handle.seek(0, os.SEEK_END)
+        pos, data = size, b""
+        while pos > 0 and data.count(b"\n") <= count:
+            step = min(block, pos)
+            pos -= step
+            handle.seek(pos)
+            data = handle.read(step) + data
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    if pos > 0 and lines:
+        lines = lines[1:]  # first line may be partial
+    return lines[-count:]
 
 
 def _follow_file(path: Path) -> Iterator[str]:

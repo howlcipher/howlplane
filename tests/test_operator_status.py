@@ -74,3 +74,18 @@ def test_every_suggested_command_is_a_real_howlplane_command():
             argv = action.command.split()
             assert argv[0] == "howlplane"
             parser.parse_args(argv[1:])
+
+
+def test_waiting_for_provider_missing_executable_requires_owner():
+    st = derive_operator_status(_status(
+        state="waiting_for_provider",
+        last_error="MISSING_EXECUTABLE: executable 'codex' not found on PATH"))
+    assert st.owner_required is True
+    assert st.reason_code is ReasonCode.MISSING_EXECUTABLE
+    assert "'codex'" in st.summary
+    assert st.next_action.command == "howlplane doctor --agents"
+
+
+def test_waiting_for_provider_without_missing_executable_stays_automatic():
+    st = derive_operator_status(_status(state="waiting_for_provider"))
+    assert st.owner_required is False

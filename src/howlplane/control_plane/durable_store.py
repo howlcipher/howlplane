@@ -20,13 +20,17 @@ The guarantees a subclass inherits:
     refusing a silent overwrite that would change the object's identity
 """
 
+import logging
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
 from howlplane.control_plane.atomic_io import atomic_write_json, safe_load_json
 
 T = TypeVar("T")
+
+logger = logging.getLogger("howlplane.durable_store")
 
 _SAFE_OBJECT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -102,10 +106,38 @@ class DurableObjectStore:
     def exists(self, obj_id: str) -> bool:
         return self._path(obj_id).is_file()
 
-    def list_all(self) -> List[T]:
+    def quarantine(self, path: Path) -> Optional[Path]:
+        """Rename an unreadable file to `<name>.corrupt-<utc ts>`; never deletes."""
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        target = path.with_name(f"{path.name}.corrupt-{stamp}")
+        try:
+            path.rename(target)
+        except OSError:
+            logger.warning("could not quarantine unreadable file %s", path, exc_info=True)
+            return None
+        return target
+
+    def list_all(
+        self, on_corrupt: Optional[Callable[[Path, Optional[Path], Exception], None]] = None
+    ) -> List[T]:
+        """All readable objects. An unreadable file is quarantined and skipped.
+
+        One corrupt file must not take down callers such as the 24/7 supervisor
+        loop. `on_corrupt(path, quarantined_path, error)` is called per skipped
+        file; a warning is always logged.
+        """
         objects: List[T] = []
         for p in sorted(self.base_dir.glob(f"*{self._filename_suffix}")):
-            objects.append(self._factory(safe_load_json(p)))
+            try:
+                objects.append(self._factory(safe_load_json(p)))
+            except Exception as exc:
+                moved = self.quarantine(p)
+                logger.warning("skipping unreadable store file %s (quarantined as %s): %s", p, moved, exc)
+                if on_corrupt is not None:
+                    try:
+                        on_corrupt(p, moved, exc)
+                    except Exception:
+                        logger.debug("on_corrupt callback failed", exc_info=True)
         return objects
 
     def find_by_field(self, name: str, value: Any) -> Optional[T]:

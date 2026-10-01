@@ -20,6 +20,7 @@ import socket
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from howlplane.control_plane.atomic_io import atomic_write_json
 from howlplane.control_plane.agent_execution import AgentBackendRegistry, read_available_memory_gib
 from howlplane.control_plane.authority_envelope import (
     AuthorityEnvelope,
@@ -1474,7 +1475,7 @@ class MarathonDogfoodEngine:
         attempt_dir = self.target_repo / ".task_runs" / task_id / "attempts" / f"{attempt_index:02d}"
         try:
             attempt_dir.mkdir(parents=True, exist_ok=True)
-            (attempt_dir / "delta.json").write_text(json.dumps(delta.to_dict(), indent=2), encoding="utf-8")
+            atomic_write_json(attempt_dir / "delta.json", delta.to_dict())
             (attempt_dir / "delta.patch").write_text(delta.diff_content or "", encoding="utf-8")
         except OSError:
             pass

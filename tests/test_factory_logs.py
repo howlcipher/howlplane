@@ -146,3 +146,26 @@ def test_parse_since_forms():
     assert logs_cli.parse_since("2d", now) == now - timedelta(days=2)
     with pytest.raises(ValueError):
         logs_cli.parse_since("soon")
+
+
+def test_tail_reads_last_lines_from_large_file(tmp_path):
+    path = tmp_path / "big.log"
+    path.write_text("".join(f"line {i}\n" for i in range(50000)), encoding="utf-8")
+    assert logs_cli._tail(path, 3) == ["line 49997", "line 49998", "line 49999"]
+    small = tmp_path / "small.log"
+    small.write_text("a\nb\nc", encoding="utf-8")
+    assert logs_cli._tail(small, 10) == ["a", "b", "c"]
+    assert logs_cli._tail(small, 0) == []
+
+
+def test_emit_rotates_when_size_cap_reached(tmp_path, monkeypatch):
+    from howlplane.control_plane.factory import oplog
+
+    monkeypatch.setattr(oplog, "MAX_LOG_BYTES", 300)
+    monkeypatch.setattr(oplog, "KEEP_ROTATED", 2)
+    log = OperationalLog(tmp_path)
+    for i in range(60):
+        log.emit("X", f"event {i}")
+    files = sorted(p.name for p in events_path(tmp_path).parent.iterdir())
+    assert files == [oplog.EVENTS_FILENAME, oplog.EVENTS_FILENAME + ".1", oplog.EVENTS_FILENAME + ".2"]
+    assert "event 59" in events_path(tmp_path).read_text()

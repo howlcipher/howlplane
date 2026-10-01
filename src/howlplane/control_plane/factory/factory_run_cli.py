@@ -180,6 +180,16 @@ def _build_factory_supervisor(args: argparse.Namespace, sleep: Any = None):
 
     # Persist campaign objective and target metadata so they survive restart.
     state_record = state_store.load()
+    if state_record.stopped_reason == "malformed_state":
+        # load() promised to preserve the bad file; saving would overwrite it.
+        import shutil
+        bad = state_store._path("factory_supervisor")
+        if bad.is_file():
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            try:
+                shutil.copy2(bad, bad.with_name(f"{bad.name}.corrupt-{stamp}"))
+            except OSError:
+                pass
     if objective is not None:
         state_record.objective = objective
     state_record.target_mode = target_mode
@@ -303,6 +313,16 @@ def cmd_factory_run_once(args: argparse.Namespace) -> int:
     return 0
 
 
+def _malformed_state_error(supervisor: Any) -> Optional[str]:
+    try:
+        record = supervisor.state_store.load(reconcile_restart=False)
+    except Exception:
+        return None
+    if getattr(record, "stopped_reason", None) == "malformed_state":
+        return record.last_error or "malformed_state"
+    return None
+
+
 def cmd_factory_run(args: argparse.Namespace) -> int:
     from datetime import datetime, timedelta, timezone
     import signal
@@ -316,6 +336,10 @@ def cmd_factory_run(args: argparse.Namespace) -> int:
         _cli()._select_factory_authority(args, campaign)
     wake = threading.Event()
     supervisor = _cli()._build_factory_supervisor(args, sleep=wake.wait)
+    malformed = _malformed_state_error(supervisor)
+    if malformed is not None:
+        print(f"Factory state is malformed: {malformed}", file=sys.stderr)
+        return 1
 
     def request_stop(signum, _frame):
         supervisor.request_stop(f"signal_{signal.Signals(signum).name.lower()}")

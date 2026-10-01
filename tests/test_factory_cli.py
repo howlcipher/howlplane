@@ -454,3 +454,27 @@ def test_factory_cli_parses_max_work_items_and_canary():
     assert start_args.factory_action == "start"
     assert start_args.max_work_items == 3
 
+
+
+def test_build_factory_supervisor_preserves_corrupt_state_and_run_fails(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from howlplane.control_plane import cli
+    from howlplane.control_plane.cli import _build_factory_supervisor
+
+    state = tmp_path / "state"
+    (state / "supervisor").mkdir(parents=True)
+    bad = state / "supervisor" / "factory_supervisor.json"
+    bad.write_text("{not json", encoding="utf-8")
+    args = SimpleNamespace(
+        state_dir=str(state), target_repo=".", target="repo", objective=None,
+        workspace=None, authority_profile=None, json=False,
+    )
+    monkeypatch.setattr(cli, "_factory_preflight", lambda a: None)
+    monkeypatch.setattr(cli, "_resolve_factory_campaign", lambda *a, **k: None)
+    code = cli.cmd_factory_run(args)
+    assert code != 0
+    assert "malformed" in capsys.readouterr().err.lower()
+    copies = list((state / "supervisor").glob("factory_supervisor.json.corrupt-*"))
+    assert len(copies) == 1
+    assert copies[0].read_text(encoding="utf-8") == "{not json"

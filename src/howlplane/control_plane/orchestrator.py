@@ -496,8 +496,8 @@ class GovernedTaskOrchestrator:
         attempt_dir.mkdir(parents=True, exist_ok=True)
 
         if impl_res is not None:
-            (attempt_dir / "result.json").write_text(impl_res.to_json(), encoding="utf-8")
-        (attempt_dir / "diff.patch").write_text(delta.diff_content, encoding="utf-8")
+            atomic_write_text(attempt_dir / "result.json", impl_res.to_json())
+        atomic_write_text(attempt_dir / "diff.patch", delta.diff_content)
         if not delta.is_empty:
             (attempt_dir / "partial_work.patch").write_text(delta.diff_content, encoding="utf-8")
 
@@ -2004,8 +2004,8 @@ class GovernedTaskOrchestrator:
         run_dir: Path,
     ) -> None:
         """Publishes a captured patch as the stage artifact and the run's current diff."""
-        (stage_dir / "diff.patch").write_text(delta.diff_content, encoding="utf-8")
-        (run_dir / "diff.patch").write_text(delta.diff_content, encoding="utf-8")
+        atomic_write_text(stage_dir / "diff.patch", delta.diff_content)
+        atomic_write_text(run_dir / "diff.patch", delta.diff_content)
 
     def _record_delta_captured(
         self,
@@ -2359,10 +2359,10 @@ class GovernedTaskOrchestrator:
                 baseline = GitBaseline.from_dict(safe_load_json(baseline_file))
             except Exception:
                 baseline = capture_baseline(self.target_repo)
-                (run_dir / "baseline.json").write_text(baseline.to_json(), encoding="utf-8")
+                atomic_write_text(run_dir / "baseline.json", baseline.to_json())
         else:
             baseline = capture_baseline(self.target_repo)
-            (run_dir / "baseline.json").write_text(baseline.to_json(), encoding="utf-8")
+            atomic_write_text(run_dir / "baseline.json", baseline.to_json())
 
         # --------------------------------------------------------------------
         # Stage 4: Implementation (implementing) / Reconcile on Recovery
