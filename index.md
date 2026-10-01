@@ -80,7 +80,11 @@ When `factory status` shows `OWNER REQUIRED` it prints the exact command to run.
 For a repository proposal awaiting authority that is
 `howlplane approve --proposal PROPOSAL_ID --state-dir DIR` (or `reject`, with an
 optional `--reason`). Approving records the decision and its evidence and marks
-the proposal `accepted`; it does not create a repository by itself.
+the proposal `accepted`; it does not create a repository by itself. An accepted
+proposal is consumed only by `howlplane factory bootstrap --proposal PROPOSAL_ID
+--state-dir DIR`, which refuses a contract changed after approval, creates a local
+scaffold only (no remote, no credentials), and registers the capability as
+verified only after the scaffold's own test passes.
 
 On its first interactive start, Factory asks for an explicit authority choice.
 The safe default uses the existing `strict` authority profile. In automation,

@@ -172,7 +172,7 @@ and records structured evidence to the durable ledger.</p>
 </span><span id="L-13"><a href="#L-13"><span class="linenos"> 13</span></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
 </span><span id="L-14"><a href="#L-14"><span class="linenos"> 14</span></a><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span>
 </span><span id="L-15"><a href="#L-15"><span class="linenos"> 15</span></a>
-</span><span id="L-16"><a href="#L-16"><span class="linenos"> 16</span></a><span class="kn">from</span><span class="w"> </span><span class="nn">howlplane.control_plane.evidence_ledger</span><span class="w"> </span><span class="kn">import</span> <span class="n">EvidenceEntry</span><span class="p">,</span> <span class="n">EvidenceLedger</span><span class="p">,</span> <span class="n">sanitize_value</span>
+</span><span id="L-16"><a href="#L-16"><span class="linenos"> 16</span></a><span class="kn">from</span><span class="w"> </span><span class="nn">howlplane.control_plane.evidence_ledger</span><span class="w"> </span><span class="kn">import</span> <span class="n">EvidenceEntry</span><span class="p">,</span> <span class="n">EvidenceLedger</span><span class="p">,</span> <span class="n">EvidenceSchemaError</span><span class="p">,</span> <span class="n">sanitize_value</span>
 </span><span id="L-17"><a href="#L-17"><span class="linenos"> 17</span></a><span class="kn">from</span><span class="w"> </span><span class="nn">howlplane.control_plane.project_adapter</span><span class="w"> </span><span class="kn">import</span> <span class="n">ProjectContext</span>
 </span><span id="L-18"><a href="#L-18"><span class="linenos"> 18</span></a><span class="kn">from</span><span class="w"> </span><span class="nn">howlplane.control_plane.task_spec</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataClassSerializationMixin</span>
 </span><span id="L-19"><a href="#L-19"><span class="linenos"> 19</span></a>
@@ -596,8 +596,10 @@ and records structured evidence to the durable ledger.</p>
 </span><span id="L-437"><a href="#L-437"><span class="linenos">437</span></a>                <span class="p">},</span>
 </span><span id="L-438"><a href="#L-438"><span class="linenos">438</span></a>            <span class="p">)</span>
 </span><span id="L-439"><a href="#L-439"><span class="linenos">439</span></a>            <span class="n">target_ledger</span><span class="o">.</span><span class="n">append_entry</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
-</span><span id="L-440"><a href="#L-440"><span class="linenos">440</span></a>        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-</span><span id="L-441"><a href="#L-441"><span class="linenos">441</span></a>            <span class="k">pass</span>
+</span><span id="L-440"><a href="#L-440"><span class="linenos">440</span></a>        <span class="k">except</span> <span class="n">EvidenceSchemaError</span><span class="p">:</span>
+</span><span id="L-441"><a href="#L-441"><span class="linenos">441</span></a>            <span class="k">raise</span>  <span class="c1"># a schema violation is a control-plane defect, never swallowed</span>
+</span><span id="L-442"><a href="#L-442"><span class="linenos">442</span></a>        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+</span><span id="L-443"><a href="#L-443"><span class="linenos">443</span></a>            <span class="k">pass</span>
 </span></pre></div>
 
 
@@ -678,7 +680,7 @@ and records structured evidence to the durable ledger.</p>
                     <div class="attr variable">
             <span class="name">VALID_COMPARISON_STATUSES</span>        =
 <input id="VALID_COMPARISON_STATUSES-view-value" class="view-value-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
-            <label class="view-value-button pdoc-button" for="VALID_COMPARISON_STATUSES-view-value"></label><span class="default_value">{&#39;BUDGET_EXCEEDED&#39;, &#39;MISMATCH&#39;, &#39;INVALID_OUTPUT&#39;, &#39;TIMEOUT&#39;, &#39;HOWLFRAME_UNAVAILABLE&#39;, &#39;HOWLFRAME_FAILURE&#39;, &#39;MATCH&#39;, &#39;NOT_COMPUTED&#39;}</span>
+            <label class="view-value-button pdoc-button" for="VALID_COMPARISON_STATUSES-view-value"></label><span class="default_value">{&#39;HOWLFRAME_UNAVAILABLE&#39;, &#39;MATCH&#39;, &#39;INVALID_OUTPUT&#39;, &#39;NOT_COMPUTED&#39;, &#39;TIMEOUT&#39;, &#39;HOWLFRAME_FAILURE&#39;, &#39;BUDGET_EXCEEDED&#39;, &#39;MISMATCH&#39;}</span>
 
         
     </div>
@@ -1359,8 +1361,10 @@ and records structured evidence to the durable ledger.</p>
 </span><span id="HowlFrameAuditRunner-438"><a href="#HowlFrameAuditRunner-438"><span class="linenos">438</span></a>                <span class="p">},</span>
 </span><span id="HowlFrameAuditRunner-439"><a href="#HowlFrameAuditRunner-439"><span class="linenos">439</span></a>            <span class="p">)</span>
 </span><span id="HowlFrameAuditRunner-440"><a href="#HowlFrameAuditRunner-440"><span class="linenos">440</span></a>            <span class="n">target_ledger</span><span class="o">.</span><span class="n">append_entry</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
-</span><span id="HowlFrameAuditRunner-441"><a href="#HowlFrameAuditRunner-441"><span class="linenos">441</span></a>        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-</span><span id="HowlFrameAuditRunner-442"><a href="#HowlFrameAuditRunner-442"><span class="linenos">442</span></a>            <span class="k">pass</span>
+</span><span id="HowlFrameAuditRunner-441"><a href="#HowlFrameAuditRunner-441"><span class="linenos">441</span></a>        <span class="k">except</span> <span class="n">EvidenceSchemaError</span><span class="p">:</span>
+</span><span id="HowlFrameAuditRunner-442"><a href="#HowlFrameAuditRunner-442"><span class="linenos">442</span></a>            <span class="k">raise</span>  <span class="c1"># a schema violation is a control-plane defect, never swallowed</span>
+</span><span id="HowlFrameAuditRunner-443"><a href="#HowlFrameAuditRunner-443"><span class="linenos">443</span></a>        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+</span><span id="HowlFrameAuditRunner-444"><a href="#HowlFrameAuditRunner-444"><span class="linenos">444</span></a>            <span class="k">pass</span>
 </span></pre></div>
 
 
