@@ -16,6 +16,7 @@ from howlplane.control_plane.launcher import cmd_work, cmd_status, build_parser
 from howlplane.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
 from howlplane.control_plane.task_spec import TaskSpec
 from tests._git_test_helpers import git_in_repo, init_git_repo
+from tests._tia_helpers import record_valid_tia
 
 
 def _init_test_git_repo(path: Path) -> Path:
@@ -141,6 +142,7 @@ findings:
 
     orchestrator = GovernedTaskOrchestrator(
         target_repo=repo,
+        control_plane_root=tmp_path / "control_plane",
         config=OrchestrationConfig(
             custom_backend=impl_backend,
             custom_reviewer_fn=reviewer_fn,
@@ -148,6 +150,7 @@ findings:
             max_remediation_cycles=3,
         ),
     )
+    record_valid_tia(orchestrator.ledger, spec.task_id)  # the completion gate requires a TIA
 
     res = orchestrator.run(spec)
 
