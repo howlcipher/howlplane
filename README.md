@@ -356,6 +356,8 @@ The repository's shared context layer operates as an integrated subsystem within
 
 ## Global Installation & Setup
 
+HowlPlane's Python engine requires **Python 3.11 or newer** (tested on 3.11 to 3.14); pip refuses older interpreters at install time.
+
 ### Option 0: Howl Ecosystem Installer (Recommended)
 `howl install` downloads and verifies the `howlplane` CLI (a checksummed release binary, from [GitHub Releases](https://github.com/howlcipher/howlplane/releases)) and the Python control-plane engine (a checksummed wheel from the same release, installed into an isolated venv Howl manages) together, as one dependency-ordered ecosystem install -- no local Go toolchain, source checkout, or `pip install -e` required. Everything except `project`-family subcommands is transparently delegated from the `howlplane` binary to the managed engine; see `internal/enginepath` for the resolution order.
 

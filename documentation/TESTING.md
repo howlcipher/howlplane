@@ -158,10 +158,12 @@ Python jobs install the pinned SlopsLint binary
 hygiene verification steps verify it on the live system and fail closed when it
 is absent).
 
-The current package metadata says `>=3.9`, but the live source imports
-`tomllib`, which is standard-library only from Python 3.11. CI therefore treats
-3.11, 3.12, and 3.13 as the tested compatibility set. Aligning the package metadata is
-a separate compatibility decision; it is not hidden by this test optimization.
+HowlPlane requires Python 3.11 or newer (`requires-python = ">=3.11"`): the
+source imports the standard-library `tomllib`, which exists from 3.11. CI tests
+3.11, 3.12, 3.13, and 3.14 (the Docker image runs 3.14). `tests/test_python_support_contract.py`
+fails if the declared floor, the classifiers, the CI matrix, or a `tomllib`
+import drift apart. Older interpreters are refused by pip at install time
+rather than failing after installation; no `tomli` backport is carried.
 
 ## Audit record
 
