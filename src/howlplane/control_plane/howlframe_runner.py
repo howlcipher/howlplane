@@ -13,7 +13,7 @@ import json, os, shutil, subprocess, time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, sanitize_value
+from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, EvidenceSchemaError, sanitize_value
 from howlplane.control_plane.project_adapter import ProjectContext
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
 
@@ -437,5 +437,7 @@ class HowlFrameAuditRunner:
                 },
             )
             target_ledger.append_entry(entry)
+        except EvidenceSchemaError:
+            raise  # a schema violation is a control-plane defect, never swallowed
         except Exception:
             pass

@@ -27,7 +27,8 @@ if _src not in sys.path:
 from howlplane.control_plane import __version__, agent_readiness
 from howlplane.control_plane.agent_registry import AgentRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
-from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, EvidenceSchemaError
+from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
 from howlplane.control_plane.git_env import run_git_in_repo
 from howlplane.control_plane.locking import get_repo_lock_path, get_task_lock_path, is_process_alive
 from howlplane.control_plane.recovery import CrashRecoveryEngine
@@ -903,7 +904,13 @@ def cmd_record(args: argparse.Namespace) -> int:
         findings_summary=findings_sum,
         metadata=meta,
     )
-    ledger.append_entry(entry)
+    try:
+        ledger.append_entry(entry)
+    except EvidenceSchemaError as exc:
+        raise OperatorFailure(OperatorError(
+            "EVIDENCE_SCHEMA_INVALID", f"The evidence entry was not recorded: {exc}",
+            "Evidence must match schemas/evidence-entry.schema.json before it is written.",
+            "Use a known action name (see the schema's action list) and valid field types."))
     print(f"Recorded evidence entry '{entry.entry_id}' for task '{entry.task_id}'.")
     return 0
 
@@ -911,7 +918,13 @@ def cmd_record(args: argparse.Namespace) -> int:
 def cmd_metrics(args: argparse.Namespace) -> int:
     """Calculates and displays engineering history metrics."""
     ledger = EvidenceLedger(args.ledger_file)
-    entries = ledger.list_all_entries()
+    entries, diagnostics = ledger.read_entries()
+    if diagnostics:
+        print(
+            f"warning: {len(diagnostics)} evidence record(s) are malformed or schema-invalid "
+            f"(first: line {diagnostics[0].line_number}, {diagnostics[0].kind}); run `howlplane doctor`.",
+            file=sys.stderr,
+        )
     summary = MetricsCalculator.calculate(entries)
     if getattr(args, "format", "markdown") == "json":
         import json

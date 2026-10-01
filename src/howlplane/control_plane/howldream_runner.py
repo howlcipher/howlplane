@@ -645,19 +645,21 @@ class HowlDreamRunner:
 
             # Record to EvidenceLedger if configured
             if self.ledger:
-                entry = EvidenceEntry(
-                    source="howldream",
-                    claim_type="exploration",
-                    content={
-                        "objective": objective,
-                        "candidates_count": len(candidates),
-                        "accepted_count": len(development_results),
-                        "envelope_path": str(envelope_path),
-                        "authority": "ADVISORY_ONLY",
-                    },
-                    status="SUCCESS",
+                self.ledger.append_entry(
+                    EvidenceEntry(
+                        task_id=f"howldream-{envelope_path.parent.name}",
+                        agent_id="howldream",
+                        action="howldream_exploration",
+                        result="SUCCESS",
+                        artifact=str(envelope_path),
+                        metadata={
+                            "objective": objective,
+                            "candidates_count": len(candidates),
+                            "accepted_count": len(development_results),
+                            "authority": "ADVISORY_ONLY",
+                        },
+                    )
                 )
-                self.ledger.record(entry)
 
             status = "SUCCESS" if len(candidates) > 0 else "NO_CANDIDATES"
             return ExplorationRunResult(

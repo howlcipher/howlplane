@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from howlplane.control_plane.completion_gate import GATE_BLOCKED_ACTION, evaluate_completion_gate
-from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, EvidenceSchemaError
 from howlplane.control_plane.git_env import run_git_in_repo
 from howlplane.control_plane.hygiene_policy import (
     PolicyChangeType,
@@ -1137,6 +1137,8 @@ class HumanLifecycleManager:
                         metadata=metadata,
                     )
                 )
+            except EvidenceSchemaError:
+                raise  # a schema violation is a control-plane defect, never swallowed
             except Exception:
                 pass
 

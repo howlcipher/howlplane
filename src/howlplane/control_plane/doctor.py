@@ -191,16 +191,23 @@ def check_control_plane_ledger(repo_root: Path) -> DiagnosticCheck:
             message="No evidence ledger log file exists yet (clean state).",
         )
     try:
-        valid_lines = 0
-        with open(ledger_file, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    json.loads(line)
-                    valid_lines += 1
+        from howlplane.control_plane.evidence_ledger import EvidenceLedger
+
+        entries, diagnostics = EvidenceLedger(str(ledger_file)).read_entries()
+        if diagnostics:
+            first = diagnostics[0]
+            return DiagnosticCheck(
+                name="Evidence Ledger",
+                status="error",
+                message=(
+                    f"Evidence ledger has {len(diagnostics)} unclean record(s) "
+                    f"(first: line {first.line_number}, {first.kind}: {first.reason})."
+                ),
+            )
         return DiagnosticCheck(
             name="Evidence Ledger",
             status="ok",
-            message=f"Evidence ledger healthy ({valid_lines} valid JSON records).",
+            message=f"Evidence ledger healthy ({len(entries)} schema-valid records).",
         )
     except Exception as exc:
         return DiagnosticCheck(

@@ -36,7 +36,7 @@ from howlplane.control_plane.atomic_io import (
 )
 from howlplane.control_plane.checkpoints import CheckpointManager, StageCheckpoint
 from howlplane.control_plane.completion_gate import GATE_BLOCKED_ACTION, evaluate_completion_gate
-from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, EvidenceSchemaError
 from howlplane.control_plane.git_baseline import (
     GitBaseline,
     RepositoryDelta,
@@ -1992,6 +1992,8 @@ class GovernedTaskOrchestrator:
         )
         try:
             self.ledger.append_entry(entry)
+        except EvidenceSchemaError:
+            raise  # a schema violation is a control-plane defect, never swallowed
         except Exception:
             pass
 
