@@ -14,7 +14,7 @@ howlplane factory status   # health, current work, and your next action
 howlplane factory logs --follow
 ```
 
-`howlplane setup --json` is the non-interactive form. `howlplane config show`
+`howlplane setup --json` is the non-interactive form. When status says `OWNER REQUIRED`, run the command it prints (`howlplane approve|reject --proposal ID --state-dir DIR` for repository proposals, `--work-item` for parked work items). `howlplane config show`
 and `howlplane config explain <setting>` show effective configuration and where
 each value came from. The sections below are the full reference.
 

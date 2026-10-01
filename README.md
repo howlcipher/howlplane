@@ -76,6 +76,12 @@ next action. Add `--verbose` for supervisor IDs, ticks and history counts, and
 `--json` for the stable contract (its `operator` object carries the state,
 severity, `reason_code` and next action).
 
+When `factory status` shows `OWNER REQUIRED` it prints the exact command to run.
+For a repository proposal awaiting authority that is
+`howlplane approve --proposal PROPOSAL_ID --state-dir DIR` (or `reject`, with an
+optional `--reason`). Approving records the decision and its evidence and marks
+the proposal `accepted`; it does not create a repository by itself.
+
 On its first interactive start, Factory asks for an explicit authority choice.
 The safe default uses the existing `strict` authority profile. In automation,
 pass `--authority safe` or an approved `--authority-profile`; Factory never
