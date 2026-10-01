@@ -1752,6 +1752,12 @@ class MarathonDogfoodEngine:
                     f"{dispatch_id}:{attempt_index}"
                 )
             git_rec.provider = provider
+            observer = getattr(self, "provider_observer", None)
+            if observer is not None:
+                try:
+                    observer(provider, attempt_index)
+                except Exception:  # noqa: BLE001 - status reporting must never alter execution
+                    pass
             attempt_started = time.time()
             attempt_baseline = None
             try:

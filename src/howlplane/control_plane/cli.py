@@ -2748,6 +2748,40 @@ def _factory_state_store(args: argparse.Namespace):
     return SupervisorStateStore(Path(args.state_dir).resolve() / "supervisor")
 
 
+def _worker_display(resource_id: Optional[str]) -> Optional[str]:
+    from howlplane.control_plane.presentation.operator import worker_display
+    return worker_display(resource_id)
+
+
+def _owner_decisions(work_store: Any, target_dir: Any) -> List[Dict[str, str]]:
+    """Exact approve/reject commands for parked work whose governed task awaits the owner.
+
+    Only a task that really is ``awaiting_human`` gets a command; ``approve`` and
+    ``reject`` decide governed tasks, so nothing is suggested for any other parked item.
+    """
+    import shlex
+    from howlplane.control_plane.factory.work_item import WorkItemState
+    decisions: List[Dict[str, str]] = []
+    for item in work_store.list_all():
+        if item.state != WorkItemState.AWAITING_OWNER:
+            continue
+        for task_id in item.task_ids:
+            task_file = Path(target_dir) / ".task_runs" / task_id / "task.yaml"
+            try:
+                if TaskSpec.load_from_file(str(task_file)).current_state != "awaiting_human":
+                    continue
+            except Exception:
+                continue
+            repo = shlex.quote(str(target_dir))
+            decisions.append({
+                "work_item_id": item.work_item_id, "task_id": task_id,
+                "approve": f"howlplane approve {task_id} --repo {repo}",
+                "reject": f"howlplane reject {task_id} --repo {repo}",
+            })
+            break
+    return decisions
+
+
 def cmd_factory_status(args: argparse.Namespace) -> int:
     from pathlib import Path
     from howlplane.control_plane.factory.campaign import campaign_from_state_dir
@@ -2803,7 +2837,18 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         "proposals_awaiting_authority": proposals,
         "consecutive_capped_ticks": getattr(record, "consecutive_capped_ticks", 0),
         "alerts": list(getattr(record, "alerts", [])),
+        # Additive: the worker comes from the dispatch record, never from logs.
+        "worker_resource_id": getattr(record, "current_provider", None),
+        "worker": _worker_display(getattr(record, "current_provider", None)),
+        "dispatch_started_at": getattr(record, "current_dispatch_started_at", None),
     }
+    if record.current_work_item_id:
+        try:
+            current_item = work_store.load(record.current_work_item_id)
+            status["current_work_title"] = current_item.title
+            status["current_attempt"] = current_item.attempts
+        except Exception:
+            pass
     if campaign is not None:
         from howlplane.control_plane.factory.service import process_status
         from howlplane.control_plane.authority_envelope import ENVELOPE_FILENAME, load_envelope
@@ -2821,6 +2866,9 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         })
     from howlplane.control_plane.factory.status_publish import publish_cli_status
     published = publish_cli_status(status, args)
+    if campaign is not None:
+        # Local commands name local paths, so they are added after the redacted publish.
+        status["decisions"] = _owner_decisions(work_store, campaign.target_dir)
     from howlplane.control_plane.presentation.operator import (
         derive_operator_status,
         render_operator_text,
@@ -2830,7 +2878,8 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
         import json
         print(json.dumps({**status, "operator": operator.to_dict()}, indent=2, default=str))
     elif not getattr(args, "verbose", False):
-        print("\n".join(render_operator_text(operator, status)))
+        from howlplane.control_plane.presentation.style import resolve_style
+        print("\n".join(render_operator_text(operator, status, resolve_style(sys.stdout, _COLOR_MODE))))
     else:
         print("HowlPlane Factory\n")
         if campaign is not None:

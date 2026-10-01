@@ -105,6 +105,11 @@ class SupervisorStateRecord(DataClassSerializationMixin):
     last_work_item_id: Optional[str] = None
     current_task_id: Optional[str] = None
     current_dispatch_id: Optional[str] = None
+    # The worker handling the active dispatch, stamped when the provider is
+    # actually selected (and again on failover). Additive; absent in old records.
+    current_provider: Optional[str] = None
+    current_provider_attempt: Optional[int] = None
+    current_dispatch_started_at: Optional[str] = None
     observations_consumed: int = 0
     merges_count: int = 0
     admission_decisions: List[Dict[str, Any]] = field(default_factory=list)
@@ -166,6 +171,9 @@ class SupervisorStateRecord(DataClassSerializationMixin):
         repository: Optional[str] = None,
     ) -> None:
         self.current_dispatch_id = dispatch_id
+        self.current_provider = None
+        self.current_provider_attempt = None
+        self.current_dispatch_started_at = now_iso
         self.current_work_item_id = work_item_id
         self.current_task_id = task_id
         self.last_work_item_id = work_item_id
@@ -178,6 +186,16 @@ class SupervisorStateRecord(DataClassSerializationMixin):
             "repository": repository,
         })
         self.dispatch_history = self.dispatch_history[-100:]
+
+    def record_provider(self, provider: str, attempt: int) -> None:
+        """Stamp the provider chosen for the active dispatch (and its dispatch_history entry)."""
+        self.current_provider = provider
+        self.current_provider_attempt = attempt
+        for entry in reversed(self.dispatch_history):
+            if entry.get("dispatch_id") == self.current_dispatch_id:
+                entry["provider"] = provider
+                entry["provider_attempt"] = attempt
+                break
 
     def record_completion(self, work_item_id: str, task_id: str, now_iso: str) -> None:
         self.last_successful_tick_at = now_iso

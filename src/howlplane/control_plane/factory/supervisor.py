@@ -952,6 +952,14 @@ class FactorySupervisor:
                 self._state_record.bounded_dispatched_ids.append(item.work_item_id)
         self._state_record.transition_to(SupervisorState.DISPATCHING, reason="item_selected", at=now_iso)
         self._persist()
+
+        def _observe_provider(provider: str, attempt: int) -> None:
+            self._state_record.record_provider(provider, attempt)
+            self._persist()
+
+        setter = getattr(self.dispatcher, "set_provider_observer", None)
+        if callable(setter):
+            setter(_observe_provider)
         try:
             dispatch_result = self.dispatcher.dispatch(
                 item, dispatch_id=dispatch_id, task_id=task_id, run_mode=self._state_record.run_mode
@@ -960,6 +968,10 @@ class FactorySupervisor:
             dispatch_result = self.dispatcher.dispatch(
                 item, dispatch_id=dispatch_id, task_id=task_id
             )
+        final_provider = (dispatch_result.git_record or {}).get("provider")
+        if final_provider and self._state_record.current_provider is None:
+            self._state_record.record_provider(final_provider, 1)
+            self._persist()
         if (
             dispatch_result.success
             and dispatch_result.git_record
