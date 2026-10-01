@@ -207,7 +207,7 @@ def cmd_logs(args: argparse.Namespace) -> int:
         raise OperatorFailure(OperatorError(
             "LOGS_NO_REPOSITORY", "There are no logs to show here.",
             "This directory is not a Git repository HowlPlane has worked on.",
-            "Run it inside the repository.", "howlplane"))
+            "Go into the repository and set it up.", "howlplane setup"))
     return _cli().cmd_factory_logs(_factory_args(args))
 
 

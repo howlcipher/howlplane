@@ -117,3 +117,18 @@ def test_explicit_work_item_flag_discovers_the_state_dir(product):
 def test_no_target_still_asks_for_one(product):
     code, out, err = product.run("approve")
     assert code == 1 and "DECISION_TARGET_REQUIRED" in err and "howlplane status" in err
+
+
+def test_unknown_command_is_one_friendly_line_with_exit_2(tmp_path):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ, PYTHONPATH=f"{root / 'src'}:{root}")
+    done = subprocess.run([sys.executable, "-m", "howlplane.control_plane.cli", "frobnicate"],
+                          cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert done.returncode == 2
+    assert "unknown command 'frobnicate'" in done.stderr and "--help" in done.stderr
+    assert "init-task" not in done.stderr and "choose from" not in done.stderr
