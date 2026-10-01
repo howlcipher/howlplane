@@ -5,7 +5,7 @@ vocabulary (READY / LIMITED / NEEDS ACTION / UNAVAILABLE) is mapped from the
 underlying states here; the JSON output keeps the original fields untouched.
 """
 
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 from howlplane.control_plane.presentation.style import Style
 

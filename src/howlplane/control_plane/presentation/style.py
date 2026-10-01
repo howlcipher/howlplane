@@ -173,3 +173,17 @@ def format_duration(seconds: Optional[float]) -> Optional[str]:
     if minutes:
         return f"{minutes:02d}m {secs:02d}s"
     return f"{secs}s"
+
+
+def phase(message: str, stream: Optional[TextIO] = None, enabled: bool = True,
+          mode: Optional[str] = None) -> None:
+    """One transient "doing X..." line on stderr, only for an interactive terminal.
+
+    Silent for pipes, CI, JSON callers (``enabled=False``) and dumb terminals,
+    so it can never mix into machine-readable output or CI logs. It reports a
+    phase, never a percentage.
+    """
+    stream = stream if stream is not None else sys.stderr
+    if not enabled or not resolve_style(stream, mode).interactive:
+        return
+    print(message + "...", file=stream, flush=True)
