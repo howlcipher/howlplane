@@ -49,13 +49,13 @@ def _owner_decisions(work_store: Any, target_dir: Any, state_dir: Any = None) ->
                 continue
             repo = shlex.quote(str(target_dir))
             entry = {
-                "work_item_id": item.work_item_id, "task_id": task_id, "kind": "task",
+                "work_item_id": item.work_item_id, "task_id": task_id, "kind": "task", "title": getattr(item, "title", None),
                 "approve": f"howlplane approve {task_id} --repo {repo}",
                 "reject": f"howlplane reject {task_id} --repo {repo}",
             }
             break
         if entry is None and state_dir is not None:
-            entry = {"work_item_id": item.work_item_id, "kind": "work_item",
+            entry = {"work_item_id": item.work_item_id, "kind": "work_item", "title": getattr(item, "title", None),
                      **work_item_commands(item.work_item_id, str(state_dir), str(target_dir))}
         if entry is not None:
             decisions.append(entry)
@@ -103,11 +103,20 @@ def cmd_factory_bootstrap(args: argparse.Namespace) -> int:
     return bootstrap.run_cli(args, _cli().EvidenceLedger(ledger_file) if ledger_file else None)
 
 
-def cmd_factory_status(args: argparse.Namespace) -> int:
+def collect_factory_status(args: argparse.Namespace):
+    """The one Factory status projection: ``(status, operator, campaign, record, published)``.
+
+    Shared by ``factory status`` and the everyday ``howlplane status``/home screen so
+    every surface derives state, health, reason and next action from the same data.
+    Read-only apart from the optional redacted snapshot publish.
+    """
     from pathlib import Path
     from howlplane.control_plane.factory.campaign import campaign_from_state_dir
     from howlplane.control_plane.factory.repo_proposal import RepoProposalStore
     from howlplane.control_plane.factory.work_item import WorkItemState, WorkItemStore
+    # An explicit --state-dir may point anywhere, so only repo-discovered status
+    # recommends the short `howlplane approve ID` form that relies on discovery.
+    discovered = not getattr(args, "state_dir", None)
     campaign = _cli()._resolve_factory_campaign(args)
     if campaign is None:
         campaign = campaign_from_state_dir(args.state_dir)
@@ -116,7 +125,7 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
     work_store = WorkItemStore(Path(args.state_dir).resolve() / "work_items")
     proposal_store = RepoProposalStore(Path(args.state_dir).resolve() / "repo_proposals")
     parked = [
-        {"work_item_id": i.work_item_id, "state": i.state, "blocker": i.admission_blocked_reason}
+        {"work_item_id": i.work_item_id, "state": i.state, "blocker": i.admission_blocked_reason, "title": i.title}
         for i in work_store.list_all()
         if i.state in (WorkItemState.AWAITING_OWNER, WorkItemState.BLOCKED, WorkItemState.DEFERRED)
     ]
@@ -194,12 +203,23 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
     status["decisions"] = (
         (_cli()._owner_decisions(work_store, campaign.target_dir, args.state_dir) if campaign is not None else [])
         + _proposal_decisions(proposal_store, args.state_dir))
+    if discovered:
+        for decision in status["decisions"]:
+            item = decision.get("task_id") or decision.get("work_item_id") or decision.get("proposal_id")
+            if item:
+                decision["short_approve"] = f"howlplane approve {item}"
+                decision["short_reject"] = f"howlplane reject {item}"
     status["bootstrap_ready"] = _bootstrap_ready(proposal_store, args.state_dir)
-    from howlplane.control_plane.presentation.operator import (
-        derive_operator_status,
-        render_operator_text,
-    )
+    from howlplane.control_plane.presentation.operator import derive_operator_status
     operator = derive_operator_status(status)
+    return status, operator, campaign, record, published
+
+
+def cmd_factory_status(args: argparse.Namespace) -> int:
+    from howlplane.control_plane.presentation.operator import render_operator_text
+    status, operator, campaign, record, published = _cli().collect_factory_status(args)
+    parked = status["parked_items"]
+    proposals = status["proposals_awaiting_authority"]
     if getattr(args, "json", False):
         import json
         print(json.dumps({**status, "operator": operator.to_dict()}, indent=2, default=str))
@@ -277,28 +297,38 @@ def cmd_factory_stop(args: argparse.Namespace) -> int:
             record.transition_to(SupervisorState.STOPPED, reason="operator_stop")
             record.stopped_reason = "operator_stop"
             store.save(record)
+        everyday = bool(getattr(args, "everyday", False))
         _cli()._print_factory_result(
             "STOPPED", "ok", stop_process(campaign),
             [("Project", campaign.repository.remote or campaign.repository.root.name)],
-            "Campaign state and evidence are preserved. Resume when ready:",
-            ["howlplane factory resume", "howlplane factory status"])
+            "Work and evidence are preserved. Continue when ready:" if everyday
+            else "Campaign state and evidence are preserved. Resume when ready:",
+            ["howlplane start", "howlplane status"] if everyday
+            else ["howlplane factory resume", "howlplane factory status"],
+            title="HowlPlane" if everyday else "HowlPlane Factory")
         return 0
     store = _cli()._factory_state_store(args)
     record = store.load()
+    everyday = bool(getattr(args, "everyday", False))
+    resume_cmd = "howlplane start" if everyday else "howlplane factory resume"
+    title = "HowlPlane" if everyday else "HowlPlane Factory"
     if record.state == SupervisorState.STOPPED:
         _cli()._print_factory_result("STOPPED", "ok", "The Factory was already stopped.", [],
-                              "Resume when ready:", ["howlplane factory resume"])
+                              "Resume when ready:", [resume_cmd], title=title)
         return 0
     record.transition_to(SupervisorState.STOPPED, reason="operator_stop")
     record.stopped_reason = "operator_stop"
     store.save(record)
     _cli()._print_factory_result("STOPPED", "ok", "Factory supervisor stopped. Campaign state is preserved.", [],
-                          "Resume when ready:", ["howlplane factory resume"])
+                          "Resume when ready:", [resume_cmd], title=title)
     return 0
 
 
 def cmd_factory_resume(args: argparse.Namespace) -> int:
     from howlplane.control_plane.factory.supervisor_state import SupervisorState
+    # Discover the repository's campaign like every other Factory command; without
+    # this, resume failed with a TypeError unless --state-dir was given.
+    _cli()._resolve_factory_campaign(args)
     store = _cli()._factory_state_store(args)
     record = store.load()
     if record.state != SupervisorState.STOPPED:
@@ -359,24 +389,29 @@ def cmd_factory_start(args: argparse.Namespace) -> int:
     rows = [("Project", project), ("Authority", display_authority)]
     if getattr(args, "verbose", False):
         rows += [("Backend", record.backend), ("Target", str(campaign.target_dir))]
+    everyday = bool(getattr(args, "everyday", False))
+    title = "HowlPlane" if everyday else "HowlPlane Factory"
     if not started:
-        _cli()._print_factory_result("RUNNING", "ok", "The Factory was already running. Nothing changed.", rows,
-                              "See what it is doing:", ["howlplane factory status"])
+        _cli()._print_factory_result("RUNNING", "ok", "HowlPlane was already running. Nothing changed." if everyday
+                              else "The Factory was already running. Nothing changed.", rows,
+                              "See what it is doing:", ["howlplane status" if everyday else "howlplane factory status"],
+                              title=title)
         return 0
     if campaign.repository.dirty:
         rows.append(("Checkout", "has local changes; it will not be modified"))
-    _cli()._print_factory_result("STARTED", "ok", "Factory started in an isolated worktree.", rows,
-                          "Next:", ["howlplane factory status", "howlplane factory logs --follow",
-                                    "howlplane factory stop"])
+    commands = (["howlplane status", "howlplane logs --follow", "howlplane stop"] if everyday else
+                ["howlplane factory status", "howlplane factory logs --follow", "howlplane factory stop"])
+    _cli()._print_factory_result("STARTED", "ok", "HowlPlane started working in an isolated worktree." if everyday
+                          else "Factory started in an isolated worktree.", rows, "Next:", commands, title=title)
     return 0
 
 
 def _print_factory_result(badge: str, severity: str, message: str, rows: List[tuple], next_note: str,
-                          commands: List[str]) -> None:
+                          commands: List[str], title: str = "HowlPlane Factory") -> None:
     """Shared confirmation block for mutating Factory commands."""
     from howlplane.control_plane.presentation.style import resolve_style
     style = resolve_style(sys.stdout, _cli()._COLOR_MODE)
-    lines = style.header("HowlPlane Factory", badge, severity)
+    lines = style.header(title, badge, severity)
     lines.append(message)
     kv = style.kv(rows)
     if kv:

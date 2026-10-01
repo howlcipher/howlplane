@@ -40,6 +40,7 @@ def _resolve_factory_campaign(
 
     is_bounded = (getattr(args, "max_work_items", None) is not None and args.max_work_items > 0) or getattr(args, "factory_action", None) == "canary"
     campaign = resolve_campaign(
+        getattr(args, "repo", None),
         state_dir=getattr(args, "state_dir", None),
         target_repo=getattr(args, "target_repo", None),
         prefer_active=True,

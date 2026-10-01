@@ -26,7 +26,7 @@ def _owner_decision_spec(args: argparse.Namespace, decision: str, flag: str):
                                                 reason=reason, ledger=ledger),
                 WorkItemDecisionError,
                 ("WORK ITEM REQUEUED", "WORK ITEM REJECTED",
-                 "The Factory will pick it up again. Governed checks and authority limits still apply."))
+                 "HowlPlane will pick it up again. Governed checks and authority limits still apply."))
     from howlplane.control_plane.factory.proposal_decision import ProposalDecisionError, decide_proposal
     return (lambda ledger: decide_proposal(args.state_dir, args.proposal, decision, reason=reason, ledger=ledger),
             ProposalDecisionError,
@@ -38,6 +38,12 @@ def _run_owner_decision(args: argparse.Namespace, decision: str, flag: str) -> i
     """Shared body of the ``--work-item`` and ``--proposal`` decisions (one authority path)."""
     from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
     from howlplane.control_plane.factory.owner_decision import require_state_dir
+    if not getattr(args, "state_dir", None):
+        # The current repository normally determines the campaign; --state-dir stays an override.
+        from howlplane.control_plane.factory.decision_resolver import discover_campaign
+        campaign = discover_campaign(args)
+        if campaign is not None:
+            args.state_dir = str(campaign.state_dir)
     require_state_dir(args, f"--{flag}", flag.replace("-", " "))
     ledger_file = _cli()._resolve_ledger_file(args)
     ledger = _cli().EvidenceLedger(ledger_file) if ledger_file else None
@@ -73,9 +79,14 @@ def _handle_decision(args: argparse.Namespace, decision: str) -> int:
     targets = [getattr(args, name, None) for name in ("task_id", "work_item", "proposal")]
     if sum(1 for target in targets if target) != 1:
         raise OperatorFailure(OperatorError(
-            "DECISION_TARGET_REQUIRED", "Give exactly one of TASK_ID, --work-item or --proposal.",
-            "A decision applies to one governed task, one parked Factory work item, or one repository proposal.",
-            "List what is waiting and copy the exact command.", "howlplane factory status"))
+            "DECISION_TARGET_REQUIRED", "Say what to decide on: howlplane approve ID.",
+            "A decision applies to one task, one parked work item, or one repository proposal, named by its id.",
+            "See what is waiting and copy the exact command.", "howlplane status"))
+    if getattr(args, "task_id", None):
+        from howlplane.control_plane.factory import decision_resolver
+        target = decision_resolver.resolve_decision_target(args)
+        if target is not None:
+            decision_resolver.apply_target(args, target)
     if getattr(args, "work_item", None):
         return _cli()._handle_work_item_decision(args, decision)
     if getattr(args, "proposal", None):

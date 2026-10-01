@@ -48,7 +48,7 @@ def test_session_limit_waits_with_retry_and_automatic_recovery():
     assert op.retry_in_seconds == 42 * 60 and op.recovery == "automatic"
     text = _text(status)
     assert "WAITING" in text and "SESSION_LIMIT" in text and "in 42m 00s" in text and "Automatic" in text
-    assert "howlplane agents doctor" in text
+    assert "howlplane doctor --agents" in text
 
 
 def test_retry_not_shown_when_wake_time_unknown_or_past():

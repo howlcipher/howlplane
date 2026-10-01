@@ -42,15 +42,15 @@ def test_healthy_repository_points_to_factory_start(repo, monkeypatch, capsys):
     code, out = _run(capsys, repo)
     assert code == 0
     assert "Codex" in out and "ready" in out
-    assert "Ready." in out and "howlplane factory start" in out
+    assert "You're ready." in out and "howlplane start" in out and "factory" not in out
 
 
 def test_missing_provider_and_session_limit_are_named(repo, monkeypatch, capsys):
     _fake(monkeypatch, [_summary("codex", "Codex"), _summary("claude", "Claude Code", capacity="SESSION_EXHAUSTED"),
                         _summary("cursor", "Cursor", installed=False)])
     code, out = _run(capsys, repo)
-    assert "Claude Code" in out and "session limit" in out
-    assert "not installed" in out
+    assert "Claude Code" in out and "session limit" in out.lower()
+    assert "not installed" in out.lower()
     assert code == 0  # one usable worker remains
 
 
@@ -59,8 +59,8 @@ def test_missing_workspace_trust_reports_without_preparing_when_noninteractive(r
     called = []
     monkeypatch.setattr("howlplane.control_plane.factory.prepare.command", lambda a: called.append(a) or 0)
     code, out = _run(capsys, repo)
-    assert "needs preparation" in out
-    assert "howlplane factory prepare" in out
+    assert "needs preparation" in out.lower()
+    assert "howlplane setup --yes" in out
     assert called == []  # stdin is not a TTY and --yes was not given
 
 
@@ -76,7 +76,7 @@ def test_yes_delegates_to_factory_prepare_and_rechecks(repo, monkeypatch, capsys
     monkeypatch.setattr("howlplane.control_plane.factory.prepare.command", fake_prepare)
     code, out = _run(capsys, repo, "--yes")
     assert len(calls) == 1 and calls[0].yes is True
-    assert code == 0 and "howlplane factory start" in out
+    assert code == 0 and "howlplane start" in out and "Repository prepared." in out
 
 
 def test_blocked_factory_exits_nonzero_with_remediation(repo, monkeypatch, capsys):
@@ -84,7 +84,7 @@ def test_blocked_factory_exits_nonzero_with_remediation(repo, monkeypatch, capsy
     code, out = _run(capsys, repo)
     assert code == 1
     assert "AUTHENTICATION_REQUIRED" in out
-    assert "howlplane agents doctor" in out
+    assert "howlplane doctor --agents" in out
 
 
 def test_not_a_git_repository_is_blocked_with_fix(tmp_path, capsys):
@@ -99,4 +99,4 @@ def test_json_contract_never_prompts(repo, monkeypatch, capsys):
     doc = json.loads(out)
     assert doc["schema"] == setup_cli.SETUP_SCHEMA
     assert doc["needs_preparation"] is True and doc["ready"] is False
-    assert doc["next_action"]["command"] == "howlplane factory prepare"
+    assert doc["next_action"]["command"] == "howlplane setup --yes"

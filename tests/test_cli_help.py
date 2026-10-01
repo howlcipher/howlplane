@@ -21,10 +21,11 @@ def _subcommands(parser):
 @pytest.mark.unit
 def test_top_level_help_leads_with_get_started_and_quickstart():
     text = _help(build_parser())
-    assert text.index("howlplane setup") < text.index("Get started:") < text.index("Advanced and engineering:")
-    first_group = text[text.index("Get started:"):text.index("Decisions and recovery:")]
-    for name in ("setup", "factory", "work", "status", "doctor", "agents", "create"):
+    assert text.index("howlplane setup") < text.index("Everyday:") < text.index("Advanced engineering:")
+    first_group = text[text.index("Everyday:"):text.index("Governance and recovery:")]
+    for name in ("setup", "start", "status", "logs", "stop", "approve", "reject", "doctor"):
         assert f"\n  {name} " in first_group
+    assert "\n  factory " not in first_group
 
 
 @pytest.mark.unit

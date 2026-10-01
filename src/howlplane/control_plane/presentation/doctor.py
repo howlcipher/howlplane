@@ -86,3 +86,10 @@ def render_checks_table(checks: Sequence[Any], style: Optional[Style] = None) ->
         lines += ["", style.section("Next")]
         lines += [f"{name}: {action}" for name, action in actions]
     return lines
+
+
+def check_mark(style: Style, severity: str) -> str:
+    """One fixed-width status mark (ok, attention, error) so check lists line up in any terminal."""
+    marks = {"ok": "✓", "attention": "!", "error": "✗"} if style.unicode else {"ok": "ok", "attention": "!", "error": "x"}
+    width = max(len(m) for m in marks.values())
+    return style.severity(severity, marks.get(severity, "-").ljust(width))

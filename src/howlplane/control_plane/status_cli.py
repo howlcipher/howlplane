@@ -250,10 +250,21 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    """Executes workspace health diagnostics."""
+    """`howlplane doctor`: the front door. Selectors narrow it; the engine checks are unchanged."""
+    from howlplane.control_plane import doctor_report
+    return doctor_report.command(args)
+
+
+def cmd_system_doctor(args: argparse.Namespace) -> int:
+    """Executes workspace health diagnostics (the system checks only)."""
     from howlplane.control_plane.doctor import run_diagnostics
     target_repo = _cli()._resolve_repo(args)
     results = run_diagnostics(repo_root=target_repo)
+    if getattr(args, "json", False):
+        print(json.dumps({"schema": "howlplane.doctor.system/v1", "checks": [
+            {"name": r.name, "status": r.status, "message": r.message, "details": r.details}
+            for r in results]}, indent=2))
+        return 1 if any(res.status not in ("ok", "warning") for res in results) else 0
 
     from howlplane.control_plane.presentation.doctor import render_checks_table
     from howlplane.control_plane.presentation.style import resolve_style

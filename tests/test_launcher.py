@@ -265,15 +265,25 @@ def test_howlplane_shell_launcher_dispatches_native_project_validation(tmp_path)
 
 def test_ai_doctor_subcommand(tmp_path, capsys):
     repo_dir = _make_test_repo(tmp_path / "sample_repo")
-    code = launcher_main(["doctor", "--repo", str(repo_dir)])
+    code = launcher_main(["doctor", "--system", "--repo", str(repo_dir)])
     assert code in (0, 1)
     captured = capsys.readouterr().out
     assert "HowlPlane Doctor" in captured and "Component" in captured
 
 
+def test_doctor_front_door_composes_system_workers_and_repository(tmp_path, capsys):
+    from tests._factory_test_helpers import make_git_repo
+    repo_dir = make_git_repo(tmp_path)
+    launcher_main(["doctor", "--repo", str(repo_dir)])
+    captured = capsys.readouterr().out
+    assert "HowlPlane Doctor" in captured
+    for section in ("System", "Workers", "Repository", "Factory", "Overall"):
+        assert section in captured
+
+
 def test_ai_status_subcommand(tmp_path, capsys):
     repo_dir = _make_test_repo(tmp_path / "sample_repo", {"go.mod": "module sample\n"})
-    code = launcher_main(["status", "--repo", str(repo_dir)])
+    code = launcher_main(["status", "--verbose", "--repo", str(repo_dir)])
     assert code == 0
     captured = capsys.readouterr().out
     assert "PROJECT STATUS: sample_repo" in captured
@@ -355,7 +365,7 @@ def test_ai_status_with_shadow_mode(tmp_path, capsys, monkeypatch):
         "go.mod": "module statusproj\n",
     })
     monkeypatch.setenv("HOWLPLANE_HOWLFRAME_DOGFOOD", "shadow")
-    code = launcher_main(["status", "--repo", str(repo_dir)])
+    code = launcher_main(["status", "--verbose", "--repo", str(repo_dir)])
     assert code == 0
     captured = capsys.readouterr().out
     assert "HOWLFRAME DOGFOOD STATUS" in captured
@@ -409,7 +419,7 @@ def test_terminal_task_not_reported_as_stale_progress(tmp_path, capsys, terminal
     repo_dir = _make_test_repo(tmp_path / "sample_repo", {"go.mod": "module sample\n"})
     _run_dir_with_progress(repo_dir, f"TASK-TERM-{terminal_state.upper()}", terminal_state)
 
-    assert launcher_main(["status", "--repo", str(repo_dir)]) == 0
+    assert launcher_main(["status", "--verbose", "--repo", str(repo_dir)]) == 0
     captured = capsys.readouterr().out
 
     assert "STALE (Process not running)" not in captured
@@ -422,7 +432,7 @@ def test_live_run_still_reported_from_progress(tmp_path, capsys):
     repo_dir = _make_test_repo(tmp_path / "sample_repo", {"go.mod": "module sample\n"})
     _run_dir_with_progress(repo_dir, "TASK-LIVE-01", "implementing")
 
-    assert launcher_main(["status", "--repo", str(repo_dir)]) == 0
+    assert launcher_main(["status", "--verbose", "--repo", str(repo_dir)]) == 0
     captured = capsys.readouterr().out
 
     assert "Phase:          PREPARING" in captured
