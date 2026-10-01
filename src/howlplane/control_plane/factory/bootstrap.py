@@ -30,7 +30,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from howlplane.control_plane.durable_store import DurableObjectStore
 from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
 from howlplane.control_plane.factory import owner_decision as od
-from howlplane.control_plane.factory.proposal_decision import EVIDENCE_ACTION as DECISION_ACTION
+from howlplane.control_plane.factory.proposal_decision import EVIDENCE_ACTION as DECISION_ACTION, load_proposal
 from howlplane.control_plane.factory.repo_proposal import (
     CapabilityRecord,
     CapabilityRegistry,
@@ -232,15 +232,7 @@ def bootstrap_proposal(
     runs = BootstrapRunStore(state / "bootstrap_runs")
     cmd = f"howlplane factory bootstrap --proposal {proposal_id} --state-dir {state}"
 
-    if not proposals.exists(proposal_id):
-        raise od.not_found_error(BootstrapError, "PROPOSAL_NOT_FOUND", "repository proposal", proposal_id, state)
-    try:
-        proposal: RepoProposal = proposals.load(proposal_id)
-    except Exception as exc:
-        raise BootstrapError(
-            "PROPOSAL_MALFORMED", f"Repository proposal '{proposal_id}' cannot be read: {exc}",
-            "The stored record is damaged, so nothing was created.",
-            "Inspect the proposal file in the Factory state directory.", "howlplane factory status --verbose")
+    proposal = load_proposal(proposals, proposal_id, state, BootstrapError, "nothing was created")
 
     if proposal.state != ProposalState.ACCEPTED.value:
         raise _refuse(
@@ -364,11 +356,33 @@ def bootstrap_proposal(
             "capability_id": record.capability_id, "verification": verification}
 
 
+def run_cli(args: Any, ledger: Optional[EvidenceLedger]) -> int:
+    """Run the bootstrap for parsed CLI arguments and print the outcome."""
+    from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+    try:
+        result = bootstrap_proposal(
+            args.state_dir, args.proposal, ledger=ledger,
+            target_root=getattr(args, "target_root", None), retry=getattr(args, "retry", False))
+    except BootstrapError as exc:
+        raise OperatorFailure(OperatorError(exc.code, str(exc), exc.why, exc.next_action, exc.command))
+    done = result["state"] == COMPLETED
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2))
+    elif done:
+        print(f"Bootstrapped {result['repository_name']} at {result['target_path']}")
+        print(f"Verification passed; capability {result['capability_id']} is registered as verified.")
+        print("No remote repository was created.")
+    else:
+        print(f"Bootstrap of {result['repository_name']} FAILED: {result['error']}")
+        print(f"Left in place for inspection: {result['target_path']}")
+    return 0 if done else 1
+
+
 def bootstrap_command(proposal_id: str, state_dir: str) -> str:
     """The exact command that consumes an accepted proposal."""
     import shlex
     return f"howlplane factory bootstrap --proposal {shlex.quote(proposal_id)} --state-dir {shlex.quote(str(state_dir))}"
 
 
-__all__ = ["bootstrap_proposal", "bootstrap_command", "validate_contract", "BootstrapError", "BootstrapRun",
+__all__ = ["bootstrap_proposal", "run_cli", "bootstrap_command", "validate_contract", "BootstrapError", "BootstrapRun",
            "BootstrapRunStore", "default_verifier", "STARTED", "COMPLETED", "FAILED"]

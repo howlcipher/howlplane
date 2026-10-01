@@ -97,31 +97,10 @@ def _bootstrap_ready(proposal_store: Any, state_dir: Any) -> List[Dict[str, str]
 def cmd_factory_bootstrap(args: argparse.Namespace) -> int:
     """The single governed consumer of an accepted repository proposal (#82)."""
     from howlplane.control_plane.factory import bootstrap
-    from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
-    if not getattr(args, "state_dir", None):
-        raise OperatorFailure(OperatorError(
-            "MISSING_STATE_DIRECTORY", "factory bootstrap needs --state-dir.",
-            "The Factory state directory says where the accepted proposal is stored.",
-            "Copy the exact command from the Factory status.", "howlplane factory status"))
+    from howlplane.control_plane.factory.owner_decision import require_state_dir
+    require_state_dir(args, "factory bootstrap", "accepted proposal")
     ledger_file = _cli()._resolve_ledger_file(args)
-    ledger = _cli().EvidenceLedger(ledger_file) if ledger_file else None
-    try:
-        result = bootstrap.bootstrap_proposal(
-            args.state_dir, args.proposal, ledger=ledger,
-            target_root=getattr(args, "target_root", None), retry=getattr(args, "retry", False))
-    except bootstrap.BootstrapError as exc:
-        raise OperatorFailure(OperatorError(exc.code, str(exc), exc.why, exc.next_action, exc.command))
-    if getattr(args, "json", False):
-        import json
-        print(json.dumps(result, indent=2))
-    elif result["state"] == bootstrap.COMPLETED:
-        print(f"Bootstrapped {result['repository_name']} at {result['target_path']}")
-        print(f"Verification passed; capability {result['capability_id']} is registered as verified.")
-        print("No remote repository was created.")
-    else:
-        print(f"Bootstrap of {result['repository_name']} FAILED: {result['error']}")
-        print(f"Left in place for inspection: {result['target_path']}")
-    return 0 if result["state"] == bootstrap.COMPLETED else 1
+    return bootstrap.run_cli(args, _cli().EvidenceLedger(ledger_file) if ledger_file else None)
 
 
 def cmd_factory_status(args: argparse.Namespace) -> int:

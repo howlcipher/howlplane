@@ -972,52 +972,6 @@ class HumanLifecycleManager:
         return list(current_fp.files_modified)
 
     @classmethod
-    def _tia_blocked_terminal_result(
-        cls,
-        task_id: str,
-        task_spec: Any,
-        run_dir: Path,
-        reason: str,
-        decision: Any,
-        ledger: Optional[EvidenceLedger],
-    ) -> Any:
-        """Ends a resumed task as blocked when the TIA completion gate fails."""
-        from howlplane.control_plane.orchestrator import OrchestrationResult
-
-        task_spec.transition_to("blocked", reason)
-        task_spec.save_to_file(str(run_dir / "task.yaml"))
-        summary_file = run_dir / "summary.md"
-        if not summary_file.is_file():
-            summary_file.write_text(
-                f"# Governed Task Run Summary: `{task_id}`\n\n"
-                f"- **Objective:** {task_spec.objective}\n"
-                f"- **Final State:** `BLOCKED`\n"
-                f"- **Approved At:** {decision.timestamp}\n\n"
-                f"{reason}\n",
-                encoding="utf-8",
-            )
-        if ledger:
-            ledger.append_entry(
-                EvidenceEntry(
-                    task_id=task_id,
-                    agent_id="control_plane",
-                    action=GATE_BLOCKED_ACTION,
-                    result=reason,
-                    task_class=task_spec.task_class,
-                    risk_level=task_spec.risk_level,
-                    metadata={"human_approved": True, "resumed": True, "final_state": "blocked"},
-                )
-            )
-        return OrchestrationResult(
-            task_id=task_id,
-            task_spec=task_spec,
-            final_state="blocked",
-            exit_code=1,
-            run_dir=str(run_dir),
-            error_message=reason,
-        )
-
-    @classmethod
     def _unverified_terminal_result(
         cls,
         task_id: str,
@@ -1035,8 +989,6 @@ class HumanLifecycleManager:
         operation with its own evidence and its own terminal semantics, and does
         not exist (issues.md #12).
         """
-        from howlplane.control_plane.orchestrator import OrchestrationResult
-
         # `failed` is what the ordinary Stage 6 gate uses for a plan that ran
         # and failed, so a resumed run reaches the same terminal state by the
         # same evidence. Anything short of a completed run -- a plan that
@@ -1049,6 +1001,38 @@ class HumanLifecycleManager:
             f"reported '{verif_status}', so this task cannot be recorded as "
             f"verified-complete."
         )
+        return cls._resumed_terminal_result(
+            task_id=task_id,
+            task_spec=task_spec,
+            run_dir=run_dir,
+            terminal=terminal,
+            reason=reason,
+            decision=decision,
+            ledger=ledger,
+            action="resume_blocked_on_verification",
+            result=verif_status,
+            metadata={"verification_status": verif_status},
+            summary_extra=f"- **Deterministic Verification:** `{verif_status}`\n",
+        )
+
+    @classmethod
+    def _resumed_terminal_result(
+        cls,
+        task_id: str,
+        task_spec: Any,
+        run_dir: Path,
+        terminal: str,
+        reason: str,
+        decision: Any,
+        ledger: Optional[EvidenceLedger],
+        action: str,
+        result: str,
+        metadata: Dict[str, Any],
+        summary_extra: str = "",
+    ) -> Any:
+        """Ends a resumed task in a non-complete terminal state, with summary and evidence."""
+        from howlplane.control_plane.orchestrator import OrchestrationResult
+
         task_spec.transition_to(terminal, reason)
         task_spec.save_to_file(str(run_dir / "task.yaml"))
 
@@ -1058,7 +1042,7 @@ class HumanLifecycleManager:
                 f"# Governed Task Run Summary: `{task_id}`\n\n"
                 f"- **Objective:** {task_spec.objective}\n"
                 f"- **Final State:** `{terminal.upper()}`\n"
-                f"- **Deterministic Verification:** `{verif_status}`\n"
+                f"{summary_extra}"
                 f"- **Approved At:** {decision.timestamp}\n\n"
                 f"{reason}\n",
                 encoding="utf-8",
@@ -1069,15 +1053,11 @@ class HumanLifecycleManager:
                 EvidenceEntry(
                     task_id=task_id,
                     agent_id="control_plane",
-                    action="resume_blocked_on_verification",
-                    result=verif_status,
+                    action=action,
+                    result=result,
                     task_class=task_spec.task_class,
                     risk_level=task_spec.risk_level,
-                    metadata={
-                        "human_approved": True,
-                        "verification_status": verif_status,
-                        "final_state": terminal,
-                    },
+                    metadata={"human_approved": True, "final_state": terminal, **metadata},
                 )
             )
 
@@ -1087,6 +1067,23 @@ class HumanLifecycleManager:
             final_state=terminal,
             exit_code=1,
             run_dir=str(run_dir),
+            error_message=reason if terminal == "blocked" and action == GATE_BLOCKED_ACTION else None,
+        )
+
+    @classmethod
+    def _tia_blocked_terminal_result(
+        cls,
+        task_id: str,
+        task_spec: Any,
+        run_dir: Path,
+        reason: str,
+        decision: Any,
+        ledger: Optional[EvidenceLedger],
+    ) -> Any:
+        """Ends a resumed task as blocked when the TIA completion gate fails."""
+        return cls._resumed_terminal_result(
+            task_id, task_spec, run_dir, "blocked", reason, decision, ledger,
+            action=GATE_BLOCKED_ACTION, result=reason, metadata={"resumed": True},
         )
 
     @classmethod

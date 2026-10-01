@@ -44,6 +44,17 @@ def record_decision(
     return entry.entry_id
 
 
+def require_state_dir(args: Any, subject: str, what: str) -> None:
+    """Refuse an owner-facing command that was given no Factory ``--state-dir``."""
+    if getattr(args, "state_dir", None):
+        return
+    from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+    raise OperatorFailure(OperatorError(
+        "MISSING_STATE_DIRECTORY", f"{subject} needs --state-dir.",
+        f"The Factory state directory says where the {what} is stored.",
+        "Copy the exact command from the Factory status.", "howlplane factory status"))
+
+
 def not_found_error(error_cls, code: str, label: str, item_id: str, state_dir: Any) -> OwnerDecisionError:
     return error_cls(
         code, f"No {label} '{item_id}' in {state_dir}.", "The id or the state directory is wrong.",
