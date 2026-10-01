@@ -26,3 +26,15 @@ plain output exactly (tested). JSON paths never touch the module.
 ## Consequences
 Revisit only if tables need features the module cannot provide cheaply. Any
 change must keep the plain-text output complete.
+
+## Addendum: everyday front door (productization)
+The everyday commands (`howlplane`, `start`, `status`, `logs`, `stop`, `approve ID`,
+`reject ID`, `doctor`) are a facade in `product_cli.py`, `factory/decision_resolver.py`
+and `doctor_report.py`. They own no state: they discover the repository's campaign,
+delegate to the existing Factory, governance and readiness code, and render the
+one `OperatorStatus` projection (`derive_operator_status`, plus `not_started_status`
+for a repository with no run yet). Text, JSON, the bare home screen and the remote
+snapshot therefore share one state, health, reason, owner-required signal and next
+action. Option comparison: a second status model per command (rejected: drift),
+renaming `factory` commands (rejected: breaks scripts and Board), a facade over the
+existing handlers (chosen). HowlBoard still owns any rich UI.

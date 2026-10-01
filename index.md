@@ -36,12 +36,16 @@
 1. Install HowlPlane (see [Global Installation & Setup](#global-installation--setup)).
 2. `cd` into a Git repository.
 3. `howlplane setup` checks the repository, your AI workers and workspace trust, offers to prepare the repository (it asks before authorizing anything), and tells you what to run next.
-4. `howlplane factory start`
-5. `howlplane factory status` shows whether the Factory is healthy, what it is working on, and exactly what you need to do, if anything.
-6. `howlplane factory logs --follow`
-7. If status says `OWNER REQUIRED`, run the command it prints. Use `howlplane factory status --verbose` for full supervisor detail, or `--json` for a stable machine-readable contract.
+4. `howlplane start` starts HowlPlane working on the repository.
+5. `howlplane status` shows whether it is healthy, what it is working on, and exactly what you need to do, if anything.
+6. `howlplane logs --follow` shows the details as they happen.
+7. If status says `OWNER REQUIRED`, run the command it prints: `howlplane approve ID` or `howlplane reject ID`. The id can be a task, a parked work item or a repository proposal; HowlPlane works out which.
+8. `howlplane stop` pauses safely and keeps all state; `howlplane start` continues.
+9. Something wrong? `howlplane doctor` (`--ready` gives a one-word answer for scripts).
 
-Three names to keep straight: **Plane** is the governed engine and control plane (this repository). **Board** is the rich human work surface; it reads the contracts Plane publishes and is not part of this repository. The **Factory** is the persistent engineering loop Plane runs. `howlplane --help` lists the everyday commands first and the advanced ones after.
+Running `howlplane` with no arguments shows where this repository stands and what to do next. Add `--json` to `status` and `doctor` for a stable machine-readable contract; `howlplane status --verbose` shows the project diagnostics (verification plan, locks, task runs).
+
+Three names to keep straight: **Plane** is the governed engine and control plane (this repository). **Board** is the rich human work surface; it reads the contracts Plane publishes and is not part of this repository. The **Factory** is the persistent engineering loop Plane runs; you never need to name it for daily use. `howlplane --help` lists the everyday commands first and the advanced ones after.
 
 The persistent factory supervisor uses one lock per state directory. A second
 process is rejected without changing the durable record of the active process.
@@ -65,21 +69,31 @@ without supplying a state directory, worktree, PID, or service name:
 
 ```bash
 cd /path/to/project
-howlplane factory start
-howlplane factory status
-howlplane factory logs --follow
-howlplane factory stop
+howlplane start
+howlplane status
+howlplane logs --follow
+howlplane stop
 ```
 
-`factory status` is concise by default and shows health, current work, and the
+`howlplane start|status|logs|stop` are the everyday front door and delegate to
+`howlplane factory start|status|logs|stop`, which remain available unchanged for
+scripts and experts. `howlplane start "goal"` records an optional durable
+objective. After `howlplane stop`, `howlplane start` continues; it does not
+silently restart work that stopped on a failure, it asks you to look first and
+then use `howlplane start --retry`.
+
+`status` is concise by default and shows health, current work, and the
 next action. Add `--verbose` for supervisor IDs, ticks and history counts, and
 `--json` for the stable contract (its `operator` object carries the state,
 severity, `reason_code` and next action).
 
 When `factory status` shows `OWNER REQUIRED` it prints the exact command to run.
 For a repository proposal awaiting authority that is
-`howlplane approve --proposal PROPOSAL_ID --state-dir DIR` (or `reject`, with an
-optional `--reason`). Approving records the decision and its evidence and marks
+`howlplane approve PROPOSAL_ID` (or `reject`, with an optional `--reason`). The id
+alone is enough: HowlPlane finds the task, work item or proposal it names in the
+current repository's campaign, refuses to guess when an id is ambiguous, and
+uses the same decision path as before. `--work-item`, `--proposal` and
+`--state-dir` remain as manual overrides. Approving records the decision and its evidence and marks
 the proposal `accepted`; it does not create a repository by itself. An accepted
 proposal is consumed only by `howlplane factory bootstrap --proposal PROPOSAL_ID
 --state-dir DIR`, which refuses a contract changed after approval, creates a local

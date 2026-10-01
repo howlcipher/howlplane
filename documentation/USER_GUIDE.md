@@ -9,12 +9,14 @@ Welcome to the official User Guide for HowlPlane! This document outlines how to 
 ```bash
 cd /path/to/project
 howlplane setup            # check the repo, workers and workspace trust; prepare if you confirm
-howlplane factory start
-howlplane factory status   # health, current work, and your next action
-howlplane factory logs --follow
+howlplane start            # start working
+howlplane status           # health, current work, and your next action
+howlplane logs --follow    # the details
 ```
 
-`howlplane setup --json` is the non-interactive form. When status says `OWNER REQUIRED`, run the command it prints (`howlplane approve|reject --proposal ID --state-dir DIR` for repository proposals, `--work-item` for parked work items). `howlplane config show`
+To intervene: `howlplane approve ID` or `howlplane reject ID`. To pause: `howlplane stop`, and `howlplane start` continues. To troubleshoot: `howlplane doctor`. Bare `howlplane` shows where the repository stands.
+
+`howlplane setup --json` is the non-interactive form. When status says `OWNER REQUIRED`, run the command it prints (`howlplane approve ID`; the id can name a task, a parked work item or a repository proposal). `howlplane config show`
 and `howlplane config explain <setting>` show effective configuration and where
 each value came from. The sections below are the full reference.
 
@@ -22,13 +24,17 @@ each value came from. The sections below are the full reference.
 
 | You want to know | Run | Look for |
 | --- | --- | --- |
-| Is it healthy, what is it doing, who is working? | `howlplane factory status` | the state in the heading, `Worker`, `Elapsed`, `Next` |
-| Why is it waiting, and will it recover? | `howlplane factory status` | `Reason`, `Recovery`, `Retry` |
-| What happened? | `howlplane factory logs` | compact `time LEVEL message` lines |
-| Only the problems | `howlplane factory logs --errors --since 1h` | ERROR lines |
-| One work item or provider | `howlplane factory logs --work-item WI-042` / `--provider codex` | |
-| Can it start safely? Which workers work? | `howlplane factory doctor`, `howlplane agents doctor` | the Worker table and its `Next` step |
-| Pause and continue | `howlplane factory stop`, then `howlplane factory resume` and `howlplane factory start` | state is preserved |
+| Is it healthy, what is it doing, who is working? | `howlplane status` | the state in the heading, `Worker`, `Elapsed`, `Next` |
+| Why is it waiting, and will it recover? | `howlplane status` | `Reason`, `Recovery`, `Retry` |
+| What happened? | `howlplane logs` | compact `time LEVEL message` lines |
+| Only the problems | `howlplane logs --errors --since 1h` | ERROR lines |
+| One work item or provider | `howlplane logs --work-item WI-042` / `--provider codex` | |
+| Is everything ready? Which workers work? | `howlplane doctor` (`--ready`, `--agents`, `--factory`, `--system`, `--json`) | the sections and `Fix` list |
+| Pause and continue | `howlplane stop`, then `howlplane start` | state is preserved |
+
+The `howlplane factory ...` commands, `howlplane agents doctor` and the old
+`--work-item/--proposal/--state-dir` approval flags still work for scripts and
+advanced use.
 
 `factory logs` shows the operator event log (what HowlPlane did). Worker
 transcripts and run evidence stay under the target repository's
@@ -55,8 +61,10 @@ The primary way to interact with HowlPlane across any codebase on your machine i
 cd /path/to/project
 howlplane work "fix the highest-value open bug"
 
-# Inspect active project status, verification suites, and task runs:
+# See what HowlPlane is doing and what, if anything, you need to do:
 howlplane status
+# Project diagnostics: verification suites, locks, and task runs:
+howlplane status --verbose
 
 # Deterministically route a task and generate reviewer assignments without mutations:
 howlplane route "patch authentication vulnerability"
@@ -117,7 +125,7 @@ terminal view and `--verbose` for full supervisor detail.
 
 HowlPlane includes verification, diagnostic, and automation utilities:
 
-* **`howlplane doctor` (or `python src/infrastructure/doctor.py`)**: Runs complete health diagnostics on Python, Go, Git, evidence ledger integrity, operating mode egress enforcement, and non-generative provider readiness.
+* **`howlplane doctor` (or `python src/infrastructure/doctor.py`)**: The one diagnostic front door. It reports System (Python, Go, Git, evidence ledger integrity, operating mode egress enforcement), Workers, Repository and Factory readiness, then an overall `READY` or `NOT READY` with a numbered `Fix` list. `--ready` prints only `READY` or `NOT READY` plus fixes and exits non-zero when not ready; `--json` is the structured form (`howlplane.doctor/v1`); `--system`, `--agents` and `--factory` show one section in full (`--agents` and `--factory` are `agents doctor` and `factory doctor`).
 * **`howlplane route`**: Explains role-aware selection without provider probes, generation, or capacity mutation.
 * **`howlplane providers`**: Shows the versioned resource inventory; `howlplane providers reset <resource-id>` re-probes only current state without deleting history.
 * **`python src/infrastructure/build_vector_index.py`**: Scans the knowledge layer and builds a localized ChromaDB vector index for offline semantic retrieval.

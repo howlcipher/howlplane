@@ -3,8 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Added
+
+- Everyday product front door (backlog row 85). Bare `howlplane` is a read-only contextual home screen (exit 0; the deprecated `ai` alias still prints help). New `howlplane start [OBJECTIVE]`, `status`, `logs` and `stop` delegate to the Factory handlers; `start` continues an operator stop or a normal bounded completion without a resume step and refuses to restart a failed run until `--retry`. `howlplane approve|reject ID` finds the task, work item or repository proposal the id names in the current repository's campaign (`factory/decision_resolver.py`), fails closed on ambiguous or unknown ids, and uses the unchanged decision paths. `howlplane doctor` composes system, workers, repository and Factory checks (`doctor_report.py`, schema `howlplane.doctor/v1`) with `--ready`, `--system`, `--agents`, `--factory`, `--live` and `--json`. Tests: `test_product_journey.py`, `test_product_home.py`, `test_product_start_stop.py`, `test_decision_resolver.py`, `test_doctor_report.py`.
+
 ### Changed
 
+- Top-level `howlplane status` now shows the operator view (same state, health, reason and next action as `factory status`); the previous project diagnostics are `howlplane status --verbose`. `setup` groups its checklist into System, AI workers and Repository and ends with `howlplane start`; its JSON `next_action.command` values now name everyday commands. Help lists the Everyday commands first, then Governance and recovery, Diagnostics and inspection, Factory internals and Advanced engineering. Operator next actions recommend `howlplane start`, `logs` and `doctor --agents`; `parked_items` and decisions gain a `title`, and decisions gain `short_approve`/`short_reject` (additive; existing fields unchanged). `--repo` now selects the repository for Factory commands.
+- `--work-item` and `--proposal` approvals discover the state directory from the repository; `--state-dir` remains an override.
 - `cli.py` split finished (backlog rows 75 and 78), behavior-preserving. The agents, status and doctor handlers moved to `status_cli.py`, approve/reject/resume/cancel/unlock to `governance_cli.py`, and `cmd_factory_run*` with the `_factory_*` helpers to `factory/factory_run_cli.py`. `cli.py` re-exports every name as the same object and the moved handlers look shared helpers up on `cli` at call time, so imports and test monkeypatches keep working.
 
 ### Added
@@ -133,6 +139,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `howlplane factory resume` failed with a `TypeError` unless `--state-dir` was given; it now discovers the campaign like every other Factory command.
 - Orchestration `HANDOFF REQUIRED` is now an active, resumable paused state instead of being treated as terminal, allowing operator intervention or parameter updates to resume in place.
 - Truthful CLI guidance: `SessionProgress` only displays `RESUME` commands when the session is verified resumable.
 - A trust refusal is now `WORKSPACE_TRUST_REQUIRED`, positively identified per
