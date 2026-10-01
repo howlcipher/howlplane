@@ -314,38 +314,37 @@ def test_semantic_judgment_cannot_outrank_economics():
     assert decision.selected.resource_id == "codex"  # subscription outranks metered
 
 
-@pytest.mark.parametrize("scenario", ["local_only", "task_no_egress"])
-def test_egress_policy_blocks_semantic_call(scenario):
+def local_planning_decision(recommender, *, operating_mode, no_egress=False, **overrides):
+    """Selects for planning over two local resources; shared by the egress tests."""
     local = [
         make_profile(rid, locality=ResourceLocality.LOCAL, economics=EconomicClass.LOCAL)
         for rid in ("local_a", "local_b")
     ]
-    recommender = pick("local_b")
     pool = pool_with(
-        recommender,
-        profiles=local,
-        operating_mode="local_only" if scenario == "local_only" else "connected",
-        decision_roles=["planning"],
-        policy=ProviderPolicySettings(),
+        recommender, profiles=local, operating_mode=operating_mode,
+        decision_roles=["planning"], policy=ProviderPolicySettings(), **overrides,
     )
-    task = make_task(no_egress=scenario == "task_no_egress")
-    decision = pool.select_resource(task, role="planning")
+    return pool.select_resource(make_task(no_egress=no_egress), role="planning")
+
+
+@pytest.mark.parametrize("operating_mode, no_egress", [
+    ("local_only", False),
+    ("connected", True),
+])
+def test_egress_policy_blocks_semantic_call(operating_mode, no_egress):
+    recommender = pick("local_b")
+    decision = local_planning_decision(
+        recommender, operating_mode=operating_mode, no_egress=no_egress
+    )
     assert recommender.calls == []
     assert decision.semantic_recommendation["status"] == "NOT_APPLICABLE"
 
 
 def test_local_only_operator_may_explicitly_allow_the_call():
-    local = [
-        make_profile(rid, locality=ResourceLocality.LOCAL, economics=EconomicClass.LOCAL)
-        for rid in ("local_a", "local_b")
-    ]
     recommender = pick("local_b")
-    pool = pool_with(
-        recommender, profiles=local, operating_mode="local_only",
-        decision_roles=["planning"], allow_in_local_only=True,
-        policy=ProviderPolicySettings(),
+    decision = local_planning_decision(
+        recommender, operating_mode="local_only", allow_in_local_only=True
     )
-    decision = pool.select_resource(make_task(), role="planning")
     assert len(recommender.calls) == 1
     assert decision.selected.resource_id == "local_b"
 
