@@ -70,19 +70,51 @@ def render_route(decision: Any) -> str:
         lines.append("  none")
     lines.extend([
         f"Economic policy: {decision.economic_policy}",
-        "Recommendation: " + (
+        "Deterministic recommendation: " + (
             recommendation.resource_id if recommendation and recommendation.resource_id
             else "none"
         ),
         "Reason: " + (
             recommendation.reason if recommendation else "No eligible candidate."
         ),
+    ])
+    semantic = getattr(decision, "semantic_recommendation", None)
+    if semantic:
+        lines.extend(_render_semantic(semantic))
+    lines.append(
         "Likely selected: " + (
             f"{selected.resource_id} / {selected.interface_id} / {selected.model_id or 'unknown'}"
-            if selected else "BLOCKED: NO_ELIGIBLE_AI_RESOURCE"
-        ),
-    ])
+            if selected else "BLOCKED: " + (decision.blocked_reason or "NO_ELIGIBLE_AI_RESOURCE")
+        )
+    )
     return "\n".join(lines)
+
+
+def _render_semantic(semantic: Dict[str, Any]) -> List[str]:
+    """Explains the System 1 judgment and what Plane policy did with it."""
+    status = semantic.get("status")
+    lines = [f"HowlInstinct ({semantic.get('mode')} mode):"]
+    if status == "NOT_APPLICABLE":
+        lines.append(f"  not applicable: {semantic.get('reason')}")
+        return lines
+    if semantic.get("selected_resource_id") is None:
+        lines.append(f"  {str(status).lower()}: {semantic.get('reason')}")
+        lines.append("  fallback: deterministic")
+        return lines
+    margin = semantic.get("instinct_margin")
+    confidence = semantic.get("provider_confidence")
+    minimum = semantic.get("minimum_instinct_margin")
+    lines.extend([
+        f"  selected: {semantic['selected_resource_id']}",
+        "  instinct margin: " + ("not reported" if margin is None else f"{margin:.4g}"),
+        "  provider confidence: " + (
+            "not reported" if confidence is None else f"{confidence:.4g}"
+        ),
+        "  plane minimum margin: " + ("not set" if minimum is None else f"{minimum:.4g}"),
+        f"  outcome: {status} ({semantic.get('reason')})",
+        "  applied to ranking: " + ("yes" if semantic.get("applied") else "no"),
+    ])
+    return lines
 
 
 def resource_diagnostic_rows(pool: Any) -> List[Dict[str, str]]:
