@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -21,6 +22,10 @@ from typing import Any, Dict, List, Optional, Union
 from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
 from howlplane.control_plane.project_adapter import ProjectContext
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
+
+
+_EXPLORE_TIMEOUT_SECONDS = 600
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class ExplorationPolicy(str, Enum):
@@ -204,14 +209,22 @@ class NativeHowlDreamProvider(ExplorationProvider):
             req_file.write_text(json.dumps(req_data), encoding="utf-8")
             runs_dir = work_dir / ".howldream" / "runs"
             runs_dir.mkdir(parents=True, exist_ok=True)
-            res = subprocess.run(
-                [str(bin_path), "explore", str(req_file), "--output", str(runs_dir)],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
+            try:
+                res = subprocess.run(
+                    [str(bin_path), "explore", str(req_file), "--output", str(runs_dir)],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=_EXPLORE_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(
+                    f"HowlDream explore timed out after {_EXPLORE_TIMEOUT_SECONDS}s"
+                ) from exc
             data = json.loads(res.stdout)
             run_id = data.get("exploration_id", "")
+            if not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id):
+                raise RuntimeError(f"HowlDream returned an invalid exploration_id: {run_id!r}")
             return runs_dir / run_id, data
 
 

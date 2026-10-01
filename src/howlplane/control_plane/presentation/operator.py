@@ -11,6 +11,7 @@ classifications (``SupervisorState``, ``ProviderFailureClass``, the snapshot
 only new codes name conditions that previously had no stable token.
 """
 
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -41,6 +42,7 @@ class ReasonCode(str, Enum):
     AUTHENTICATION_REQUIRED = ProviderFailureClass.AUTHENTICATION_REQUIRED.value
     SESSION_LIMIT = ProviderFailureClass.SESSION_LIMIT.value
     PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
+    MISSING_EXECUTABLE = ProviderFailureClass.MISSING_EXECUTABLE.value
     VERIFICATION_FAILURE = ProviderFailureClass.VERIFICATION_FAILURE.value
     FACTORY_FAILURE = "FACTORY_FAILURE"
     WAITING_FOR_WORK = "WAITING_FOR_WORK"
@@ -153,6 +155,24 @@ def _classified_failure(status: Mapping[str, Any]) -> Optional[ProviderFailureCl
     return None
 
 
+_BINARY_RE = re.compile(
+    r"['\"`]([A-Za-z0-9][A-Za-z0-9._+-]*)['\"`]"
+    r"|\b(?:executable|binary|command|cli)[ :=]+([A-Za-z0-9][A-Za-z0-9._+-]*)",
+    re.IGNORECASE,
+)
+_BINARY_STOPWORDS = {"not", "missing", "found", "is", "was", "the", "a", "on", "path", "executable", "binary", "command", "cli"}
+
+
+def _missing_binary(status: Mapping[str, Any]) -> Optional[str]:
+    """Best-effort binary name from the supervisor error text, if it names one."""
+    for source in (status.get("last_error"), status.get("provider_wake_conditions")):
+        for match in _BINARY_RE.finditer(str(source or "")):
+            name = match.group(1) or match.group(2)
+            if name and name.lower() not in _BINARY_STOPWORDS:
+                return name
+    return None
+
+
 def _blockers(status: Mapping[str, Any]) -> List[str]:
     blockers = []
     for item in status.get("parked_items") or []:
@@ -255,6 +275,17 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
             reason_code=ReasonCode.AUTHENTICATION_REQUIRED, owner_required=True, recovery="manual",
             next_action=OperatorAction(
                 "Sign in to the provider CLI, then check readiness.", "howlplane doctor --agents"),
+            **common)
+    if failure is ProviderFailureClass.MISSING_EXECUTABLE:
+        binary = _missing_binary(status)
+        what = f"The provider CLI '{binary}'" if binary else "A provider CLI"
+        return OperatorStatus(
+            label="ATTENTION", severity=Severity.ATTENTION,
+            summary=f"{what} is not installed or not on PATH.",
+            reason_code=ReasonCode.MISSING_EXECUTABLE, owner_required=True, recovery="manual",
+            next_action=OperatorAction(
+                f"Install {f'{chr(39)}{binary}{chr(39)}' if binary else 'the missing provider CLI'} "
+                "and make sure it is on PATH, then check readiness.", "howlplane doctor --agents"),
             **common)
     if failure is ProviderFailureClass.SESSION_LIMIT or (
         state == SupervisorState.WAITING_FOR_PROVIDER.value

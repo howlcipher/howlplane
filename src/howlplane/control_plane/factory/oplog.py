@@ -19,6 +19,8 @@ from howlplane.control_plane.presentation.redact import redact_operator_text
 EVENTS_FILENAME = "factory_events.jsonl"
 SEVERITIES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 _MAX_TEXT = 500
+MAX_LOG_BYTES = 10 * 1024 * 1024
+KEEP_ROTATED = 5
 
 logger = logging.getLogger("howlplane.factory.oplog")
 
@@ -34,6 +36,22 @@ def _clean(value: Any) -> Any:
     if isinstance(value, (int, float, bool)) or value is None:
         return value
     return _clean(str(value))
+
+
+def _rotate(path: Path, max_bytes: int, keep: int) -> None:
+    """Shift path -> path.1 -> ... -> path.<keep> once path reaches max_bytes."""
+    try:
+        if path.stat().st_size < max_bytes:
+            return
+        oldest = path.with_name(f"{path.name}.{keep}")
+        oldest.unlink(missing_ok=True)
+        for i in range(keep - 1, 0, -1):
+            src = path.with_name(f"{path.name}.{i}")
+            if src.exists():
+                src.rename(path.with_name(f"{path.name}.{i + 1}"))
+        path.rename(path.with_name(f"{path.name}.1"))
+    except OSError:
+        logger.debug("could not rotate operational log", exc_info=True)
 
 
 class OperationalLog:
@@ -56,6 +74,7 @@ class OperationalLog:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             line = json.dumps({k: _clean(v) for k, v in event.items()}, sort_keys=False)
+            _rotate(self.path, MAX_LOG_BYTES, KEEP_ROTATED)
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
         except (OSError, TypeError, ValueError):

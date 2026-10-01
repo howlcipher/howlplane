@@ -13,6 +13,7 @@
     "task_id": {
       "type": "string",
       "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
       "description": "Unique identifier for the task (e.g. TASK-101, imp-51, bug-12)."
     },
     "repository": {

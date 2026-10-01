@@ -1211,6 +1211,19 @@ Something wrong? howlplane doctor.
 Add --json for scripts. Add --debug for a full traceback; NO_COLOR or --color never for plain text.
 """
 
+class _FriendlyArgumentParser(argparse.ArgumentParser):
+    """Argparse that answers a mistyped command with one line, not a 40-name dump."""
+
+    def error(self, message: str) -> Any:
+        import re
+        import sys
+        match = re.search(r"argument <command>: invalid choice: '([^']*)'", message)
+        if match:
+            self.exit(2, f"{self.prog}: unknown command '{match.group(1)}'. "
+                         f"Run `{self.prog} --help` to see what is available.\n")
+        super().error(message)
+
+
 def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument(
@@ -1231,7 +1244,7 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     task_base_parser.add_argument("--tier", choices=["tier_1", "tier_2", "tier_3"], help="Reasoning tier override")
     task_base_parser.add_argument("--agent", help="Preferred agent override")
 
-    parser = argparse.ArgumentParser(
+    parser = _FriendlyArgumentParser(
         prog=program_name,
         description="Deterministic Multi-Agent Engineering Control Plane CLI\n\n" + _TOP_LEVEL_QUICKSTART,
         formatter_class=_grouped_help_formatter(_TOP_LEVEL_HELP_GROUPS, "Advanced engineering"),

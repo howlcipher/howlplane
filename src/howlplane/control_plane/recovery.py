@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
-from howlplane.control_plane.atomic_io import atomic_write_json, atomic_write_yaml, safe_load_json, safe_load_yaml
+from howlplane.control_plane.atomic_io import atomic_write_json, atomic_write_text, atomic_write_yaml, safe_load_json, safe_load_yaml
 from howlplane.control_plane.checkpoints import CheckpointManager, StageCheckpoint, compute_stage_repo_fingerprint
 from howlplane.control_plane.executor import AuthorityExecutor, ExecutionReceipt, ExecutionResult, ExecutorRegistry
 from howlplane.control_plane.git_baseline import GitBaseline, RepositoryDelta, capture_baseline, capture_delta
@@ -379,12 +379,8 @@ class CrashRecoveryEngine:
         # Delta exists: persist diff artifacts to avoid rerun
         impl_dir = r_dir / "implementation"
         impl_dir.mkdir(parents=True, exist_ok=True)
-        (impl_dir / "diff.patch").write_text(
-            current_delta.diff_content, encoding="utf-8"
-        )
-        (r_dir / "diff.patch").write_text(
-            current_delta.diff_content, encoding="utf-8"
-        )
+        atomic_write_text(impl_dir / "diff.patch", current_delta.diff_content)
+        atomic_write_text(r_dir / "diff.patch", current_delta.diff_content)
 
         return (
             True,

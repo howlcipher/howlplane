@@ -61,11 +61,23 @@ class LockMetadata(DataClassSerializationMixin):
 
 
 def get_process_create_time(pid: int) -> float:
-    """Extracts process creation timestamp on Linux /proc or falls back to current time."""
+    """Extracts process start time (epoch seconds) from Linux /proc or falls back to current time."""
     try:
         stat_path = Path(f"/proc/{pid}/stat")
         if stat_path.is_file():
-            return stat_path.stat().st_mtime
+            # Field 22 is starttime in clock ticks since boot. The comm field
+            # (2) may contain spaces/parentheses, so parse after the last ')'.
+            raw = stat_path.read_text(encoding="utf-8", errors="replace")
+            fields = raw[raw.rindex(")") + 1:].split()
+            # fields[0] is field 3 (state), so field 22 is fields[19].
+            start_ticks = int(fields[19])
+            btime = None
+            for line in Path("/proc/stat").read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith("btime "):
+                    btime = int(line.split()[1])
+                    break
+            if btime is not None:
+                return btime + start_ticks / os.sysconf("SC_CLK_TCK")
     except Exception:
         pass
     return time.time()
@@ -424,12 +436,16 @@ class _BaseFileLock:
                 if state is LockOwnerState.AMBIGUOUS:
                     # Never silently steal a lock we cannot prove is dead, and
                     # never claim its owner is active when we never checked.
+                    if self.lock_type == "factory_supervisor":
+                        # `howlplane unlock` only inspects task/repo locks.
+                        recovery = f"remove the lock file `{self.lock_path}`"
+                    else:
+                        recovery = f"reclaim the lock explicitly with `howlplane unlock {existing.task_id}`"
                     raise self.error_cls(
                         f"{label} lock ownership is INDETERMINATE for task "
                         f"'{existing.task_id}': PID {existing.pid} ({existing.command}) "
                         f"on host '{existing.hostname}', started at {existing.started_at}. "
-                        f"{reason}. If that run is definitely gone, reclaim the lock "
-                        f"explicitly with `howlplane unlock {existing.task_id}`."
+                        f"{reason}. If that run is definitely gone, {recovery}."
                     )
                 # Provably gone: reclaim automatically, as before.
                 try:
