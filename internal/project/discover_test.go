@@ -93,3 +93,18 @@ func TestDiscoverRoot_NestedMixedCaseAndSpaces(t *testing.T) {
 		t.Errorf("expected root %s, got %s", rootPath, discovered)
 	}
 }
+
+func TestDiscoverRootAcceptsGitFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: /elsewhere\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := DiscoverRoot(sub)
+	if err != nil || got != root {
+		t.Fatalf("got %q, %v; want %q", got, err, root)
+	}
+}

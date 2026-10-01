@@ -60,6 +60,7 @@ def build_report(repo: Path, live: bool = False) -> Dict[str, Any]:
     blocked_setup = any(c["status"] == setup_cli.BLOCKED for c in gathered["checks"])
     ready = not blocked_setup and not gathered["needs_preparation"] and gathered["factory"] != "blocked"
     has_error = any(e["status"] == "error" for e in entries)
+    ready = ready and not has_error
     overall = "READY" if ready and not has_error else "NOT READY"
     return {"schema": DOCTOR_SCHEMA, "overall": overall, "ready": ready, "has_error": has_error,
             "repo": gathered["repo"], "entries": entries, "issues": issues, "factory": gathered["factory"]}

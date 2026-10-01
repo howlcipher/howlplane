@@ -130,3 +130,19 @@ def test_dispatch_id_reaches_the_engine_so_retries_get_distinct_trajectories():
     assert engine.dispatch_ids == ["D-1", "D-2"], (
         "the engine cannot tell two dispatches of the same work item apart"
     )
+
+
+def test_engine_exception_defers_the_item_instead_of_killing_the_loop():
+    calls = []
+
+    class Boom:
+        def execute_factory_work_item(self, work_item, files_changed=None, dispatch_id=None):
+            calls.append(1)
+            raise TypeError("a bug inside the engine")
+
+    outcome = MarathonDispatcherAdapter(lambda: Boom()).dispatch(_work_item(), dispatch_id="D-1", task_id="T-1")
+    assert calls == [1], "an engine TypeError must not re-run the work item"
+    assert outcome.success is False
+    assert outcome.next_work_item_state == WorkItemState.DEFERRED
+    assert outcome.reason.startswith("dispatch_exception:TypeError")
+    assert not outcome.requires_authority

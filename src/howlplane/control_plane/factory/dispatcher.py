@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
 """Dispatcher adapter that hands selected factory work to the governed lifecycle."""
 
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from howlplane.control_plane.factory.work_item import WorkItem, WorkItemState
 from howlplane.control_plane.synthesis.marathon import MarathonDogfoodEngine
+
+
+def accepts_keyword(func: Callable[..., Any], name: str) -> bool:
+    """True when ``func`` takes ``name`` (or **kwargs); never calls it to find out."""
+    try:
+        params = inspect.signature(func).parameters.values()
+    except (TypeError, ValueError):
+        return True
+    return any(p.name == name or p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
 
 
 @dataclass
@@ -65,13 +75,21 @@ class MarathonDispatcherAdapter:
         if self._provider_observer is not None:
             engine.provider_observer = self._provider_observer
         files_changed = self._files_changed_from_work_item(work_item)
+        kwargs: Dict[str, Any] = {"files_changed": files_changed, "dispatch_id": dispatch_id}
+        if accepts_keyword(engine.execute_factory_work_item, "run_mode"):
+            kwargs["run_mode"] = run_mode
         try:
-            success, git_record = engine.execute_factory_work_item(
-                work_item, files_changed=files_changed, dispatch_id=dispatch_id, run_mode=run_mode
-            )
-        except TypeError:
-            success, git_record = engine.execute_factory_work_item(
-                work_item, files_changed=files_changed, dispatch_id=dispatch_id
+            success, git_record = engine.execute_factory_work_item(work_item, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - one bad dispatch must not kill the 24/7 loop
+            # A transient network, git or OS error is not an owner decision:
+            # defer the item so the supervisor backs off and retries it.
+            return DispatchOutcome(
+                success=False,
+                work_item_id=work_item.work_item_id,
+                next_work_item_state=WorkItemState.DEFERRED,
+                reason=f"dispatch_exception:{type(exc).__name__}: {exc}"[:300],
+                task_id=task_id,
+                dispatch_id=dispatch_id,
             )
         if git_record and git_record.get("integration_mode") == "parked":
             return DispatchOutcome(

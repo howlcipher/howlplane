@@ -55,3 +55,26 @@ def test_posix_installer_registers_codex_globally(tmp_path):
     command_link = user_skills / "work_next_item"
     assert command_link.is_symlink()
     assert (command_link / "SKILL.md").is_file()
+
+
+def test_posix_installer_aborts_on_unterminated_marker_and_links_launcher(tmp_path):
+    home = tmp_path / "home"
+    codex_home = tmp_path / "codex"
+    fake_bin = tmp_path / "bin"
+    for d in (home, codex_home, fake_bin):
+        d.mkdir()
+    _write_executable(fake_bin / "pip3", "#!/usr/bin/env bash\nexit 0\n")
+    broken = "keep me\n<!-- ai_knowledge_library:start -->\nuser text after\n"
+    (codex_home / "AGENTS.md").write_text(broken, encoding="utf8")
+
+    env = os.environ.copy()
+    env.update(HOME=str(home), CODEX_HOME=str(codex_home))
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    result = subprocess.run(
+        ["bash", str(INSTALL_SCRIPT)], cwd=REPO_ROOT, env=env,
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "without a matching" in result.stderr
+    assert (codex_home / "AGENTS.md").read_text(encoding="utf8") == broken
+    assert (home / ".local" / "bin" / "howlplane").is_symlink()

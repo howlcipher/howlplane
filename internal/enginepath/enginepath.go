@@ -60,10 +60,28 @@ func Resolve() (string, error) {
 		return p, nil
 	}
 
-	return "", fmt.Errorf(
-		"could not locate the HowlPlane control-plane engine: install it via `howl install`, " +
-			"set " + EngineEnvOverride + " to a virtualenv, or set HOWLPLANE_HOME to a source checkout",
-	)
+	return "", notFoundError()
+}
+
+func notFoundError() error {
+	searched := []string{}
+	if dh := xdgDataHome(); dh != "" {
+		searched = append(searched, filepath.Join(dh, "howl", "components", "howlplane-engine", "current", exeName("howlplane-engine")))
+	}
+	for _, env := range []string{"HOWLPLANE_HOME", "HOWLPLANE_DIR"} {
+		if v := os.Getenv(env); v != "" {
+			searched = append(searched, filepath.Join(v, "bin", "howlplane")+" (from "+env+")")
+		}
+	}
+	if exe, err := os.Executable(); err == nil {
+		searched = append(searched, filepath.Join(filepath.Dir(exe), "bin", "howlplane"))
+	}
+	return fmt.Errorf("could not locate the HowlPlane control-plane engine.\n"+
+		"Searched:\n  - %s\n"+
+		"HOWLPLANE_HOME must point to a HowlPlane source checkout containing bin/howlplane and src/control_plane.\n"+
+		"Next step: run `export HOWLPLANE_HOME=/path/to/howlplane` (your checkout), "+
+		"or install the engine with `howl install`, or set %s to a virtualenv with the howlplane console script.",
+		strings.Join(searched, "\n  - "), EngineEnvOverride)
 }
 
 // howlManagedEntrypoint returns the path Howl activates the

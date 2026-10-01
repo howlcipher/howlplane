@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 # This script links the local skills and rules to the global config
 # directories for Gemini (AGY), Claude Code, and Codex, so the library
@@ -18,20 +19,63 @@ else
   exit 1
 fi
 
-"$PIP_BIN" install "$REPO_ROOT"
-if [ $? -ne 0 ]; then
-  echo "Error: Failed to install dependencies."
-  echo "Please download and install Python and pip from https://www.python.org/downloads/ and try again."
+if ! "$PIP_BIN" install "$REPO_ROOT"; then
+  echo "Error: '$PIP_BIN install' failed (see pip's error above)."
+  echo "Hint: if this is an externally-managed or system Python, install inside a virtualenv"
+  echo "  (python3 -m venv .venv && . .venv/bin/activate) or use pipx, then re-run this script."
   exit 1
 fi
 
+MARKER_START="<!-- ai_knowledge_library:start -->"
+MARKER_END="<!-- ai_knowledge_library:end -->"
+
+# refresh_block FILE MODE: refresh the managed marker block in FILE in place.
+# MODE is "ref" (single @import line) or "inline" (full AGENTS.md contents).
+# Aborts without modifying FILE if MARKER_END is missing after MARKER_START.
+refresh_block() {
+  local file="$1" mode="$2" tmp
+  if ! awk -v start="$MARKER_START" -v end="$MARKER_END" '
+    $0 == start {s=1; next}
+    s && $0 == end {e=1}
+    END {exit !(s && e)}
+  ' "$file"; then
+    echo "Error: $file has '$MARKER_START' without a matching '$MARKER_END'; refusing to modify it." >&2
+    echo "Fix the markers manually and re-run." >&2
+    exit 1
+  fi
+  tmp=$(mktemp)
+  awk -v start="$MARKER_START" -v end="$MARKER_END" -v repo="$REPO_ROOT" -v mode="$mode" '
+    $0 == start {
+      print
+      if (mode == "ref") {
+        print "@" repo "/AGENTS.md"
+      } else {
+        rules = repo "/AGENTS.md"
+        while ((getline line < rules) > 0) print line
+        close(rules)
+      }
+      skip=1; next
+    }
+    $0 == end {skip=0}
+    !skip {print}
+  ' "$file" > "$tmp"
+  # cat rather than mv so symlinks and file mode are preserved
+  cat "$tmp" > "$file"
+  rm -f "$tmp"
+}
+
 # --- Global Control Plane Configuration & Launcher ---
 mkdir -p "$HOME/.config/howlplane"
-cat << EOF > "$HOME/.config/howlplane/config.toml"
+HP_CONFIG="$HOME/.config/howlplane/config.toml"
+if [ -f "$HP_CONFIG" ] && grep -qxF "path = \"$REPO_ROOT\"" "$HP_CONFIG"; then
+  echo "Keeping existing $HP_CONFIG (already points at $REPO_ROOT)"
+else
+  cat << EOF > "$HP_CONFIG"
 # HowlPlane Engineering Control Plane Configuration
 [control_plane]
 path = "$REPO_ROOT"
 EOF
+fi
 
 # Legacy compatibility fallback path
 mkdir -p "$HOME/.config/ai-control-plane"
@@ -46,6 +90,12 @@ if [ -f "$REPO_ROOT/bin/ai" ]; then
   chmod +x "$REPO_ROOT/bin/ai"
   ln -sf "$REPO_ROOT/bin/ai" "$HOME/.local/bin/ai"
   echo "Installed 'ai' global launcher to $HOME/.local/bin/ai"
+fi
+
+if [ -f "$REPO_ROOT/bin/howlplane" ]; then
+  chmod +x "$REPO_ROOT/bin/howlplane"
+  ln -sf "$REPO_ROOT/bin/howlplane" "$HOME/.local/bin/howlplane"
+  echo "Installed 'howlplane' global launcher to $HOME/.local/bin/howlplane"
 fi
 
 # --- Gemini / Antigravity (AGY) integration ---
@@ -96,17 +146,9 @@ done
 
 echo "Registering library rulebook in global Claude memory"
 CLAUDE_MEMORY="$CLAUDE_DIR/CLAUDE.md"
-MARKER_START="<!-- ai_knowledge_library:start -->"
-MARKER_END="<!-- ai_knowledge_library:end -->"
 
 if [ -f "$CLAUDE_MEMORY" ] && grep -qF "$MARKER_START" "$CLAUDE_MEMORY"; then
-  # Refresh the existing managed block in place
-  TMP_FILE=$(mktemp)
-  awk -v start="$MARKER_START" -v end="$MARKER_END" -v repo="$REPO_ROOT" '
-    $0 == start {print; print "@" repo "/AGENTS.md"; skip=1; next}
-    $0 == end {skip=0}
-    !skip {print}
-  ' "$CLAUDE_MEMORY" > "$TMP_FILE" && mv "$TMP_FILE" "$CLAUDE_MEMORY"
+  refresh_block "$CLAUDE_MEMORY" ref
 else
   {
     echo ""
@@ -152,20 +194,7 @@ done
 
 echo "Registering library rulebook in global Codex guidance"
 if [ -f "$CODEX_AGENTS" ] && grep -qF "$MARKER_START" "$CODEX_AGENTS"; then
-  TMP_FILE=$(mktemp)
-  awk -v start="$MARKER_START" -v end="$MARKER_END" -v rules="$REPO_ROOT/AGENTS.md" '
-    $0 == start {
-      print
-      while ((getline line < rules) > 0) {
-        print line
-      }
-      close(rules)
-      skip=1
-      next
-    }
-    $0 == end {skip=0}
-    !skip {print}
-  ' "$CODEX_AGENTS" > "$TMP_FILE" && mv "$TMP_FILE" "$CODEX_AGENTS"
+  refresh_block "$CODEX_AGENTS" inline
 else
   {
     echo ""
@@ -202,20 +231,7 @@ echo "Registering library rulebook in global Devin CLI configuration"
 DEVIN_AGENTS="$DEVIN_DIR/AGENTS.md"
 
 if [ -f "$DEVIN_AGENTS" ] && grep -qF "$MARKER_START" "$DEVIN_AGENTS"; then
-  TMP_FILE=$(mktemp)
-  awk -v start="$MARKER_START" -v end="$MARKER_END" -v rules="$REPO_ROOT/AGENTS.md" '
-    $0 == start {
-      print
-      while ((getline line < rules) > 0) {
-        print line
-      }
-      close(rules)
-      skip=1
-      next
-    }
-    $0 == end {skip=0}
-    !skip {print}
-  ' "$DEVIN_AGENTS" > "$TMP_FILE" && mv "$TMP_FILE" "$DEVIN_AGENTS"
+  refresh_block "$DEVIN_AGENTS" inline
 else
   {
     echo ""

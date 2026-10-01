@@ -116,10 +116,13 @@ def _select_factory_authority(args: argparse.Namespace, campaign: Any) -> Option
         return requested
 
     if not sys.stdin.isatty():
-        raise ValueError(
-            "Factory needs an explicit authority choice in a non-interactive environment. "
-            "Use --authority safe or --authority-profile strict."
-        )
+        from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+        raise OperatorFailure(OperatorError(
+            "AUTHORITY_REQUIRED",
+            "Factory needs an explicit authority choice when it cannot ask you.",
+            "This shell is not interactive, so HowlPlane will not guess how much it may do.",
+            "Choose an authority level, for example the safest one.",
+            "howlplane start --authority safe"))
     print("Choose Factory authority:\n  1. Safe: no consequential Git or GitHub actions.\n"
           "  2. Standard: use an existing repository-compatible delegated profile.\n"
           "  3. Autonomous: use the most permissive existing compatible profile.\n")

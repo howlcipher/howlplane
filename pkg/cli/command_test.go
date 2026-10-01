@@ -133,7 +133,7 @@ func TestUnknownSubcommandPropagatesEngineExitCode(t *testing.T) {
 	}
 }
 
-func TestNoArgsPrintsHelpInsteadOfDelegating(t *testing.T) {
+func TestNoArgsPrintsNativeHelpWhenEngineMissing(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("HOWLPLANE_ENGINE_VENV", "")
 	t.Setenv("HOWLPLANE_HOME", "")
@@ -167,7 +167,7 @@ func TestVersionFlagReportsGoBinaryVersionWithoutDelegating(t *testing.T) {
 	}
 }
 
-func TestHelpFlagsShowGoCommandTreeWithoutDelegating(t *testing.T) {
+func TestHelpFlagsShowNativeHelpWhenEngineMissing(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("HOWLPLANE_ENGINE_VENV", "")
 	t.Setenv("HOWLPLANE_HOME", "")
@@ -213,4 +213,57 @@ func execute(t *testing.T, command *cobra.Command, args ...string) (string, stri
 	command.SetArgs(args)
 	err := command.Execute()
 	return stdout.String(), stderr.String(), err
+}
+
+func fakeEngine(t *testing.T, script string) {
+	t.Helper()
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	t.Setenv("HOWLPLANE_ENGINE_VENV", "")
+	t.Setenv("HOWLPLANE_HOME", "")
+	t.Setenv("HOWLPLANE_DIR", "")
+	dir := filepath.Join(dataHome, "howl", "components", "howlplane-engine", "current")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "howlplane-engine"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNoArgsHelpAndHelpSubcommandForwardToEngine(t *testing.T) {
+	fakeEngine(t, "#!/bin/sh\necho \"engine got: $@\"\n")
+	for _, args := range [][]string{{}, {"--help"}, {"help", "status"}} {
+		stdout, _, err := execute(t, NewRootCommand(), args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if !strings.Contains(stdout, "engine got: "+strings.Join(args, " ")) {
+			t.Errorf("%v: expected forwarding to engine, got %q", args, stdout)
+		}
+	}
+}
+
+func TestShortVersionAliasAndSignalExitCode(t *testing.T) {
+	fakeEngine(t, "#!/bin/sh\nkill -TERM $$\n")
+	stdout, _, err := execute(t, NewRootCommand(), "-v")
+	if err != nil || !strings.Contains(stdout, "howlplane version") {
+		t.Fatalf("-v: stdout=%q err=%v", stdout, err)
+	}
+	_, _, err = execute(t, NewRootCommand(), "status")
+	var exitErr *EngineExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 143 {
+		t.Fatalf("expected exit code 143 for SIGTERM, got %v", err)
+	}
+}
+
+func TestMissingEngineErrorIsActionable(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("HOWLPLANE_ENGINE_VENV", "")
+	t.Setenv("HOWLPLANE_HOME", "")
+	t.Setenv("HOWLPLANE_DIR", "")
+	_, _, err := execute(t, NewRootCommand(), "bogus")
+	if err == nil || !strings.Contains(err.Error(), "Searched:") || !strings.Contains(err.Error(), "src/control_plane") {
+		t.Fatalf("expected actionable error, got %v", err)
+	}
 }

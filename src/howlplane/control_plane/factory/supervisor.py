@@ -951,7 +951,7 @@ class FactorySupervisor:
             return now + timedelta(seconds=self.provider_retry_interval_seconds)
         if state == SupervisorState.BACKOFF_AFTER_FAILURE:
             backoff = min(
-                self.backoff_base_seconds * (2 ** record.failure_count),
+                self.backoff_base_seconds * (2 ** min(record.failure_count, 20)),
                 self.max_backoff_seconds,
             )
             record.set_backoff("failure_backoff", record.failure_count, backoff)
@@ -1014,14 +1014,11 @@ class FactorySupervisor:
         setter = getattr(self.dispatcher, "set_provider_observer", None)
         if callable(setter):
             setter(_observe_provider)
-        try:
-            dispatch_result = self.dispatcher.dispatch(
-                item, dispatch_id=dispatch_id, task_id=task_id, run_mode=self._state_record.run_mode
-            )
-        except TypeError:
-            dispatch_result = self.dispatcher.dispatch(
-                item, dispatch_id=dispatch_id, task_id=task_id
-            )
+        from howlplane.control_plane.factory.dispatcher import accepts_keyword
+        dispatch_kwargs: Dict[str, Any] = {"dispatch_id": dispatch_id, "task_id": task_id}
+        if accepts_keyword(self.dispatcher.dispatch, "run_mode"):
+            dispatch_kwargs["run_mode"] = self._state_record.run_mode
+        dispatch_result = self.dispatcher.dispatch(item, **dispatch_kwargs)
         final_provider = (dispatch_result.git_record or {}).get("provider")
         if final_provider and self._state_record.current_provider is None:
             self._state_record.record_provider(final_provider, 1)
@@ -1359,7 +1356,7 @@ class FactorySupervisor:
                 self.stop(self._stop_requested)
                 self._maybe_publish_status()
                 break
-            result = self.tick()
+            result = self._guarded_tick()
             self._state_record.last_successful_tick_at = self._now_iso()
             self._persist()
             if self._stop_requested:
@@ -1379,6 +1376,33 @@ class FactorySupervisor:
             sleep_seconds = (next_wake - now).total_seconds()
             if sleep_seconds > 0:
                 self._sleep(sleep_seconds)
+
+    def _guarded_tick(self) -> TickResult:
+        """Run one tick; an unexpected error backs off and is recorded, never fatal.
+
+        Without this a corrupt work-item file or a transient OS error would kill
+        the supervisor, the service manager would restart it into the same
+        error, and nothing would explain why in status or the event log.
+        """
+        try:
+            return self.tick()
+        except Exception as exc:  # noqa: BLE001
+            reason = f"tick_error:{type(exc).__name__}: {exc}"[:300]
+            record = self._state_record
+            record.failure_count += 1
+            record.last_error = reason
+            try:
+                record.transition_to(SupervisorState.BACKOFF_AFTER_FAILURE, reason="tick_error", at=self._now_iso())
+            except InvalidSupervisorStateTransitionError:
+                pass
+            try:
+                self._log("supervisor.tick_error", reason, "ERROR")
+            except Exception:  # noqa: BLE001
+                pass
+            delay = min(self.backoff_base_seconds * (2 ** min(record.failure_count, 20)), self.max_backoff_seconds)
+            return TickResult(
+                state=record.state, next_wake_at=self._now() + timedelta(seconds=delay), reason=reason
+            )
 
     def _configured_lock(self) -> Optional[Any]:
         if self._lock is None and self._state_dir is not None:
@@ -1409,10 +1433,13 @@ class FactorySupervisor:
                     if resume_stopped:
                         self.resume()
                     self._run_loop(until)
-            except LockError:
+            except LockError as exc:
                 # This instance never became the supervisor.  Its cached state
                 # may predate the lock holder's current tick, so persisting a
                 # contention result could overwrite the active supervisor.
+                # Say so: silence here looks like a clean stop.
+                import sys
+                print(f"Factory did not start: {exc}", file=sys.stderr)
                 return
             return
         if resume_stopped:

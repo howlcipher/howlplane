@@ -738,3 +738,27 @@ def test_product_repo_explicit_and_state_record_resolution(tmp_path):
         provider_pool=sup2.provider_pool,
     )
     assert s2.policy.product_repository == "howlcipher/custom-repo"
+
+
+def test_unexpected_tick_error_backs_off_and_is_recorded_not_fatal(tmp_path):
+    supervisor, now, sleeps = _make_supervisor(tmp_path)
+    supervisor.tick()  # reach WAITING_FOR_WORK, a state that may enter backoff
+
+    def explode():
+        raise OSError("disk went away")
+
+    supervisor.tick = explode
+    result = supervisor._guarded_tick()
+    assert result.state == SupervisorState.BACKOFF_AFTER_FAILURE
+    assert result.reason.startswith("tick_error:OSError")
+    assert result.next_wake_at > now["t"]
+    assert supervisor.state_record.failure_count == 1
+    assert "disk went away" in supervisor.state_record.last_error
+
+
+def test_backoff_never_overflows_after_many_failures(tmp_path):
+    supervisor, now, sleeps = _make_supervisor(tmp_path)
+    supervisor.state_record.failure_count = 5000
+    supervisor.tick = lambda: (_ for _ in ()).throw(RuntimeError("x"))
+    result = supervisor._guarded_tick()
+    assert (result.next_wake_at - now["t"]).total_seconds() == supervisor.max_backoff_seconds
