@@ -347,6 +347,28 @@ HowlPlane is designed to operate seamlessly across any codebase on your machine 
 
 ---
 
+## Native Creative Pipeline (HowlDream -> HowlWriter -> HowlCreate)
+
+```bash
+export HOWL_FORBID_LOCAL_INFERENCE=1
+howlplane doctor --creative --command-config remote.json          # PASS / WARN / FAIL preflight
+howlplane creative run --run-dir runs/c1 --objective "..." \
+  --copy-spec copy-spec.json --command-config remote.json --sandbox /tmp/c1-site
+howlplane creative resume --run-dir runs/c1                        # continue from the failed stage
+```
+
+Plane runs each component through its own CLI and passes only each component's
+own contracts: a `howl.candidate/v1`, then a `howlwriter.copy_package/v1`, then a
+`howl.development_result/v1`, then a sandbox manifest. Nothing in between is
+handwritten. Every stage persists to the run directory.
+`contribution-audit.json` traces the chain Dream ID → Writer proposal ID → Create
+development ID → materialized artifacts. It credits each component only with
+what that component's provenance records. The Dream source can be an export, a
+run, externally authored ideas (clustered, never credited as generated), or a
+remote Dream exploration.
+
+---
+
 ## HowlFrame Architectural Relationship & Dogfooding Position
 
 HowlPlane serves as a **primary real-world dogfooding consumer** of the [HowlFrame](https://github.com/howlcipher/howlframe) toolchain:

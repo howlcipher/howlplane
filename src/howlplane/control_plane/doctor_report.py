@@ -116,7 +116,7 @@ def render(report: Dict[str, Any], style: Any) -> List[str]:
 
 
 def _selector(args: argparse.Namespace) -> str:
-    for name in ("system", "agents", "factory", "ready"):
+    for name in ("system", "agents", "factory", "ready", "creative"):
         if getattr(args, name, False):
             return name
     return "all"
@@ -140,6 +140,9 @@ def command(args: argparse.Namespace) -> int:
             workspace_trust=getattr(args, "workspace_trust", None)))
     if selector == "system":
         return cli_module.cmd_system_doctor(args)
+    if selector == "creative":
+        from howlplane.control_plane import creative_doctor
+        return creative_doctor.command(args)
     report = build_report(repo, live=live)
     if as_json:
         print(json.dumps(report, indent=2))

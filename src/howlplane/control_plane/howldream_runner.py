@@ -506,9 +506,15 @@ class HowlDreamRunner:
         assert_no_execution_authority(assessment)
 
         try:
-            from howlcreate.engine.candidate_ingestion import develop_candidate
+            # Plane holds no model provider here, so this promotion is an explicit
+            # deterministic scaffold. Calling develop_candidate without a provider
+            # only reached the same scaffold through a deprecated silent fallback.
+            try:
+                from howlcreate.engine.candidate_ingestion import scaffold_candidate
+            except ImportError:
+                from howlcreate.engine.candidate_ingestion import develop_candidate as scaffold_candidate
 
-            dev_result = develop_candidate(candidate_handoff, assessment)
+            dev_result = scaffold_candidate(candidate_handoff, assessment)
             dev_dict = (
                 dev_result if isinstance(dev_result, dict) else dev_result.model_dump()
             )
