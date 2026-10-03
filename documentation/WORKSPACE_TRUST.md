@@ -69,7 +69,7 @@ Vendor workspace trust exists because repository content can steer an agent: rul
 * HowlFrame policies, risk gates, and authority profiles;
 * merge policy, production and change approvals, or deployment permission;
 * secret handling and destructive-operation protection;
-* each CLI's own command and tool permissions (Claude Code's bounded profile, Devin's `--permission-mode`, Cursor's plan mode for read-only roles). Nothing adds `--force`, `--yolo`, or `bypassPermissions`;
+* each CLI's own command and tool permissions (Claude Code's bounded profile, Devin's `--permission-mode`, Cursor's plan mode for planning and ask mode for review and acceptance). Nothing adds `--force`, `--yolo`, or `bypassPermissions`;
 * closed stdin. No prompt is ever answered, typed, or piped, and no terminal is simulated.
 
 HowlPlane never writes a vendor trust store under any policy.

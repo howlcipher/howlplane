@@ -247,7 +247,9 @@ def test_transient_failure_keeps_bounded_retry(tmp_path, monkeypatch):
 def test_observed_sequence_resumes_old_manifest_without_retrying_exhausted_workers(tmp_path, monkeypatch, capsys):
     repo = repository(tmp_path)
     install_all(tmp_path, monkeypatch)
-    doc = observed_v1_session(repo)
+    # Claude is reserved: since DOG-004 its planning denial no longer bars it from implementation,
+    # and this test is about not retrying the workers that already stopped.
+    doc = observed_v1_session(repo, claude_code="RESERVED")
     goal, prior_attempts, prior_reroutes = doc["goal"], list(doc["attempts"]), list(doc["reroutes"])
     persist(doc)
     calls = []
@@ -283,7 +285,8 @@ def test_observed_sequence_resumes_old_manifest_without_retrying_exhausted_worke
     # Replayed history carries negatives only; Codex's recorded planning success
     # is not promoted to confirmed unattended capability by the migration.
     assert resumed["migrations"][0]["from"] == 1
-    assert agents["claude_code"]["capabilities"]["unattended_execution"] is False
+    # A read-only planning denial proves nothing about unattended mutation (DOG-004).
+    assert agents["claude_code"]["capabilities"]["unattended_execution"] is None
 
 
 def test_observed_sequence_live_run_reroutes_truthfully_and_never_repeats_agy(tmp_path, monkeypatch, capsys):
@@ -323,7 +326,7 @@ def test_all_workers_exhausted_hands_off_with_exclusions_instead_of_cycling(tmp_
     repo = repository(tmp_path)
     # One advertised model each, so the timed-out AGY assignment has no untried variant.
     install_all(tmp_path, monkeypatch, models=("m1",))
-    persist(observed_v1_session(repo, devin_cli="RESERVED"))
+    persist(observed_v1_session(repo, devin_cli="RESERVED", claude_code="RESERVED"))
     monkeypatch.setattr(module, "execute_assignment", lambda *args: pytest.fail("no eligible worker may be dispatched"))
 
     assert module.command(arguments(repo, input="resume", orchestrator=None)) == 2
@@ -333,7 +336,7 @@ def test_all_workers_exhausted_hands_off_with_exclusions_instead_of_cycling(tmp_
     assert "Excluded implementation workers" in captured.out
     excluded = "\n".join(events(captured.err, "EXCLUDED"))
     assert "AGY: timed out at the 300s execution budget; a retry needs a changed budget, model, or scope" in excluded
-    assert "Claude: unattended execution unavailable" in excluded
+    assert "Claude: reserved" in excluded
     assert "Cursor: failed earlier this session (ENGINEERING_FAILURE)" in excluded
     assert "Codex: failed earlier this session (NO_REPOSITORY_CHANGE)" in excluded
     assert "Devin: reserved" in excluded
@@ -395,3 +398,15 @@ def test_explicit_override_warning_is_announced_once_per_session(tmp_path, monke
     # Claude stays overridden through planning and implementation, then audits.
     assert "] ASSIGN      Claude assigned task" in stderr.split("] AUDIT")[-1]
     assert len(events(stderr, "WARNING")) == 1
+
+
+# DOG-004: permission denials are evidence only for the role that proves them
+
+
+@pytest.mark.parametrize("role, interactive_only", [("planning", False), ("review", False), ("implementation", True)])
+def test_permission_denial_marks_unattended_capability_only_for_mutating_roles(role, interactive_only):
+    doc = {"agents": {"claude_code": {"state": "AVAILABLE", "capabilities": {"unattended_execution": None}, "capacity": {}}},
+           "model_states": {}, "timed_out_assignments": []}
+    module.record_failure(doc, "claude_code", role, "UNKNOWN", "EXECUTION_PERMISSION_REQUIRED")
+    unattended = doc["agents"]["claude_code"]["capabilities"]["unattended_execution"]
+    assert (unattended is False) is interactive_only

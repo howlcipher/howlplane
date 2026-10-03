@@ -191,6 +191,81 @@ def test_non_clean_verdicts_are_classified_and_visible(tmp_path, monkeypatch, ca
     assert "hunter2abc" not in output
 
 
+def test_rejected_acceptance_recovers_after_the_repository_is_repaired(tmp_path, monkeypatch, capsys):
+    # DOG-007: the rejecting orchestrator stayed excluded from acceptance, so `resume` after the
+    # user fixed what the verdict named found no worker and re-printed the same handoff.
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+    policy = "PLAN + EXECUTE + INDEPENDENT AUDIT"
+    monkeypatch.setattr(module, "execute_assignment", scripted_execute(acceptance="Missing a test.\nACCEPTANCE_STATUS: REJECTED"))
+    assert module.command(arguments(repo, policy=policy)) == 2
+    first = capsys.readouterr()
+    assert "Missing a test." in first.out
+    assert f"howlplane orchestrate resume --repo {repo}" in first.out and "orchestrate discard" in first.out
+
+    monkeypatch.setattr(module, "execute_assignment", lambda *args: pytest.fail("repository unchanged: no worker may be dispatched"))
+    assert module.command(arguments(repo, input="resume", policy=policy, orchestrator=None)) == 2
+    capsys.readouterr()
+
+    (repo / "test_added.py").write_text("def test_it():\n    pass\n")
+    monkeypatch.setattr(module, "execute_assignment", scripted_execute())
+    assert module.command(arguments(repo, input="resume", policy=policy, orchestrator=None, verify=["git", "diff", "--check"])) == 0
+    assert "Status: COMPLETE" in capsys.readouterr().out
+
+
+def disqualified_orchestrator_session(tmp_path, monkeypatch, codex_acceptance):
+    """Claude plans (so it is the orchestrator) and is then denied permission to implement (DOG-010, run-007).
+
+    Returns the agents that were asked to accept, in order, and the session exit status.
+    """
+    repo = repository(tmp_path)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/fake/" + name if name in {"claude", "codex", "agent"} else None)
+    monkeypatch.setattr(module, "discover_models", lambda agent: [])
+    acceptors = []
+
+    def execute(doc, stage, agent, model, cwd):
+        denied = agent == "claude_code" and stage == "implementation"
+        if stage == "implementation" and not denied:
+            (cwd / "README").write_text("changed\n")
+        if stage == "acceptance":
+            acceptors.append(agent)
+        outcome = result(agent, stage, not denied, "EXECUTION_PERMISSION_REQUIRED" if denied else "")
+        accepted = "ACCEPTANCE_STATUS: ACCEPTED"
+        outcome.stdout = {"review": "AUDIT_STATUS: CLEAN",
+                          "acceptance": codex_acceptance if agent == "codex" else accepted}.get(stage, "plan")
+        return outcome
+
+    monkeypatch.setattr(module, "execute_assignment", execute)
+    status = module.command(arguments(repo, orchestrator="AUTO", policy="PLAN + EXECUTE + INDEPENDENT AUDIT",
+                                      verify=["git", "diff", "--check"]))
+    return acceptors, status
+
+
+def test_acceptance_moves_to_another_agent_when_the_orchestrator_is_disqualified(tmp_path, monkeypatch, capsys):
+    acceptors, status = disqualified_orchestrator_session(tmp_path, monkeypatch, "ACCEPTANCE_STATUS: ACCEPTED")
+    captured = capsys.readouterr()
+    assert acceptors == ["codex"] and "claude_code" not in acceptors
+    assert "TAKEOVER" in captured.err and "could not accept" in captured.err
+    assert status == 0, captured.err + captured.out
+
+
+def test_a_rejection_by_the_taking_over_agent_is_final_and_not_shopped_to_a_third(tmp_path, monkeypatch, capsys):
+    # Run-007: Claude was disqualified, Codex took over and REJECTED, then Cursor accepted.
+    acceptors, status = disqualified_orchestrator_session(tmp_path, monkeypatch, "Not convinced.\nACCEPTANCE_STATUS: REJECTED")
+    out = capsys.readouterr().out
+    assert acceptors == ["codex"], acceptors
+    assert status == 2 and "Status: HANDOFF REQUIRED" in out and "Not convinced." in out
+
+
+def test_orchestrator_that_rejected_acceptance_is_not_replaced_by_another_agent(tmp_path, monkeypatch, capsys):
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "execute_assignment", scripted_execute(acceptance="Nope.\nACCEPTANCE_STATUS: REJECTED"))
+    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 2
+    assert "TAKEOVER" not in capsys.readouterr().err
+
+
 def test_acceptance_evidence_marks_no_verdict_reviewer_as_provider_fault():
     doc = {"attempts": [
         {"stage": "review", "agent": "cursor", "state": "REVOKED", "failure": "AUDIT_NO_VERDICT", "verdict_excerpt": ""},
@@ -333,10 +408,34 @@ def test_permission_failure_reroutes_once_and_auto_selects_replacement(tmp_path,
     output = capsys.readouterr().err
     assert "Requested orchestrator: AUTO" in output
     assert "Selected orchestrator: pending" in output
-    assert "CAPABILITY  Claude marked interactive-only for this session" in output
+    # The denial happened in the read-only planning role, which proves nothing about
+    # unattended mutation, so Claude is rerouted without being marked interactive-only (DOG-004).
+    assert "marked interactive-only" not in output
+    assert "Claude excluded from planning for this session" in output
     assert "REROUTE" in output and "Claude → Codex" in output
     assert "SELECT" in output and "Codex selected as orchestrator" in output
     assert "TAKEOVER" not in output
+
+
+def test_permission_denial_in_implementation_still_marks_claude_interactive_only(tmp_path, monkeypatch, capsys):
+    repo = repository(tmp_path)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/fake/" + name if name in {"claude", "codex"} else None)
+    monkeypatch.setattr(module, "discover_models", lambda agent: ["one"] if agent == "claude_code" else [])
+
+    def execute(document, role, agent, model, cwd):
+        denied = agent == "claude_code" and role == "implementation"
+        if role == "implementation" and not denied:
+            (cwd / "README").write_text("changed\n")
+        outcome = result(agent, role, not denied, "EXECUTION_PERMISSION_REQUIRED" if denied else "")
+        outcome.stdout = "ACCEPTANCE_STATUS: ACCEPTED" if role == "acceptance" else "plan"
+        return outcome
+
+    monkeypatch.setattr(module, "execute_assignment", execute)
+    status = module.command(arguments(repo, orchestrator="claude_code", policy="PLAN + EXECUTE", verify=["git", "diff", "--check"]))
+    err = capsys.readouterr().err
+    assert "CAPABILITY  Claude marked interactive-only for this session" in err, err
+    assert status == 0, err
 
 
 def test_progress_reporter_projects_real_session_state_without_provider_calls():

@@ -69,6 +69,12 @@ def render_worker_summary(summaries: Sequence[Mapping[str, Any]], workspace: Opt
     else:
         lines += ["Fix the workers marked NEEDS ACTION or UNAVAILABLE (per-worker detail: howlplane agents doctor), then re-check:",
                   "", style.command_block("howlplane agents doctor --refresh")]
+        if any(r[2] == "interactive only" for r in rows):
+            # `--refresh` keeps a real session's permission verdict (it outranks a smoke); only a
+            # live smoke inside the repository you work in replaces it (DOG-005).
+            lines += ["", "A worker marked 'interactive only' was denied permission in a real session. "
+                          "Re-verify it inside your repository:",
+                      "", style.command_block("howlplane agents doctor --live --repo <path-to-your-repo>")]
     lines.append("")
     return lines
 

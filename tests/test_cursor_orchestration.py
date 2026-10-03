@@ -111,8 +111,13 @@ def test_cursor_backend_readonly_role_uses_plan_mode(tmp_path, monkeypatch):
 
     impl = backend.execute(_task(tmp_path, "Implement"), tmp_path, role="implementation")
     plan = backend.execute(_task(tmp_path, "Plan"), tmp_path, role="planning")
+    review = backend.execute(_task(tmp_path, "Review"), tmp_path, role="review")
+    acceptance = backend.execute(_task(tmp_path, "Accept"), tmp_path, role="acceptance")
     assert "--mode" not in impl.stdout
     assert "--mode\nplan" in plan.stdout
+    # DOG-006: plan mode returns no text for a review in print mode; ask mode answers and is read-only.
+    assert "--mode\nask" in review.stdout and "--mode\nask" in acceptance.stdout
+    assert "plan" not in review.stdout.split("--mode\n")[-1].split("\n")[0]
 
 
 def test_cursor_backend_no_unsafe_shell_concatenation(tmp_path, monkeypatch):

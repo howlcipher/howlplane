@@ -40,6 +40,14 @@ The acceptance prompt includes the recorded verdicts of every independent review
 
 A reviewer that exits successfully with no text is recorded as `AUDIT_NO_VERDICT`, a provider fault distinct from `AUDIT_FINDINGS_OR_UNCONFIRMED`. It is excluded from the review role like any failed reviewer, and acceptance is told it is not an unresolved audit finding.
 
+An `EXECUTION_PERMISSION_REQUIRED` denial marks an agent interactive-only (for the session and in the readiness cache) only when it happens in a mutating role (`implementation`, `remediation`). A read-only role never holds a shell, so a denial there proves nothing about unattended editing. It excludes the agent from that role and reroutes. Claude's read-only roles are told to use only the Read, Grep, and Glob tools. An explicitly selected orchestrator that readiness evidence rules out fails with `ORCHESTRATOR_UNAVAILABLE` and the command that re-verifies it. A session verdict outranks a plain smoke, so `agents doctor --refresh` does not clear interactive-only; a live smoke in your repository does: `howlplane agents doctor --live --repo <path>`.
+
+Cursor runs planning with `--mode plan` and review and acceptance with `--mode ask`. Both are read-only, but in print mode `plan` produced no text for a review, which showed up as repeated `AUDIT_NO_VERDICT` results.
+
+A rejection judges one repository state. When the repository changes before `resume` (for example you fixed what the verdict named), review and acceptance exclusions that came from verdicts expire, the stale `audit` result is cleared, and the session is judged again after verification (pass `--verify`). If nothing changed, `resume` stops again with the same guidance. `orchestrate discard` starts over.
+
+Only the session orchestrator accepts, with one exception: if the orchestrator is disqualified for a reason unrelated to the work (capability, availability, capacity, as when its own implementation attempt was denied permission), the next eligible agent takes over, with a `TAKEOVER` event, so the session cannot deadlock. A verdict from any agent is final until the repository changes: a rejection is never shopped to another agent (see DOG-007 recovery above).
+
 ### Session lifecycle and resumability
 
 Orchestration sessions classify states into distinct lifecycle categories:
