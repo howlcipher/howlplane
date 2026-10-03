@@ -1,0 +1,15 @@
+HOWL ORCHESTRATION
+Session: 599376b8...
+Goal: Design and build a small but real command-line application for managing recurring househo…
+Requested orchestrator: AUTO
+Selected orchestrator: pending
+Strategy: BALANCED
+Failover: AUTO REROUTE
+Execution: PLAN + EXECUTE + INDEPENDENT AUDIT
+
+Starting orchestration...
+[00:17:42] PLAN        Building implementation plan
+[00:17:42] ROUTE       Claude skipped: unattended execution unavailable
+[00:17:42] SELECT      Codex for planning: unattended verified · live smoke stale · capacity UNKNOWN
+[00:17:42] ASSIGN      Codex assigned task 599376b8: planning
+[00:17:42] START       Codex started planning

@@ -4,13 +4,13 @@
 Prove a normal user can ask Howl for a household recurring-task CLI app (add, list, complete with timestamp, due-again detection, local persistence, tests, usage docs) via the public CLI and get a working result. Two consecutive clean runs required.
 
 ## Current Status
-RUNNING (run-001 ended HANDOFF REQUIRED; DOG-001 open)
+RUNNING (run-002 in progress, verifying DOG-001 fix)
 
 ## Current Run
-run-001 (started 2026-10-02 21:14 local; evidence in runs/run-001/)
+run-002 (evidence in runs/run-002/)
 
 ## Current Phase
-Repair mode for DOG-001. Session 791d33f0 is resumable at stage acceptance.
+run-002 started (fresh target dogfood-missions/run-002/household-tasks, same mission) to regress DOG-001. run-001 session 791d33f0 left resumable at acceptance; ignore it.
 
 ## Last User Command
 `howl orchestrate "<mission in runs/run-001/00-mission.txt>" --repo /run/media/system/tallgeese/dev/dogfood-missions/run-001/household-tasks` (after `howl factory prepare --repo ... --yes`, `howl agents doctor --repo ...`)
@@ -28,7 +28,8 @@ n/a
 none
 
 ## Latest Commits
-none yet
+howlplane dogfood/DOG-001-persist-verdict-text 110091a (push in progress, log /tmp/claude-1000/push-dog001.log)
+howlplane dogfood/campaign-household-tasks 8251ad0 (local only)
 
 ## Repositories Modified
 howlplane: branch dogfood/campaign-household-tasks (campaign records only)
@@ -43,7 +44,8 @@ none
 4. Independently verify output (Phase 19).
 
 ## Resume Instructions
-1. cd /run/media/system/tallgeese/dev/howlplane && git checkout dogfood/campaign-household-tasks
+Campaign records live in the worktree /run/media/system/tallgeese/dev/howlplane-dogfood-campaign (branch dogfood/campaign-household-tasks). The howlplane checkout (/run/media/system/tallgeese/dev/howlplane) must stay on the repair branch, because the installed engine is an editable install of that working tree (so the checked-out branch IS what `howl orchestrate` runs).
+1. cd /run/media/system/tallgeese/dev/howlplane-dogfood-campaign
 2. Read this file, findings/FINDINGS.md, journal.
 3. `howl orchestrate inspect --json --repo <target>` to see any live session before starting anything new.
 

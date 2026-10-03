@@ -2,7 +2,7 @@
 
 ## DOG-001 — Review/acceptance verdict text is discarded; user cannot see why a session stopped
 
-Status: OPEN (investigating, run-001)
+Status: FIX COMMITTED, PUSH IN PROGRESS, awaiting regression in run-002
 Severity: High (false-success and UX; blocks diagnosis of every audit/acceptance stop)
 Discovered in run: run-001
 Owning component: HowlPlane orchestration
@@ -27,10 +27,22 @@ User cannot tell whether the app is wrong or the acceptance was spurious. Cursor
 Hard-failed review/acceptance attempts persist no verdict text. (Sub-question, DOG-002 candidate: should a reviewer's findings be overridden by another reviewer's CLEAN without reconciliation?)
 
 ### Resolution
-TBD
+Review and acceptance attempts now store a redacted `verdict_excerpt` (last 4000 chars of stdout). Report prints it for AUDIT_FINDINGS_OR_UNCONFIRMED and ACCEPTANCE_REJECTED_OR_UNCONFIRMED attempts. Docs: documentation/ORCHESTRATE.md.
 
-### Tests / Commit / Regression verification
-TBD
+Not yet addressed (DOG-002 candidate): a reviewer's findings are treated as a worker failure and a different reviewer's CLEAN supersedes them. Decide after seeing real verdict text.
+
+### Tests
+New parametrized test_non_clean_verdicts_are_visible_in_report; tests/test_orchestration.py 21 passed; `-k 'orchestrat or closed_loop or handoff or factory'` 549 passed.
+
+### Commit
+Repository: howlplane
+Branch: dogfood/DOG-001-persist-verdict-text (from main 83b117c)
+SHA: 110091a
+Remote: origin
+Push status: IN PROGRESS (pre-push hook runs the full suite)
+
+### Regression verification
+run-002 (pending)
 
 ### Notes
 Generated app itself (independently checked after handoff): `python3 -m household_tasks --help` works; `bash scripts/test.sh` passes 11 tests incl. cross-process persistence. Files are uncommitted in the target working tree (README.md modified, others untracked); the session did not commit them.
