@@ -36,6 +36,8 @@ After a timeout, the repository is checkpointed. Partial changes are recorded, a
 
 Review and acceptance attempts keep a redacted excerpt (last 4000 characters) of the reviewer's or orchestrator's verdict as `verdict_excerpt` in the session manifest. `report` and `orchestrate` final output print it for every `AUDIT_FINDINGS_OR_UNCONFIRMED` or `ACCEPTANCE_REJECTED_OR_UNCONFIRMED` attempt, so the reason a session stopped is readable without opening the manifest.
 
+The acceptance prompt includes the recorded verdicts of every independent review attempt, including reviewers that were superseded after reporting findings, so the orchestrator weighs the actual audit instead of rejecting for missing evidence.
+
 ### Session lifecycle and resumability
 
 Orchestration sessions classify states into distinct lifecycle categories:

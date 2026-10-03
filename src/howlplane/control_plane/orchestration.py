@@ -146,6 +146,7 @@ def redact(value: str) -> str:
 
 
 VERDICT_EXCERPT_CHARS = 4000
+AUDIT_EVIDENCE_CHARS = 2500
 AGENT_NAMES = {"claude_code": "Claude", "codex": "Codex", "cursor": "Cursor", "agy": "AGY", "devin_cli": "Devin"}
 PHASE_NAMES = {"planning": "PLAN", "implementation": "IMPLEMENT", "review": "AUDIT", "acceptance": "INTEGRATE", "verification": "VERIFY"}
 PRIVATE_REASONING = re.compile(r"(?i)(?:private\s+)?(?:chain[- ]of[- ]thought|internal reasoning).*?(?:[.;]|$)")
@@ -965,6 +966,25 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     }
 
 
+def audit_evidence_for_acceptance(doc: dict[str, Any]) -> str:
+    """Hand the acceptance worker the independent audit it is told to weigh.
+
+    Review verdicts exist only in the session manifest; without them an
+    orchestrator that is told to inspect the audit can only reject for missing
+    evidence (DOG-002). Superseded findings are included so a later CLEAN
+    verdict never silently hides them.
+    """
+    reviews = [item for item in doc["attempts"] if item.get("stage") == "review" and item.get("verdict_excerpt") is not None]
+    if not reviews:
+        return ""
+    lines = [" Independent audit evidence recorded by HowlPlane (verdicts from reviewers other than you):"]
+    for item in reviews:
+        outcome = "ACCEPTED AS CLEAN" if item.get("state") == "SUCCEEDED" else f"NOT CLEAN ({item.get('failure')})"
+        excerpt = item["verdict_excerpt"].strip()[-AUDIT_EVIDENCE_CHARS:] or "(reviewer returned no text)"
+        lines.append(f"\n--- {AGENT_NAMES.get(item['agent'], item['agent'])} review, {outcome} ---\n{excerpt}")
+    return "".join(lines) + "\n--- end of audit evidence ---"
+
+
 def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, repo: Path) -> Any:
     instructions = (
         f"Goal: {doc['goal']}\nRole: {role}. Work only in {repo}. "
@@ -976,6 +996,7 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         instructions += "Independently inspect the current diff and falsify correctness. Do not edit files. End with exactly AUDIT_STATUS: CLEAN only if you found no issue; otherwise end with AUDIT_STATUS: FINDINGS."
     elif role == "acceptance":
         instructions += "As session orchestrator, inspect implementation, tests, and independent audit. Do not edit files. End with exactly ACCEPTANCE_STATUS: ACCEPTED only if evidence supports the goal; otherwise end with ACCEPTANCE_STATUS: REJECTED."
+        instructions += audit_evidence_for_acceptance(doc)
     elif role == "implementation":
         instructions += "Implement the goal and run relevant local tests. Inspect existing partial changes first."
         if is_existing_wip_context(doc["goal"], doc.get("constraints", [])):

@@ -181,6 +181,29 @@ def test_non_clean_verdicts_are_visible_in_report(tmp_path, monkeypatch, capsys,
     assert "hunter2abc" not in output
 
 
+def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeypatch):
+    # DOG-002: acceptance was told to inspect the independent audit but was
+    # never given it, so it rejected a clean audit as "missing evidence".
+    prompts = []
+
+    class Recorder:
+        def execute(self, task, repo, role, prompt_override, **kwargs):
+            prompts.append((role, prompt_override))
+            return result("codex", role)
+
+    monkeypatch.setattr(module.AgentBackendRegistry, "get_backend", lambda agent: Recorder())
+    doc = {"id": "x", "goal": "g", "constraints": [], "execution_budget": {}, "workspace_trust_policy": {"policy": "prepare"},
+           "attempts": [
+               {"stage": "review", "agent": "cursor", "state": "REVOKED", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED", "verdict_excerpt": "bug in due()"},
+               {"stage": "review", "agent": "agy", "state": "SUCCEEDED", "failure": None, "verdict_excerpt": "all fine\nAUDIT_STATUS: CLEAN"}]}
+    module.execute_assignment(doc, "acceptance", "codex", "UNKNOWN", tmp_path)
+    module.execute_assignment(doc, "review", "agy", "UNKNOWN", tmp_path)
+    acceptance = dict(prompts)["acceptance"]
+    assert "Cursor review, NOT CLEAN (AUDIT_FINDINGS_OR_UNCONFIRMED)" in acceptance and "bug in due()" in acceptance
+    assert "AGY review, ACCEPTED AS CLEAN" in acceptance and "AUDIT_STATUS: CLEAN" in acceptance
+    assert "Independent audit evidence" not in dict(prompts)["review"]
+
+
 def test_cursor_backend_passes_selected_model_without_generation_probe(tmp_path, monkeypatch):
     from howlplane.control_plane.agent_execution import CursorBackend
     from howlplane.control_plane.task_spec import TaskSpec
