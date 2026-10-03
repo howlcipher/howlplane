@@ -65,3 +65,7 @@ Many other agents' worktrees exist; do not modify them. Do not use local LLM pro
 - howlplane branch dogfood/followups-reviewer-and-recovery pushed through ce14f29 (DOG-004..007, DOG-010 corrected). howl branch dogfood/readme-orchestrate pushed (95b78ac).
 - Open: DOG-009 (default --verify, design), DOG-011 (no rework loop, design; waiting on the user's choice).
 - Resume: read findings DOG-009/DOG-011; if a rework design is chosen, implement on a new branch from dogfood/followups-reviewer-and-recovery, then run two fresh missions.
+
+## Status update (run-009)
+- run-009 CLEAN RUN 1/2 on the new code (howlplane dogfood/rework-and-default-verify). run-010 in progress for clean run 2.
+- Branch/PR state: howlplane PR #139 (dogfood/followups-reviewer-and-recovery) and howl PR #14 open, unmerged; dogfood/rework-and-default-verify pushed, no PR yet (stacked on #139).

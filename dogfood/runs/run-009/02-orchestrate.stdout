@@ -1,0 +1,28 @@
+HOWL ORCHESTRATION REPORT
+Session: 7feafe82b4314a8db1717b0956f01afd
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: codex
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 5
+Reroutes: 1
+Repository head: 4387fd243da11542aa72df656fcd548fecadc9c3
+Repository status: M README.md
+?? .gitignore
+?? documentation/evidence.jsonl
+?? documentation/implementation.md
+?? documentation/test_impact.json
+?? household_tasks.py
+?? scripts/demo.sh
+?? scripts/lint.sh
+?? scripts/test.sh
+?? tests/test_household_tasks.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "(test_household_tasks.HouseholdTasksTests.test_invalid_inputs_do_not_create_database) ... ok\ntest_leap_day_recurrence (test_household_tasks.HouseholdTasksTests.test_leap_day_recurrence) ... ok\ntest_lifecycle_persists_across_processes_and_retains_history (test_household_tasks.HouseholdTasksTests.test_lifecycle_persists_across_processes_and_retains_history) ... ok\ntest_missing_task_and_invalid_completion_do_not_mutate (test_household_tasks.HouseholdTasksTests.test_missing_task_and_invalid_completion_do_not_mutate) ... ok\ntest_storage_failure_is_friendly (test_household_tasks.HouseholdTasksTests.test_storage_failure_is_friendly) ... ok\ntest_text_output_and_sql_metacharacters (test_household_tasks.HouseholdTasksTests.test_text_output_and_sql_metacharacters) ... ok\ntest_unsupported_schema_is_not_modified (test_household_tasks.HouseholdTasksTests.test_unsupported_schema_is_not_modified) ... ok\n\n----------------------------------------------------------------------\nRan 15 tests in 4.857s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: bash scripts/test.sh (derived from the project's discovered test command)
+Timed-out assignments: [{"stage": "review", "agent": "cursor", "model": "UNKNOWN", "execution_budget_seconds": 300}]
+Failures: [{"stage": "review", "agent": "cursor", "model": "UNKNOWN", "failure": "EXECUTION_BUDGET_EXCEEDED"}]

@@ -18,3 +18,4 @@
 - 2026-10-03 follow-ups: DOG-004..008 written up; code committed 338478b; starting regression runs.
 - run-007 resume: DOG-010 first fix produced false success (Codex rejected, Cursor accepted). Corrected: any-agent verdict is final. Run-007 not counted.
 - run-008: HANDOFF REQUIRED on real Cursor finding (README JSON-error claim). DOG-011 filed. PRs being opened for followups + readme.
+- run-009 COMPLETE + verified: clean run 1/2 on new code. Starting run-010.

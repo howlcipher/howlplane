@@ -165,3 +165,7 @@ Why it surfaced now: before DOG-006 the Cursor review was always empty, so findi
 Behavior today: findings route to "another reviewer"; the implementer is never asked to fix them. The only recovery is a human editing the repository, then `resume --verify`.
 Options (see the question put to the user): bounded rework loop (feed findings to the implementer, re-review, cap N rounds); advisory findings with acceptance deciding; or keep the human-in-the-loop handoff.
 Run-008 is not a clean run (HANDOFF REQUIRED). Streak: 0.
+
+## Follow-up status (after DOG-009/011 implementation)
+DOG-009 and DOG-011 implemented on howlplane dogfood/rework-and-default-verify (user chose: bounded rework loop, project-derived verify). Run-009 verified DOG-009 live (derived verify ran and passed). DOG-011's loop is covered by tests but has not fired in a live run yet (run-009's reviewer returned CLEAN).
+Observation (not fixed, DOG-012 candidate): Cursor review in --mode ask takes 213-300+ s (runs 006, 008, 009), right at the 300 s default review budget, so it times out in some runs and is replaced. Raising the review budget or using a faster Cursor model is an operator choice (`--execution-budget review=600`); no code change made.
