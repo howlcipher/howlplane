@@ -44,6 +44,13 @@ def test_summary_counts_and_remediation_command():
     assert "Worker" in text and "UNAVAILABLE" in text and text.isascii()
 
 
+def test_interactive_only_worker_points_at_live_repo_smoke_not_refresh():
+    # DOG-005: `--refresh` keeps a real session's permission verdict, so the advice must name the command that replaces it.
+    text = "\n".join(render_worker_summary([_agent("Claude", unattended_execution=False)]))
+    assert "howlplane agents doctor --live --repo <path-to-your-repo>" in text
+    assert "howlplane agents doctor --live --repo" not in "\n".join(render_worker_summary([_agent("Codex"), _agent("Devin", authenticated=False)]))
+
+
 def test_all_ready_needs_no_action():
     assert "No action required." in "\n".join(render_worker_summary([_agent("Codex")]))
 

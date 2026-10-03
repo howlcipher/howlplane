@@ -23,6 +23,8 @@ from typing import Any, Callable, TextIO
 from howlplane.control_plane import agent_readiness, workspace_trust
 from howlplane.control_plane.agent_execution import AgentBackendRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
+from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+from howlplane.control_plane.provider_execution_profile import is_mutating_role
 from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 from howlplane.control_plane.task_spec import TaskSpec
 
@@ -678,7 +680,10 @@ def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failu
                                     "role": role, "source": "orchestrate session", "detected_at": at or now(),
                                     "policy": policy, "mechanism": workspace_trust.mechanism(agent, policy)}
         return None
-    if failure == "EXECUTION_PERMISSION_REQUIRED":
+    if failure == "EXECUTION_PERMISSION_REQUIRED" and is_mutating_role(role):
+        # A denial in a read-only role means the worker reached for a tool that
+        # role never holds. It says nothing about unattended mutation, so it
+        # must not take the agent out of every other role (DOG-004).
         record_capability_failure(doc, agent, failure, at)
     if failure in UNAVAILABLE_FAILURES:
         state["state"] = "UNAVAILABLE"
@@ -947,8 +952,13 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     model_states = {f"{agent}:{limit.rsplit(':', 1)[0]}": "EXHAUSTED"
                     for agent, record in agents.items() for limit in record["readiness"]["model_limits"]}
     if lead != "AUTO" and agents[lead]["state"] != "AVAILABLE":
-        raise ValueError("Selected orchestrator is not available for this session"
-                         + (f" ({agents[lead]['unavailable_reason']})" if agents[lead].get("unavailable_reason") else ""))
+        record = agents[lead]
+        reason = record.get("unavailable_reason") or record["capabilities"].get("reason") or record["state"]
+        raise OperatorFailure(OperatorError(
+            "ORCHESTRATOR_UNAVAILABLE", f"The selected orchestrator {lead} is not available ({reason}).",
+            "HowlPlane's readiness evidence for this agent says it cannot run unattended right now.",
+            "Pick another agent, use AUTO, or refresh the evidence for this agent.",
+            f"howlplane agents doctor --live --repo {repo}"))
     if lead != "AUTO" and (agents[lead].get("workspace_trust") or {}).get("effective_state") == workspace_trust.TRUST_REQUIRED:
         raise ValueError(f"Selected orchestrator {AGENT_NAMES.get(lead, lead)} does not trust {snapshot['root']} yet "
                          f"(workspace trust policy {resolved_policy['policy']}); prepare it with `howlplane factory prepare` "
@@ -1008,6 +1018,11 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
                              "verify them against local tests and report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED.")
     else:
         instructions += "Produce a bounded implementation plan and acceptance criteria. Do not edit files."
+    if agent == "claude_code" and not is_mutating_role(role):
+        # Claude's read-only roles hold Read, Grep and Glob but no shell; a
+        # shell attempt is denied and fails the assignment, which then marks
+        # the agent interactive-only for the whole session (DOG-004).
+        instructions += " Shell commands are unavailable in this role: use only the Read, Grep and Glob tools to inspect files."
     if any(item.get("stage") == role and item.get("state") == "TIMED_OUT" and item.get("partial_changes") for item in doc["attempts"]):
         instructions += (" An earlier attempt at this role reached its execution budget and left partial changes: "
                          "inspect and continue them rather than starting over.")
@@ -1033,6 +1048,29 @@ def checkpoint(doc: dict[str, Any], path: Path, token: str, repo: Path) -> None:
         save(path, doc, token)
 
 
+VERDICT_FAILURES = frozenset({"AUDIT_FINDINGS_OR_UNCONFIRMED", "AUDIT_NO_VERDICT", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"})
+
+
+def expire_verdict_exclusions(doc: dict[str, Any]) -> None:
+    """Drop review/acceptance exclusions that were verdicts on a repository state that no longer exists.
+
+    A rejection judges one state of the work. Once the repository has changed (for
+    example the user fixed what the verdict named), the same agent must be able to
+    judge the new state, or `resume` finds no acceptance worker (DOG-007).
+    """
+    for agent in AGENTS:
+        state = agent_record(doc, agent)
+        for role in ("review", "acceptance"):
+            if state["capacity"].get(role, {}).get("reason") in VERDICT_FAILURES:
+                del state["capacity"][role]
+        if (state["state"] == "DEGRADED" and not state["capacity"]
+                and state["capabilities"]["unattended_execution"] is not False):
+            state["state"] = "AVAILABLE"
+    doc.pop("audit", None)
+    doc.pop("acceptance", None)
+    doc.pop("exclusions", None)
+
+
 def reconcile(doc: dict[str, Any], repo: Path) -> None:
     if doc["attempts"] and doc["attempts"][-1].get("state") == "ASSIGNED":
         doc["attempts"][-1].update({"state": "REVOKED", "failure": "INTERRUPTED_OR_STALE_LEASE", "finished_at": now()})
@@ -1042,6 +1080,7 @@ def reconcile(doc: dict[str, Any], repo: Path) -> None:
         doc["reconciliation"] = {"recorded": fingerprint(previous), "actual": fingerprint(actual), "at": now(), "needs_validation": True}
         doc["tests"] = []
         doc["stage"] = "implementation" if doc["policy"] != "PLAN ONLY" else "planning"
+        expire_verdict_exclusions(doc)
     doc["repository_evidence"] = actual
 
 
@@ -1198,7 +1237,8 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 assignment["workspace"] = str(repo)
                 agent_readiness.record_workspace_trust(agent, str(repo), stage, "orchestrate session",
                                                        policy=invocation_policy)
-            elif assignment["failure"] is None or assignment["failure"] in UNAVAILABLE_FAILURES | MODEL_LIMIT_FAILURES | {"EXECUTION_PERMISSION_REQUIRED"}:
+            elif assignment["failure"] is None or assignment["failure"] in UNAVAILABLE_FAILURES | MODEL_LIMIT_FAILURES | (
+                    {"EXECUTION_PERMISSION_REQUIRED"} if is_mutating_role(stage) else set()):
                 agent_readiness.record_session_outcome(agent, model, assignment["failure"],
                                                        detail=f"{result.error_message or ''}\n{result.stderr}")
             if assignment["state"] == "SUCCEEDED":
@@ -1231,7 +1271,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 if assignment["failure"] in WORKSPACE_TRUST_FAILURES:
                     progress._write("TRUST", f"{AGENT_NAMES.get(agent, agent)} requires workspace trust for {repo}; "
                                              "rerouting (the agent stays eligible elsewhere)")
-                elif assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED":
+                elif assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED" and is_mutating_role(stage):
                     progress.capability_downgrade(agent)
                 elif exclusion:
                     progress.role_excluded(agent, stage, exclusion)
@@ -1349,6 +1389,12 @@ def report(doc: dict[str, Any]) -> int:
     if doc.get("exclusions") and (is_final(doc) or doc["status"] == "HANDOFF REQUIRED"):
         print(f"Excluded {doc['exclusions']['stage']} workers: {json.dumps(doc['exclusions']['agents'])}")
     print(f"Failures: {json.dumps([{'stage': a['stage'], 'agent': a['agent'], 'model': a['model'], 'failure': a.get('failure')} for a in doc['attempts'] if a.get('failure')])}")
+    if doc["status"] == "HANDOFF REQUIRED" and doc.get("stage") == "acceptance" and any(
+            a.get("failure") == "ACCEPTANCE_REJECTED_OR_UNCONFIRMED" for a in doc["attempts"]):
+        print("Next: the orchestrator rejected acceptance (verdict below). Address what it names in the repository, then run\n"
+              f"  howlplane orchestrate resume --repo {doc['repository']} --verify <your test command>\n"
+              "Changing the repository lets the same session be judged again. If the verdict is not actionable, run\n"
+              f"  howlplane orchestrate discard --repo {doc['repository']}\nand start a new session.")
     for attempt in doc["attempts"]:
         if attempt.get("failure") in {"AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"} and attempt.get("verdict_excerpt"):
             print(f"Verdict from {AGENT_NAMES.get(attempt['agent'], attempt['agent'])} ({attempt['stage']}, {attempt['failure']}):")
