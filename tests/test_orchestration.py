@@ -193,6 +193,19 @@ def test_non_clean_verdicts_are_classified_and_visible(tmp_path, monkeypatch, ca
     assert "hunter2abc" not in output
 
 
+def test_clean_review_notes_are_shown_in_the_report(tmp_path, monkeypatch, capsys):
+    # DOG-015: non-blocking notes live only in a CLEAN verdict (DOG-013), the report printed
+    # only non-clean verdicts, and a COMPLETE session's manifest is deleted, so they were lost.
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "execute_assignment", scripted_execute(
+        review="NON-BLOCKING: dates are local time only\nAUDIT_STATUS: CLEAN"))
+    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 0
+    out = capsys.readouterr().out
+    assert "Status: COMPLETE" in out
+    assert "Review notes from" in out and "(review, CLEAN):" in out and "  NON-BLOCKING: dates are local time only" in out
+
+
 def test_rejected_acceptance_recovers_after_the_repository_is_repaired(tmp_path, monkeypatch, capsys):
     # DOG-007: the rejecting orchestrator stayed excluded from acceptance, so `resume` after the
     # user fixed what the verdict named found no worker and re-printed the same handoff.

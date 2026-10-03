@@ -1507,6 +1507,10 @@ def report(doc: dict[str, Any]) -> int:
         if attempt.get("failure") in {"AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"} and attempt.get("verdict_excerpt"):
             print(f"Verdict from {AGENT_NAMES.get(attempt['agent'], attempt['agent'])} ({attempt['stage']}, {attempt['failure']}):")
             print("\n".join(f"  {line}" for line in attempt["verdict_excerpt"].splitlines()))
+        elif attempt.get("stage") == "review" and attempt.get("state") == "SUCCEEDED" and attempt.get("verdict_excerpt"):
+            # Non-blocking notes exist only here, and a finished session's manifest is removed (DOG-015).
+            print(f"Review notes from {AGENT_NAMES.get(attempt['agent'], attempt['agent'])} (review, CLEAN):")
+            print("\n".join(f"  {line}" for line in attempt["verdict_excerpt"].splitlines()))
     return 0 if doc["status"] in {"COMPLETE", "COMPLETE WITH WARNINGS"} else 2
 
 
