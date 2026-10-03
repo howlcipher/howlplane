@@ -154,51 +154,41 @@ def test_lead_accepts_after_independent_clean_audit(tmp_path, monkeypatch, capsy
     assert "Status: COMPLETE" in capsys.readouterr().out
 
 
+def scripted_execute(**stdout_by_stage):
+    """Worker stub: implementation edits README; other stages reply with the scripted text."""
+    defaults = {"review": "AUDIT_STATUS: CLEAN", "acceptance": "ACCEPTANCE_STATUS: ACCEPTED"}
+
+    def execute(doc, stage, agent, model, cwd):
+        if stage == "implementation":
+            (cwd / "README").write_text("changed\n")
+        outcome = result(agent, stage)
+        outcome.stdout = stdout_by_stage.get(stage, defaults.get(stage, "plan"))
+        return outcome
+
+    return execute
+
+
 @pytest.mark.parametrize("role, verdict, failure, reason", [
     ("review", "Finding: add --due validation\nAUDIT_STATUS: FINDINGS", "AUDIT_FINDINGS_OR_UNCONFIRMED", "Finding: add --due validation"),
+    ("review", "", "AUDIT_NO_VERDICT", None),
     ("acceptance", "Missing test, token=hunter2abc\nACCEPTANCE_STATUS: REJECTED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED", "Missing test"),
 ])
-def test_non_clean_verdicts_are_visible_in_report(tmp_path, monkeypatch, capsys, role, verdict, failure, reason):
-    # DOG-001: the verdict text was hashed and discarded, so a user could not
-    # tell why a session stopped at HANDOFF REQUIRED.
+def test_non_clean_verdicts_are_classified_and_visible(tmp_path, monkeypatch, capsys, role, verdict, failure, reason):
+    # DOG-001: verdict text was hashed and discarded, so a stop reason was unreadable.
+    # DOG-003: an exit-0 reviewer with no text is a provider fault (AUDIT_NO_VERDICT), not findings.
     repo = repository(tmp_path)
     enable_fake_review_pair(tmp_path, monkeypatch)
-
-    def execute(doc, stage, agent, model, cwd):
-        if stage == "implementation":
-            (cwd / "README").write_text("changed\n")
-        outcome = result(agent, stage)
-        outcome.stdout = {"review": "AUDIT_STATUS: CLEAN", "acceptance": "ACCEPTANCE_STATUS: ACCEPTED"}.get(stage, "plan")
-        if stage == role:
-            outcome.stdout = verdict
-        return outcome
-
-    monkeypatch.setattr(module, "execute_assignment", execute)
-    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 2
-    output = capsys.readouterr().out
-    assert f"({role}, {failure})" in output
-    assert reason in output
-    assert "hunter2abc" not in output
-
-
-def test_empty_review_is_no_verdict_not_findings(tmp_path, monkeypatch, capsys):
-    # DOG-003: a reviewer that exits 0 with no text is a provider fault. It was
-    # reported as findings, and acceptance then refused to accept (run-004).
-    repo = repository(tmp_path)
-    enable_fake_review_pair(tmp_path, monkeypatch)
-
-    def execute(doc, stage, agent, model, cwd):
-        if stage == "implementation":
-            (cwd / "README").write_text("changed\n")
-        outcome = result(agent, stage)
-        outcome.stdout = "" if stage == "review" else "plan"
-        return outcome
-
-    monkeypatch.setattr(module, "execute_assignment", execute)
+    monkeypatch.setattr(module, "execute_assignment", scripted_execute(**{role: verdict}))
     assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 2
     captured = capsys.readouterr()
-    assert "review failed: AUDIT_NO_VERDICT" in captured.err + captured.out
-    assert "AUDIT_FINDINGS_OR_UNCONFIRMED" not in captured.err + captured.out
+    output = captured.out + captured.err
+    assert f"{role} failed: {failure}" in output
+    if reason:
+        assert f"({role}, {failure})" in captured.out
+        assert reason in captured.out
+    else:
+        assert "AUDIT_FINDINGS_OR_UNCONFIRMED" not in output
+    assert "hunter2abc" not in output
 
 
 def test_acceptance_evidence_marks_no_verdict_reviewer_as_provider_fault():
