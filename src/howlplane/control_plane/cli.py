@@ -1190,6 +1190,7 @@ _TOP_LEVEL_HELP_GROUPS = [
     ("Everyday", ["setup", "start", "status", "logs", "stop", "approve", "reject", "doctor"]),
     ("Governance and recovery", ["resume", "cancel", "unlock", "tia", "config"]),
     ("Diagnostics and inspection", ["agents", "providers", "route", "trace", "explore", "metrics", "report"]),
+    ("Creative pipeline", ["creative"]),
     ("Factory internals", ["factory"]),
 ]
 
@@ -1328,9 +1329,17 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     doctor_scope.add_argument("--factory", action="store_true", help="Only the repository and Factory checks")
     doctor_scope.add_argument("--ready", action="store_true",
                               help="Print READY or NOT READY with the fix for each blocker; exit 1 when not ready")
+    doctor_scope.add_argument("--creative", action="store_true",
+                              help="Preflight the Dream -> Writer -> Create pipeline (PASS/WARN/FAIL)")
+    p_doctor.add_argument("--command-config", help="With --creative: remote provider profile to validate")
+    p_doctor.add_argument("--repos-root", help="With --creative: directory holding local Howl checkouts")
+    p_doctor.add_argument("--workspace", help="With --creative: workspace to check for write access")
     p_doctor.add_argument("--live", action="store_true", help="Run a short read-only smoke test of each worker")
     _add_workspace_trust_argument(p_doctor)
     p_doctor.add_argument("--json", action="store_true", help="Output versioned JSON")
+
+    from howlplane.control_plane import creative_pipeline
+    creative_pipeline.add_parser(subparsers, common_parser)
 
     # agents
     p_agents = subparsers.add_parser("agents", parents=[common_parser], help="Inspect supported agent CLIs")
@@ -2574,6 +2583,7 @@ HANDLERS = {
     "factory": cmd_factory,
     "explore": cmd_explore,
     "trace": cmd_trace,
+    "creative": lambda args: __import__("howlplane.control_plane.creative_pipeline", fromlist=["command"]).command(args),
 }
 
 ACTIONS = HANDLERS
