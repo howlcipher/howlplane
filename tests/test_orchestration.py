@@ -213,31 +213,49 @@ def test_rejected_acceptance_recovers_after_the_repository_is_repaired(tmp_path,
     assert "Status: COMPLETE" in capsys.readouterr().out
 
 
-def test_acceptance_moves_to_another_agent_when_the_orchestrator_is_disqualified(tmp_path, monkeypatch, capsys):
-    # DOG-010 (run-007): Claude planned and became orchestrator, its implementation was denied, and the
-    # session deadlocked because only the orchestrator may accept.
+def disqualified_orchestrator_session(tmp_path, monkeypatch, codex_acceptance):
+    """Claude plans (so it is the orchestrator) and is then denied permission to implement (DOG-010, run-007).
+
+    Returns the agents that were asked to accept, in order, and the session exit status.
+    """
     repo = repository(tmp_path)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setattr(module.shutil, "which", lambda name: "/fake/" + name if name in {"claude", "codex", "agent"} else None)
     monkeypatch.setattr(module, "discover_models", lambda agent: [])
-    roles = []
+    acceptors = []
 
     def execute(doc, stage, agent, model, cwd):
-        roles.append((stage, agent))
         denied = agent == "claude_code" and stage == "implementation"
         if stage == "implementation" and not denied:
             (cwd / "README").write_text("changed\n")
+        if stage == "acceptance":
+            acceptors.append(agent)
         outcome = result(agent, stage, not denied, "EXECUTION_PERMISSION_REQUIRED" if denied else "")
-        outcome.stdout = {"review": "AUDIT_STATUS: CLEAN", "acceptance": "ACCEPTANCE_STATUS: ACCEPTED"}.get(stage, "plan")
+        accepted = "ACCEPTANCE_STATUS: ACCEPTED"
+        outcome.stdout = {"review": "AUDIT_STATUS: CLEAN",
+                          "acceptance": codex_acceptance if agent == "codex" else accepted}.get(stage, "plan")
         return outcome
 
     monkeypatch.setattr(module, "execute_assignment", execute)
-    status = module.command(arguments(repo, orchestrator="AUTO", policy="PLAN + EXECUTE + INDEPENDENT AUDIT", verify=["git", "diff", "--check"]))
+    status = module.command(arguments(repo, orchestrator="AUTO", policy="PLAN + EXECUTE + INDEPENDENT AUDIT",
+                                      verify=["git", "diff", "--check"]))
+    return acceptors, status
+
+
+def test_acceptance_moves_to_another_agent_when_the_orchestrator_is_disqualified(tmp_path, monkeypatch, capsys):
+    acceptors, status = disqualified_orchestrator_session(tmp_path, monkeypatch, "ACCEPTANCE_STATUS: ACCEPTED")
     captured = capsys.readouterr()
-    assert roles[0] == ("planning", "claude_code") and ("acceptance", "claude_code") not in roles
-    assert [item for item in roles if item[0] == "acceptance"], roles
+    assert acceptors == ["codex"] and "claude_code" not in acceptors
     assert "TAKEOVER" in captured.err and "could not accept" in captured.err
     assert status == 0, captured.err + captured.out
+
+
+def test_a_rejection_by_the_taking_over_agent_is_final_and_not_shopped_to_a_third(tmp_path, monkeypatch, capsys):
+    # Run-007: Claude was disqualified, Codex took over and REJECTED, then Cursor accepted.
+    acceptors, status = disqualified_orchestrator_session(tmp_path, monkeypatch, "Not convinced.\nACCEPTANCE_STATUS: REJECTED")
+    out = capsys.readouterr().out
+    assert acceptors == ["codex"], acceptors
+    assert status == 2 and "Status: HANDOFF REQUIRED" in out and "Not convinced." in out
 
 
 def test_orchestrator_that_rejected_acceptance_is_not_replaced_by_another_agent(tmp_path, monkeypatch, capsys):

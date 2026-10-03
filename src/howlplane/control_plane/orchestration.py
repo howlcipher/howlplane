@@ -868,8 +868,11 @@ def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
     if role == "acceptance":
         # Only the orchestrator accepts, unless it has been disqualified for a reason unrelated to
         # the work (capability, availability, capacity). Then the next eligible agent takes over so
-        # the session cannot deadlock (DOG-010). An orchestrator that judged and rejected stays final.
-        judged = agent_record(doc, lead)["capacity"].get("acceptance", {}).get("reason") in VERDICT_FAILURES if lead in order else False
+        # the session cannot deadlock (DOG-010).
+        # A verdict from ANY agent is final until the repository changes: shopping a rejection around
+        # until some agent accepts is a false success (run-007, where Codex rejected and Cursor accepted).
+        judged = any(agent_record(doc, agent)["capacity"].get("acceptance", {}).get("reason") in VERDICT_FAILURES
+                     for agent in AGENTS)
         if lead == "AUTO" or judged:
             order = order[:1]
     selected = []

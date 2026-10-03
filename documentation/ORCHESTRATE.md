@@ -46,7 +46,7 @@ Cursor runs planning with `--mode plan` and review and acceptance with `--mode a
 
 A rejection judges one repository state. When the repository changes before `resume` (for example you fixed what the verdict named), review and acceptance exclusions that came from verdicts expire, the stale `audit` result is cleared, and the session is judged again after verification (pass `--verify`). If nothing changed, `resume` stops again with the same guidance. `orchestrate discard` starts over.
 
-Only the session orchestrator accepts, with one exception: if the orchestrator is disqualified for a reason unrelated to the work (capability, availability, capacity, as when its own implementation attempt was denied permission), the next eligible agent takes over, with a `TAKEOVER` event, so the session cannot deadlock. An orchestrator that judged and rejected the work stays final (see DOG-007 recovery above).
+Only the session orchestrator accepts, with one exception: if the orchestrator is disqualified for a reason unrelated to the work (capability, availability, capacity, as when its own implementation attempt was denied permission), the next eligible agent takes over, with a `TAKEOVER` event, so the session cannot deadlock. A verdict from any agent is final until the repository changes: a rejection is never shopped to another agent (see DOG-007 recovery above).
 
 ### Session lifecycle and resumability
 
