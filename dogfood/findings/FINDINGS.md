@@ -50,7 +50,7 @@ Generated app itself (independently checked after handoff): `python3 -m househol
 
 ## DOG-002 — Acceptance worker is never given the independent audit verdicts
 
-Status: FIX COMMITTED (b07a4e0), push in progress, awaiting regression in run-003
+Status: RESOLVED (verified run-003: Codex acceptance ACCEPTED, session COMPLETE)
 Severity: High (workflow blocker; false rejection of working output; hits every run so far)
 Discovered in run: run-001 (reason visible only after DOG-001 fix, confirmed run-002)
 Owning component: HowlPlane orchestration
@@ -75,17 +75,17 @@ The acceptance prompt says "inspect implementation, tests, and independent audit
 New `audit_evidence_for_acceptance()` appends every recorded review verdict (including superseded NOT CLEAN ones) to the acceptance prompt. Test: test_acceptance_prompt_includes_independent_audit_verdicts. Docs: ORCHESTRATE.md.
 
 ### Commit
-Repository: howlplane; Branch: dogfood/DOG-001-persist-verdict-text; SHA: b07a4e0; Push status: IN PROGRESS
+Repository: howlplane; Branch: dogfood/DOG-001-persist-verdict-text; SHA: b07a4e0; Push status: PUSHED (origin/dogfood/DOG-001-persist-verdict-text, 110091a..b07a4e0)
 
 ### Regression verification
-run-003 (pending)
+run-003 exit 0, Status COMPLETE, acceptance completed in ~50s.
 
 ### Notes
 This also closes the earlier concern that a later CLEAN review hides an earlier reviewer's findings: acceptance now sees both.
 
 ## DOG-003 — Empty reviewer output is reported as "findings"
 
-Status: OPEN (not yet repaired; lower priority)
+Status: OPEN, NONBLOCKING (recurred run-003: Cursor review again empty then AGY CLEAN; deliberately not changed between clean runs 1 and 2)
 Severity: Medium (misleading UX)
 Discovered in run: run-002
 Owning component: HowlPlane orchestration

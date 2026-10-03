@@ -28,4 +28,7 @@ Howl 0.1.1; HowlFrame, HowlChangeOps, HowlPlane (+ control-plane engine), HowlWr
 ## Runs
 | Run | Status | Notes |
 | --- | --- | --- |
-| run-001 | PENDING | not yet started |
+| run-001 | FAILED | HANDOFF REQUIRED, DOG-001 |
+| run-002 | FAILED | HANDOFF REQUIRED, DOG-002 (DOG-001 verified) |
+| run-003 | CLEAN RUN 1: PASS | COMPLETE, verified, engine howlplane @b07a4e0 |
+| run-004 | RUNNING | clean run 2 attempt, same code, fresh target |
