@@ -145,6 +145,7 @@ def redact(value: str) -> str:
     return SECRET.sub(lambda match: match.group(1) + "<redacted>" if match.group(1) else "<redacted>", value)
 
 
+VERDICT_EXCERPT_CHARS = 4000
 AGENT_NAMES = {"claude_code": "Claude", "codex": "Codex", "cursor": "Cursor", "agy": "AGY", "devin_cli": "Devin"}
 PHASE_NAMES = {"planning": "PLAN", "implementation": "IMPLEMENT", "review": "AUDIT", "acceptance": "INTEGRATE", "verification": "VERIFY"}
 PRIVATE_REASONING = re.compile(r"(?i)(?:private\s+)?(?:chain[- ]of[- ]thought|internal reasoning).*?(?:[.;]|$)")
@@ -1154,6 +1155,10 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             if result.success and stage == "acceptance" and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
+            if result.success and stage in {"review", "acceptance"}:
+                # The verdict is the only record of why a reviewer or the
+                # orchestrator stopped the session; the hash alone cannot be read.
+                assignment["verdict_excerpt"] = redact((result.stdout or "").strip()[-VERDICT_EXCERPT_CHARS:])
             if assignment["failure"] in ATTEMPT_TIMEOUT_FAILURES:
                 metadata = getattr(result, "metadata", None) or {}
                 budget = execution_budget(doc, stage)
@@ -1319,6 +1324,10 @@ def report(doc: dict[str, Any]) -> int:
     if doc.get("exclusions") and (is_final(doc) or doc["status"] == "HANDOFF REQUIRED"):
         print(f"Excluded {doc['exclusions']['stage']} workers: {json.dumps(doc['exclusions']['agents'])}")
     print(f"Failures: {json.dumps([{'stage': a['stage'], 'agent': a['agent'], 'model': a['model'], 'failure': a.get('failure')} for a in doc['attempts'] if a.get('failure')])}")
+    for attempt in doc["attempts"]:
+        if attempt.get("failure") in {"AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"} and attempt.get("verdict_excerpt"):
+            print(f"Verdict from {AGENT_NAMES.get(attempt['agent'], attempt['agent'])} ({attempt['stage']}, {attempt['failure']}):")
+            print("\n".join(f"  {line}" for line in attempt["verdict_excerpt"].splitlines()))
     return 0 if doc["status"] in {"COMPLETE", "COMPLETE WITH WARNINGS"} else 2
 
 

@@ -34,6 +34,8 @@ An `EXECUTION_BUDGET_EXCEEDED` result means only that this assignment did not fi
 
 After a timeout, the repository is checkpointed. Partial changes are recorded, and the next worker is told to inspect and continue them. Another worker is preferred for the same role. The timed-out agent stays eligible for other roles and other models, just behind other workers for this role. The same goal, constraints, role, agent, model, and budget never run again unchanged, including after `resume`. A retry needs a meaningful change: a different agent or model, a changed goal or constraints, a changed budget (`resume --execution-budget implementation=600`), or an explicit operator retry (`resume --retry-timeouts`, which clears the timeout ledger once and records that it did). When a stage runs out of workers after timeouts, the handoff and report include timeout guidance instead of claiming anything was exhausted.
 
+Review and acceptance attempts keep a redacted excerpt (last 4000 characters) of the reviewer's or orchestrator's verdict as `verdict_excerpt` in the session manifest. `report` and `orchestrate` final output print it for every `AUDIT_FINDINGS_OR_UNCONFIRMED` or `ACCEPTANCE_REJECTED_OR_UNCONFIRMED` attempt, so the reason a session stopped is readable without opening the manifest.
+
 ### Session lifecycle and resumability
 
 Orchestration sessions classify states into distinct lifecycle categories:

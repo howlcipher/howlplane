@@ -154,6 +154,33 @@ def test_lead_accepts_after_independent_clean_audit(tmp_path, monkeypatch, capsy
     assert "Status: COMPLETE" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("role, verdict, failure, reason", [
+    ("review", "Finding: add --due validation\nAUDIT_STATUS: FINDINGS", "AUDIT_FINDINGS_OR_UNCONFIRMED", "Finding: add --due validation"),
+    ("acceptance", "Missing test, token=hunter2abc\nACCEPTANCE_STATUS: REJECTED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED", "Missing test"),
+])
+def test_non_clean_verdicts_are_visible_in_report(tmp_path, monkeypatch, capsys, role, verdict, failure, reason):
+    # DOG-001: the verdict text was hashed and discarded, so a user could not
+    # tell why a session stopped at HANDOFF REQUIRED.
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+
+    def execute(doc, stage, agent, model, cwd):
+        if stage == "implementation":
+            (cwd / "README").write_text("changed\n")
+        outcome = result(agent, stage)
+        outcome.stdout = {"review": "AUDIT_STATUS: CLEAN", "acceptance": "ACCEPTANCE_STATUS: ACCEPTED"}.get(stage, "plan")
+        if stage == role:
+            outcome.stdout = verdict
+        return outcome
+
+    monkeypatch.setattr(module, "execute_assignment", execute)
+    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 2
+    output = capsys.readouterr().out
+    assert f"({role}, {failure})" in output
+    assert reason in output
+    assert "hunter2abc" not in output
+
+
 def test_cursor_backend_passes_selected_model_without_generation_probe(tmp_path, monkeypatch):
     from howlplane.control_plane.agent_execution import CursorBackend
     from howlplane.control_plane.task_spec import TaskSpec
