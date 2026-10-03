@@ -69,3 +69,6 @@ Many other agents' worktrees exist; do not modify them. Do not use local LLM pro
 ## Status update (run-009)
 - run-009 CLEAN RUN 1/2 on the new code (howlplane dogfood/rework-and-default-verify). run-010 in progress for clean run 2.
 - Branch/PR state: howlplane PR #139 (dogfood/followups-reviewer-and-recovery) and howl PR #14 open, unmerged; dogfood/rework-and-default-verify pushed, no PR yet (stacked on #139).
+
+## Status update (run-010)
+PASS on the new code: runs 009 and 010 are two consecutive clean runs (engine aedf82f). See FINAL_REPORT.md addendum. Remaining: PR for dogfood/rework-and-default-verify (stacked on #139), merges are the user's. A live firing of the rework loop is still unobserved.

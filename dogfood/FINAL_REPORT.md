@@ -60,3 +60,34 @@ runs/run-NNN/ (stdout, stderr, exit code, timestamps, manifests for runs 001 and
 3. `howl orchestrate "<mission text from runs/run-001/00-mission.txt>" --repo .`
 4. Expect Status COMPLETE; then run the README commands of the generated app and its test script.
 Requires howlplane main at aeac4b9 or later; the installed engine is an editable install of the howlplane checkout.
+
+
+---
+
+# Addendum: follow-up campaign (after the first PASS)
+
+## Result
+PASS again, on the changed code. Clean runs: **run-009 and run-010**, consecutive, on identical engine source (howlplane `dogfood/rework-and-default-verify` @aedf82f), each from a fresh empty repository with the same mission and no recovery steps. Verification: runs/run-009 and runs/run-010 `VERIFICATION.md`.
+
+Not counted: run-007 (needed a documented `resume --verify`, and a first takeover design let a rejection be shopped to a second agent: a false success caught live and fixed), run-008 (honest HANDOFF REQUIRED on a real Cursor finding; nothing could act on it yet).
+
+## What was done for the four recommended follow-ups
+1. **Cursor empty reviews (DOG-006):** root cause was `--mode plan` printing no text for a review in print mode; review and acceptance now use `--mode ask`. Cursor then produced real findings (run-007, run-008) and a clean review itself (run-010).
+2. **Claude excluded as planner (DOG-004, DOG-005):** a read-only-role permission denial no longer poisons the cross-session readiness cache; Claude's read-only roles are told which tools they hold; an unusable explicit orchestrator is a clean error; `agents doctor` names the command that actually clears interactive-only.
+3. **No recovery after rejection (DOG-007, DOG-010, DOG-011):** verdict exclusions expire when the repository changes; the rejection report gives next steps; if the orchestrator is disqualified for a non-work reason another agent can accept, but a rejection from any agent is final; real review findings now go back to the implementer (bounded, 2 rounds) instead of being shopped to another reviewer.
+4. **howl README (DOG-008):** documents `howl orchestrate`, `agents doctor`, `factory prepare`.
+Also DOG-009: without `--verify`, the project's discovered test command is used and reported as derived.
+
+## Findings (follow-up)
+DOG-004 to DOG-011. All resolved in code; DOG-011's rework loop is covered by tests but **has not fired in a live run** (reviews in runs 009 and 010 were clean). DOG-012 candidate (not fixed): Cursor's `ask`-mode review takes 213 to over 300 s against a 300 s default budget (timed out in run-009 and was replaced); `--execution-budget review=600` is the operator knob.
+
+## Repositories and PRs (none merged by me)
+- howlplane PR #139: `dogfood/followups-reviewer-and-recovery` (DOG-004 to 007, 010).
+- howlplane `dogfood/rework-and-default-verify`: DOG-009, DOG-011, stacked on #139 (PR opened against #139's branch).
+- howl PR #14: README (DOG-008).
+- Campaign records: `dogfood/campaign-household-tasks`.
+
+## Process lessons
+- A change that widens who may approve needs a test where the new approver disagrees (DOG-010).
+- Run `slopslint check --classify --enforce` before committing tests; it blocked pushes twice.
+- The howlplane checkout is the live engine (editable install): its checked-out branch is what `howl orchestrate` runs.
