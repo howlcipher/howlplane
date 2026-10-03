@@ -85,7 +85,7 @@ This also closes the earlier concern that a later CLEAN review hides an earlier 
 
 ## DOG-003 — Empty reviewer output is reported as "findings"
 
-Status: FIX COMMITTED (82d3cde), push in progress, awaiting regression in run-005
+Status: RESOLVED (verified run-005: Cursor empty review classified AUDIT_NO_VERDICT, session COMPLETE)
 Severity: High after run-004 (escalated from Medium: blocked completion)
 Discovered in run: run-002
 Owning component: HowlPlane orchestration
@@ -107,3 +107,6 @@ Resolution: empty exit-0 review stdout is `AUDIT_NO_VERDICT` (in ROLE_FAILURES, 
 Commit: howlplane dogfood/DOG-001-persist-verdict-text 82d3cde. Push: in progress.
 Regression: run-005 (pending).
 Open question for later (not fixed): Cursor reviewer returned empty output in 4 of 4 runs after 3-4 minutes. That is a Cursor backend/provider problem worth its own finding if it persists.
+
+### DOG-003 follow-up: pre-push gate failure (self-inflicted, fixed)
+First push of 82d3cde failed the repo pre-push suite: `slopslint check --enforce` reported python_tests had 3 duplicate clones (ceiling 2) because my two new tests shared near-identical worker stubs. Fixed in a3c7d7e by sharing a `scripted_execute` helper (clones back to 2; tests only). Lesson recorded: run `slopslint check --classify --enforce` before pushing test changes.

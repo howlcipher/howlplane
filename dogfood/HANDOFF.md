@@ -4,10 +4,10 @@
 Prove a normal user can ask Howl for a household recurring-task CLI app (add, list, complete with timestamp, due-again detection, local persistence, tests, usage docs) via the public CLI and get a working result. Two consecutive clean runs required.
 
 ## Current Status
-RUNNING, clean-run streak 0/2 (run-003 retracted); run-005 next
+RUNNING, clean-run streak 1/2 (run-005 clean); run-006 in progress
 
 ## Current Run
-run-005 (pending; evidence will be in runs/run-005/)
+run-006 (evidence in runs/run-006/)
 
 ## Current Phase
 run-002 started (fresh target dogfood-missions/run-002/household-tasks, same mission) to regress DOG-001. run-001 session 791d33f0 left resumable at acceptance; ignore it.
@@ -19,7 +19,7 @@ run-002 started (fresh target dogfood-missions/run-002/household-tasks, same mis
 Exit 2, HANDOFF REQUIRED at acceptance; app works (11 tests pass) but acceptance rejection reason is invisible. Logs in runs/run-001/02-orchestrate.{stdout,stderr}; exit code in 02-exit.txt once finished.
 
 ## Active Finding
-DOG-003 (empty review -> acceptance rejection), fix committed, awaiting run-005. DOG-001, DOG-002 resolved.
+NONE. DOG-001, DOG-002, DOG-003 resolved. Do not change howlplane src before run-006 ends.
 
 ## Root Cause
 n/a
@@ -28,6 +28,7 @@ n/a
 none
 
 ## Latest Commits
+howlplane dogfood/DOG-001-persist-verdict-text a3c7d7e (tests only; push in progress, /tmp/claude-1000/push-dog003b.log) on top of 82d3cde DOG-003 fix (first push FAILED slopslint gate, see FINDINGS) ; b07a4e0 DOG-002 and 110091a DOG-001 PUSHED
 howlplane dogfood/DOG-001-persist-verdict-text b07a4e0 DOG-002 fix (push in progress, /tmp/claude-1000/push-dog002.log)
 howlplane dogfood/DOG-001-persist-verdict-text 110091a (PUSHED)
 howlplane dogfood/campaign-household-tasks 8251ad0 (local only)
