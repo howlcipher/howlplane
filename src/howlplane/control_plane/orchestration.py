@@ -23,6 +23,8 @@ from typing import Any, Callable, TextIO
 from howlplane.control_plane import agent_readiness, workspace_trust
 from howlplane.control_plane.agent_execution import AgentBackendRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
+from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+from howlplane.control_plane.provider_execution_profile import is_mutating_role
 from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 from howlplane.control_plane.task_spec import TaskSpec
 
@@ -62,7 +64,8 @@ LEGACY_EXECUTION_BUDGET_SECONDS = 300
 ROLE_FAILURES = {
     "EXECUTION_PERMISSION_REQUIRED", "ENGINEERING_FAILURE", "NO_REPOSITORY_CHANGE", "MALFORMED_OUTPUT",
     "CAPABILITY_FAILURE", "POLICY_FAILURE", "VERIFICATION_FAILURE", "PROVIDER_STALLED",
-    "READ_ONLY_ROLE_MUTATED_REPOSITORY", "AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
+    "READ_ONLY_ROLE_MUTATED_REPOSITORY", "AUDIT_FINDINGS_OR_UNCONFIRMED", "AUDIT_NO_VERDICT",
+    "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
 }
 REQUIRED_KEYS = ("id", "created_at", "goal", "orchestrator", "strategy", "failover", "policy", "stage", "status",
                  "agents", "attempts", "lease", "repository_evidence")
@@ -145,6 +148,9 @@ def redact(value: str) -> str:
     return SECRET.sub(lambda match: match.group(1) + "<redacted>" if match.group(1) else "<redacted>", value)
 
 
+VERDICT_EXCERPT_CHARS = 4000
+MAX_REWORK_ROUNDS = 2
+AUDIT_EVIDENCE_CHARS = 2500
 AGENT_NAMES = {"claude_code": "Claude", "codex": "Codex", "cursor": "Cursor", "agy": "AGY", "devin_cli": "Devin"}
 PHASE_NAMES = {"planning": "PLAN", "implementation": "IMPLEMENT", "review": "AUDIT", "acceptance": "INTEGRATE", "verification": "VERIFY"}
 PRIVATE_REASONING = re.compile(r"(?i)(?:private\s+)?(?:chain[- ]of[- ]thought|internal reasoning).*?(?:[.;]|$)")
@@ -675,7 +681,10 @@ def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failu
                                     "role": role, "source": "orchestrate session", "detected_at": at or now(),
                                     "policy": policy, "mechanism": workspace_trust.mechanism(agent, policy)}
         return None
-    if failure == "EXECUTION_PERMISSION_REQUIRED":
+    if failure == "EXECUTION_PERMISSION_REQUIRED" and is_mutating_role(role):
+        # A denial in a read-only role means the worker reached for a tool that
+        # role never holds. It says nothing about unattended mutation, so it
+        # must not take the agent out of every other role (DOG-004).
         record_capability_failure(doc, agent, failure, at)
     if failure in UNAVAILABLE_FAILURES:
         state["state"] = "UNAVAILABLE"
@@ -858,7 +867,15 @@ def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
         order.remove(lead)
         order.insert(0, lead)
     if role == "acceptance":
-        order = order[:1]
+        # Only the orchestrator accepts, unless it has been disqualified for a reason unrelated to
+        # the work (capability, availability, capacity). Then the next eligible agent takes over so
+        # the session cannot deadlock (DOG-010).
+        # A verdict from ANY agent is final until the repository changes: shopping a rejection around
+        # until some agent accepts is a false success (run-007, where Codex rejected and Cursor accepted).
+        judged = any(agent_record(doc, agent)["capacity"].get("acceptance", {}).get("reason") in VERDICT_FAILURES
+                     for agent in AGENTS)
+        if lead == "AUTO" or judged:
+            order = order[:1]
     selected = []
     for agent in order:
         state = agents[agent]["state"]
@@ -944,8 +961,13 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     model_states = {f"{agent}:{limit.rsplit(':', 1)[0]}": "EXHAUSTED"
                     for agent, record in agents.items() for limit in record["readiness"]["model_limits"]}
     if lead != "AUTO" and agents[lead]["state"] != "AVAILABLE":
-        raise ValueError("Selected orchestrator is not available for this session"
-                         + (f" ({agents[lead]['unavailable_reason']})" if agents[lead].get("unavailable_reason") else ""))
+        record = agents[lead]
+        reason = record.get("unavailable_reason") or record["capabilities"].get("reason") or record["state"]
+        raise OperatorFailure(OperatorError(
+            "ORCHESTRATOR_UNAVAILABLE", f"The selected orchestrator {lead} is not available ({reason}).",
+            "HowlPlane's readiness evidence for this agent says it cannot run unattended right now.",
+            "Pick another agent, use AUTO, or refresh the evidence for this agent.",
+            f"howlplane agents doctor --live --repo {repo}"))
     if lead != "AUTO" and (agents[lead].get("workspace_trust") or {}).get("effective_state") == workspace_trust.TRUST_REQUIRED:
         raise ValueError(f"Selected orchestrator {AGENT_NAMES.get(lead, lead)} does not trust {snapshot['root']} yet "
                          f"(workspace trust policy {resolved_policy['policy']}); prepare it with `howlplane factory prepare` "
@@ -964,6 +986,30 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     }
 
 
+def audit_evidence_for_acceptance(doc: dict[str, Any]) -> str:
+    """Hand the acceptance worker the independent audit it is told to weigh.
+
+    Review verdicts exist only in the session manifest; without them an
+    orchestrator that is told to inspect the audit can only reject for missing
+    evidence (DOG-002). Superseded findings are included so a later CLEAN
+    verdict never silently hides them.
+    """
+    reviews = [item for item in doc["attempts"] if item.get("stage") == "review" and item.get("verdict_excerpt") is not None]
+    if not reviews:
+        return ""
+    lines = [" Independent audit evidence recorded by HowlPlane (verdicts from reviewers other than you):"]
+    for item in reviews:
+        no_verdict = item.get("failure") == "AUDIT_NO_VERDICT"
+        earlier_round = item.get("rework_round", 0) < doc.get("rework_rounds", 0)
+        outcome = ("NO VERDICT (provider returned no text; not a finding, do not treat as unresolved)" if no_verdict else
+                   f"FINDINGS FROM REWORK ROUND {item.get('rework_round', 0)}; the implementer was sent back to address them and "
+                   "the work was re-reviewed. Judge by the latest review, and check whether these were actually fixed" if earlier_round and item.get("state") != "SUCCEEDED" else
+                   "ACCEPTED AS CLEAN" if item.get("state") == "SUCCEEDED" else f"NOT CLEAN ({item.get('failure')})")
+        excerpt = item["verdict_excerpt"].strip()[-AUDIT_EVIDENCE_CHARS:] or "(reviewer returned no text)"
+        lines.append(f"\n--- {AGENT_NAMES.get(item['agent'], item['agent'])} review, {outcome} ---\n{excerpt}")
+    return "".join(lines) + "\n--- end of audit evidence ---"
+
+
 def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, repo: Path) -> Any:
     instructions = (
         f"Goal: {doc['goal']}\nRole: {role}. Work only in {repo}. "
@@ -975,14 +1021,25 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         instructions += "Independently inspect the current diff and falsify correctness. Do not edit files. End with exactly AUDIT_STATUS: CLEAN only if you found no issue; otherwise end with AUDIT_STATUS: FINDINGS."
     elif role == "acceptance":
         instructions += "As session orchestrator, inspect implementation, tests, and independent audit. Do not edit files. End with exactly ACCEPTANCE_STATUS: ACCEPTED only if evidence supports the goal; otherwise end with ACCEPTANCE_STATUS: REJECTED."
+        instructions += audit_evidence_for_acceptance(doc)
     elif role == "implementation":
         instructions += "Implement the goal and run relevant local tests. Inspect existing partial changes first."
+        if doc.get("rework"):
+            instructions += (f" Independent review round {doc['rework']['round']} found issues with the current work. Fix every valid "
+                             "finding, run the tests again, and state which findings you rejected and why. If no change is warranted, "
+                             "report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED with your reasons. Reviewer findings:\n"
+                             + doc["rework"]["findings"])
         if is_existing_wip_context(doc["goal"], doc.get("constraints", [])):
             instructions += (" Treat current repository changes as intentional work in progress. "
                              "If existing changes completely satisfy the goal and no further edits are required, "
                              "verify them against local tests and report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED.")
     else:
         instructions += "Produce a bounded implementation plan and acceptance criteria. Do not edit files."
+    if agent == "claude_code" and not is_mutating_role(role):
+        # Claude's read-only roles hold Read, Grep and Glob but no shell; a
+        # shell attempt is denied and fails the assignment, which then marks
+        # the agent interactive-only for the whole session (DOG-004).
+        instructions += " Shell commands are unavailable in this role: use only the Read, Grep and Glob tools to inspect files."
     if any(item.get("stage") == role and item.get("state") == "TIMED_OUT" and item.get("partial_changes") for item in doc["attempts"]):
         instructions += (" An earlier attempt at this role reached its execution budget and left partial changes: "
                          "inspect and continue them rather than starting over.")
@@ -1008,6 +1065,47 @@ def checkpoint(doc: dict[str, Any], path: Path, token: str, repo: Path) -> None:
         save(path, doc, token)
 
 
+def derive_verify_command(repo: Path) -> list[str] | None:
+    """The repository's own test command, as HowlPlane's project discovery finds it (DOG-009)."""
+    try:
+        from howlplane.control_plane.project_adapter import ProjectAdapter
+        commands = ProjectAdapter.discover(repo).test_commands
+    except Exception:
+        return None
+    return list(commands[0]) if commands else None
+
+
+def begin_rework(doc: dict[str, Any], findings: dict[str, Any]) -> None:
+    """Send a reviewer's real findings back to implementation (bounded by MAX_REWORK_ROUNDS)."""
+    doc["rework_rounds"] = doc.get("rework_rounds", 0) + 1
+    doc["rework"] = {"round": doc["rework_rounds"], "reviewer": findings["agent"], "findings": findings["verdict_excerpt"], "at": now()}
+    doc["previous_implementer"] = doc.pop("implementer", None)
+    doc.pop("audit", None)
+
+
+VERDICT_FAILURES = frozenset({"AUDIT_FINDINGS_OR_UNCONFIRMED", "AUDIT_NO_VERDICT", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"})
+
+
+def expire_verdict_exclusions(doc: dict[str, Any]) -> None:
+    """Drop review/acceptance exclusions that were verdicts on a repository state that no longer exists.
+
+    A rejection judges one state of the work. Once the repository has changed (for
+    example the user fixed what the verdict named), the same agent must be able to
+    judge the new state, or `resume` finds no acceptance worker (DOG-007).
+    """
+    for agent in AGENTS:
+        state = agent_record(doc, agent)
+        for role in ("review", "acceptance"):
+            if state["capacity"].get(role, {}).get("reason") in VERDICT_FAILURES:
+                del state["capacity"][role]
+        if (state["state"] == "DEGRADED" and not state["capacity"]
+                and state["capabilities"]["unattended_execution"] is not False):
+            state["state"] = "AVAILABLE"
+    doc.pop("audit", None)
+    doc.pop("acceptance", None)
+    doc.pop("exclusions", None)
+
+
 def reconcile(doc: dict[str, Any], repo: Path) -> None:
     if doc["attempts"] and doc["attempts"][-1].get("state") == "ASSIGNED":
         doc["attempts"][-1].update({"state": "REVOKED", "failure": "INTERRUPTED_OR_STALE_LEASE", "finished_at": now()})
@@ -1017,6 +1115,7 @@ def reconcile(doc: dict[str, Any], repo: Path) -> None:
         doc["reconciliation"] = {"recorded": fingerprint(previous), "actual": fingerprint(actual), "at": now(), "needs_validation": True}
         doc["tests"] = []
         doc["stage"] = "implementation" if doc["policy"] != "PLAN ONLY" else "planning"
+        expire_verdict_exclusions(doc)
     doc["repository_evidence"] = actual
 
 
@@ -1027,8 +1126,10 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
         stages.append("review")
     if doc["policy"] != "PLAN ONLY":
         stages.append("acceptance")
-    start = stages.index(doc["stage"]) if doc["stage"] in stages else 0
-    for stage in stages[start:]:
+    index = stages.index(doc["stage"]) if doc["stage"] in stages else 0
+    while index < len(stages):
+        stage = stages[index]
+        index += 1
         doc["stage"] = stage
         doc["status"] = stage.upper()
         checkpoint(doc, path, token, repo)
@@ -1052,6 +1153,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             return [pair for pair in options if not (stage == "review" and pair[0] == doc.get("implementer"))]
 
         succeeded = False
+        findings_attempt: dict[str, Any] | None = None
         transient_retries: dict[tuple[str, str], int] = {}
         attempted: list[tuple[str, str]] = []
         retry: tuple[str, str] | None = None
@@ -1096,6 +1198,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             before = evidence(repo)
             invocation_policy = session_trust_policy(doc)
             assignment = {"task_id": doc["id"][:8], "stage": stage, "agent": agent, "model": model, "started_at": now(), "fence": token, "state": "ASSIGNED",
+                          "rework_round": doc.get("rework_rounds", 0),
                           "workspace_trust": {"policy": invocation_policy,
                                               "mechanism": workspace_trust.mechanism(agent, invocation_policy)},
                           "execution_budget_seconds": execution_budget(doc, stage), "selection_evidence": selection_evidence(doc, agent)}
@@ -1118,7 +1221,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                                "error": redact((result.error_message or result.stderr)[:200])})
             no_change_detail = ""
             if result.success and stage == "implementation" and before == after:
-                is_wip = is_existing_wip_context(doc["goal"], doc.get("constraints", []))
+                is_wip = is_existing_wip_context(doc["goal"], doc.get("constraints", [])) or bool(doc.get("rework"))
                 has_repo_wip = bool(before.get("status", "").strip())
                 stdout_text = result.stdout or ""
                 reports_no_change = bool(
@@ -1150,10 +1253,15 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 assignment["failure"] = "READ_ONLY_ROLE_MUTATED_REPOSITORY"
             if result.success and stage == "review" and not result.stdout.strip().endswith("AUDIT_STATUS: CLEAN"):
                 assignment["state"] = "REVOKED"
-                assignment["failure"] = "AUDIT_FINDINGS_OR_UNCONFIRMED"
+                # An empty reply is a provider fault, not a finding (DOG-003).
+                assignment["failure"] = "AUDIT_FINDINGS_OR_UNCONFIRMED" if result.stdout.strip() else "AUDIT_NO_VERDICT"
             if result.success and stage == "acceptance" and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
+            if result.success and stage in {"review", "acceptance"}:
+                # The verdict is the only record of why a reviewer or the
+                # orchestrator stopped the session; the hash alone cannot be read.
+                assignment["verdict_excerpt"] = redact((result.stdout or "").strip()[-VERDICT_EXCERPT_CHARS:])
             if assignment["failure"] in ATTEMPT_TIMEOUT_FAILURES:
                 metadata = getattr(result, "metadata", None) or {}
                 budget = execution_budget(doc, stage)
@@ -1168,7 +1276,8 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 assignment["workspace"] = str(repo)
                 agent_readiness.record_workspace_trust(agent, str(repo), stage, "orchestrate session",
                                                        policy=invocation_policy)
-            elif assignment["failure"] is None or assignment["failure"] in UNAVAILABLE_FAILURES | MODEL_LIMIT_FAILURES | {"EXECUTION_PERMISSION_REQUIRED"}:
+            elif assignment["failure"] is None or assignment["failure"] in UNAVAILABLE_FAILURES | MODEL_LIMIT_FAILURES | (
+                    {"EXECUTION_PERMISSION_REQUIRED"} if is_mutating_role(stage) else set()):
                 agent_readiness.record_session_outcome(agent, model, assignment["failure"],
                                                        detail=f"{result.error_message or ''}\n{result.stderr}")
             if assignment["state"] == "SUCCEEDED":
@@ -1184,12 +1293,25 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                     doc["audit"] = "CLEAN"
                 if stage == "acceptance":
                     doc["acceptance"] = "ACCEPTED"
+                    if agent != doc["orchestrator"]:
+                        if progress:
+                            progress._write("TAKEOVER", f"{AGENT_NAMES.get(doc['orchestrator'], doc['orchestrator'])} could not accept; "
+                                                        f"{AGENT_NAMES.get(agent, agent)} is now orchestrator")
+                        doc["orchestrator"] = doc["selected_orchestrator"] = agent
                 if model != "UNKNOWN":
                     doc["known_models"].setdefault(agent, []).append(model)
                 succeeded = True
                 checkpoint(doc, path, token, repo)
                 if progress:
                     progress.worker_complete(doc["id"][:8], agent, stage)
+                break
+            if stage == "review" and assignment["failure"] == "AUDIT_FINDINGS_OR_UNCONFIRMED" and assignment.get("verdict_excerpt"):
+                # Real findings are not a worker fault: asking another reviewer until one says CLEAN would hide
+                # them. The reviewer stays eligible; the findings go back to the implementer or end the session.
+                findings_attempt = assignment
+                if progress:
+                    progress._write("FINDINGS", f"{AGENT_NAMES.get(agent, agent)} review reported findings")
+                checkpoint(doc, path, token, repo)
                 break
             doc["reroutes"].append({"from": f"{agent}:{model}", "stage": stage, "reason": assignment["failure"]})
             if progress:
@@ -1201,7 +1323,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 if assignment["failure"] in WORKSPACE_TRUST_FAILURES:
                     progress._write("TRUST", f"{AGENT_NAMES.get(agent, agent)} requires workspace trust for {repo}; "
                                              "rerouting (the agent stays eligible elsewhere)")
-                elif assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED":
+                elif assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED" and is_mutating_role(stage):
                     progress.capability_downgrade(agent)
                 elif exclusion:
                     progress.role_excluded(agent, stage, exclusion)
@@ -1226,10 +1348,22 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 return report(doc)
             if doc["failover"] == "OFF":
                 break
+        if not succeeded and findings_attempt is not None and "implementation" in stages:
+            if doc.get("rework_rounds", 0) < MAX_REWORK_ROUNDS:
+                begin_rework(doc, findings_attempt)
+                if progress:
+                    progress._write("REWORK", f"Round {doc['rework_rounds']} of {MAX_REWORK_ROUNDS}: sending "
+                                              f"{AGENT_NAMES.get(findings_attempt['agent'], findings_attempt['agent'])}'s findings back to implementation")
+                checkpoint(doc, path, token, repo)
+                index = stages.index("implementation")
+                continue
         if not succeeded:
             doc["status"] = "BLOCKED" if stage == "review" else "HANDOFF REQUIRED"
             if stage == "review":
-                doc["audit"] = "AUDIT BLOCKED: independent reviewers exhausted" if attempted else "AUDIT BLOCKED: no independent reviewer"
+                if findings_attempt is not None:
+                    doc["audit"] = (f"AUDIT BLOCKED: review findings remain after {doc.get('rework_rounds', 0)} rework round(s)")
+                else:
+                    doc["audit"] = "AUDIT BLOCKED: independent reviewers exhausted" if attempted else "AUDIT BLOCKED: no independent reviewer"
             doc["exclusions"] = {"stage": stage, "agents": exclusions(doc, stage)}
             stage_timeouts = [item for item in doc["timed_out_assignments"] if item["stage"] == stage]
             if stage_timeouts and is_resumable(doc):
@@ -1260,6 +1394,13 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 if progress:
                     progress.blocked("HANDOFF REQUIRED", "Repository diff validation failed", f"howlplane orchestrate resume --repo {repo}" if is_resumable(doc) else None)
                 return report(doc)
+            if not doc.get("verify_command"):
+                derived = derive_verify_command(repo)
+                if derived:
+                    # Not user-supplied: record that, so the report and the user can see where it came from.
+                    doc["verify_command"], doc["verify_source"] = derived, "derived from the project's discovered test command"
+                    if progress:
+                        progress._write("VERIFY", f"No --verify given; using the project's test command: {' '.join(derived)}")
             if doc.get("verify_command"):
                 command = doc["verify_command"]
                 if progress:
@@ -1310,6 +1451,10 @@ def report(doc: dict[str, Any]) -> int:
     print(f"Tests: {json.dumps(doc['tests'])}")
     print(f"Independent audit: {doc.get('audit', 'completed' if doc['stage'] == 'review' and (is_final(doc) or doc['status'] == 'HANDOFF REQUIRED') else 'not requested or incomplete')}")
     print(f"Recovery: {json.dumps(doc.get('reconciliation', {}))}")
+    if doc.get("verify_source"):
+        print(f"Verification command: {' '.join(doc['verify_command'])} ({doc['verify_source']})")
+    if doc.get("rework_rounds"):
+        print(f"Rework rounds: {doc['rework_rounds']} of {MAX_REWORK_ROUNDS}")
     if doc.get("validation_gap"):
         print(f"Validation gap: {doc['validation_gap']}")
     if doc.get("timed_out_assignments"):
@@ -1319,6 +1464,16 @@ def report(doc: dict[str, Any]) -> int:
     if doc.get("exclusions") and (is_final(doc) or doc["status"] == "HANDOFF REQUIRED"):
         print(f"Excluded {doc['exclusions']['stage']} workers: {json.dumps(doc['exclusions']['agents'])}")
     print(f"Failures: {json.dumps([{'stage': a['stage'], 'agent': a['agent'], 'model': a['model'], 'failure': a.get('failure')} for a in doc['attempts'] if a.get('failure')])}")
+    if doc["status"] == "HANDOFF REQUIRED" and doc.get("stage") == "acceptance" and any(
+            a.get("failure") == "ACCEPTANCE_REJECTED_OR_UNCONFIRMED" for a in doc["attempts"]):
+        print("Next: the orchestrator rejected acceptance (verdict below). Address what it names in the repository, then run\n"
+              f"  howlplane orchestrate resume --repo {doc['repository']} --verify <your test command>\n"
+              "Changing the repository lets the same session be judged again. If the verdict is not actionable, run\n"
+              f"  howlplane orchestrate discard --repo {doc['repository']}\nand start a new session.")
+    for attempt in doc["attempts"]:
+        if attempt.get("failure") in {"AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"} and attempt.get("verdict_excerpt"):
+            print(f"Verdict from {AGENT_NAMES.get(attempt['agent'], attempt['agent'])} ({attempt['stage']}, {attempt['failure']}):")
+            print("\n".join(f"  {line}" for line in attempt["verdict_excerpt"].splitlines()))
     return 0 if doc["status"] in {"COMPLETE", "COMPLETE WITH WARNINGS"} else 2
 
 

@@ -1059,15 +1059,19 @@ class CursorBackend(SubprocessAgentBackend):
     Uses the installed ``agent`` executable in print mode, which is Cursor's
     supported non-interactive automation interface. The ``agent`` binary is
     distinct from the IDE launcher (``cursor``) and does not require the IDE.
-    Planning, review, and acceptance roles use ``--mode plan`` so they stay
-    read-only; implementation uses the default editing mode.
+    Planning uses ``--mode plan``. Review and acceptance use ``--mode ask``:
+    both are read-only, but in print mode ``plan`` builds a plan instead of
+    answering, so a review came back as a bare newline after minutes (DOG-006).
+    Implementation uses the default editing mode.
     """
 
     def __init__(self):
         def _cursor_cmd(task, cwd, role, prompt, **kwargs):
             command = ["agent", "-p", prompt, "--output-format", "text", "--workspace", str(cwd)]
-            if role in ("planning", "review", "acceptance"):
+            if role == "planning":
                 command += ["--mode", "plan"]
+            elif role in ("review", "acceptance"):
+                command += ["--mode", "ask"]
             return command
         super().__init__("cursor", "agent", _cursor_cmd)
 
