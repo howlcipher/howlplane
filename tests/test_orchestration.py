@@ -182,7 +182,9 @@ def test_non_clean_verdicts_are_classified_and_visible(tmp_path, monkeypatch, ca
     assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 2
     captured = capsys.readouterr()
     output = captured.out + captured.err
-    assert f"{role} failed: {failure}" in output
+    # Genuine findings are not a worker fault: they trigger rework, not a "failed" reroute (DOG-011).
+    expected = "review reported findings" if failure == "AUDIT_FINDINGS_OR_UNCONFIRMED" else f"{role} failed: {failure}"
+    assert expected in output
     if reason:
         assert f"({role}, {failure})" in captured.out
         assert reason in captured.out
@@ -211,6 +213,92 @@ def test_rejected_acceptance_recovers_after_the_repository_is_repaired(tmp_path,
     monkeypatch.setattr(module, "execute_assignment", scripted_execute())
     assert module.command(arguments(repo, input="resume", policy=policy, orchestrator=None, verify=["git", "diff", "--check"])) == 0
     assert "Status: COMPLETE" in capsys.readouterr().out
+
+
+def rework_session(tmp_path, monkeypatch, review_rounds):
+    """Review replies come from `review_rounds` in order (last one repeats); each implementation writes new content.
+
+    Returns the session exit status, the implementation prompts' rework state, and the review count.
+    """
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+    seen = {"implementations": [], "reviews": 0}
+
+    def execute(doc, stage, agent, model, cwd):
+        if stage == "implementation":
+            seen["implementations"].append((doc.get("rework") or {}).get("findings"))
+            (cwd / "README").write_text(f"change {len(seen['implementations'])}\n")
+        outcome = result(agent, stage)
+        outcome.stdout = "plan"
+        if stage == "review":
+            outcome.stdout = review_rounds[min(seen["reviews"], len(review_rounds) - 1)]
+            seen["reviews"] += 1
+        if stage == "acceptance":
+            outcome.stdout = "ACCEPTANCE_STATUS: ACCEPTED"
+        return outcome
+
+    monkeypatch.setattr(module, "execute_assignment", execute)
+    status = module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT"))
+    return status, seen
+
+
+def test_review_findings_go_back_to_the_implementer_and_are_rechecked(tmp_path, monkeypatch, capsys):
+    # DOG-011 (run-008): a reviewer's real findings ended in a handoff because nothing acted on them.
+    status, seen = rework_session(tmp_path, monkeypatch, ["README claims JSON errors; false.\nAUDIT_STATUS: FINDINGS", "AUDIT_STATUS: CLEAN"])
+    captured = capsys.readouterr()
+    assert status == 0, captured.err + captured.out
+    assert seen["implementations"][0] is None and "README claims JSON errors" in seen["implementations"][1]
+    assert seen["reviews"] == 2
+    assert "Rework rounds: 1 of 2" in captured.out and "REWORK" in captured.err
+
+
+def test_rework_is_capped_and_unfixed_findings_block_with_the_verdict_visible(tmp_path, monkeypatch, capsys):
+    status, seen = rework_session(tmp_path, monkeypatch, ["Still wrong.\nAUDIT_STATUS: FINDINGS"])
+    captured = capsys.readouterr()
+    assert status == 2
+    assert len(seen["implementations"]) == 3 and seen["reviews"] == 3  # initial + 2 rework rounds
+    assert "review findings remain after 2 rework round(s)" in captured.out and "Still wrong." in captured.out
+
+
+def test_findings_from_an_earlier_round_are_labelled_for_acceptance():
+    doc = {"rework_rounds": 1, "attempts": [
+        {"stage": "review", "agent": "cursor", "state": "REVOKED", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED", "verdict_excerpt": "bug", "rework_round": 0},
+        {"stage": "review", "agent": "cursor", "state": "SUCCEEDED", "failure": None, "verdict_excerpt": "AUDIT_STATUS: CLEAN", "rework_round": 1}]}
+    evidence = module.audit_evidence_for_acceptance(doc)
+    assert "FINDINGS FROM REWORK ROUND 0" in evidence and "NOT CLEAN" not in evidence
+    assert "Cursor review, ACCEPTED AS CLEAN" in evidence
+
+
+def test_verification_command_is_derived_from_the_project_when_not_given(tmp_path, monkeypatch, capsys):
+    # DOG-009 (run-007): a reroute after a partial write demanded --verify before the app, and its test script, existed.
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "test.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
+
+    def execute(doc, stage, agent, model, cwd):
+        if stage == "implementation":
+            (cwd / "README").write_text("changed\n")
+            doc["reconciliation"] = {"needs_validation": True}
+        outcome = result(agent, stage)
+        outcome.stdout = {"review": "AUDIT_STATUS: CLEAN", "acceptance": "ACCEPTANCE_STATUS: ACCEPTED"}.get(stage, "plan")
+        return outcome
+
+    monkeypatch.setattr(module, "execute_assignment", execute)
+    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 0
+    out = capsys.readouterr()
+    assert "Verification command: bash scripts/test.sh (derived from the project's discovered test command)" in out.out
+    assert "using the project's test command: bash scripts/test.sh" in out.err
+
+
+def test_derived_verification_failure_stops_the_session(tmp_path, monkeypatch, capsys):
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "test.sh").write_text("#!/usr/bin/env bash\nexit 1\n")
+    monkeypatch.setattr(module, "execute_assignment", scripted_execute())
+    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 2
+    assert "Configured validation failed" in capsys.readouterr().err
 
 
 def disqualified_orchestrator_session(tmp_path, monkeypatch, codex_acceptance):
