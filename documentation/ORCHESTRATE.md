@@ -19,7 +19,7 @@ Hard failures are recorded per agent and role before a replacement is chosen. `S
 
 ### Execution budget is not provider capacity
 
-Every assignment runs under HowlPlane's own execution budget. That is a per-role wall-clock deadline: 300 seconds by default for planning, review, and acceptance, and 600 seconds by default for implementation (justified by dogfooding across multi-file implementation tasks), with a hard maximum of 1800. AGY's `--print-timeout` is derived from the same deadline minus 15 seconds of headroom. Set the budget with `--execution-budget ROLE=SECONDS` or `--execution-budget SECONDS` (all roles), on a new session or on `resume`. Values outside 1 to 1800 are refused, never clamped. Raising every budget is not the default fix: prefer decomposing a goal that does not fit.
+Every assignment runs under HowlPlane's own execution budget. That is a per-role wall-clock deadline: 300 seconds by default for planning and acceptance, and 600 seconds by default for implementation and review (justified by dogfooding: multi-file implementation tasks, and whole-change reviews measured at 97 to over 300 seconds, which cut off half of Cursor's real reviews at 300), with a hard maximum of 1800. AGY's `--print-timeout` is derived from the same deadline minus 15 seconds of headroom. Set the budget with `--execution-budget ROLE=SECONDS` or `--execution-budget SECONDS` (all roles), on a new session or on `resume`. Values outside 1 to 1800 are refused, never clamped. Raising every budget is not the default fix: prefer decomposing a goal that does not fit.
 
 An `EXECUTION_BUDGET_EXCEEDED` result means only that this assignment did not finish in time. It is not quota, session, rate, or model exhaustion:
 
