@@ -1055,10 +1055,15 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
     elif role == "acceptance":
         instructions += "As session orchestrator, inspect implementation, tests, and independent audit. Do not edit files. End with exactly ACCEPTANCE_STATUS: ACCEPTED only if evidence supports the goal; otherwise end with ACCEPTANCE_STATUS: REJECTED."
         instructions += audit_evidence_for_acceptance(doc)
+        if (doc.get("rework") or {}).get("source") == "acceptance":
+            instructions += (f" An earlier acceptance check rejected the work and the implementer was sent back to address it "
+                             f"(rework round {doc['rework']['round']}). Judge the current repository, and check whether "
+                             "these reasons were actually resolved:\n" + doc["rework"]["findings"])
     elif role == "implementation":
         instructions += "Implement the goal and run relevant local tests. Inspect existing partial changes first."
         if doc.get("rework"):
-            instructions += (f" Independent review round {doc['rework']['round']} found issues with the current work. Fix every valid "
+            source = "The acceptance check" if doc["rework"].get("source") == "acceptance" else "Independent review"
+            instructions += (f" {source} (rework round {doc['rework']['round']}) found issues with the current work. Fix every valid "
                              "finding, run the tests again, and state which findings you rejected and why. If no change is warranted, "
                              "report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED with your reasons. Reviewer findings:\n"
                              + doc["rework"]["findings"])
@@ -1109,9 +1114,10 @@ def derive_verify_command(repo: Path) -> list[str] | None:
 
 
 def begin_rework(doc: dict[str, Any], findings: dict[str, Any]) -> None:
-    """Send a reviewer's real findings back to implementation (bounded by MAX_REWORK_ROUNDS)."""
+    """Send review findings or an acceptance rejection back to implementation (bounded by MAX_REWORK_ROUNDS)."""
     doc["rework_rounds"] = doc.get("rework_rounds", 0) + 1
-    doc["rework"] = {"round": doc["rework_rounds"], "reviewer": findings["agent"], "findings": findings["verdict_excerpt"], "at": now()}
+    doc["rework"] = {"round": doc["rework_rounds"], "reviewer": findings["agent"], "source": findings["stage"],
+                     "findings": findings["verdict_excerpt"], "at": now()}
     doc["previous_implementer"] = doc.pop("implementer", None)
     doc.pop("audit", None)
 
@@ -1344,6 +1350,17 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 findings_attempt = assignment
                 if progress:
                     progress._write("FINDINGS", f"{AGENT_NAMES.get(agent, agent)} review reported findings")
+                checkpoint(doc, path, token, repo)
+                break
+            if (stage == "acceptance" and assignment["failure"] == "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
+                    and assignment.get("verdict_excerpt") and "implementation" in stages
+                    and doc.get("rework_rounds", 0) < MAX_REWORK_ROUNDS):
+                # A reasoned rejection is actionable (DOG-016): rework it, then the same orchestrator judges
+                # the changed repository. It is never shopped to another acceptor (DOG-010); once rework is
+                # spent, the failure path below records it and hands off.
+                findings_attempt = assignment
+                if progress:
+                    progress._write("FINDINGS", f"{AGENT_NAMES.get(agent, agent)} acceptance rejected; reasons go back to implementation")
                 checkpoint(doc, path, token, repo)
                 break
             doc["reroutes"].append({"from": f"{agent}:{model}", "stage": stage, "reason": assignment["failure"]})
