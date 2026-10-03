@@ -169,3 +169,33 @@ Run-008 is not a clean run (HANDOFF REQUIRED). Streak: 0.
 ## Follow-up status (after DOG-009/011 implementation)
 DOG-009 and DOG-011 implemented on howlplane dogfood/rework-and-default-verify (user chose: bounded rework loop, project-derived verify). Run-009 verified DOG-009 live (derived verify ran and passed). DOG-011's loop is covered by tests but has not fired in a live run yet (run-009's reviewer returned CLEAN).
 Observation (not fixed, DOG-012 candidate): Cursor review in --mode ask takes 213-300+ s (runs 006, 008, 009), right at the 300 s default review budget, so it times out in some runs and is replaced. Raising the review budget or using a faster Cursor model is an operator choice (`--execution-budget review=600`); no code change made.
+
+## DOG-012 — Default review budget cuts off half of Cursor's real reviews
+
+Status: FIX COMMITTED (howlplane dogfood/DOG-012-review-budget 9a9a59c), awaiting regression runs 011 and 012
+Severity: Medium (reliability: the reviewer most likely to find real defects is silently replaced; the session still completes)
+Discovered in run: run-006, confirmed run-009
+Owning component: HowlPlane orchestration (`DEFAULT_EXECUTION_BUDGETS`)
+Repository: howlplane
+
+### User action
+`howl orchestrate "<mission>" --repo <target>` with default budgets.
+
+### Expected
+A normally sized whole-change review finishes within the default review budget.
+
+### Actual
+Review durations from runs 001-010 stderr: Cursor 90-300+ s (198, 221, 300 timeout and 300 timeout since `--mode ask`; 213 s measured directly), AGY 97-241 s. Default review budget was 300 s, so Cursor hit EXECUTION_BUDGET_EXCEEDED in runs 006 and 009 and AGY replaced it. Acceptance took 44-61 s.
+
+### Root cause
+Review default (300 s) was set without measurement; implementation was already raised to 600 s on dogfood evidence. A review covers the whole change and cannot be decomposed.
+
+### Resolution
+Review default 600 s; planning and acceptance stay 300 s. Docs: documentation/ORCHESTRATE.md. Operator override unchanged (`--execution-budget review=N`).
+Options weighed: per-agent Cursor budget (special-cases one vendor, rejected); leave as is (operator knob, but users cannot know to use it); role default 600 (chosen; worst cost is a hung reviewer burning 5 more minutes before failover).
+
+### Tests
+tests/test_orchestration_execution_budget.py split: default-budget contract (review 600) and override contract; 15 passed. Orchestration subset (-k orchestrat/budget/review/cursor/agy/handoff/failover/readiness) 467 passed. slopslint enforce OK.
+
+### Commit
+Repository: howlplane; Branch: dogfood/DOG-012-review-budget; SHA: 9a9a59c; Push: in progress (see HANDOFF)

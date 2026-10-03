@@ -21,3 +21,5 @@
 - run-009 COMPLETE + verified: clean run 1/2 on new code. Starting run-010.
 - run-010 COMPLETE + verified: clean run 2/2 on new code (009+010). Final report addendum written.
 - 2026-10-03 resume check (new session): all PRs merged, main src == aedf82f, PASS remains valid; howlframe fast-forwarded; no new runs.
+- 2026-10-03 host fault: ~16 user site-packages missing (httpx, pydantic, ...) broke pre-push; restored via pip --user. Records branch dogfood/resume-check-20261003 pushed (46357fe).
+- 2026-10-03 DOG-012 fixed (review budget 600 s), 9a9a59c; regression runs 011/012 planned on that engine. Target run-011 created (39f7b1a).
