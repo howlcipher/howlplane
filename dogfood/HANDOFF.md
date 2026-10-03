@@ -4,10 +4,10 @@
 Prove a normal user can ask Howl for a household recurring-task CLI app (add, list, complete with timestamp, due-again detection, local persistence, tests, usage docs) via the public CLI and get a working result. Two consecutive clean runs required.
 
 ## Current Status
-RUNNING, clean-run streak 1/2 (run-005 clean); run-006 in progress
+PASS (two consecutive clean runs: run-005, run-006). See FINAL_REPORT.md
 
 ## Current Run
-run-006 (evidence in runs/run-006/)
+run-006 (finished, clean)
 
 ## Current Phase
 run-002 started (fresh target dogfood-missions/run-002/household-tasks, same mission) to regress DOG-001. run-001 session 791d33f0 left resumable at acceptance; ignore it.
@@ -40,6 +40,8 @@ howlplane: branch dogfood/campaign-household-tasks (campaign records only)
 none
 
 ## Remaining Work
+Campaign complete. Only follow-ups: merge howlplane PR for dogfood/DOG-001-persist-verdict-text; see FINAL_REPORT.md recommended work.
+(Original plan, now done:)
 1. Create target repo /run/media/system/tallgeese/dev/dogfood-missions/run-001/household-tasks (git init).
 2. `howl agents doctor --repo <target>`; `howl factory prepare --repo <target> --yes`.
 3. `howl orchestrate "<mission text>" --repo <target> --verify <cmd>`.

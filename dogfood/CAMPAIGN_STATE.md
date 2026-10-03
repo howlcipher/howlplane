@@ -33,4 +33,7 @@ Howl 0.1.1; HowlFrame, HowlChangeOps, HowlPlane (+ control-plane engine), HowlWr
 | run-003 | COMPLETE, verified, but NOT COUNTED | same latent DOG-003 defect; streak reset |
 | run-004 | FAILED | HANDOFF REQUIRED, DOG-003 blocked acceptance (b07a4e0) |
 | run-005 | CLEAN RUN 1/2: PASS | COMPLETE, verified, engine @82d3cde |
-| run-006 | RUNNING | clean run 2 attempt, same engine code, fresh target |
+| run-006 | CLEAN RUN 2/2: PASS | COMPLETE, verified, same engine src |
+
+## RESULT
+DOGFOOD RESULT: PASS (run-005 and run-006). See FINAL_REPORT.md.
