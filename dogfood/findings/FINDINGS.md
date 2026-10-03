@@ -199,3 +199,47 @@ tests/test_orchestration_execution_budget.py split: default-budget contract (rev
 
 ### Commit
 Repository: howlplane; Branch: dogfood/DOG-012-review-budget; SHA: 9a9a59c; Push: in progress (see HANDOFF)
+
+## DOG-013 — Review rework cannot converge: any minor note blocks the audit
+
+Status: FIX COMMITTED (howlplane dogfood/DOG-013-review-convergence 82414bf, stacked on DOG-012), awaiting regression runs
+Severity: High (complete workflow blocker whenever the reviewer is thorough; first live firing of DOG-011's loop ended BLOCKED)
+Discovered in run: run-011
+Owning component: HowlPlane orchestration (review prompt, `execute_assignment`)
+Repository: howlplane
+
+### User action
+`howl orchestrate "<mission>" --repo dogfood-missions/run-011/household-tasks`
+
+### Expected
+Rework fixes real defects; once none remain the audit is CLEAN and acceptance runs.
+
+### Actual
+Exit 2, Status BLOCKED, "AUDIT BLOCKED: review findings remain after 2 rework round(s)". Each round fixed the previous findings (tests 12 -> 14 -> 19), and each new Cursor review raised different, mostly Low or Minor items (exit-code wording, user_version=0 SQLite files, partial stdout on failure) plus one Medium real issue (documentation/demo.log shows an unquoted command that cannot succeed).
+
+### Evidence
+runs/run-011/02-orchestrate.{stdout,stderr} (three Cursor verdicts), exit in 02-exit.txt.
+
+### Root cause
+Review prompt: "End with AUDIT_STATUS: CLEAN only if you found no issue", plus "falsify correctness". A falsifying reviewer always finds a new note, so with a bounded loop the audit can never become CLEAN.
+
+### Resolution
+Reviewers classify findings BLOCKING (incorrect behavior, unmet requirement, required behavior without working tests, failing test, false docs or evidence) or NON-BLOCKING; only BLOCKING yields FINDINGS. Non-blocking notes remain in the verdict text that acceptance already receives (DOG-002), so nothing is hidden. Docs: ORCHESTRATE.md.
+Options weighed: more rework rounds (does not converge); let acceptance judge after the cap (the "advisory findings" option the user did not choose earlier); severity contract (chosen).
+
+### Tests
+test_review_prompt_carries_harness_verification_and_a_blocking_only_verdict (fails on old code, verified). tests/test_orchestration.py 35 passed; orchestration subset 469 passed; slopslint enforce OK.
+
+## DOG-014 — Reviewers are not shown HowlPlane's own verification results
+
+Status: FIX COMMITTED (same commit 82414bf)
+Severity: Medium (a shell-less reviewer reports the test gate as unproven; in run-011 round 1 it was a numbered finding)
+Discovered in run: run-011
+Owning component: HowlPlane orchestration
+### Actual
+Every Cursor review (ask mode has no shell) said "the suite was not re-run here … pass status is not established", although HowlPlane had just run `bash scripts/test.sh` (exit 0) itself.
+### Resolution
+Review prompt carries the latest harness result per check (`git diff --check`, verification command) with exit code and output tail. `doc["tests"]` is cleared when the repository changes outside the session, so the evidence is for the current tree.
+
+## Observation (not filed): implementer's `howlplane route` attempt failed
+Cursor noted `.howl_state/.../HP-20261003-185406-bced.txt`: Codex tried `howlplane route` with task_class 'test' and it was rejected as invalid. The mission asks for approach selection "through the normal Howl workflow", and the orchestrate session already is that workflow. Low priority; recheck if it recurs.

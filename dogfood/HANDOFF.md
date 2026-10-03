@@ -83,3 +83,7 @@ Host fault found and repaired (2026-10-03): the first push of this branch failed
 Status: VERIFYING. Engine change: howlplane dogfood/DOG-012-review-budget 9a9a59c (review budget 300 -> 600 s). Because engine src changed, PASS must be re-earned: two fresh clean runs, run-011 and run-012.
 Plan: after the DOG-012 push lands, remove worktree ../howlplane-dog012, then `git -C howlplane checkout dogfood/DOG-012-review-budget` (the live engine is the editable install of howlplane/src). Then in runs/run-011: `howl factory prepare --repo <target> --yes`; `howl orchestrate "$(cat ../run-001/00-mission.txt)" --repo /run/media/system/tallgeese/dev/dogfood-missions/run-011/household-tasks`; verify per Phase 19; repeat as run-012. Watch also for a live firing of the DOG-011 rework loop.
 Afterwards return the howlplane checkout to main.
+
+## Status update (run-011, 2026-10-03)
+run-011 BLOCKED (not clean). Fixes for DOG-013 and DOG-014: howlplane dogfood/DOG-013-review-convergence 82414bf (stacked on DOG-012 9a9a59c); the howlplane checkout is on that branch (= live engine). Clean streak 0/2.
+Next: run-012 from a fresh target (same steps as run-011, engine 82414bf), then run-013. Afterwards open PRs for DOG-012 and DOG-013 and return the checkout to main.
