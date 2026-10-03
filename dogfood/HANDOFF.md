@@ -28,7 +28,7 @@ n/a
 none
 
 ## Latest Commits
-howlplane dogfood/DOG-001-persist-verdict-text 110091a (push in progress, log /tmp/claude-1000/push-dog001.log)
+howlplane dogfood/DOG-001-persist-verdict-text 110091a (PUSHED)
 howlplane dogfood/campaign-household-tasks 8251ad0 (local only)
 
 ## Repositories Modified

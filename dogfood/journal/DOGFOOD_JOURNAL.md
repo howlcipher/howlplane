@@ -8,3 +8,4 @@
 - 21:14 run-001 started: factory prepare OK (BYPASS trust), orchestrate session 791d33f0, planner=Claude.
 - 2026-10-03 01:28Z run-001 ended exit=2 HANDOFF REQUIRED. Opened DOG-001. Generated app verified working by hand (read-only check).
 - 2026-10-03 DOG-001 fixed (110091a), run-002 started. Discovery: howl engine is an editable install of howlplane working tree, so repair branches take effect immediately; campaign records moved to own worktree.
+- DOG-001 fix 110091a pushed to origin/dogfood/DOG-001-persist-verdict-text.

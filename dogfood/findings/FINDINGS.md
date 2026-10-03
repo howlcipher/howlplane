@@ -2,7 +2,7 @@
 
 ## DOG-001 — Review/acceptance verdict text is discarded; user cannot see why a session stopped
 
-Status: FIX COMMITTED, PUSH IN PROGRESS, awaiting regression in run-002
+Status: FIX PUSHED, awaiting regression in run-002
 Severity: High (false-success and UX; blocks diagnosis of every audit/acceptance stop)
 Discovered in run: run-001
 Owning component: HowlPlane orchestration
@@ -39,7 +39,7 @@ Repository: howlplane
 Branch: dogfood/DOG-001-persist-verdict-text (from main 83b117c)
 SHA: 110091a
 Remote: origin
-Push status: IN PROGRESS (pre-push hook runs the full suite)
+Push status: PUSHED to origin (full pre-push suite passed)
 
 ### Regression verification
 run-002 (pending)
