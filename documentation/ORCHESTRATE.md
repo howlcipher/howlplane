@@ -38,6 +38,8 @@ Review and acceptance attempts keep a redacted excerpt (last 4000 characters) of
 
 The acceptance prompt includes the recorded verdicts of every independent review attempt, including reviewers that were superseded after reporting findings, so the orchestrator weighs the actual audit instead of rejecting for missing evidence.
 
+A reviewer that exits successfully with no text is recorded as `AUDIT_NO_VERDICT`, a provider fault distinct from `AUDIT_FINDINGS_OR_UNCONFIRMED`. It is excluded from the review role like any failed reviewer, and acceptance is told it is not an unresolved audit finding.
+
 ### Session lifecycle and resumability
 
 Orchestration sessions classify states into distinct lifecycle categories:

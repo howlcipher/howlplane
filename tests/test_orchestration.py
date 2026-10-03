@@ -181,6 +181,36 @@ def test_non_clean_verdicts_are_visible_in_report(tmp_path, monkeypatch, capsys,
     assert "hunter2abc" not in output
 
 
+def test_empty_review_is_no_verdict_not_findings(tmp_path, monkeypatch, capsys):
+    # DOG-003: a reviewer that exits 0 with no text is a provider fault. It was
+    # reported as findings, and acceptance then refused to accept (run-004).
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+
+    def execute(doc, stage, agent, model, cwd):
+        if stage == "implementation":
+            (cwd / "README").write_text("changed\n")
+        outcome = result(agent, stage)
+        outcome.stdout = "" if stage == "review" else "plan"
+        return outcome
+
+    monkeypatch.setattr(module, "execute_assignment", execute)
+    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 2
+    captured = capsys.readouterr()
+    assert "review failed: AUDIT_NO_VERDICT" in captured.err + captured.out
+    assert "AUDIT_FINDINGS_OR_UNCONFIRMED" not in captured.err + captured.out
+
+
+def test_acceptance_evidence_marks_no_verdict_reviewer_as_provider_fault():
+    doc = {"attempts": [
+        {"stage": "review", "agent": "cursor", "state": "REVOKED", "failure": "AUDIT_NO_VERDICT", "verdict_excerpt": ""},
+        {"stage": "review", "agent": "agy", "state": "SUCCEEDED", "failure": None, "verdict_excerpt": "AUDIT_STATUS: CLEAN"}]}
+    evidence = module.audit_evidence_for_acceptance(doc)
+    assert "Cursor review, NO VERDICT (provider returned no text" in evidence
+    assert "NOT CLEAN" not in evidence
+    assert "AGY review, ACCEPTED AS CLEAN" in evidence
+
+
 def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeypatch):
     # DOG-002: acceptance was told to inspect the independent audit but was
     # never given it, so it rejected a clean audit as "missing evidence".

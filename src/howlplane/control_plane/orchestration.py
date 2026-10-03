@@ -62,7 +62,8 @@ LEGACY_EXECUTION_BUDGET_SECONDS = 300
 ROLE_FAILURES = {
     "EXECUTION_PERMISSION_REQUIRED", "ENGINEERING_FAILURE", "NO_REPOSITORY_CHANGE", "MALFORMED_OUTPUT",
     "CAPABILITY_FAILURE", "POLICY_FAILURE", "VERIFICATION_FAILURE", "PROVIDER_STALLED",
-    "READ_ONLY_ROLE_MUTATED_REPOSITORY", "AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
+    "READ_ONLY_ROLE_MUTATED_REPOSITORY", "AUDIT_FINDINGS_OR_UNCONFIRMED", "AUDIT_NO_VERDICT",
+    "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
 }
 REQUIRED_KEYS = ("id", "created_at", "goal", "orchestrator", "strategy", "failover", "policy", "stage", "status",
                  "agents", "attempts", "lease", "repository_evidence")
@@ -979,7 +980,9 @@ def audit_evidence_for_acceptance(doc: dict[str, Any]) -> str:
         return ""
     lines = [" Independent audit evidence recorded by HowlPlane (verdicts from reviewers other than you):"]
     for item in reviews:
-        outcome = "ACCEPTED AS CLEAN" if item.get("state") == "SUCCEEDED" else f"NOT CLEAN ({item.get('failure')})"
+        no_verdict = item.get("failure") == "AUDIT_NO_VERDICT"
+        outcome = ("NO VERDICT (provider returned no text; not a finding, do not treat as unresolved)" if no_verdict else
+                   "ACCEPTED AS CLEAN" if item.get("state") == "SUCCEEDED" else f"NOT CLEAN ({item.get('failure')})")
         excerpt = item["verdict_excerpt"].strip()[-AUDIT_EVIDENCE_CHARS:] or "(reviewer returned no text)"
         lines.append(f"\n--- {AGENT_NAMES.get(item['agent'], item['agent'])} review, {outcome} ---\n{excerpt}")
     return "".join(lines) + "\n--- end of audit evidence ---"
@@ -1172,7 +1175,8 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 assignment["failure"] = "READ_ONLY_ROLE_MUTATED_REPOSITORY"
             if result.success and stage == "review" and not result.stdout.strip().endswith("AUDIT_STATUS: CLEAN"):
                 assignment["state"] = "REVOKED"
-                assignment["failure"] = "AUDIT_FINDINGS_OR_UNCONFIRMED"
+                # An empty reply is a provider fault, not a finding (DOG-003).
+                assignment["failure"] = "AUDIT_FINDINGS_OR_UNCONFIRMED" if result.stdout.strip() else "AUDIT_NO_VERDICT"
             if result.success and stage == "acceptance" and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
