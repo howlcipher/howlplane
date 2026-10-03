@@ -62,7 +62,8 @@ LEGACY_EXECUTION_BUDGET_SECONDS = 300
 ROLE_FAILURES = {
     "EXECUTION_PERMISSION_REQUIRED", "ENGINEERING_FAILURE", "NO_REPOSITORY_CHANGE", "MALFORMED_OUTPUT",
     "CAPABILITY_FAILURE", "POLICY_FAILURE", "VERIFICATION_FAILURE", "PROVIDER_STALLED",
-    "READ_ONLY_ROLE_MUTATED_REPOSITORY", "AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
+    "READ_ONLY_ROLE_MUTATED_REPOSITORY", "AUDIT_FINDINGS_OR_UNCONFIRMED", "AUDIT_NO_VERDICT",
+    "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
 }
 REQUIRED_KEYS = ("id", "created_at", "goal", "orchestrator", "strategy", "failover", "policy", "stage", "status",
                  "agents", "attempts", "lease", "repository_evidence")
@@ -145,6 +146,8 @@ def redact(value: str) -> str:
     return SECRET.sub(lambda match: match.group(1) + "<redacted>" if match.group(1) else "<redacted>", value)
 
 
+VERDICT_EXCERPT_CHARS = 4000
+AUDIT_EVIDENCE_CHARS = 2500
 AGENT_NAMES = {"claude_code": "Claude", "codex": "Codex", "cursor": "Cursor", "agy": "AGY", "devin_cli": "Devin"}
 PHASE_NAMES = {"planning": "PLAN", "implementation": "IMPLEMENT", "review": "AUDIT", "acceptance": "INTEGRATE", "verification": "VERIFY"}
 PRIVATE_REASONING = re.compile(r"(?i)(?:private\s+)?(?:chain[- ]of[- ]thought|internal reasoning).*?(?:[.;]|$)")
@@ -964,6 +967,27 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     }
 
 
+def audit_evidence_for_acceptance(doc: dict[str, Any]) -> str:
+    """Hand the acceptance worker the independent audit it is told to weigh.
+
+    Review verdicts exist only in the session manifest; without them an
+    orchestrator that is told to inspect the audit can only reject for missing
+    evidence (DOG-002). Superseded findings are included so a later CLEAN
+    verdict never silently hides them.
+    """
+    reviews = [item for item in doc["attempts"] if item.get("stage") == "review" and item.get("verdict_excerpt") is not None]
+    if not reviews:
+        return ""
+    lines = [" Independent audit evidence recorded by HowlPlane (verdicts from reviewers other than you):"]
+    for item in reviews:
+        no_verdict = item.get("failure") == "AUDIT_NO_VERDICT"
+        outcome = ("NO VERDICT (provider returned no text; not a finding, do not treat as unresolved)" if no_verdict else
+                   "ACCEPTED AS CLEAN" if item.get("state") == "SUCCEEDED" else f"NOT CLEAN ({item.get('failure')})")
+        excerpt = item["verdict_excerpt"].strip()[-AUDIT_EVIDENCE_CHARS:] or "(reviewer returned no text)"
+        lines.append(f"\n--- {AGENT_NAMES.get(item['agent'], item['agent'])} review, {outcome} ---\n{excerpt}")
+    return "".join(lines) + "\n--- end of audit evidence ---"
+
+
 def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, repo: Path) -> Any:
     instructions = (
         f"Goal: {doc['goal']}\nRole: {role}. Work only in {repo}. "
@@ -975,6 +999,7 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         instructions += "Independently inspect the current diff and falsify correctness. Do not edit files. End with exactly AUDIT_STATUS: CLEAN only if you found no issue; otherwise end with AUDIT_STATUS: FINDINGS."
     elif role == "acceptance":
         instructions += "As session orchestrator, inspect implementation, tests, and independent audit. Do not edit files. End with exactly ACCEPTANCE_STATUS: ACCEPTED only if evidence supports the goal; otherwise end with ACCEPTANCE_STATUS: REJECTED."
+        instructions += audit_evidence_for_acceptance(doc)
     elif role == "implementation":
         instructions += "Implement the goal and run relevant local tests. Inspect existing partial changes first."
         if is_existing_wip_context(doc["goal"], doc.get("constraints", [])):
@@ -1150,10 +1175,15 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 assignment["failure"] = "READ_ONLY_ROLE_MUTATED_REPOSITORY"
             if result.success and stage == "review" and not result.stdout.strip().endswith("AUDIT_STATUS: CLEAN"):
                 assignment["state"] = "REVOKED"
-                assignment["failure"] = "AUDIT_FINDINGS_OR_UNCONFIRMED"
+                # An empty reply is a provider fault, not a finding (DOG-003).
+                assignment["failure"] = "AUDIT_FINDINGS_OR_UNCONFIRMED" if result.stdout.strip() else "AUDIT_NO_VERDICT"
             if result.success and stage == "acceptance" and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
+            if result.success and stage in {"review", "acceptance"}:
+                # The verdict is the only record of why a reviewer or the
+                # orchestrator stopped the session; the hash alone cannot be read.
+                assignment["verdict_excerpt"] = redact((result.stdout or "").strip()[-VERDICT_EXCERPT_CHARS:])
             if assignment["failure"] in ATTEMPT_TIMEOUT_FAILURES:
                 metadata = getattr(result, "metadata", None) or {}
                 budget = execution_budget(doc, stage)
@@ -1319,6 +1349,10 @@ def report(doc: dict[str, Any]) -> int:
     if doc.get("exclusions") and (is_final(doc) or doc["status"] == "HANDOFF REQUIRED"):
         print(f"Excluded {doc['exclusions']['stage']} workers: {json.dumps(doc['exclusions']['agents'])}")
     print(f"Failures: {json.dumps([{'stage': a['stage'], 'agent': a['agent'], 'model': a['model'], 'failure': a.get('failure')} for a in doc['attempts'] if a.get('failure')])}")
+    for attempt in doc["attempts"]:
+        if attempt.get("failure") in {"AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"} and attempt.get("verdict_excerpt"):
+            print(f"Verdict from {AGENT_NAMES.get(attempt['agent'], attempt['agent'])} ({attempt['stage']}, {attempt['failure']}):")
+            print("\n".join(f"  {line}" for line in attempt["verdict_excerpt"].splitlines()))
     return 0 if doc["status"] in {"COMPLETE", "COMPLETE WITH WARNINGS"} else 2
 
 

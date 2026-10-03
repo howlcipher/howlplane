@@ -154,6 +154,76 @@ def test_lead_accepts_after_independent_clean_audit(tmp_path, monkeypatch, capsy
     assert "Status: COMPLETE" in capsys.readouterr().out
 
 
+def scripted_execute(**stdout_by_stage):
+    """Worker stub: implementation edits README; other stages reply with the scripted text."""
+    defaults = {"review": "AUDIT_STATUS: CLEAN", "acceptance": "ACCEPTANCE_STATUS: ACCEPTED"}
+
+    def execute(doc, stage, agent, model, cwd):
+        if stage == "implementation":
+            (cwd / "README").write_text("changed\n")
+        outcome = result(agent, stage)
+        outcome.stdout = stdout_by_stage.get(stage, defaults.get(stage, "plan"))
+        return outcome
+
+    return execute
+
+
+@pytest.mark.parametrize("role, verdict, failure, reason", [
+    ("review", "Finding: add --due validation\nAUDIT_STATUS: FINDINGS", "AUDIT_FINDINGS_OR_UNCONFIRMED", "Finding: add --due validation"),
+    ("review", "", "AUDIT_NO_VERDICT", None),
+    ("acceptance", "Missing test, token=hunter2abc\nACCEPTANCE_STATUS: REJECTED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED", "Missing test"),
+])
+def test_non_clean_verdicts_are_classified_and_visible(tmp_path, monkeypatch, capsys, role, verdict, failure, reason):
+    # DOG-001: verdict text was hashed and discarded, so a stop reason was unreadable.
+    # DOG-003: an exit-0 reviewer with no text is a provider fault (AUDIT_NO_VERDICT), not findings.
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "execute_assignment", scripted_execute(**{role: verdict}))
+    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 2
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert f"{role} failed: {failure}" in output
+    if reason:
+        assert f"({role}, {failure})" in captured.out
+        assert reason in captured.out
+    else:
+        assert "AUDIT_FINDINGS_OR_UNCONFIRMED" not in output
+    assert "hunter2abc" not in output
+
+
+def test_acceptance_evidence_marks_no_verdict_reviewer_as_provider_fault():
+    doc = {"attempts": [
+        {"stage": "review", "agent": "cursor", "state": "REVOKED", "failure": "AUDIT_NO_VERDICT", "verdict_excerpt": ""},
+        {"stage": "review", "agent": "agy", "state": "SUCCEEDED", "failure": None, "verdict_excerpt": "AUDIT_STATUS: CLEAN"}]}
+    evidence = module.audit_evidence_for_acceptance(doc)
+    assert "Cursor review, NO VERDICT (provider returned no text" in evidence
+    assert "NOT CLEAN" not in evidence
+    assert "AGY review, ACCEPTED AS CLEAN" in evidence
+
+
+def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeypatch):
+    # DOG-002: acceptance was told to inspect the independent audit but was
+    # never given it, so it rejected a clean audit as "missing evidence".
+    prompts = []
+
+    class Recorder:
+        def execute(self, task, repo, role, prompt_override, **kwargs):
+            prompts.append((role, prompt_override))
+            return result("codex", role)
+
+    monkeypatch.setattr(module.AgentBackendRegistry, "get_backend", lambda agent: Recorder())
+    doc = {"id": "x", "goal": "g", "constraints": [], "execution_budget": {}, "workspace_trust_policy": {"policy": "prepare"},
+           "attempts": [
+               {"stage": "review", "agent": "cursor", "state": "REVOKED", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED", "verdict_excerpt": "bug in due()"},
+               {"stage": "review", "agent": "agy", "state": "SUCCEEDED", "failure": None, "verdict_excerpt": "all fine\nAUDIT_STATUS: CLEAN"}]}
+    module.execute_assignment(doc, "acceptance", "codex", "UNKNOWN", tmp_path)
+    module.execute_assignment(doc, "review", "agy", "UNKNOWN", tmp_path)
+    acceptance = dict(prompts)["acceptance"]
+    assert "Cursor review, NOT CLEAN (AUDIT_FINDINGS_OR_UNCONFIRMED)" in acceptance and "bug in due()" in acceptance
+    assert "AGY review, ACCEPTED AS CLEAN" in acceptance and "AUDIT_STATUS: CLEAN" in acceptance
+    assert "Independent audit evidence" not in dict(prompts)["review"]
+
+
 def test_cursor_backend_passes_selected_model_without_generation_probe(tmp_path, monkeypatch):
     from howlplane.control_plane.agent_execution import CursorBackend
     from howlplane.control_plane.task_spec import TaskSpec
