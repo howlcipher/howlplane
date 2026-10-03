@@ -1,0 +1,28 @@
+HOWL ORCHESTRATION REPORT
+Session: 791d33f0f0db44c6903ea76dacc58891
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: HANDOFF REQUIRED
+Resumable: yes
+Orchestrator: codex
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 6
+Reroutes: 3
+Repository head: 96ea92b003173a0538be4646eee1d31d10977208
+Repository status: M README.md
+?? .gitignore
+?? documentation/evidence.jsonl
+?? documentation/implementation.md
+?? documentation/task_spec.yaml
+?? documentation/test_impact.json
+?? household_tasks/__init__.py
+?? household_tasks/__main__.py
+?? household_tasks/cli.py
+?? scripts/test.sh
+?? tests/test_cli.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}]
+Independent audit: CLEAN
+Recovery: {}
+Excluded acceptance workers: [{"agent": "claude_code", "reason": "unattended execution unavailable"}, {"agent": "codex", "reason": "failed earlier this session (ACCEPTANCE_REJECTED_OR_UNCONFIRMED)"}, {"agent": "cursor", "reason": "not the session orchestrator"}, {"agent": "agy", "reason": "not the session orchestrator"}, {"agent": "devin_cli", "reason": "not the session orchestrator"}]
+Failures: [{"stage": "planning", "agent": "claude_code", "model": "UNKNOWN", "failure": "EXECUTION_PERMISSION_REQUIRED"}, {"stage": "review", "agent": "cursor", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}, {"stage": "acceptance", "agent": "codex", "model": "UNKNOWN", "failure": "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"}]

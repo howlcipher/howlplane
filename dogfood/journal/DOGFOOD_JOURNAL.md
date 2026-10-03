@@ -5,3 +5,5 @@
 - Phase 1/2: surveyed 11 Howl repos, all clean on main, fetch shows 0 behind.
 - Phase 3: public interface is `howl orchestrate "<goal>" --repo <git repo>` (forwards to `howlplane orchestrate`), plus `howl factory prepare`, `howl agents doctor`. Documented in howlplane/documentation/ORCHESTRATE.md.
 - Campaign records live in howlplane/dogfood on branch dogfood/campaign-household-tasks.
+- 21:14 run-001 started: factory prepare OK (BYPASS trust), orchestrate session 791d33f0, planner=Claude.
+- 2026-10-03 01:28Z run-001 ended exit=2 HANDOFF REQUIRED. Opened DOG-001. Generated app verified working by hand (read-only check).
