@@ -48,6 +48,10 @@ A rejection judges one repository state. When the repository changes before `res
 
 Only the session orchestrator accepts, with one exception: if the orchestrator is disqualified for a reason unrelated to the work (capability, availability, capacity, as when its own implementation attempt was denied permission), the next eligible agent takes over, with a `TAKEOVER` event, so the session cannot deadlock. A verdict from any agent is final until the repository changes: a rejection is never shopped to another agent (see DOG-007 recovery above).
 
+**Review findings are reworked, not shopped.** When a reviewer returns real findings (non-empty text that is not `AUDIT_STATUS: CLEAN`), the findings go back to implementation, the work is re-verified, and review runs again. At most 2 rework rounds run (`Rework rounds: n of 2` in the report); if findings remain, the session ends `BLOCKED` with `AUDIT BLOCKED: review findings remain after 2 rework round(s)` and the verdict printed. The reviewer that reported findings stays eligible to re-review. A reviewer that returns nothing (`AUDIT_NO_VERDICT`) or times out is still replaced by another reviewer, since that is a provider fault rather than a finding. Acceptance sees findings from earlier rounds labelled as such. An implementer that judges every finding invalid may report `IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED` with reasons.
+
+**Verification command.** Without `--verify`, HowlPlane uses the repository's own test command as project discovery finds it (for example `bash scripts/test.sh`), runs it after each implementation, and reports `Verification command: ... (derived from the project's discovered test command)`. If discovery finds nothing, a session that needs validation still stops and asks for an explicit `--verify`.
+
 ### Session lifecycle and resumability
 
 Orchestration sessions classify states into distinct lifecycle categories:
