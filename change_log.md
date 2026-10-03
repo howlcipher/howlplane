@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 
+- Native creative pipeline (Run 5 dogfood findings). `howlplane doctor --creative [--json] [--command-config F] [--repos-root D] [--workspace D]` (`creative_doctor.py`, schema `howlplane.doctor.creative/v1`) is a read-only PASS/WARN/FAIL preflight for the Dream -> Writer -> Create pipeline. It checks:
+  - interpreter and venv staleness (missing `pyvenv.cfg` home, minor-version mismatch, patch drift)
+  - installed versions and commits of howl-provider-core, howldream, howlwriter and howlcreate
+  - required runtime symbols, so the Run 5 `classify_failure` ImportError is caught before runtime
+  - each consumer's provider-core pin against the installed commit, and FAIL when consumers pin different provider-core commits (a fresh install cannot resolve them together)
+  - Writer/Create copy-package schema agreement
+  - CLI entry points with stale shebangs
+  - remote command-config parseability, reported by executable name only
+  - `HOWL_FORBID_LOCAL_INFERENCE`, local model endpoints or launchers, and workspace write access
+
+  `howlplane creative run|resume|status` (`creative_pipeline.py`) runs each component through its own CLI. The Dream candidate comes from an export, a run, externally authored ideas clustered by Dream, or a remote Dream exploration. Then:
+  - Writer runs `native request` and `write` (one bounded remote call).
+  - Create runs `develop` or `scaffold --from-writer`, then an optional `materialize` into an explicit sandbox.
+
+  No adapter is involved. Each stage persists to the run directory with output hashes, so resume skips verified completed stages and reruns tampered ones. Failures are reported by stage, with partial outputs kept. Child processes always receive `HOWL_FORBID_LOCAL_INFERENCE=1`. `contribution-audit.json` traces the Dream ID, Writer proposal ID, Create development ID and materialized artifacts, reading credit only from each component's own provenance. Tests: `test_creative_doctor.py`, `test_creative_pipeline.py` (hermetic fake component CLIs in `tests/fixtures/creative_fakes/`).
+
+### Fixed
+
+- `HowlDreamRunner.promote_candidate_to_howlcreate` calls `scaffold_candidate` explicitly. It previously reached the same scaffold through HowlCreate's deprecated provider-less `develop_candidate` fallback, which only emitted a warning.
+
 - Everyday product front door (backlog row 85). Bare `howlplane` is a read-only contextual home screen (exit 0; the deprecated `ai` alias still prints help). New `howlplane start [OBJECTIVE]`, `status`, `logs` and `stop` delegate to the Factory handlers; `start` continues an operator stop or a normal bounded completion without a resume step and refuses to restart a failed run until `--retry`. `howlplane approve|reject ID` finds the task, work item or repository proposal the id names in the current repository's campaign (`factory/decision_resolver.py`), fails closed on ambiguous or unknown ids, and uses the unchanged decision paths. `howlplane doctor` composes system, workers, repository and Factory checks (`doctor_report.py`, schema `howlplane.doctor/v1`) with `--ready`, `--system`, `--agents`, `--factory`, `--live` and `--json`. Tests: `test_product_journey.py`, `test_product_home.py`, `test_product_start_stop.py`, `test_decision_resolver.py`, `test_doctor_report.py`.
 
 ### Changed
