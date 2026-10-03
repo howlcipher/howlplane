@@ -59,3 +59,9 @@ After PASS, the user asked to do all 4 recommended follow-ups. Done in code: DOG
 ## Warnings
 howlplane has a pre-push hook that runs the full suite (`make test lint build docs`, several minutes). Pushes are slow, not hung. Campaign branch commit bc1ad5d push was in flight at 21:15.
 Many other agents' worktrees exist; do not modify them. Do not use local LLM providers.
+
+## Status after follow-ups (updated)
+- Clean-run streak for the NEW code: 0. run-007 (recovered + false-success caught), run-008 (HANDOFF REQUIRED on a real finding) are not clean.
+- howlplane branch dogfood/followups-reviewer-and-recovery pushed through ce14f29 (DOG-004..007, DOG-010 corrected). howl branch dogfood/readme-orchestrate pushed (95b78ac).
+- Open: DOG-009 (default --verify, design), DOG-011 (no rework loop, design; waiting on the user's choice).
+- Resume: read findings DOG-009/DOG-011; if a rework design is chosen, implement on a new branch from dogfood/followups-reviewer-and-recovery, then run two fresh missions.
