@@ -364,9 +364,7 @@ def test_acceptance_evidence_marks_no_verdict_reviewer_as_provider_fault():
     assert "AGY review, ACCEPTED AS CLEAN" in evidence
 
 
-def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeypatch):
-    # DOG-002: acceptance was told to inspect the independent audit but was
-    # never given it, so it rejected a clean audit as "missing evidence".
+def record_prompts(monkeypatch):
     prompts = []
 
     class Recorder:
@@ -375,6 +373,13 @@ def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeyp
             return result("codex", role)
 
     monkeypatch.setattr(module.AgentBackendRegistry, "get_backend", lambda agent: Recorder())
+    return prompts
+
+
+def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeypatch):
+    # DOG-002: acceptance was told to inspect the independent audit but was
+    # never given it, so it rejected a clean audit as "missing evidence".
+    prompts = record_prompts(monkeypatch)
     doc = {"id": "x", "goal": "g", "constraints": [], "execution_budget": {}, "workspace_trust_policy": {"policy": "prepare"},
            "attempts": [
                {"stage": "review", "agent": "cursor", "state": "REVOKED", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED", "verdict_excerpt": "bug in due()"},
@@ -385,6 +390,27 @@ def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeyp
     assert "Cursor review, NOT CLEAN (AUDIT_FINDINGS_OR_UNCONFIRMED)" in acceptance and "bug in due()" in acceptance
     assert "AGY review, ACCEPTED AS CLEAN" in acceptance and "AUDIT_STATUS: CLEAN" in acceptance
     assert "Independent audit evidence" not in dict(prompts)["review"]
+
+
+def test_review_prompt_carries_harness_verification_and_a_blocking_only_verdict(tmp_path, monkeypatch):
+    # DOG-014: shell-less reviewers reported the test gate as unproven because
+    # HowlPlane never showed them its own run. DOG-013: "CLEAN only if you
+    # found no issue" let any minor note block the audit, so rework never converged.
+    prompts = record_prompts(monkeypatch)
+    doc = {"id": "x", "goal": "g", "constraints": [], "execution_budget": {}, "workspace_trust_policy": {"policy": "prepare"},
+           "attempts": [], "tests": [
+               {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "Ran 12 tests\nOK (round one)"},
+               {"command": "git diff --check", "exit_code": 0, "output": ""},
+               {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "Ran 19 tests\nOK"}]}
+    module.execute_assignment(doc, "review", "cursor", "UNKNOWN", tmp_path)
+    module.execute_assignment({**doc, "tests": []}, "review", "agy", "UNKNOWN", tmp_path)
+    review, without_tests = (prompt for _, prompt in prompts)
+    assert "HowlPlane itself ran these checks on the current tree" in review
+    assert "`bash scripts/test.sh` exit 0" in review and "Ran 19 tests" in review and "round one" not in review
+    assert "`git diff --check` exit 0" in review
+    assert "HowlPlane itself ran" not in without_tests
+    for prompt in (review, without_tests):
+        assert "BLOCKING or NON-BLOCKING" in prompt and "found no issue" not in prompt
 
 
 def test_cursor_backend_passes_selected_model_without_generation_probe(tmp_path, monkeypatch):

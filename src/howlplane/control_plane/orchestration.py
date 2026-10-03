@@ -1012,6 +1012,36 @@ def audit_evidence_for_acceptance(doc: dict[str, Any]) -> str:
     return "".join(lines) + "\n--- end of audit evidence ---"
 
 
+# Any finding at all used to block the audit, and a falsifying reviewer always
+# finds something new, so bounded rework could never converge (DOG-013).
+# Non-blocking notes still reach acceptance through the stored verdict text.
+REVIEW_VERDICT_CONTRACT = (
+    "Classify every finding as BLOCKING or NON-BLOCKING. BLOCKING means: incorrect behavior, a goal requirement "
+    "not met, required behavior without working tests, a failing test, or documentation or evidence that is false. "
+    "Hardening ideas, style, unlikely edge cases, and residual risks are NON-BLOCKING. End with exactly "
+    "AUDIT_STATUS: FINDINGS if any BLOCKING finding remains; otherwise end with exactly AUDIT_STATUS: CLEAN.")
+
+
+def verification_evidence_for_review(doc: dict[str, Any]) -> str:
+    """Give the reviewer the checks HowlPlane itself ran on the current tree.
+
+    Read-only reviewers often have no shell, so without this they report the
+    test gate as unproven (DOG-014). `doc["tests"]` is cleared whenever the
+    repository changes outside the session, and every review directly follows
+    a verification, so the latest result per command describes this tree.
+    """
+    latest: dict[str, dict[str, Any]] = {}
+    for item in doc.get("tests", []):
+        command = item["command"] if isinstance(item["command"], str) else " ".join(item["command"])
+        latest[command] = item
+    if not latest:
+        return ""
+    lines = [" HowlPlane itself ran these checks on the current tree (harness evidence, not implementer claims):"]
+    for command, item in latest.items():
+        lines.append(f"\n--- `{command}` exit {item['exit_code']} ---\n{item.get('output', '').strip()[-600:]}")
+    return "".join(lines) + "\n--- end of verification evidence ---"
+
+
 def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, repo: Path) -> Any:
     instructions = (
         f"Goal: {doc['goal']}\nRole: {role}. Work only in {repo}. "
@@ -1020,7 +1050,8 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         f"Constraints: {'; '.join(doc['constraints']) or 'none'}. "
     )
     if role == "review":
-        instructions += "Independently inspect the current diff and falsify correctness. Do not edit files. End with exactly AUDIT_STATUS: CLEAN only if you found no issue; otherwise end with AUDIT_STATUS: FINDINGS."
+        instructions += ("Independently inspect the current diff and falsify correctness. Do not edit files. "
+                         + REVIEW_VERDICT_CONTRACT + verification_evidence_for_review(doc))
     elif role == "acceptance":
         instructions += "As session orchestrator, inspect implementation, tests, and independent audit. Do not edit files. End with exactly ACCEPTANCE_STATUS: ACCEPTED only if evidence supports the goal; otherwise end with ACCEPTANCE_STATUS: REJECTED."
         instructions += audit_evidence_for_acceptance(doc)
