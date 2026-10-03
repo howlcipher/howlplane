@@ -1,0 +1,18 @@
+[15:35:07] RESUME      Loading orchestration session 9c87638b
+[15:35:07] RECONCILE   Checking repository and worker state
+[15:35:07] INTEGRATE   Orchestrator validating final result
+[15:35:08] SELECT      Codex for acceptance: unattended verified · live smoke stale · capacity UNKNOWN
+[15:35:08] ASSIGN      Codex assigned task 9c87638b: acceptance
+[15:35:08] START       Codex started acceptance
+[15:35:38] WORKING     INTEGRATE — 1 active worker(s); tasks: 9c87638b
+[15:35:49] FAIL        Codex acceptance failed: ACCEPTANCE_REJECTED_OR_UNCONFIRMED
+[15:35:49] CAPABILITY  Codex excluded from acceptance for this session after ACCEPTANCE_REJECTED_OR_UNCONFIRMED
+[15:35:49] CHECKPOINT  Preserved task 9c87638b state
+[15:35:50] REROUTE     9c87638b: Codex → Cursor (ACCEPTANCE_REJECTED_OR_UNCONFIRMED)
+[15:35:50] SELECT      Cursor for acceptance: unattended unverified · live smoke stale · capacity UNKNOWN
+[15:35:50] ASSIGN      Cursor assigned task 9c87638b: acceptance
+[15:35:50] START       Cursor started acceptance
+[15:36:20] WORKING     INTEGRATE — 1 active worker(s); tasks: 9c87638b
+[15:36:28] TAKEOVER    Claude could not accept; Cursor is now orchestrator
+[15:36:28] COMPLETE    Cursor completed 9c87638b: acceptance
+[15:36:28] COMPLETE    Session finished; 4 tasks completed; 3 rerouted; 3 validations passed; final status: COMPLETE WITH WARNINGS

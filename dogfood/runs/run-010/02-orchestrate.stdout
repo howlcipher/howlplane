@@ -1,0 +1,25 @@
+HOWL ORCHESTRATION REPORT
+Session: f7492d17d7834a5eb9c9a95b1be0a31c
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: codex
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: c3b4402d5b94ee0635d8309f35fc5b1742ce2fa5
+Repository status: M README.md
+?? .gitignore
+?? documentation/evidence.jsonl
+?? documentation/implementation.md
+?? documentation/test_impact.json
+?? household_tasks.py
+?? scripts/test.sh
+?? tests/test_cli.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "test_default_dates_and_environment_path (test_cli.CliTests.test_default_dates_and_environment_path) ... ok\ntest_full_lifecycle_and_persistence (test_cli.CliTests.test_full_lifecycle_and_persistence) ... ok\ntest_invalid_inputs_do_not_create_database (test_cli.CliTests.test_invalid_inputs_do_not_create_database) ... ok\ntest_multiple_tasks_and_parameterized_names (test_cli.CliTests.test_multiple_tasks_and_parameterized_names) ... ok\ntest_overflow_does_not_save_task (test_cli.CliTests.test_overflow_does_not_save_task) ... ok\ntest_rejected_completion_preserves_history (test_cli.CliTests.test_rejected_completion_preserves_history) ... ok\ntest_unusable_database_and_unsupported_version (test_cli.CliTests.test_unusable_database_and_unsupported_version) ... ok\n\n----------------------------------------------------------------------\nRan 7 tests in 3.023s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: bash scripts/test.sh (derived from the project's discovered test command)
+Failures: []

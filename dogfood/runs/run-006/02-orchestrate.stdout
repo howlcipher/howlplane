@@ -1,0 +1,24 @@
+HOWL ORCHESTRATION REPORT
+Session: 0e012100d31f46f49785a9f2e4dea8cd
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: codex
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 5
+Reroutes: 1
+Repository head: 7d852066b7095114e2b5d750becb2cd323c49beb
+Repository status: M README.md
+?? .gitignore
+?? documentation/implementation_decision.md
+?? household_tasks.py
+?? scripts/run.sh
+?? scripts/test.sh
+?? tests/test_cli.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}]
+Independent audit: CLEAN
+Recovery: {}
+Timed-out assignments: [{"stage": "review", "agent": "cursor", "model": "UNKNOWN", "execution_budget_seconds": 300}]
+Failures: [{"stage": "review", "agent": "cursor", "model": "UNKNOWN", "failure": "EXECUTION_BUDGET_EXCEEDED"}]

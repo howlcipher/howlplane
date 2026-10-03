@@ -1,0 +1,88 @@
+HOWL ORCHESTRATION REPORT
+Session: 9c87638b90d641fc8ddb838ce014e928
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE WITH WARNINGS
+Resumable: no
+Orchestrator: cursor
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 7
+Reroutes: 3
+Repository head: 19c3d7e832dae7a81c6290b92f640390b3828804
+Repository status: M README.md
+?? .gitignore
+?? DESIGN.md
+?? household/__init__.py
+?? household/__main__.py
+?? household/cli.py
+?? household/core.py
+?? scripts/demo.sh
+?? scripts/test.sh
+?? tests/test_cli_process.py
+?? tests/test_household.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "friendly) ... ok\ntest_end_to_end (test_household.CliTests.test_end_to_end) ... ok\ntest_main_reports_errors (test_household.CliTests.test_main_reports_errors) ... ok\ntest_bad_unit (test_household.RecurrenceTests.test_bad_unit) ... ok\ntest_months_clamp_and_roll_year (test_household.RecurrenceTests.test_months_clamp_and_roll_year) ... ok\ntest_units (test_household.RecurrenceTests.test_units) ... ok\ntest_backdated_completion_keeps_latest (test_household.StoreTests.test_backdated_completion_keeps_latest) ... ok\ntest_corrupt_file (test_household.StoreTests.test_corrupt_file) ... ok\ntest_due_logic (test_household.StoreTests.test_due_logic) ... ok\ntest_future_start_not_due (test_household.StoreTests.test_future_start_not_due) ... ok\ntest_persistence_and_ids (test_household.StoreTests.test_persistence_and_ids) ... ok\ntest_rejects_bad_input (test_household.StoreTests.test_rejects_bad_input) ... ok\n\n----------------------------------------------------------------------\nRan 17 tests in 1.858s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {"at": "2026-10-03T19:16:10.484271+00:00", "needs_validation": false, "from": "claude_code", "stage": "implementation"}
+Validation gap: Partial or recovered changes require an explicit --verify command
+Failures: [{"stage": "implementation", "agent": "claude_code", "model": "UNKNOWN", "failure": "EXECUTION_PERMISSION_REQUIRED"}, {"stage": "review", "agent": "cursor", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}, {"stage": "acceptance", "agent": "codex", "model": "UNKNOWN", "failure": "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"}]
+Verdict from Cursor (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  ## Review verdict
+  
+  Static review of the uncommitted tree: the CLI, recurrence rules, persistence, tests, and README mostly match the goal. A few goal/process and invariant gaps prevent a clean audit.
+  
+  ### Files changed (working tree vs empty `main`)
+  | Path | Role |
+  | --- | --- |
+  | `README.md` (modified) | Usage docs |
+  | `DESIGN.md` | Howl/route notes + tradeoffs |
+  | `.gitignore` | Ignores `data/`, bytecode |
+  | `household/__main__.py`, `cli.py`, `core.py` | App (no `__init__.py`) |
+  | `scripts/demo.sh`, `scripts/test.sh` | Demo + test/lint gate |
+  | `tests/test_household.py`, `tests/test_cli_process.py` | Unit + subprocess tests |
+  
+  HEAD is still `chore: empty mission target`; the app is entirely uncommitted. No commit/push/publish performed.
+  
+  ### Tests run
+  **None in this review.** Ask mode blocked shell execution, so `python3 -m unittest discover -s tests -v` and `bash scripts/test.sh` were not re-run. Suites inspected only: ~17 methods covering recurrence, store/CLI, subprocess lifecycle, schema errors, atomic save failure.
+  
+  ### Goal coverage (static)
+  | Requirement | Status |
+  | --- | --- |
+  | add / list / done / record completion / due-again | Present (`add`, `list`, `done`, `history`, `due`) |
+  | Local persistence | JSON + `os.replace` atomic write |
+  | Automated tests | Present (unverified here) |
+  | Usage docs | `README.md` matches CLI |
+  | Howl-selected approach | **Weak** — see finding 1 |
+  | Demonstrable CLI | `scripts/demo.sh` + `python3 -m household` (not executed here) |
+  
+  Recurrence contract in code matches the README: first due from `--start` / today; after completions, `next_due = last_completion + interval`; `due` uses `next_due <= today`; month-end clamp; same-day complete is idempotent.
+  
+  ### Findings
+  
+  1. **Howl selection constraint not met as stated.** `DESIGN.md` says the full goal failed `howlplane route`, a shortened goal only selected role/class `feature`/`implementation`, language was chosen by retaining an existing Python partial (HowlFrame not prototyped). That is path-dependent pre-decision, not a workflow-driven design pick.
+  
+  2. **Store invariant gap on load.** `complete()` rejects future dates; `_validate()` only checks that completion strings parse. A hand-edited future completion becomes `last_done` and can hide a task from `due` without error.
+  
+  3. **Full gate depends on undeclared flake8.** `scripts/test.sh` always runs `flake8`; README notes it, but there is no pinned/dev dependency, so a clean env can fail the “full” gate while unittest alone would pass.
+  
+  ### Remaining risks
+  - No writer locking (documented); even no-op idempotent `done` still rewrites the file (last writer wins).
+  - Completion-anchored schedule (no catch-up for missed intervals) — documented, easy to misread as calendar cadence.
+  - Not installable as a package; must run from repo root / `PYTHONPATH`.
+  - Deliverable not committed; only narrative evidence of prior test runs.
+  
+  ### Completion status
+  **Functionally close to done, not audit-clean:** core CLI behavior and docs look coherent; Howl-selection requirement and load-time completion invariant are the main gaps; tests/`demo.sh` not re-verified in this session.
+  
+  AUDIT_STATUS: FINDINGS
+Verdict from Codex (acceptance, ACCEPTANCE_REJECTED_OR_UNCONFIRMED):
+  The application works, but evidence does not support full acceptance.
+  
+  - **Files changed by me:** none. Existing changes: `README.md`, `.gitignore`, `DESIGN.md`, `household/`, `scripts/`, and `tests/`.
+  - **Verification:** `bash scripts/test.sh` passed all 17 tests and flake8. `bash scripts/demo.sh` demonstrated adding, listing, completing, recording history, persisting data, and becoming due again.
+  - **Audit reconciliation:** AGY’s functional approval is supported. Cursor’s workflow concern remains: `DESIGN.md` documents role routing and retaining existing Python code, but does not establish selection through the requested normal Howl workflow.
+  - **Remaining risks:** loaded future completion dates can suppress due tasks; concurrent writers can overwrite changes; the lint dependency is unpinned.
+  - **Completion:** functionally complete; acceptance blocked by unresolved workflow evidence. No commits, pushes, or publishing performed.
+  
+  ACCEPTANCE_STATUS: REJECTED

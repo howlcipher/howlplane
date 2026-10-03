@@ -1,0 +1,1 @@
+howl orchestrate "$(cat 00-mission.txt)" --repo /run/media/system/tallgeese/dev/dogfood-missions/run-010/household-tasks  (engine = howlplane dogfood/rework-and-default-verify @aedf82f, unchanged since run-009)

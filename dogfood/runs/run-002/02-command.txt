@@ -1,0 +1,1 @@
+howl orchestrate "$(cat 00-mission.txt)" --repo /run/media/system/tallgeese/dev/dogfood-missions/run-002/household-tasks  (howlplane engine = editable install on branch dogfood/DOG-001-persist-verdict-text @110091a)

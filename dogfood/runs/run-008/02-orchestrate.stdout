@@ -1,0 +1,104 @@
+HOWL ORCHESTRATION REPORT
+Session: 2eb12880bf5c46d68e63c91fd484a331
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: HANDOFF REQUIRED
+Resumable: yes
+Orchestrator: codex
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 5
+Reroutes: 2
+Repository head: 40f9bf119549abe4375b4f39d712acd273a6a28a
+Repository status: M README.md
+?? .gitignore
+?? documentation/evidence.jsonl
+?? documentation/implementation.md
+?? documentation/task_spec.json
+?? documentation/test_impact.json
+?? household_tasks.py
+?? scripts/test.sh
+?? tests/test_cli.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}]
+Independent audit: CLEAN
+Recovery: {}
+Excluded acceptance workers: [{"agent": "claude_code", "reason": "unattended execution unavailable"}, {"agent": "codex", "reason": "failed earlier this session (ACCEPTANCE_REJECTED_OR_UNCONFIRMED)"}, {"agent": "cursor", "reason": "not the session orchestrator"}, {"agent": "agy", "reason": "not the session orchestrator"}, {"agent": "devin_cli", "reason": "not the session orchestrator"}]
+Failures: [{"stage": "review", "agent": "cursor", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}, {"stage": "acceptance", "agent": "codex", "model": "UNKNOWN", "failure": "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"}]
+Next: the orchestrator rejected acceptance (verdict below). Address what it names in the repository, then run
+  howlplane orchestrate resume --repo /run/media/system/tallgeese/dev/dogfood-missions/run-008/household-tasks --verify <your test command>
+Changing the repository lets the same session be judged again. If the verdict is not actionable, run
+  howlplane orchestrate discard --repo /run/media/system/tallgeese/dev/dogfood-missions/run-008/household-tasks
+and start a new session.
+Verdict from Cursor (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  ## Review verdict
+  
+  Core CLI behavior (add/list/complete/due, SQLite persistence, inclusive recurrence, transactional history) looks coherent on static inspection. Documentation and process gaps prevent a clean audit.
+  
+  ### Files changed (uncommitted vs empty mission HEAD)
+  
+  | Path | Role |
+  | :--- | :--- |
+  | `household_tasks.py` | App |
+  | `tests/test_cli.py` | CLI integration tests |
+  | `scripts/test.sh` | unittest + flake8 gate |
+  | `.gitignore` | ignore `data/`, bytecode |
+  | `README.md` | Usage docs |
+  | `documentation/implementation.md` | Howl decision/evidence |
+  | `documentation/task_spec.json` | Feature TaskSpec |
+  | `documentation/test_impact.json` | TIA |
+  | `documentation/evidence.jsonl` | HowlPlane ledger |
+  
+  No commits/pushes observed beyond prior placeholder HEAD (`chore: empty mission target`). Other worktrees were not modified from this review.
+  
+  ### Tests run
+  
+  **Not re-executed here** — shell was rejected in Ask mode. Static review of six unittest cases + `scripts/test.sh` only. Implementation claims prior green `bash scripts/test.sh`; unverified in this pass.
+  
+  ### Findings
+  
+  1. **Major — README error contract is false for argparse failures**  
+     README claims exit code 2 with a JSON error on stderr. JSON is only emitted in `main`’s `except` after successful `parse_args`. Invalid `--every`, bad `--on` syntax, bad names, etc. exit via argparse usage text, not JSON. Tests check return code `2` and no traceback, never JSON shape.  
+     Repro: `python3 household_tasks.py add "Task" --every 0` vs `complete 999` after a real add.
+  
+  2. **Minor — Name rules stricter than docs**  
+     Filter rejects any Unicode category starting with `C` (`Cf`/`Co`/…), not only “control characters” as README states. ZWJ emoji names fail.
+  
+  3. **Minor — Howl loop incomplete at implement time**  
+     TaskSpec routing + alternatives are recorded; recommended independent reviewers were not run then (self-review only). Evidence ledger has TIA only. This review is the falsifier pass.
+  
+  4. **Minor — TIA overclaims leap-day coverage**  
+     Test uses `2024-02-28` + 7 days; never exercises `2024-02-29`.
+  
+  ### Remaining risks
+  
+  - Suite/flake8 not re-run in this environment  
+  - Concurrent-completion test expects exactly `[0, 2]`; lock/timeout edge cases could yield `[2, 2]`  
+  - `BEGIN IMMEDIATE` inside `with connection:` is a sqlite3 footgun across Python versions (looks OK for default isolation; not runtime-verified here)  
+  - No migrations / edit-delete; local unencrypted SQLite (documented limits)
+  
+  ### Completion vs acceptance
+  
+  | Criterion | Status |
+  | :--- | :--- |
+  | Add / list | Met |
+  | Complete + record date | Met |
+  | Due-again identification | Met (inclusive boundary) |
+  | Local persistence | Met |
+  | Automated tests + usage docs | Mostly; docs error-format claim wrong |
+  | Howl-chosen approach | Adequately evidenced; review evidence was thin until now |
+  
+  Working CLI design is demonstrable from README commands; fix the error-contract docs (or emit JSON from validation) before treating docs as trustworthy.
+  
+  AUDIT_STATUS: FINDINGS
+Verdict from Codex (acceptance, ACCEPTANCE_REJECTED_OR_UNCONFIRMED):
+  The CLI works, but acceptance is blocked by a confirmed documentation defect.
+  
+  - **Files delivered:** `README.md`, `.gitignore`, `household_tasks.py`, `scripts/test.sh`, `tests/test_cli.py`, and `documentation/`. I made no file edits or commits.
+  - **Verification:** All six integration tests, flake8, and `git diff --check` passed. A separate CLI demonstration verified add, list, completion recording, persistence, and the inclusive due-date boundary.
+  - **Audit reconciliation:** Cursor’s error-contract finding is confirmed: `add Task --every 0` emits argparse text, although README promises JSON errors. AGY’s clean verdict does not resolve this reproduced defect. ZWJ emoji names are also rejected despite the narrower documented restriction.
+  - **Workflow:** Implementation documentation records technology alternatives and Howl routing. The local ledger contains only test-impact evidence.
+  - **Remaining risks:** Documentation mismatches, limited workflow evidence, and SQLite writer contention.
+  
+  Implementation is functional; acceptance remains incomplete until the error contract is corrected and verified.
+  
+  ACCEPTANCE_STATUS: REJECTED

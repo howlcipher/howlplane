@@ -1,0 +1,1 @@
+howl orchestrate resume --repo /run/media/system/tallgeese/dev/dogfood-missions/run-007/household-tasks --verify bash scripts/test.sh   (documented recovery printed by the handoff)
