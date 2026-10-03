@@ -142,3 +142,11 @@ Not done: automatic rework (feeding the rejection back to the implementer). That
 ## DOG-008 — howl README omits `howl orchestrate`
 Status: FIX PUSHED (howl 95b78ac on dogfood/readme-orchestrate; PR pending). Severity: Medium (docs).
 Fix: README section on agents doctor / factory prepare / orchestrate with a first-run example, consistent with docs/SCOPE.md.
+
+## DOG-009 — A reroute after a partly written attempt demands a --verify command the user cannot know yet
+Status: OPEN (observed run-007; recovery followed as documented; not yet repaired). Severity: Medium (workflow needs an extra manual step, but the handoff states it).
+Evidence: run-007. Claude (now a working planner thanks to DOG-004) planned, then its implementation wrote files and was denied a shell command (EXECUTION_PERMISSION_REQUIRED; it also tried `cd` into the howlplane repo, outside the workspace). Codex continued from the partial files and completed. The session still ended HANDOFF REQUIRED: "Partial or recovered changes require an explicit --verify command", because a failed attempt that changed the repo sets needs_validation (existing safeguard).
+Impact: the mission goal contains no verification command and the app does not exist yet, so a user cannot supply one up front. After the fact it is discoverable (scripts/test.sh).
+Recovery used (documented): `howl orchestrate resume --repo <target> --verify bash scripts/test.sh` (runs/run-007/05-*).
+Fix candidates (design decision, not made): derive a default verification from the discovered project (ProjectAdapter already does this for Claude's allowlist), or let the planner propose it.
+Note: this was always possible; earlier runs never hit it because no attempt failed after writing files.

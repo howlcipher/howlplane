@@ -1,0 +1,28 @@
+HOWL ORCHESTRATION REPORT
+Session: 9c87638b90d641fc8ddb838ce014e928
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: HANDOFF REQUIRED
+Resumable: yes
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 3
+Reroutes: 1
+Repository head: 19c3d7e832dae7a81c6290b92f640390b3828804
+Repository status: M README.md
+?? .gitignore
+?? DESIGN.md
+?? household/__init__.py
+?? household/__main__.py
+?? household/cli.py
+?? household/core.py
+?? scripts/demo.sh
+?? scripts/test.sh
+?? tests/test_cli_process.py
+?? tests/test_household.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}]
+Independent audit: not requested or incomplete
+Recovery: {"at": "2026-10-03T19:16:10.484271+00:00", "needs_validation": true, "from": "claude_code", "stage": "implementation"}
+Validation gap: Partial or recovered changes require an explicit --verify command
+Failures: [{"stage": "implementation", "agent": "claude_code", "model": "UNKNOWN", "failure": "EXECUTION_PERMISSION_REQUIRED"}]
