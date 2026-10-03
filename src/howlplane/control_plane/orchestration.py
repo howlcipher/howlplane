@@ -866,7 +866,12 @@ def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
         order.remove(lead)
         order.insert(0, lead)
     if role == "acceptance":
-        order = order[:1]
+        # Only the orchestrator accepts, unless it has been disqualified for a reason unrelated to
+        # the work (capability, availability, capacity). Then the next eligible agent takes over so
+        # the session cannot deadlock (DOG-010). An orchestrator that judged and rejected stays final.
+        judged = agent_record(doc, lead)["capacity"].get("acceptance", {}).get("reason") in VERDICT_FAILURES if lead in order else False
+        if lead == "AUTO" or judged:
+            order = order[:1]
     selected = []
     for agent in order:
         state = agents[agent]["state"]
@@ -1254,6 +1259,11 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                     doc["audit"] = "CLEAN"
                 if stage == "acceptance":
                     doc["acceptance"] = "ACCEPTED"
+                    if agent != doc["orchestrator"]:
+                        if progress:
+                            progress._write("TAKEOVER", f"{AGENT_NAMES.get(doc['orchestrator'], doc['orchestrator'])} could not accept; "
+                                                        f"{AGENT_NAMES.get(agent, agent)} is now orchestrator")
+                        doc["orchestrator"] = doc["selected_orchestrator"] = agent
                 if model != "UNKNOWN":
                     doc["known_models"].setdefault(agent, []).append(model)
                 succeeded = True

@@ -213,6 +213,41 @@ def test_rejected_acceptance_recovers_after_the_repository_is_repaired(tmp_path,
     assert "Status: COMPLETE" in capsys.readouterr().out
 
 
+def test_acceptance_moves_to_another_agent_when_the_orchestrator_is_disqualified(tmp_path, monkeypatch, capsys):
+    # DOG-010 (run-007): Claude planned and became orchestrator, its implementation was denied, and the
+    # session deadlocked because only the orchestrator may accept.
+    repo = repository(tmp_path)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/fake/" + name if name in {"claude", "codex", "agent"} else None)
+    monkeypatch.setattr(module, "discover_models", lambda agent: [])
+    roles = []
+
+    def execute(doc, stage, agent, model, cwd):
+        roles.append((stage, agent))
+        denied = agent == "claude_code" and stage == "implementation"
+        if stage == "implementation" and not denied:
+            (cwd / "README").write_text("changed\n")
+        outcome = result(agent, stage, not denied, "EXECUTION_PERMISSION_REQUIRED" if denied else "")
+        outcome.stdout = {"review": "AUDIT_STATUS: CLEAN", "acceptance": "ACCEPTANCE_STATUS: ACCEPTED"}.get(stage, "plan")
+        return outcome
+
+    monkeypatch.setattr(module, "execute_assignment", execute)
+    status = module.command(arguments(repo, orchestrator="AUTO", policy="PLAN + EXECUTE + INDEPENDENT AUDIT", verify=["git", "diff", "--check"]))
+    captured = capsys.readouterr()
+    assert roles[0] == ("planning", "claude_code") and ("acceptance", "claude_code") not in roles
+    assert [item for item in roles if item[0] == "acceptance"], roles
+    assert "TAKEOVER" in captured.err and "could not accept" in captured.err
+    assert status == 0, captured.err + captured.out
+
+
+def test_orchestrator_that_rejected_acceptance_is_not_replaced_by_another_agent(tmp_path, monkeypatch, capsys):
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "execute_assignment", scripted_execute(acceptance="Nope.\nACCEPTANCE_STATUS: REJECTED"))
+    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 2
+    assert "TAKEOVER" not in capsys.readouterr().err
+
+
 def test_acceptance_evidence_marks_no_verdict_reviewer_as_provider_fault():
     doc = {"attempts": [
         {"stage": "review", "agent": "cursor", "state": "REVOKED", "failure": "AUDIT_NO_VERDICT", "verdict_excerpt": ""},
