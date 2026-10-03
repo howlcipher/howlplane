@@ -149,6 +149,7 @@ def redact(value: str) -> str:
 
 
 VERDICT_EXCERPT_CHARS = 4000
+MAX_REWORK_ROUNDS = 2
 AUDIT_EVIDENCE_CHARS = 2500
 AGENT_NAMES = {"claude_code": "Claude", "codex": "Codex", "cursor": "Cursor", "agy": "AGY", "devin_cli": "Devin"}
 PHASE_NAMES = {"planning": "PLAN", "implementation": "IMPLEMENT", "review": "AUDIT", "acceptance": "INTEGRATE", "verification": "VERIFY"}
@@ -999,7 +1000,10 @@ def audit_evidence_for_acceptance(doc: dict[str, Any]) -> str:
     lines = [" Independent audit evidence recorded by HowlPlane (verdicts from reviewers other than you):"]
     for item in reviews:
         no_verdict = item.get("failure") == "AUDIT_NO_VERDICT"
+        earlier_round = item.get("rework_round", 0) < doc.get("rework_rounds", 0)
         outcome = ("NO VERDICT (provider returned no text; not a finding, do not treat as unresolved)" if no_verdict else
+                   f"FINDINGS FROM REWORK ROUND {item.get('rework_round', 0)}; the implementer was sent back to address them and "
+                   "the work was re-reviewed. Judge by the latest review, and check whether these were actually fixed" if earlier_round and item.get("state") != "SUCCEEDED" else
                    "ACCEPTED AS CLEAN" if item.get("state") == "SUCCEEDED" else f"NOT CLEAN ({item.get('failure')})")
         excerpt = item["verdict_excerpt"].strip()[-AUDIT_EVIDENCE_CHARS:] or "(reviewer returned no text)"
         lines.append(f"\n--- {AGENT_NAMES.get(item['agent'], item['agent'])} review, {outcome} ---\n{excerpt}")
@@ -1020,6 +1024,11 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         instructions += audit_evidence_for_acceptance(doc)
     elif role == "implementation":
         instructions += "Implement the goal and run relevant local tests. Inspect existing partial changes first."
+        if doc.get("rework"):
+            instructions += (f" Independent review round {doc['rework']['round']} found issues with the current work. Fix every valid "
+                             "finding, run the tests again, and state which findings you rejected and why. If no change is warranted, "
+                             "report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED with your reasons. Reviewer findings:\n"
+                             + doc["rework"]["findings"])
         if is_existing_wip_context(doc["goal"], doc.get("constraints", [])):
             instructions += (" Treat current repository changes as intentional work in progress. "
                              "If existing changes completely satisfy the goal and no further edits are required, "
@@ -1054,6 +1063,24 @@ def checkpoint(doc: dict[str, Any], path: Path, token: str, repo: Path) -> None:
     doc["lease"]["renewed_at"] = time.time()
     with locked(path.parent):
         save(path, doc, token)
+
+
+def derive_verify_command(repo: Path) -> list[str] | None:
+    """The repository's own test command, as HowlPlane's project discovery finds it (DOG-009)."""
+    try:
+        from howlplane.control_plane.project_adapter import ProjectAdapter
+        commands = ProjectAdapter.discover(repo).test_commands
+    except Exception:
+        return None
+    return list(commands[0]) if commands else None
+
+
+def begin_rework(doc: dict[str, Any], findings: dict[str, Any]) -> None:
+    """Send a reviewer's real findings back to implementation (bounded by MAX_REWORK_ROUNDS)."""
+    doc["rework_rounds"] = doc.get("rework_rounds", 0) + 1
+    doc["rework"] = {"round": doc["rework_rounds"], "reviewer": findings["agent"], "findings": findings["verdict_excerpt"], "at": now()}
+    doc["previous_implementer"] = doc.pop("implementer", None)
+    doc.pop("audit", None)
 
 
 VERDICT_FAILURES = frozenset({"AUDIT_FINDINGS_OR_UNCONFIRMED", "AUDIT_NO_VERDICT", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"})
@@ -1099,8 +1126,10 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
         stages.append("review")
     if doc["policy"] != "PLAN ONLY":
         stages.append("acceptance")
-    start = stages.index(doc["stage"]) if doc["stage"] in stages else 0
-    for stage in stages[start:]:
+    index = stages.index(doc["stage"]) if doc["stage"] in stages else 0
+    while index < len(stages):
+        stage = stages[index]
+        index += 1
         doc["stage"] = stage
         doc["status"] = stage.upper()
         checkpoint(doc, path, token, repo)
@@ -1124,6 +1153,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             return [pair for pair in options if not (stage == "review" and pair[0] == doc.get("implementer"))]
 
         succeeded = False
+        findings_attempt: dict[str, Any] | None = None
         transient_retries: dict[tuple[str, str], int] = {}
         attempted: list[tuple[str, str]] = []
         retry: tuple[str, str] | None = None
@@ -1168,6 +1198,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             before = evidence(repo)
             invocation_policy = session_trust_policy(doc)
             assignment = {"task_id": doc["id"][:8], "stage": stage, "agent": agent, "model": model, "started_at": now(), "fence": token, "state": "ASSIGNED",
+                          "rework_round": doc.get("rework_rounds", 0),
                           "workspace_trust": {"policy": invocation_policy,
                                               "mechanism": workspace_trust.mechanism(agent, invocation_policy)},
                           "execution_budget_seconds": execution_budget(doc, stage), "selection_evidence": selection_evidence(doc, agent)}
@@ -1190,7 +1221,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                                "error": redact((result.error_message or result.stderr)[:200])})
             no_change_detail = ""
             if result.success and stage == "implementation" and before == after:
-                is_wip = is_existing_wip_context(doc["goal"], doc.get("constraints", []))
+                is_wip = is_existing_wip_context(doc["goal"], doc.get("constraints", [])) or bool(doc.get("rework"))
                 has_repo_wip = bool(before.get("status", "").strip())
                 stdout_text = result.stdout or ""
                 reports_no_change = bool(
@@ -1274,6 +1305,14 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 if progress:
                     progress.worker_complete(doc["id"][:8], agent, stage)
                 break
+            if stage == "review" and assignment["failure"] == "AUDIT_FINDINGS_OR_UNCONFIRMED" and assignment.get("verdict_excerpt"):
+                # Real findings are not a worker fault: asking another reviewer until one says CLEAN would hide
+                # them. The reviewer stays eligible; the findings go back to the implementer or end the session.
+                findings_attempt = assignment
+                if progress:
+                    progress._write("FINDINGS", f"{AGENT_NAMES.get(agent, agent)} review reported findings")
+                checkpoint(doc, path, token, repo)
+                break
             doc["reroutes"].append({"from": f"{agent}:{model}", "stage": stage, "reason": assignment["failure"]})
             if progress:
                 progress._write("FAIL", f"{AGENT_NAMES.get(agent, agent)} {stage} failed: {assignment['failure']}{no_change_detail}")
@@ -1309,10 +1348,22 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 return report(doc)
             if doc["failover"] == "OFF":
                 break
+        if not succeeded and findings_attempt is not None and "implementation" in stages:
+            if doc.get("rework_rounds", 0) < MAX_REWORK_ROUNDS:
+                begin_rework(doc, findings_attempt)
+                if progress:
+                    progress._write("REWORK", f"Round {doc['rework_rounds']} of {MAX_REWORK_ROUNDS}: sending "
+                                              f"{AGENT_NAMES.get(findings_attempt['agent'], findings_attempt['agent'])}'s findings back to implementation")
+                checkpoint(doc, path, token, repo)
+                index = stages.index("implementation")
+                continue
         if not succeeded:
             doc["status"] = "BLOCKED" if stage == "review" else "HANDOFF REQUIRED"
             if stage == "review":
-                doc["audit"] = "AUDIT BLOCKED: independent reviewers exhausted" if attempted else "AUDIT BLOCKED: no independent reviewer"
+                if findings_attempt is not None:
+                    doc["audit"] = (f"AUDIT BLOCKED: review findings remain after {doc.get('rework_rounds', 0)} rework round(s)")
+                else:
+                    doc["audit"] = "AUDIT BLOCKED: independent reviewers exhausted" if attempted else "AUDIT BLOCKED: no independent reviewer"
             doc["exclusions"] = {"stage": stage, "agents": exclusions(doc, stage)}
             stage_timeouts = [item for item in doc["timed_out_assignments"] if item["stage"] == stage]
             if stage_timeouts and is_resumable(doc):
@@ -1343,6 +1394,13 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 if progress:
                     progress.blocked("HANDOFF REQUIRED", "Repository diff validation failed", f"howlplane orchestrate resume --repo {repo}" if is_resumable(doc) else None)
                 return report(doc)
+            if not doc.get("verify_command"):
+                derived = derive_verify_command(repo)
+                if derived:
+                    # Not user-supplied: record that, so the report and the user can see where it came from.
+                    doc["verify_command"], doc["verify_source"] = derived, "derived from the project's discovered test command"
+                    if progress:
+                        progress._write("VERIFY", f"No --verify given; using the project's test command: {' '.join(derived)}")
             if doc.get("verify_command"):
                 command = doc["verify_command"]
                 if progress:
@@ -1393,6 +1451,10 @@ def report(doc: dict[str, Any]) -> int:
     print(f"Tests: {json.dumps(doc['tests'])}")
     print(f"Independent audit: {doc.get('audit', 'completed' if doc['stage'] == 'review' and (is_final(doc) or doc['status'] == 'HANDOFF REQUIRED') else 'not requested or incomplete')}")
     print(f"Recovery: {json.dumps(doc.get('reconciliation', {}))}")
+    if doc.get("verify_source"):
+        print(f"Verification command: {' '.join(doc['verify_command'])} ({doc['verify_source']})")
+    if doc.get("rework_rounds"):
+        print(f"Rework rounds: {doc['rework_rounds']} of {MAX_REWORK_ROUNDS}")
     if doc.get("validation_gap"):
         print(f"Validation gap: {doc['validation_gap']}")
     if doc.get("timed_out_assignments"):
