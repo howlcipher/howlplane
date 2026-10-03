@@ -40,7 +40,7 @@ howlplane: branch dogfood/campaign-household-tasks (campaign records only)
 none
 
 ## Remaining Work
-Campaign complete. Only follow-ups: merge howlplane PR for dogfood/DOG-001-persist-verdict-text; see FINAL_REPORT.md recommended work.
+Campaign complete. Only follow-ups: (howlplane PR #138 merged as aeac4b9; howlplane checkout is back on main) see FINAL_REPORT.md recommended work.
 (Original plan, now done:)
 1. Create target repo /run/media/system/tallgeese/dev/dogfood-missions/run-001/household-tasks (git init).
 2. `howl agents doctor --repo <target>`; `howl factory prepare --repo <target> --yes`.

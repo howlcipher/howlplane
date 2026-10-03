@@ -23,7 +23,7 @@ Total: 3. Resolved: 3. Remaining nonblocking: observations below.
 | DOG-003 | An exit-0 reviewer with no text was reported as findings and then fed to acceptance as an unresolved audit (run-004) | 82d3cde, a3c7d7e |
 
 ## Ecosystem Repositories Changed
-Repo: howlplane. Branch: dogfood/DOG-001-persist-verdict-text (from main 83b117c). Commits: 110091a, b07a4e0, 82d3cde, a3c7d7e. Remote: origin (github.com/howlcipher/howlplane), all pushed. Merged: NO, awaiting review/PR. No other Howl repository needed changes.
+Repo: howlplane. Branch: dogfood/DOG-001-persist-verdict-text (from main 83b117c). Commits: 110091a, b07a4e0, 82d3cde, a3c7d7e. Remote: origin (github.com/howlcipher/howlplane), all pushed. Merged: YES, PR #138 merged to main as aeac4b9 on 2026-10-03. No other Howl repository needed changes.
 Campaign records: howlplane branch dogfood/campaign-household-tasks (worktree howlplane-dogfood-campaign).
 
 ## Major Improvements
@@ -47,7 +47,7 @@ artifacts/run-001-household-tasks-at-handoff.tgz, run-003-..., run-005-..., run-
 runs/run-NNN/ (stdout, stderr, exit code, timestamps, manifests for runs 001 and 004), findings/FINDINGS.md, journal/DOGFOOD_JOURNAL.md.
 
 ## Remaining Recommended Work
-1. Review and merge the howlplane PR for the repair branch.
+1. (Done) howlplane PR #138 merged.
 2. Cursor review returned empty output in 5 of 6 runs and timed out in the sixth. This is a Cursor backend or provider problem, now correctly handled but worth its own investigation.
 3. Claude is excluded as planner with EXECUTION_PERMISSION_REQUIRED in unattended mode (seen run-001, recurring "Claude: unattended execution unavailable"). Possibly because this campaign ran inside a Claude Code session; not investigated.
 4. `howl/README.md` does not mention `howl orchestrate`, the main user entry point (documentation gap, not filed as a blocking finding).
@@ -59,4 +59,4 @@ runs/run-NNN/ (stdout, stderr, exit code, timestamps, manifests for runs 001 and
 2. `howl factory prepare --repo . --yes`
 3. `howl orchestrate "<mission text from runs/run-001/00-mission.txt>" --repo .`
 4. Expect Status COMPLETE; then run the README commands of the generated app and its test script.
-Requires the howlplane engine from branch dogfood/DOG-001-persist-verdict-text (or main once merged); the installed engine is an editable install of the howlplane checkout.
+Requires howlplane main at aeac4b9 or later; the installed engine is an editable install of the howlplane checkout.
