@@ -85,8 +85,8 @@ This also closes the earlier concern that a later CLEAN review hides an earlier 
 
 ## DOG-003 — Empty reviewer output is reported as "findings"
 
-Status: OPEN, NONBLOCKING (recurred run-003: Cursor review again empty then AGY CLEAN; deliberately not changed between clean runs 1 and 2)
-Severity: Medium (misleading UX)
+Status: FIX COMMITTED (82d3cde), push in progress, awaiting regression in run-005
+Severity: High after run-004 (escalated from Medium: blocked completion)
 Discovered in run: run-002
 Owning component: HowlPlane orchestration
 Repository: howlplane
@@ -99,3 +99,11 @@ A distinct, explicit failure such as "reviewer returned no verdict", so the user
 
 ### Notes
 Fix candidate: classify empty/verdictless review stdout separately (touches the failure enum at orchestration.py ~L65 and its tests).
+
+
+### DOG-003 update (run-004)
+Run-003 hit the same empty Cursor review but Codex acceptance tolerated it, so run-003 was clean by luck. Run-004 (same code b07a4e0): Cursor empty review, AGY CLEAN, then Codex acceptance REJECTED: "Cursor's independent audit returned no text and is marked unconfirmed". Cause: DOG-002 now hands acceptance every review attempt, and the empty one was labelled NOT CLEAN (AUDIT_FINDINGS_OR_UNCONFIRMED). Evidence: runs/run-004/.
+Resolution: empty exit-0 review stdout is `AUDIT_NO_VERDICT` (in ROLE_FAILURES, so the reviewer is excluded from the review role); acceptance evidence labels it "NO VERDICT (provider returned no text; not a finding)". Tests: test_empty_review_is_no_verdict_not_findings, test_acceptance_evidence_marks_no_verdict_reviewer_as_provider_fault; subset 552 passed.
+Commit: howlplane dogfood/DOG-001-persist-verdict-text 82d3cde. Push: in progress.
+Regression: run-005 (pending).
+Open question for later (not fixed): Cursor reviewer returned empty output in 4 of 4 runs after 3-4 minutes. That is a Cursor backend/provider problem worth its own finding if it persists.

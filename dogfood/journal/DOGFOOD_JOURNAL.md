@@ -11,3 +11,4 @@
 - DOG-001 fix 110091a pushed to origin/dogfood/DOG-001-persist-verdict-text.
 - run-002 ended HANDOFF REQUIRED: DOG-001 fix verified; new root cause DOG-002 (acceptance not given audit). DOG-002 fixed b07a4e0. DOG-003 filed. Next: run-003.
 - run-003 COMPLETE and independently verified: CLEAN RUN 1 PASS. DOG-002 pushed b07a4e0. Starting run-004 on unchanged code.
+- run-004 FAILED (HANDOFF REQUIRED): DOG-003 blocked acceptance. Fix 82d3cde. run-003 retracted from clean count (streak 0/2). Next run-005.

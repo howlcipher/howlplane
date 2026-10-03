@@ -12,3 +12,5 @@ Notes: files left uncommitted in the target (Howl is told not to commit). Artifa
 Manual edits to generated app: none. Internal state edits: none. Bypasses: none.
 
 CLEAN RUN 1: PASS
+
+RETRACTION (after run-004): CLEAN RUN 1 does not count toward the two-run target. The DOG-003 defect was present in run-003 (Cursor empty review) and acceptance tolerated it by chance. The streak restarts after the DOG-003 fix.
