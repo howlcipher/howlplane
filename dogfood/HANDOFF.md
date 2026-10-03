@@ -53,6 +53,9 @@ Campaign records live in the worktree /run/media/system/tallgeese/dev/howlplane-
 2. Read this file, findings/FINDINGS.md, journal.
 3. `howl orchestrate inspect --json --repo <target>` to see any live session before starting anything new.
 
+## Follow-up campaign in progress
+After PASS, the user asked to do all 4 recommended follow-ups. Done in code: DOG-004..007 (howlplane 338478b + docs on branch dogfood/followups-reviewer-and-recovery, push in progress, log /tmp/claude-1000/push-followups.log), DOG-008 (howl dogfood/readme-orchestrate 95b78ac pushed, PR not yet opened). Next: regression runs run-007, run-008 via the public CLI on the new code; then PRs.
+
 ## Warnings
 howlplane has a pre-push hook that runs the full suite (`make test lint build docs`, several minutes). Pushes are slow, not hung. Campaign branch commit bc1ad5d push was in flight at 21:15.
 Many other agents' worktrees exist; do not modify them. Do not use local LLM providers.

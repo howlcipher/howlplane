@@ -15,3 +15,4 @@
 - run-005 COMPLETE + verified: CLEAN RUN 1/2 on fixed code. DOG-003 first push failed slopslint (my dup tests); fixed a3c7d7e, repush in progress. Starting run-006.
 - run-006 COMPLETE + verified: CLEAN RUN 2/2. DOGFOOD RESULT: PASS. Final report written.
 - 2026-10-03 PR #138 merged (aeac4b9). howlplane checkout returned to main.
+- 2026-10-03 follow-ups: DOG-004..008 written up; code committed 338478b; starting regression runs.

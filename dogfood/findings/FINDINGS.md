@@ -110,3 +110,35 @@ Open question for later (not fixed): Cursor reviewer returned empty output in 4 
 
 ### DOG-003 follow-up: pre-push gate failure (self-inflicted, fixed)
 First push of 82d3cde failed the repo pre-push suite: `slopslint check --enforce` reported python_tests had 3 duplicate clones (ceiling 2) because my two new tests shared near-identical worker stubs. Fixed in a3c7d7e by sharing a `scripted_execute` helper (clones back to 2; tests only). Lesson recorded: run `slopslint check --classify --enforce` before pushing test changes.
+
+
+# Follow-up campaign (after PASS and PR #138 merge): findings DOG-004 to DOG-007
+
+Branch howlplane dogfood/followups-reviewer-and-recovery (from merged main aeac4b9); howl dogfood/readme-orchestrate.
+
+## DOG-004 — A read-only-role permission denial marks Claude interactive-only across sessions
+Status: FIX COMMITTED (338478b), awaiting regression run. Severity: High (silently removes an agent; poisons the cross-session cache).
+Evidence: run-001 planning by Claude was denied `cat README.md; howl --help | head`; HowlPlane then wrote unattended=false to the readiness cache. Later `howl agents doctor` showed Claude "NEEDS ACTION interactive only" and `howl orchestrate --orchestrator claude_code` ended in INTERNAL_ERROR (ValueError traceback, "likely a HowlPlane bug").
+Root cause: the planning profile has no Bash by design, the model tried a shell, and the denial was recorded as evidence about unattended *mutation*. Also an unusable explicit orchestrator raised a bare ValueError.
+Fix: denial scopes to mutating roles only (implementation/remediation); Claude read-only roles are told to use Read/Grep/Glob; explicit unavailable orchestrator raises OperatorFailure ORCHESTRATOR_UNAVAILABLE with the recovery command. Three tests that encoded the old contract were updated (observed-incident fixtures now reserve Claude; planning denial leaves capability unknown) and two tests pin the new contract (planning/review do not, implementation does mark interactive-only).
+Live check: after clearing the stale cache, a Claude PLAN ONLY session completed in 15 s.
+
+## DOG-005 — `agents doctor` advice for interactive-only does not recover it
+Status: FIX COMMITTED (338478b). Severity: Medium.
+Evidence: doctor's Next says `agents doctor --refresh`, and neither `--refresh` nor `--live` (no repo) cleared "interactive only" even with a passing smoke, because a session verdict outranks a smoke. Only `--live --repo <path>` (workspace smoke) cleared it.
+Fix: doctor now names that command for interactive-only workers; docs explain the precedence.
+
+## DOG-006 — Cursor reviews return no text (root cause of repeated AUDIT_NO_VERDICT)
+Status: FIX COMMITTED (338478b), awaiting regression run. Severity: High (reviewer wasted ~4 min per run, 5 of 6 runs).
+Evidence (run outside HowlPlane, same review prompt, run-006 target): `agent -p --mode plan --output-format text` rc 0 after 4m08s, stdout 1 byte; `--mode plan --output-format json` timed out at 290 s with no output; `--mode ask` rc 0 in 213 s with a full review, including a legitimate finding (foreign-key integrity unenforced) and `AUDIT_STATUS: FINDINGS`. The planning role in plan mode works (19 s, real output).
+Fix: Cursor review and acceptance use `--mode ask`; planning keeps `--mode plan`. Note: with real reviews Cursor will now sometimes report genuine findings, which route through the normal findings path.
+
+## DOG-007 — No recovery after an acceptance rejection
+Status: FIX COMMITTED (338478b). Severity: High.
+Evidence: `howl orchestrate resume` on run-001's rejected session re-printed the same HANDOFF with no worker and no guidance. The rejecting orchestrator stays excluded for acceptance for the session even after the repository changes.
+Fix: verdict-based review/acceptance exclusions (AUDIT_FINDINGS_OR_UNCONFIRMED, AUDIT_NO_VERDICT, ACCEPTANCE_REJECTED_OR_UNCONFIRMED) expire when the repository changes; stale audit/acceptance results are cleared; the rejection report prints exact next steps (repair then `resume --verify`, or `discard`). Test: test_rejected_acceptance_recovers_after_the_repository_is_repaired.
+Not done: automatic rework (feeding the rejection back to the implementer). That is a larger design change, recorded as a recommendation.
+
+## DOG-008 — howl README omits `howl orchestrate`
+Status: FIX PUSHED (howl 95b78ac on dogfood/readme-orchestrate; PR pending). Severity: Medium (docs).
+Fix: README section on agents doctor / factory prepare / orchestrate with a first-run example, consistent with docs/SCOPE.md.
