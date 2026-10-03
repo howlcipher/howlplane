@@ -2,7 +2,7 @@
 
 ## DOG-001 — Review/acceptance verdict text is discarded; user cannot see why a session stopped
 
-Status: FIX PUSHED, awaiting regression in run-002
+Status: RESOLVED (verified run-002: Codex acceptance rejection reason and Cursor review output now readable in report)
 Severity: High (false-success and UX; blocks diagnosis of every audit/acceptance stop)
 Discovered in run: run-001
 Owning component: HowlPlane orchestration
@@ -42,7 +42,60 @@ Remote: origin
 Push status: PUSHED to origin (full pre-push suite passed)
 
 ### Regression verification
-run-002 (pending)
+run-002 report printed `Verdict from Codex (acceptance, ...)` with the full rejection text.
 
 ### Notes
 Generated app itself (independently checked after handoff): `python3 -m household_tasks --help` works; `bash scripts/test.sh` passes 11 tests incl. cross-process persistence. Files are uncommitted in the target working tree (README.md modified, others untracked); the session did not commit them.
+
+
+## DOG-002 — Acceptance worker is never given the independent audit verdicts
+
+Status: FIX COMMITTED (b07a4e0), push in progress, awaiting regression in run-003
+Severity: High (workflow blocker; false rejection of working output; hits every run so far)
+Discovered in run: run-001 (reason visible only after DOG-001 fix, confirmed run-002)
+Owning component: HowlPlane orchestration
+Repository: howlplane (orchestration.py `execute_assignment`)
+
+### User action
+`howl orchestrate "<household mission>" --repo <target>` (run-002)
+
+### Expected
+Working app + CLEAN independent audit (AGY) leads to acceptance, COMPLETE.
+
+### Actual
+Codex acceptance: "The application works, but acceptance is blocked by missing independent-audit evidence ... no independent findings or audit verdict." Verdict ACCEPTANCE_STATUS: REJECTED. Session HANDOFF REQUIRED; codex then excluded from acceptance and the other agents are "not the session orchestrator", so there is no recovery path without a new session.
+
+### Evidence
+runs/run-002/02-orchestrate.stdout (Verdict from Codex block), runs/run-002 manifest in ~/.local/state/howlplane/orchestrate/599376b8*.json.
+
+### Root cause
+The acceptance prompt says "inspect implementation, tests, and independent audit" but supplies none of it; reviewer verdicts live only in the manifest.
+
+### Resolution
+New `audit_evidence_for_acceptance()` appends every recorded review verdict (including superseded NOT CLEAN ones) to the acceptance prompt. Test: test_acceptance_prompt_includes_independent_audit_verdicts. Docs: ORCHESTRATE.md.
+
+### Commit
+Repository: howlplane; Branch: dogfood/DOG-001-persist-verdict-text; SHA: b07a4e0; Push status: IN PROGRESS
+
+### Regression verification
+run-003 (pending)
+
+### Notes
+This also closes the earlier concern that a later CLEAN review hides an earlier reviewer's findings: acceptance now sees both.
+
+## DOG-003 — Empty reviewer output is reported as "findings"
+
+Status: OPEN (not yet repaired; lower priority)
+Severity: Medium (misleading UX)
+Discovered in run: run-002
+Owning component: HowlPlane orchestration
+Repository: howlplane
+
+### Actual
+Cursor review exited 0 with empty stdout (verdict_excerpt blank, ~4 minutes). HowlPlane recorded `AUDIT_FINDINGS_OR_UNCONFIRMED` and printed "FAIL ... review failed", which reads as defects found. Also the Claude planner is skipped with EXECUTION_PERMISSION_REQUIRED in run-001 ("unattended execution unavailable").
+
+### Expected
+A distinct, explicit failure such as "reviewer returned no verdict", so the user knows it is a provider problem, not code findings.
+
+### Notes
+Fix candidate: classify empty/verdictless review stdout separately (touches the failure enum at orchestration.py ~L65 and its tests).

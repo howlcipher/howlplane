@@ -4,10 +4,10 @@
 Prove a normal user can ask Howl for a household recurring-task CLI app (add, list, complete with timestamp, due-again detection, local persistence, tests, usage docs) via the public CLI and get a working result. Two consecutive clean runs required.
 
 ## Current Status
-RUNNING (run-002 in progress, verifying DOG-001 fix)
+RUNNING (run-003 about to start, verifying DOG-002 fix)
 
 ## Current Run
-run-002 (evidence in runs/run-002/)
+run-003 (evidence in runs/run-003/)
 
 ## Current Phase
 run-002 started (fresh target dogfood-missions/run-002/household-tasks, same mission) to regress DOG-001. run-001 session 791d33f0 left resumable at acceptance; ignore it.
@@ -19,7 +19,7 @@ run-002 started (fresh target dogfood-missions/run-002/household-tasks, same mis
 Exit 2, HANDOFF REQUIRED at acceptance; app works (11 tests pass) but acceptance rejection reason is invisible. Logs in runs/run-001/02-orchestrate.{stdout,stderr}; exit code in 02-exit.txt once finished.
 
 ## Active Finding
-DOG-001 (verdict text discarded)
+DOG-002 (acceptance never given audit verdicts); DOG-003 open, lower priority
 
 ## Root Cause
 n/a
@@ -28,6 +28,7 @@ n/a
 none
 
 ## Latest Commits
+howlplane dogfood/DOG-001-persist-verdict-text b07a4e0 DOG-002 fix (push in progress, /tmp/claude-1000/push-dog002.log)
 howlplane dogfood/DOG-001-persist-verdict-text 110091a (PUSHED)
 howlplane dogfood/campaign-household-tasks 8251ad0 (local only)
 
