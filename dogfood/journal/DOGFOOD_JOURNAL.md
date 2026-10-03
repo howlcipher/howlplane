@@ -20,3 +20,4 @@
 - run-008: HANDOFF REQUIRED on real Cursor finding (README JSON-error claim). DOG-011 filed. PRs being opened for followups + readme.
 - run-009 COMPLETE + verified: clean run 1/2 on new code. Starting run-010.
 - run-010 COMPLETE + verified: clean run 2/2 on new code (009+010). Final report addendum written.
+- 2026-10-03 resume check (new session): all PRs merged, main src == aedf82f, PASS remains valid; howlframe fast-forwarded; no new runs.

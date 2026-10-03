@@ -37,3 +37,8 @@ Howl 0.1.1; HowlFrame, HowlChangeOps, HowlPlane (+ control-plane engine), HowlWr
 
 ## RESULT
 DOGFOOD RESULT: PASS (run-005 and run-006). See FINAL_REPORT.md.
+
+## Resume check (2026-10-03, new session)
+All campaign PRs merged: howlplane #139, #140, #141 (main a0ada6a); howl #14 (main 77482cb).
+`git diff aedf82f a0ada6a -- src` is empty, so main's engine source is byte-identical to the engine that produced clean runs 009 and 010. The installed engine is an editable install of howlplane/src (runtimes/howlplane-engine venv `.pth`), and the checkout is on main.
+Repository survey: all 12 Howl repos clean on main, none ahead; howlframe fast-forwarded 5a229d6 -> 9c73d28 (not used by this mission). No new runs were needed to keep the PASS valid.

@@ -72,3 +72,8 @@ Many other agents' worktrees exist; do not modify them. Do not use local LLM pro
 
 ## Status update (run-010)
 PASS on the new code: runs 009 and 010 are two consecutive clean runs (engine aedf82f). See FINAL_REPORT.md addendum. Remaining: PR for dogfood/rework-and-default-verify (stacked on #139), merges are the user's. A live firing of the rework loop is still unobserved.
+
+## Status update (resume check, 2026-10-03)
+Campaign: PASS, still valid. All PRs merged; howlplane main a0ada6a has the same src as aedf82f (the engine for runs 009/010). Nothing pending, no active finding, no unpushed work.
+Optional next work (not required for PASS): (1) observe the DOG-011 rework loop firing live; (2) DOG-012 candidate, Cursor review latency close to the 300 s review budget.
+Resume: if howlplane src changes after a0ada6a, run two fresh missions (run-011, run-012) with the reproduction in FINAL_REPORT.md before re-asserting PASS.
