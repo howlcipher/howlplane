@@ -90,3 +90,6 @@ Next: run-012 from a fresh target (same steps as run-011, engine 82414bf), then 
 
 ## Status update (run-012, 2026-10-03)
 run-012 clean on 82414bf, but DOG-015 changed the engine (a1d8ce2, push in progress). Streak 0/2 on a1d8ce2. Next: run-013, run-014 with the same procedure. Then PRs: DOG-012 branch, DOG-013 branch (stacked); return checkout to main.
+
+## Status update (run-013, 2026-10-03)
+run-013 HANDOFF REQUIRED -> DOG-016 fixed in 4a5d697 (same branch dogfood/DOG-013-review-convergence; live engine). Streak 0/2. Next: run-014, run-015 on 4a5d697.

@@ -252,3 +252,16 @@ Discovered in run: run-012
 run-012 report showed only "Independent audit: CLEAN". The report printed verdicts only for non-clean attempts, and the session manifest is removed when a session completes (unless `--retain-report`), so the CLEAN reviewer's text was gone.
 ### Resolution
 Report prints `Review notes from <agent> (review, CLEAN):` with the stored excerpt. Test: test_clean_review_notes_are_shown_in_the_report (failed before the fix). 327 related tests passed; slopslint OK.
+
+## DOG-016 — A fixable acceptance rejection ends the session; nothing acts on it
+Status: FIX COMMITTED (howlplane dogfood/DOG-013-review-convergence 4a5d697)
+Severity: High (workflow blocker; acceptance judged the app functionally complete)
+Discovered in run: run-013
+Owning component: HowlPlane orchestration (acceptance stage)
+### Actual
+Codex acceptance: "The application meets the functional goal, but required workflow evidence is incomplete … blocked by missing validated Test Impact Assessment evidence", citing the user's global rules (howlplane/.agents/prompts/ship_check.md, reachable by every agent via the global install). Session HANDOFF REQUIRED; Codex excluded; others "not the session orchestrator".
+### Root cause
+Review findings got bounded rework (DOG-011) but acceptance rejections did not, so any requirement the acceptor applies that the implementer missed is terminal. The rule itself is legitimate user policy, so suppressing it would be wrong.
+### Resolution
+A reasoned rejection goes back to implementation on the shared 2-round budget; the same orchestrator re-judges with its earlier reasons in its prompt; never passed to another acceptor; after the cap the existing handoff path applies. Tests: two new (rework then accept; cap then handoff), DOG-010 test now asserts "only the same agent ever accepts" (was "exactly one call"). Orchestration subset 513 passed; slopslint OK. Docs: ORCHESTRATE.md.
+Options weighed: tell the implementer about every global rule (unbounded, environment-specific); suppress global rules for acceptance (overrides user policy); rework the rejection (chosen; general, consistent with DOG-011).
