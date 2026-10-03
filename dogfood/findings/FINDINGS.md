@@ -243,3 +243,12 @@ Review prompt carries the latest harness result per check (`git diff --check`, v
 
 ## Observation (not filed): implementer's `howlplane route` attempt failed
 Cursor noted `.howl_state/.../HP-20261003-185406-bced.txt`: Codex tried `howlplane route` with task_class 'test' and it was rejected as invalid. The mission asks for approach selection "through the normal Howl workflow", and the orchestrate session already is that workflow. Low priority; recheck if it recurs.
+
+## DOG-015 — CLEAN review notes are invisible to the user
+Status: FIX COMMITTED (howlplane dogfood/DOG-013-review-convergence a1d8ce2)
+Severity: Medium (false-success defense: after DOG-013 a reviewer may mark items NON-BLOCKING; the user must be able to see them)
+Discovered in run: run-012
+### Actual
+run-012 report showed only "Independent audit: CLEAN". The report printed verdicts only for non-clean attempts, and the session manifest is removed when a session completes (unless `--retain-report`), so the CLEAN reviewer's text was gone.
+### Resolution
+Report prints `Review notes from <agent> (review, CLEAN):` with the stored excerpt. Test: test_clean_review_notes_are_shown_in_the_report (failed before the fix). 327 related tests passed; slopslint OK.

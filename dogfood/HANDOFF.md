@@ -87,3 +87,6 @@ Afterwards return the howlplane checkout to main.
 ## Status update (run-011, 2026-10-03)
 run-011 BLOCKED (not clean). Fixes for DOG-013 and DOG-014: howlplane dogfood/DOG-013-review-convergence 82414bf (stacked on DOG-012 9a9a59c); the howlplane checkout is on that branch (= live engine). Clean streak 0/2.
 Next: run-012 from a fresh target (same steps as run-011, engine 82414bf), then run-013. Afterwards open PRs for DOG-012 and DOG-013 and return the checkout to main.
+
+## Status update (run-012, 2026-10-03)
+run-012 clean on 82414bf, but DOG-015 changed the engine (a1d8ce2, push in progress). Streak 0/2 on a1d8ce2. Next: run-013, run-014 with the same procedure. Then PRs: DOG-012 branch, DOG-013 branch (stacked); return checkout to main.

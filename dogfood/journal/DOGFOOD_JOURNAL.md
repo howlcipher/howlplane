@@ -24,3 +24,4 @@
 - 2026-10-03 host fault: ~16 user site-packages missing (httpx, pydantic, ...) broke pre-push; restored via pip --user. Records branch dogfood/resume-check-20261003 pushed (46357fe).
 - 2026-10-03 DOG-012 fixed (review budget 600 s), 9a9a59c; regression runs 011/012 planned on that engine. Target run-011 created (39f7b1a).
 - 2026-10-03 run-011 (engine 9a9a59c): BLOCKED after 2 rework rounds. DOG-012 verified live (307 s review). DOG-011 loop fired live. Filed DOG-013 (review never converges), DOG-014 (reviewer lacks harness verification). Fixed both in 82414bf; push in progress. Next: run-012 from a fresh target.
+- 2026-10-03 DOG-013/014 pushed (82414bf). run-012 COMPLETE (Cursor CLEAN first pass, Codex ACCEPTED), app verified: clean on 82414bf. Filed+fixed DOG-015 (a1d8ce2), so streak restarts: run-013 and run-014 on a1d8ce2.
