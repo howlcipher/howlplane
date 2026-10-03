@@ -150,3 +150,10 @@ Impact: the mission goal contains no verification command and the app does not e
 Recovery used (documented): `howl orchestrate resume --repo <target> --verify bash scripts/test.sh` (runs/run-007/05-*).
 Fix candidates (design decision, not made): derive a default verification from the discovered project (ProjectAdapter already does this for Claude's allowlist), or let the planner propose it.
 Note: this was always possible; earlier runs never hit it because no attempt failed after writing files.
+
+## DOG-010 — Acceptance deadlocks when the orchestrator is disqualified (and my first fix created a false success)
+Status: FIX COMMITTED (see HANDOFF for SHAs), awaiting a fresh clean run. Severity: High.
+Evidence, run-007 (runs/run-007/): Claude, now a working planner (DOG-004), became session orchestrator; its implementation was denied permission and it was marked interactive-only; only the orchestrator may accept, so the first pass ended HANDOFF REQUIRED with every agent "not the session orchestrator".
+First fix (commit "let acceptance move off a disqualified orchestrator") let the next eligible agent take over. Live use of it on run-007 then produced a FALSE SUCCESS: Codex took over and REJECTED (genuine concerns: workflow evidence not shown, concurrent writers can overwrite, future completion dates), the session rerouted, Cursor ACCEPTED, and the session finished COMPLETE WITH WARNINGS. My "judged" guard only covered the original orchestrator. Run-007 is therefore NOT a clean run.
+Correct fix: takeover is allowed only for non-verdict disqualification; a verdict (ACCEPTANCE_REJECTED_OR_UNCONFIRMED and the other verdict failures) from ANY agent makes acceptance final until the repository changes. Tests: takeover completes; rejection by the taker is final (fails against the flawed logic, verified); rejection by the original orchestrator is final.
+Lesson: a fix that widens who may approve needs a test where the new approver disagrees. The live regression caught what the unit tests missed.

@@ -1,0 +1,1 @@
+howl orchestrate resume --repo /run/media/system/tallgeese/dev/dogfood-missions/run-007/household-tasks --verify bash scripts/test.sh   (second resume, after DOG-010 fix)
