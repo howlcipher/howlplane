@@ -162,9 +162,20 @@ def test_infer_task_metadata_security_critical():
 
 def test_infer_task_metadata_documentation_low():
     task_id, task_class, risk, tier = infer_task_metadata("update README typo comments", "docs_repo")
-    assert task_class == "documentation"
+    assert task_class == "docs"
     assert risk == "low"
     assert tier == "tier_3"
+
+
+@pytest.mark.parametrize("objective", [
+    "add automated tests for the parser", "update README typo comments", "build a recurring task CLI",
+    "fix crash on empty input", "refactor the store", "deploy with docker", "patch auth vulnerability",
+])
+def test_inferred_task_class_is_always_one_the_task_spec_accepts(objective):
+    # DOG-017: inference produced "test" and "documentation", which TaskSpec rejects, so
+    # `howlplane route` crashed with INTERNAL_ERROR on any objective that mentioned tests.
+    from howlplane.control_plane.task_spec import VALID_TASK_CLASSES
+    assert infer_task_metadata(objective, "repo")[1] in VALID_TASK_CLASSES
 
 
 def test_infer_task_metadata_explicit_overrides():
