@@ -172,3 +172,6 @@ All commits pushed on dogfood/DOG-018-greenfield-denial; PR to be merged by the 
 
 ## Reproduction
 As Addendum 2, with the howlplane checkout at 7a516c0 (or main after the PR merges); Claude may be READY.
+
+## Post-merge (2026-10-04)
+PR #148 merged as 4e31e53 and #147 as 790eee7; main engine source is identical to 7a516c0, so the Addendum 4 PASS applies to main.
