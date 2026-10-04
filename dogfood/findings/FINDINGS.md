@@ -388,7 +388,7 @@ Pending: rework treats each finding as an instance of a defect class (fix the ro
 
 ## DOG-022 — A COMPLETE report shows superseded FINDINGS verdicts as if open
 
-Status: OPEN (minor UX, nonblocking)
+Status: FIX COMMITTED (howlplane dogfood/DOG-022-report-superseded-verdicts), regression runs run-026/027 pending
 Discovered in run: run-022
 Owning component: HowlPlane orchestrate report
 ### Actual
@@ -418,7 +418,7 @@ test_auto_prefers_codex_for_implementation_only_when_no_orchestrator_was_chosen 
 
 ## DOG-024 — Test suite writes factory worktrees into the real data home; intermittent pre-push failure
 
-Status: FIXED, pushed (howlplane dogfood/DOG-024-test-xdg-isolation 48aa794), PR open
+Status: RESOLVED — merged via PR #149 (f864cb2). The 73 leaked worktrees were removed on 2026-10-04 with the user's go-ahead, after checking that each held only target/.git + README.md pointing into /tmp/pytest-of-*; the 27 real worktrees were kept.
 Severity: Medium (pollutes the operator's real ~/.local/share/howlplane/worktrees; flaky pre-push gate blocked pushes twice)
 Discovered in: records pushes ad9264c (first attempt) and 9976f67 (pre-push gate)
 Owning component: howlplane test suite (tests/conftest.py)

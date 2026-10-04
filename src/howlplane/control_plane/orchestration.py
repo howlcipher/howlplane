@@ -1629,7 +1629,12 @@ def report(doc: dict[str, Any]) -> int:
               f"  howlplane orchestrate discard --repo {doc['repository']}\nand start a new session.")
     for attempt in doc["attempts"]:
         if attempt.get("failure") in {"AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"} and attempt.get("verdict_excerpt"):
-            print(f"Verdict from {AGENT_NAMES.get(attempt['agent'], attempt['agent'])} ({attempt['stage']}, {attempt['failure']}):")
+            # A verdict from an earlier round was sent back for rework and the result judged again; unlabelled,
+            # a COMPLETE report read as if its "blocking finding remains" were still open (DOG-022).
+            round_number = attempt.get("rework_round", 0)
+            superseded = (f", rework round {round_number}: sent back to implementation and re-judged"
+                          if round_number < doc.get("rework_rounds", 0) else "")
+            print(f"Verdict from {AGENT_NAMES.get(attempt['agent'], attempt['agent'])} ({attempt['stage']}, {attempt['failure']}{superseded}):")
             print("\n".join(f"  {line}" for line in attempt["verdict_excerpt"].splitlines()))
         elif attempt.get("stage") == "review" and attempt.get("state") == "SUCCEEDED" and attempt.get("verdict_excerpt"):
             # Non-blocking notes exist only here, and a finished session's manifest is removed (DOG-015).
