@@ -236,6 +236,13 @@ class SessionProgress:
         self.last_change_at = self.clock()
         self._write("CAPABILITY", f"{AGENT_NAMES.get(agent, agent)} marked interactive-only for this session")
 
+    def permission_gap(self, agent: str, role: str, commands: list[str]) -> None:
+        self.last_change_at = self.clock()
+        self._write("PERMISSION", f"{AGENT_NAMES.get(agent, agent)} changed files but was refused commands HowlPlane "
+                                  f"did not grant: {'; '.join(commands)}. Excluded from {role} for this session only; "
+                                  "it stays ready for later sessions. To grant such commands, see extra_allowed_bash "
+                                  "in AI_RESOURCE_POOL.md")
+
     def role_excluded(self, agent: str, role: str, entry: dict[str, Any]) -> None:
         self.last_change_at = self.clock()
         name = AGENT_NAMES.get(agent, agent)
@@ -671,7 +678,23 @@ def record_capability_success(doc: dict[str, Any], agent: str) -> None:
                                   "evidence_time": now(), "scope": "session"})
 
 
-def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failure: str, at: str | None = None) -> dict[str, Any] | None:
+def permission_grant_gap(result: Any, stage: str, changed: bool) -> list[str]:
+    """Commands HowlPlane never granted, when they alone stopped a worker that was mutating the repository.
+
+    A worker that changed files unattended and was then refused only a Bash command
+    outside its derived profile (typically a greenfield test run, before any project
+    command exists to derive) has proven unattended mutation. The gap is HowlPlane's
+    grant, not the agent's capability (DOG-018). Returns [] when that is not the case.
+    """
+    metadata = getattr(result, "metadata", None) or {}
+    commands = [str(command) for command in metadata.get("denied_commands") or []]
+    if not (changed and is_mutating_role(stage) and commands and metadata.get("denied_tools") == ["Bash"]):
+        return []
+    return commands
+
+
+def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failure: str, at: str | None = None,
+                   grant_gap: bool = False) -> dict[str, Any] | None:
     """Apply one failed attempt to session evidence. Returns the role exclusion it created, if any."""
     state = agent_record(doc, agent)
     if failure in ATTEMPT_TIMEOUT_FAILURES:
@@ -683,10 +706,12 @@ def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failu
                                     "role": role, "source": "orchestrate session", "detected_at": at or now(),
                                     "policy": policy, "mechanism": workspace_trust.mechanism(agent, policy)}
         return None
-    if failure == "EXECUTION_PERMISSION_REQUIRED" and is_mutating_role(role):
+    if failure == "EXECUTION_PERMISSION_REQUIRED" and is_mutating_role(role) and not grant_gap:
         # A denial in a read-only role means the worker reached for a tool that
         # role never holds. It says nothing about unattended mutation, so it
-        # must not take the agent out of every other role (DOG-004).
+        # must not take the agent out of every other role (DOG-004). Nor does a
+        # denial of an ungranted command after real edits (DOG-018); that
+        # attempt still excludes the agent from this role below.
         record_capability_failure(doc, agent, failure, at)
     if failure in UNAVAILABLE_FAILURES:
         state["state"] = "UNAVAILABLE"
@@ -1297,6 +1322,10 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             if result.success and stage == "acceptance" and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
+            grant_gap = (permission_grant_gap(result, stage, before != after)
+                         if assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED" else [])
+            if grant_gap:
+                assignment["denied_commands"] = [redact(command) for command in grant_gap]
             if result.success and stage in {"review", "acceptance"}:
                 # The verdict is the only record of why a reviewer or the
                 # orchestrator stopped the session; the hash alone cannot be read.
@@ -1316,7 +1345,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 agent_readiness.record_workspace_trust(agent, str(repo), stage, "orchestrate session",
                                                        policy=invocation_policy)
             elif assignment["failure"] is None or assignment["failure"] in UNAVAILABLE_FAILURES | MODEL_LIMIT_FAILURES | (
-                    {"EXECUTION_PERMISSION_REQUIRED"} if is_mutating_role(stage) else set()):
+                    {"EXECUTION_PERMISSION_REQUIRED"} if is_mutating_role(stage) and not grant_gap else set()):
                 agent_readiness.record_session_outcome(agent, model, assignment["failure"],
                                                        detail=f"{result.error_message or ''}\n{result.stderr}")
             if assignment["state"] == "SUCCEEDED":
@@ -1368,11 +1397,13 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 progress._write("FAIL", f"{AGENT_NAMES.get(agent, agent)} {stage} failed: {assignment['failure']}{no_change_detail}")
             # Record the failure before choosing a replacement: the next
             # candidate list must already exclude what this attempt proved.
-            exclusion = record_failure(doc, agent, stage, model, assignment["failure"])
+            exclusion = record_failure(doc, agent, stage, model, assignment["failure"], grant_gap=bool(grant_gap))
             if progress:
                 if assignment["failure"] in WORKSPACE_TRUST_FAILURES:
                     progress._write("TRUST", f"{AGENT_NAMES.get(agent, agent)} requires workspace trust for {repo}; "
                                              "rerouting (the agent stays eligible elsewhere)")
+                elif grant_gap:
+                    progress.permission_gap(agent, stage, assignment["denied_commands"])
                 elif assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED" and is_mutating_role(stage):
                     progress.capability_downgrade(agent)
                 elif exclusion:

@@ -159,6 +159,9 @@ Readiness distinguishes between executable presence (`status: READY`) and mutati
 (`unattended_mutation_capable: true/false`). A provider lacking required mutation tools fails
 with `EXECUTION_PERMISSION_REQUIRED`, triggering bounded provider failover rather than misreporting
 a false success.
+In a new repository there are no discovered commands yet, so an implementer may edit files but
+not run its own tests; that refusal reroutes the role for the session without marking the agent
+interactive-only (see ORCHESTRATE.md).
 
 ## CLI
 
