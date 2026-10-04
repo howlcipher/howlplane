@@ -204,6 +204,56 @@ def _fail_on_campaign_pollution_of_this_repository():
     )
 
 
+def _real_factory_worktrees_from(root: Path) -> set[str]:
+    """Factory worktrees in the operator's real data home whose target belongs under `root`."""
+    worktrees = Path.home() / ".local" / "share" / "howlplane" / "worktrees"
+    if not worktrees.is_dir():
+        return set()
+    found = set()
+    for entry in worktrees.iterdir():
+        try:
+            gitdir = (entry / "target" / ".git").read_text().removeprefix("gitdir:").strip()
+        except OSError:
+            continue
+        if gitdir.startswith(str(root)):
+            found.add(entry.name)
+    return found
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _fail_on_factory_worktrees_in_the_real_data_home(tmp_path_factory):
+    """Fail the run if a test prepared a factory worktree in the operator's real data home.
+
+    Factory preparation resolves `$XDG_DATA_HOME/howlplane/worktrees/<campaign>`; a test
+    without isolated XDG paths wrote there, keyed by its temp repository path. 73 such
+    worktrees accumulated, and when pytest reused a temp path the stale target made
+    `test_explicit_state_dir_wins_in_bounded_run` fail intermittently (DOG-024). Only
+    worktrees pointing into this session's pytest temp root count, so the operator's
+    own concurrent `howl factory prepare` never trips this.
+    """
+    root = tmp_path_factory.getbasetemp().resolve().parent
+    before = _real_factory_worktrees_from(root)
+    yield
+    created = sorted(_real_factory_worktrees_from(root) - before)
+    assert not created, (
+        f"The test suite prepared {len(created)} factory worktree(s) in the real data home: "
+        + ", ".join(created[:10]) + ". A test ran factory preparation without isolated XDG paths."
+    )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_xdg_homes(monkeypatch, tmp_path_factory):
+    """Point XDG data and state homes at per-test directories (DOG-024).
+
+    Outside the test's own tmp_path, because tests assert on exactly what they create
+    there. Tests that need specific paths still set them with `set_xdg_paths` or
+    `monkeypatch.setenv`, which win over this fixture.
+    """
+    homes = tmp_path_factory.mktemp("xdg")
+    monkeypatch.setenv("XDG_DATA_HOME", str(homes / "data"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(homes / "state"))
+
+
 @pytest.fixture(autouse=True)
 def _scrub_inherited_git_repository_selection(monkeypatch):
     """Removes inherited Git repository-selection variables for every test.
