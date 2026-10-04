@@ -526,7 +526,9 @@ def test_plan_test_command_reaches_claude_implementer_as_grant_and_instruction(t
         def execute(self, task, cwd, role, prompt_override, **kwargs):
             seen[role] = (task.metadata.get("verification_commands"), prompt_override)
             if role == "implementation":
-                (repo / "app.py").write_text("print('done')\n")
+                (repo / "tests").mkdir(exist_ok=True)
+                (repo / "tests" / "test_app.py").write_text("import unittest\n\n\nclass T(unittest.TestCase):\n"
+                                                           "    def test_ok(self):\n        pass\n")
             return accepted("claude_code", role) if role != "planning" else result_with(
                 "Plan.\nVERIFY_COMMAND: python3 -m unittest discover -s tests")
 
@@ -547,3 +549,4 @@ def test_plan_test_command_reaches_claude_implementer_as_grant_and_instruction(t
     assert "only with the Edit and Write tools" in prompt
     doc = module.active_sessions(module.state_root(), repo, include_terminal=True)[0]
     assert doc["planned_verify_command"] == ["python3", "-m", "unittest", "discover", "-s", "tests"]
+    assert doc["verify_source"] == "named by the plan (VERIFY_COMMAND)"

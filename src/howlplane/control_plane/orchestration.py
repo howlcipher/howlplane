@@ -1532,6 +1532,13 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                     doc["verify_command"], doc["verify_source"] = derived, "derived from the project's discovered test command"
                     if progress:
                         progress._write("VERIFY", f"No --verify given; using the project's test command: {' '.join(derived)}")
+                elif doc.get("planned_verify_command"):
+                    # Nothing discoverable (e.g. a plain unittest layout), but the plan named its
+                    # test command; without it reviewers get no test evidence at all (DOG-019).
+                    planned = doc["planned_verify_command"]
+                    doc["verify_command"], doc["verify_source"] = planned, "named by the plan (VERIFY_COMMAND)"
+                    if progress:
+                        progress._write("VERIFY", f"No --verify given; using the plan's test command: {' '.join(planned)}")
             if doc.get("verify_command"):
                 command = doc["verify_command"]
                 if progress:

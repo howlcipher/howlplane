@@ -307,28 +307,6 @@ def test_findings_from_an_earlier_round_are_labelled_for_acceptance():
     assert "Cursor review, ACCEPTED AS CLEAN" in evidence
 
 
-def test_verification_command_is_derived_from_the_project_when_not_given(tmp_path, monkeypatch, capsys):
-    # DOG-009 (run-007): a reroute after a partial write demanded --verify before the app, and its test script, existed.
-    repo = repository(tmp_path)
-    enable_fake_review_pair(tmp_path, monkeypatch)
-    (repo / "scripts").mkdir()
-    (repo / "scripts" / "test.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
-
-    def execute(doc, stage, agent, model, cwd):
-        if stage == "implementation":
-            (cwd / "README").write_text("changed\n")
-            doc["reconciliation"] = {"needs_validation": True}
-        outcome = result(agent, stage)
-        outcome.stdout = {"review": "AUDIT_STATUS: CLEAN", "acceptance": "ACCEPTANCE_STATUS: ACCEPTED"}.get(stage, "plan")
-        return outcome
-
-    monkeypatch.setattr(module, "execute_assignment", execute)
-    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 0
-    out = capsys.readouterr()
-    assert "Verification command: bash scripts/test.sh (derived from the project's discovered test command)" in out.out
-    assert "using the project's test command: bash scripts/test.sh" in out.err
-
-
 def test_derived_verification_failure_stops_the_session(tmp_path, monkeypatch, capsys):
     repo = repository(tmp_path)
     enable_fake_review_pair(tmp_path, monkeypatch)
@@ -337,6 +315,37 @@ def test_derived_verification_failure_stops_the_session(tmp_path, monkeypatch, c
     monkeypatch.setattr(module, "execute_assignment", scripted_execute())
     assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 2
     assert "Configured validation failed" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("plan_command, with_script, status, expected", [
+    ("python3 -c pass", False, 0, "Verification command: python3 -c pass (named by the plan (VERIFY_COMMAND))"),
+    ("python3 -c 'raise SystemExit(3)'", False, 2, "Configured validation failed"),
+    ("python3 -c pass", True, 0, "Verification command: bash scripts/test.sh (derived from the project's discovered test command)"),
+    ("python3 -c pass", True, 0, "using the project's test command: bash scripts/test.sh"),
+])
+def test_plan_test_command_verifies_when_nothing_is_discoverable(tmp_path, monkeypatch, capsys, plan_command, with_script,
+                                                                  status, expected):
+    # DOG-009 (run-007): a reroute after a partial write demanded --verify before the app, and its test script, existed;
+    # the project's discovered command is used instead. DOG-019 (run-019): a plain unittest layout has no discoverable command, so only `git diff --check` ran and
+    # the sandboxed reviewer had no test evidence; a discovered command still takes precedence over the plan.
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+    if with_script:
+        (repo / "scripts").mkdir()
+        (repo / "scripts" / "test.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
+
+    def execute(doc, stage, agent, model, cwd):
+        if stage == "implementation":
+            (cwd / "README").write_text("changed\n")
+        outcome = result(agent, stage)
+        outcome.stdout = {"review": "AUDIT_STATUS: CLEAN", "acceptance": "ACCEPTANCE_STATUS: ACCEPTED"}.get(
+            stage, f"plan\nVERIFY_COMMAND: {plan_command}")
+        return outcome
+
+    monkeypatch.setattr(module, "execute_assignment", execute)
+    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == status
+    captured = capsys.readouterr()
+    assert expected in captured.out + captured.err
 
 
 def disqualified_orchestrator_session(tmp_path, monkeypatch, codex_acceptance):
