@@ -72,3 +72,31 @@ Many other agents' worktrees exist; do not modify them. Do not use local LLM pro
 
 ## Status update (run-010)
 PASS on the new code: runs 009 and 010 are two consecutive clean runs (engine aedf82f). See FINAL_REPORT.md addendum. Remaining: PR for dogfood/rework-and-default-verify (stacked on #139), merges are the user's. A live firing of the rework loop is still unobserved.
+
+## Status update (resume check, 2026-10-03)
+Campaign: PASS, still valid. All PRs merged; howlplane main a0ada6a has the same src as aedf82f (the engine for runs 009/010). Nothing pending, no active finding, no unpushed work.
+Optional next work (not required for PASS): (1) observe the DOG-011 rework loop firing live; (2) DOG-012 candidate, Cursor review latency close to the 300 s review budget.
+Resume: if howlplane src changes after a0ada6a, run two fresh missions (run-011, run-012) with the reproduction in FINAL_REPORT.md before re-asserting PASS.
+Host fault found and repaired (2026-10-03): the first push of this branch failed the pre-push hook at pytest plugin load (`langsmith` -> `ModuleNotFoundError: httpx`, then `pydantic`). About 16 packages had vanished from ~/.local/lib/python3.14/site-packages (not via apt; cause unknown), including pydantic, which howlplane's own pydantic-settings dependency needs. Restored with `python3 -m pip install --user --break-system-packages <pkgs>`; `pip check` shows no missing packages. Not a Howl defect. If a push fails at test collection again, run `python3 -m pip check` first.
+
+## Status update (DOG-012, 2026-10-03)
+Status: VERIFYING. Engine change: howlplane dogfood/DOG-012-review-budget 9a9a59c (review budget 300 -> 600 s). Because engine src changed, PASS must be re-earned: two fresh clean runs, run-011 and run-012.
+Plan: after the DOG-012 push lands, remove worktree ../howlplane-dog012, then `git -C howlplane checkout dogfood/DOG-012-review-budget` (the live engine is the editable install of howlplane/src). Then in runs/run-011: `howl factory prepare --repo <target> --yes`; `howl orchestrate "$(cat ../run-001/00-mission.txt)" --repo /run/media/system/tallgeese/dev/dogfood-missions/run-011/household-tasks`; verify per Phase 19; repeat as run-012. Watch also for a live firing of the DOG-011 rework loop.
+Afterwards return the howlplane checkout to main.
+
+## Status update (run-011, 2026-10-03)
+run-011 BLOCKED (not clean). Fixes for DOG-013 and DOG-014: howlplane dogfood/DOG-013-review-convergence 82414bf (stacked on DOG-012 9a9a59c); the howlplane checkout is on that branch (= live engine). Clean streak 0/2.
+Next: run-012 from a fresh target (same steps as run-011, engine 82414bf), then run-013. Afterwards open PRs for DOG-012 and DOG-013 and return the checkout to main.
+
+## Status update (run-012, 2026-10-03)
+run-012 clean on 82414bf, but DOG-015 changed the engine (a1d8ce2, push in progress). Streak 0/2 on a1d8ce2. Next: run-013, run-014 with the same procedure. Then PRs: DOG-012 branch, DOG-013 branch (stacked); return checkout to main.
+
+## Status update (run-013, 2026-10-03)
+run-013 HANDOFF REQUIRED -> DOG-016 fixed in 4a5d697 (same branch dogfood/DOG-013-review-convergence; live engine). Streak 0/2. Next: run-014, run-015 on 4a5d697.
+
+## Status update (FINAL, campaign 2, 2026-10-03)
+Status: PASS (run-014 + run-015 on 4a5d697). See FINAL_REPORT.md Addendum 2.
+Open PRs (not merged, the user's call): howlplane #142 (DOG-012), #143 (DOG-013..016, base #142's branch), #144 (DOG-017).
+Repository state: howlplane checkout returned to main (a0ada6a); repair worktrees removed. Campaign records: branch dogfood/resume-check-20261003 (worktree howlplane-dogfood-campaign), pushed.
+Resume instructions: nothing pending. To re-verify after merges: two fresh runs per FINAL_REPORT reproduction; record as run-016+.
+Active finding: NONE.

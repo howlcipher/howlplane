@@ -1,0 +1,30 @@
+HOWL ORCHESTRATION REPORT
+Session: 1e4f07f36acf40558f0087fe5701606e
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: codex
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: 498b926ded3de08e7da6c3b8268265e2bcdb0591
+Repository status: M README.md
+?? .gitignore
+?? app/household_tasks.py
+?? documentation/TESTING.md
+?? documentation/demo.txt
+?? documentation/design.md
+?? documentation/evidence.jsonl
+?? documentation/howl_route.json
+?? documentation/test_impact.json
+?? scripts/build.sh
+?? scripts/run.sh
+?? scripts/test.sh
+?? tests/test_cli.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "test_help_and_missing_command) ... ok\ntest_invalid_additions (test_cli.CliTests.test_invalid_additions) ... ok\ntest_invalid_dates_and_ids (test_cli.CliTests.test_invalid_dates_and_ids) ... ok\ntest_names_are_data (test_cli.CliTests.test_names_are_data) ... ok\ntest_new_tasks_start_due_and_future_tasks_wait (test_cli.CliTests.test_new_tasks_start_due_and_future_tasks_wait) ... ok\ntest_persistence_and_stable_ids (test_cli.CliTests.test_persistence_and_stable_ids) ... ok\ntest_rejected_completions_preserve_schedule (test_cli.CliTests.test_rejected_completions_preserve_schedule) ... ok\ntest_repeat_completion_resets_schedule_and_preserves_history (test_cli.CliTests.test_repeat_completion_resets_schedule_and_preserves_history) ... ok\ntest_unknown_id_does_not_mutate (test_cli.CliTests.test_unknown_id_does_not_mutate) ... ok\ntest_unsupported_schema (test_cli.CliTests.test_unsupported_schema) ... ok\n\n----------------------------------------------------------------------\nRan 14 tests in 4.503s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: bash scripts/test.sh (derived from the project's discovered test command)
+Failures: []

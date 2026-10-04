@@ -1,0 +1,1 @@
+howl orchestrate "$(cat 00-mission.txt)" --repo /run/media/system/tallgeese/dev/dogfood-missions/run-011/household-tasks  (engine = howlplane dogfood/DOG-012-review-budget @9a9a59c)

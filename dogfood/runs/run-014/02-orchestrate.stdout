@@ -1,0 +1,85 @@
+HOWL ORCHESTRATION REPORT
+Session: d558b452f3814ea1b8c6695b699e5762
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: codex
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: 2b3b74a2369d82acc253034952a278fbaa2ff266
+Repository status: M README.md
+?? .gitignore
+?? documentation/design.md
+?? documentation/evidence.jsonl
+?? documentation/howl_route.json
+?? documentation/test_impact.json
+?? documentation/verification.md
+?? household_tasks/__init__.py
+?? household_tasks/__main__.py
+?? household_tasks/cli.py
+?? household_tasks/store.py
+?? scripts/demo.sh
+?? scripts/test.sh
+?? tests/test_cli.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "liTests.test_concurrent_adds_keep_unique_ids) ... ok\ntest_concurrent_completions_record_only_once (test_cli.CliTests.test_concurrent_completions_record_only_once) ... ok\ntest_database_errors_are_readable (test_cli.CliTests.test_database_errors_are_readable) ... ok\ntest_default_storage_and_help (test_cli.CliTests.test_default_storage_and_help) ... ok\ntest_failed_completions_leave_schedule_and_history_intact (test_cli.CliTests.test_failed_completions_leave_schedule_and_history_intact) ... ok\ntest_future_schema_is_not_changed (test_cli.CliTests.test_future_schema_is_not_changed) ... ok\ntest_invalid_input_does_not_add_tasks (test_cli.CliTests.test_invalid_input_does_not_add_tasks) ... ok\ntest_lifecycle_persistence_and_due_boundary (test_cli.CliTests.test_lifecycle_persistence_and_due_boundary) ... ok\ntest_parameterized_unicode_names (test_cli.CliTests.test_parameterized_unicode_names) ... ok\n\n----------------------------------------------------------------------\nRan 11 tests in 4.981s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: bash scripts/test.sh (derived from the project's discovered test command)
+Failures: []
+Review notes from Cursor (review, CLEAN):
+  ## Review verdict
+  
+  No BLOCKING defects found on independent static review. Goal behaviors are implemented, covered by subprocess CLI tests, and consistent with the Howl design record. Harness evidence (`git diff --check` / `bash scripts/test.sh` exit 0, 11 tests OK) matches the tree; this review did not re-execute the suite (shell unavailable here).
+  
+  ### Files changed (uncommitted tree)
+  
+  | Path | Role |
+  |---|---|
+  | `README.md` | Usage docs |
+  | `.gitignore` | Ignore SQLite/pyc |
+  | `household_tasks/` | CLI + SQLite store |
+  | `tests/test_cli.py` | 11 integration tests |
+  | `scripts/test.sh`, `scripts/demo.sh` | Gate + demo |
+  | `documentation/*` | Howl route, design, verification, TIA/evidence |
+  
+  ### Tests run (harness, not re-run here)
+  
+  - `git diff --check` → 0  
+  - `bash scripts/test.sh` → 0 (11 unittest cases + flake8 `--jobs 1`)
+  
+  ### Goal coverage
+  
+  | Requirement | Status |
+  |---|---|
+  | Add / list / complete / history | Met (`cli.py`, `store.py`) |
+  | Due-again identification | Met (`due`, `due_on <= today`; boundary tested) |
+  | Local persistence | Met (SQLite; cross-process tests) |
+  | Automated tests | Met (`tests/test_cli.py`) |
+  | Concise usage docs | Met (`README.md`) |
+  | Howl approach selection | Met (`documentation/design.md`, `howl_route.json`) |
+  | CLI demonstrable | Met (`python3 -m household_tasks`, `scripts/demo.sh`) |
+  
+  ### Findings
+  
+  **BLOCKING:** none
+  
+  **NON-BLOCKING**
+  
+  1. `scripts/demo.sh` is smoke-only (no stdout assertions); due-boundary proof lives in `test_lifecycle_persistence_and_due_boundary`, not the demo script.
+  2. Same-day completion uniqueness is app-level (`BEGIN IMMEDIATE` + checks), not a DB `UNIQUE(task_id, completed_on)`.
+  3. Explicit transactions without `isolation_level=None` is a mild Python 3.10/3.11 footgun; suite exercises the path.
+  4. Out-of-range `--every` exits 1 (store) vs malformed `--every` exits 2 (argparse)—documented, uneven UX.
+  5. `scripts/test.sh` requires undeclared flake8; no packaging entry point beyond `python3 -m` from repo root.
+  
+  ### Remaining risks
+  
+  Concurrent tests may be FS-sensitive on this mount; no schema unique constraint as belt-and-suspenders. Early completion before `due_on` is allowed by design and shares the tested `next_due(completed_on, …)` path.
+  
+  ### Completion status
+  
+  Application meets the stated mission for local review purposes. No commit/push/publish performed.
+  
+  AUDIT_STATUS: CLEAN

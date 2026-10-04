@@ -1,0 +1,207 @@
+HOWL ORCHESTRATION REPORT
+Session: f47aca7dc45d4a65b247ac9fd69511cd
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: BLOCKED
+Resumable: yes
+Orchestrator: codex
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 7
+Reroutes: 0
+Repository head: 39f7b1a0f34865d7293505d07df1b7ce08661bba
+Repository status: M README.md
+?? .gitignore
+?? documentation/demo.log
+?? documentation/design.md
+?? documentation/evidence.jsonl
+?? documentation/howl_route.json
+?? documentation/test_impact.json
+?? documentation/verification.log
+?? household_tasks/__init__.py
+?? household_tasks/__main__.py
+?? household_tasks/cli.py
+?? household_tasks/store.py
+?? requirements_dev.txt
+?? scripts/test.sh
+?? tests/test_tasks.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "_does_not_create_database (test_tasks.CliTests.test_help_does_not_create_database) ... ok\ntest_invalid_cli_input_and_no_mutation (test_tasks.CliTests.test_invalid_cli_input_and_no_mutation) ... ok\ntest_unsupported_schema_is_rejected (test_tasks.CliTests.test_unsupported_schema_is_rejected) ... ok\ntest_unwritable_location_reports_error (test_tasks.CliTests.test_unwritable_location_reports_error) ... ok\ntest_date_overflow_is_rejected_before_write (test_tasks.StoreTests.test_date_overflow_is_rejected_before_write) ... ok\ntest_leap_year_and_latest_completion_drives_recurrence (test_tasks.StoreTests.test_leap_year_and_latest_completion_drives_recurrence) ... ok\ntest_names_and_intervals_are_validated (test_tasks.StoreTests.test_names_and_intervals_are_validated) ... ok\ntest_rejected_completions_do_not_change_history (test_tasks.StoreTests.test_rejected_completions_do_not_change_history) ... ok\n\n----------------------------------------------------------------------\nRan 12 tests in 2.232s\n\nOK\n"}, {"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "_does_not_create_database (test_tasks.CliTests.test_help_does_not_create_database) ... ok\ntest_invalid_cli_input_and_no_mutation (test_tasks.CliTests.test_invalid_cli_input_and_no_mutation) ... ok\ntest_unsupported_schema_is_rejected (test_tasks.CliTests.test_unsupported_schema_is_rejected) ... ok\ntest_unwritable_location_reports_error (test_tasks.CliTests.test_unwritable_location_reports_error) ... ok\ntest_date_overflow_is_rejected_before_write (test_tasks.StoreTests.test_date_overflow_is_rejected_before_write) ... ok\ntest_leap_year_and_latest_completion_drives_recurrence (test_tasks.StoreTests.test_leap_year_and_latest_completion_drives_recurrence) ... ok\ntest_names_and_intervals_are_validated (test_tasks.StoreTests.test_names_and_intervals_are_validated) ... ok\ntest_rejected_completions_do_not_change_history (test_tasks.StoreTests.test_rejected_completions_do_not_change_history) ... ok\n\n----------------------------------------------------------------------\nRan 14 tests in 2.978s\n\nOK\n"}, {"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "a_is_rejected) ... ok\ntest_unwritable_location_reports_error (test_tasks.CliTests.test_unwritable_location_reports_error) ... ok\ntest_date_overflow_is_rejected_before_write (test_tasks.StoreTests.test_date_overflow_is_rejected_before_write) ... ok\ntest_existing_store_opens_without_writes_even_read_only (test_tasks.StoreTests.test_existing_store_opens_without_writes_even_read_only) ... ok\ntest_leap_year_and_latest_completion_drives_recurrence (test_tasks.StoreTests.test_leap_year_and_latest_completion_drives_recurrence) ... ok\ntest_names_and_intervals_are_validated (test_tasks.StoreTests.test_names_and_intervals_are_validated) ... ok\ntest_rejected_completions_do_not_change_history (test_tasks.StoreTests.test_rejected_completions_do_not_change_history) ... ok\ntest_sql_interval_constraint_and_legacy_validation (test_tasks.StoreTests.test_sql_interval_constraint_and_legacy_validation) ... ok\n\n----------------------------------------------------------------------\nRan 19 tests in 3.920s\n\nOK\n"}]
+Independent audit: AUDIT BLOCKED: review findings remain after 2 rework round(s)
+Recovery: {}
+Verification command: bash scripts/test.sh (derived from the project's discovered test command)
+Rework rounds: 2 of 2
+Failures: [{"stage": "review", "agent": "cursor", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}, {"stage": "review", "agent": "cursor", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}, {"stage": "review", "agent": "cursor", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}]
+Verdict from Cursor (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  ## Review (falsification)
+  
+  Static review of the uncommitted tree only. Shell execution was blocked in this session, so the suite was **not** re-run here. Claims in `documentation/test_impact.json` / `evidence.jsonl` are treated as unverified.
+  
+  ### Files changed (vs empty `chore: empty mission target` baseline)
+  
+  | Path | Role |
+  | --- | --- |
+  | `README.md` | Usage docs |
+  | `.gitignore` | Ignores `data/`, caches, bytecode |
+  | `household_tasks/{__init__,__main__,cli,store}.py` | CLI + SQLite store |
+  | `tests/test_tasks.py` | Domain + subprocess CLI tests |
+  | `scripts/test.sh` | flake8 + unittest gate |
+  | `requirements_dev.txt` | flake8 pin |
+  | `documentation/{design.md,test_impact.json,evidence.jsonl}` | Design / TIA / evidence |
+  | `.howl_state/.../HP-20261003-185406-bced.txt` | Failed Howl route (gitignored) |
+  
+  ### Goal coverage (code-level)
+  
+  Add / list / complete / history / due / local SQLite / tests / README usage are all present and generally consistent with the documented recurrence rules (`created_on` or `max(completed_on) + interval`, due while `due_on <= reference`).
+  
+  ### Findings
+  
+  1. **Corrupt row data can crash the CLI** — `due_on()` uses `date.fromisoformat(...)` during `list`/`due`, but `main` only catches `TaskError`, `sqlite3.Error`, `OSError`, `OverflowError`. Bad `created_on` / `completed_on` yields an uncaught `ValueError` (traceback), not exit `1`. Undercuts the “corrupt storage fails cleanly” story; only non-SQLite bytes and bad `user_version` are covered.
+  
+  2. **Python support overclaim** — README requires 3.10+; design admits only 3.14.4 was verified. sqlite3 default `isolation_level` changed in 3.12; `complete()`’s `with connection` + `BEGIN IMMEDIATE` pattern is unproven on 3.10/3.11.
+  
+  3. **Howl selection under-evidenced** — Goal required approach selection via Howl workflow. Only artifact on disk is a **failed** `howlplane route` (`task_class 'test' invalid`). The claimed successful re-route has no matching diagnostic/evidence entry.
+  
+  4. **Verification not independently proven** — TIA asserts `bash scripts/test.sh` and `git diff --check` passed; this audit could not reproduce that. Per zero-trust verification rules, pass status is not established here.
+  
+  5. **CLI tests can flake across midnight** — `CliTests` capture `date.today()` in the test process while completions use the CLI process’s today; a day boundary between those calls can fail `test_full_lifecycle` / history assertions.
+  
+  ### Tests run
+  
+  - **This review:** none (execution blocked).
+  - **Claimed by implementer:** `bash scripts/test.sh` (flake8 + 12 unittest cases), plus `git diff --check` — not revalidated.
+  
+  ### Remaining risks
+  
+  - No concurrency / power-loss coverage (acknowledged).
+  - No edit/delete; day intervals only; local dates only.
+  - `list`/`due` create parent dirs / DB on first open (side effect).
+  - Preceding-creation completion covered in store tests, not CLI tests.
+  
+  ### Completion status
+  
+  **Not audit-complete.** Implementation looks like a real, goal-shaped CLI with a solid happy path and useful tests, but open defects/gaps above block a clean acceptance.
+  
+  AUDIT_STATUS: FINDINGS
+Verdict from Cursor (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  ## Review verdict
+  
+  The CLI covers the stated goal surface, but correctness is not clean: every store open commits a write (including “read” commands), and this audit could not re-run the test gate.
+  
+  ### Files changed
+  From the conversation git snapshot (shell was blocked here; not re-queried):
+  
+  | Path | Notes |
+  | --- | --- |
+  | `README.md` | Modified |
+  | `.gitignore` | New |
+  | `household_tasks/` | New package (`cli.py`, `store.py`, `__main__.py`, `__init__.py`) |
+  | `tests/test_tasks.py` | New |
+  | `scripts/test.sh` | New |
+  | `requirements_dev.txt` | New |
+  | `documentation/` | Design, route, evidence, demo/verification logs |
+  
+  ### Tests run (this audit)
+  | Command | Result |
+  | --- | --- |
+  | `bash scripts/test.sh` | **Not executed** — shell invocations rejected in this session |
+  | `documentation/verification.log` | Claims 14 unittest OK; **not treated as independent proof** |
+  
+  ### Findings
+  
+  1. **Major — Read commands always write the database**  
+     `Store.__init__` always opens a committed write transaction and runs `PRAGMA user_version = 1`, even when the schema is already at version 1 (`store.py` 24–36). So `list` / `due` / `history` need write access, update DB state/mtime, and conflict with a truly read-only DB or “backup while idle” assumptions. No test asserts that version-1 opens are non-mutating.
+  
+  2. **Minor — Schema CHECK weaker than app/docs contract**  
+     SQL enforces `interval_days > 0` only; app/docs require `1..36500` (`store.py` 28–29 vs 48–49). Normal CLI add is guarded; a hand-edited DB can store out-of-contract intervals.
+  
+  3. **Minor — `list`/`due` vs `history` disagree on partial corruption**  
+     `tasks()` uses `MAX(completed_on)` only; `history()` validates every row. A non-maximal invalid `completed_on` can leave `list`/`due` succeeding while `history` fails. Corrupt-date tests only cover `created_on` or the sole/max completion.
+  
+  4. **Minor — Partial stdout on mid-listing failure**  
+     `cli.py` 75–85 prints the header (and prior rows) before `due_on()` can raise; exit 1 can mix partial TSV with an error.
+  
+  ### Remaining risks
+  - Gate not re-verified in this review.
+  - Concurrency / lock-timeout / power-loss untested (acknowledged in design).
+  - Howl route artifact selects a worker resource, not the language; tech choice is local analysis in `design.md`.
+  
+  ### Completion status vs goal
+  
+  | Requirement | Status |
+  | --- | --- |
+  | Add / list / complete with recorded date / due-again | Implemented in CLI |
+  | Local persistence | SQLite present; write-on-open issue above |
+  | Automated tests | Present (14 cases in tree); **not re-run here** |
+  | Concise usage docs | README present |
+  | Demonstrable CLI | Demo log present; not re-executed here |
+  | Howl workflow selection | Artifacts present; language not Howl-selected |
+  
+  **Not complete for a clean audit:** persistence hygiene defect + unverified gate.
+  
+  AUDIT_STATUS: FINDINGS
+Verdict from Cursor (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  ## Review report (read-only)
+  
+  Independent static review of the working tree under `/run/media/system/tallgeese/dev/dogfood-missions/run-011/household-tasks`. No files edited. Shell was blocked in this Ask-mode session, so the gate was **not** re-executed here; unittest results are taken from `documentation/verification.log` (19 OK) plus source inspection.
+  
+  ### Files changed (vs empty `chore: empty mission target` HEAD)
+  
+  | Path | Role |
+  |------|------|
+  | `household_tasks/{__init__,__main__,cli,store}.py` | App |
+  | `tests/test_tasks.py` | Automated tests |
+  | `scripts/test.sh`, `requirements_dev.txt`, `.gitignore` | Tooling |
+  | `README.md` | Usage docs |
+  | `documentation/{design,howl_route,demo,verification,test_impact,evidence}.*` | Workflow / evidence |
+  
+  ### Tests run
+  
+  - **This review:** none (shell rejected).
+  - **Recorded in-repo:** `bash scripts/test.sh` → 19 unittest tests OK (`documentation/verification.log`); flake8 implied by `set -euo pipefail` before unittest.
+  
+  ### Findings
+  
+  **1. Medium — `documentation/demo.log` cannot match current CLI**
+  
+  Logged command:
+  
+  ```text
+  add Wash bedding --every 7
+  ```
+  
+  `cli.py` defines a single positional `name`. Unquoted `Wash bedding` is two argv tokens → argparse rejects `bedding`. Success output `Added task 1: Wash bedding` requires quoting (as README shows) or a different parser. Demo evidence is not a faithful reproduction of the shipped CLI.
+  
+  **2. Medium — Any SQLite file with `user_version = 0` is claimed and mutated**
+  
+  In `store.py`, version `0` always runs `CREATE TABLE IF NOT EXISTS` and `PRAGMA user_version = 1`. An unrelated SQLite DB that never set `user_version` (default 0) gets app tables and a version stamp; an existing differently shaped `tasks` table is left alone while version still becomes 1. That conflicts with the design claim that unsupported/corrupt storage fails without rewriting the user’s database. Non-SQLite garbage is preserved (tested); foreign version-0 SQLite is not.
+  
+  **3. Low — Domain failures still create the database**
+  
+  `main` opens `Store` before domain validation. `add ' ' --every 7` / `--every 36501` / `complete 999` on a missing path exit 1 but still create parent dirs + empty schema. Argparse failures (`--every 0`) do not. Side effect is uneven and surprising for “failed” commands.
+  
+  **4. Low — README exit-code contract overclaims**
+  
+  README: invalid input → status 2. Reality: `--every 0` → 2; `--every 36501` → 1 (`TaskError`). Same class of bad interval, different exits. Tests encode the split; docs do not.
+  
+  Recurrence rule (`due = created_on` or `max(completed_on) + interval`, due on that calendar day) looks consistent with tests and stated docs; no off-by-one found on inspection.
+  
+  ### Remaining risks
+  
+  - Live gate not re-run in this session.
+  - Concurrent writers / power-loss not tested (acknowledged in design).
+  - `BEGIN IMMEDIATE` under `isolation_level="DEFERRED"` is a known sqlite3 footgun; covered by tests in artifacts, not re-verified here.
+  - Hand-edited DBs: `list`/`due` validate all completion dates; `complete` does not re-validate prior completion rows.
+  
+  ### Completion status
+  
+  | Goal | Status |
+  |------|--------|
+  | Add / list / complete with date / due-again | Implemented |
+  | Local persistence | SQLite |
+  | Automated tests | Present (19); not re-run here |
+  | Concise usage docs | README OK; demo evidence flawed |
+  | Howl approach selection | `howl_route.json` + alternatives in `design.md` |
+  
+  Deliverable is close to a working CLI, but evidence integrity and version-0 SQLite handling block a clean correctness sign-off.
+  
+  AUDIT_STATUS: FINDINGS
