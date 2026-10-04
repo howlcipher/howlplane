@@ -193,6 +193,19 @@ def test_non_clean_verdicts_are_classified_and_visible(tmp_path, monkeypatch, ca
     assert "hunter2abc" not in output
 
 
+def test_clean_review_notes_are_shown_in_the_report(tmp_path, monkeypatch, capsys):
+    # DOG-015: non-blocking notes live only in a CLEAN verdict (DOG-013), the report printed
+    # only non-clean verdicts, and a COMPLETE session's manifest is deleted, so they were lost.
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "execute_assignment", scripted_execute(
+        review="NON-BLOCKING: dates are local time only\nAUDIT_STATUS: CLEAN"))
+    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 0
+    out = capsys.readouterr().out
+    assert "Status: COMPLETE" in out
+    assert "Review notes from" in out and "(review, CLEAN):" in out and "  NON-BLOCKING: dates are local time only" in out
+
+
 def test_rejected_acceptance_recovers_after_the_repository_is_repaired(tmp_path, monkeypatch, capsys):
     # DOG-007: the rejecting orchestrator stayed excluded from acceptance, so `resume` after the
     # user fixed what the verdict named found no worker and re-printed the same handoff.
@@ -215,14 +228,16 @@ def test_rejected_acceptance_recovers_after_the_repository_is_repaired(tmp_path,
     assert "Status: COMPLETE" in capsys.readouterr().out
 
 
-def rework_session(tmp_path, monkeypatch, review_rounds):
-    """Review replies come from `review_rounds` in order (last one repeats); each implementation writes new content.
+def rework_session(tmp_path, monkeypatch, review_rounds, acceptance_rounds=("ACCEPTANCE_STATUS: ACCEPTED",)):
+    """Review and acceptance replies come from their round lists in order (last one repeats); each
+    implementation writes new content.
 
-    Returns the session exit status, the implementation prompts' rework state, and the review count.
+    Returns the session exit status and what was seen: implementation rework findings, review count,
+    and the agents asked to accept.
     """
     repo = repository(tmp_path)
     enable_fake_review_pair(tmp_path, monkeypatch)
-    seen = {"implementations": [], "reviews": 0}
+    seen = {"implementations": [], "reviews": 0, "acceptors": []}
 
     def execute(doc, stage, agent, model, cwd):
         if stage == "implementation":
@@ -234,7 +249,8 @@ def rework_session(tmp_path, monkeypatch, review_rounds):
             outcome.stdout = review_rounds[min(seen["reviews"], len(review_rounds) - 1)]
             seen["reviews"] += 1
         if stage == "acceptance":
-            outcome.stdout = "ACCEPTANCE_STATUS: ACCEPTED"
+            outcome.stdout = acceptance_rounds[min(len(seen["acceptors"]), len(acceptance_rounds) - 1)]
+            seen["acceptors"].append(agent)
         return outcome
 
     monkeypatch.setattr(module, "execute_assignment", execute)
@@ -258,6 +274,28 @@ def test_rework_is_capped_and_unfixed_findings_block_with_the_verdict_visible(tm
     assert status == 2
     assert len(seen["implementations"]) == 3 and seen["reviews"] == 3  # initial + 2 rework rounds
     assert "review findings remain after 2 rework round(s)" in captured.out and "Still wrong." in captured.out
+
+
+def test_an_acceptance_rejection_goes_back_to_the_implementer_and_the_same_orchestrator_rejudges(tmp_path, monkeypatch, capsys):
+    # DOG-016 (run-013): acceptance named fixable missing evidence, but a rejection ended the session
+    # with nothing able to act on it. Like review findings, it now gets bounded rework; the rejection
+    # is never shopped to another agent (DOG-010).
+    status, seen = rework_session(tmp_path, monkeypatch, ["AUDIT_STATUS: CLEAN"],
+                                  ["Missing test impact evidence.\nACCEPTANCE_STATUS: REJECTED", "ACCEPTANCE_STATUS: ACCEPTED"])
+    captured = capsys.readouterr()
+    assert status == 0, captured.err + captured.out
+    assert "Missing test impact evidence." in seen["implementations"][1]
+    assert seen["reviews"] == 2 and len(set(seen["acceptors"])) == 1 and len(seen["acceptors"]) == 2
+    assert "Rework rounds: 1 of 2" in captured.out and "acceptance rejected" in captured.err
+
+
+def test_acceptance_rework_shares_the_cap_and_a_final_rejection_hands_off(tmp_path, monkeypatch, capsys):
+    status, seen = rework_session(tmp_path, monkeypatch, ["AUDIT_STATUS: CLEAN"], ["Still missing.\nACCEPTANCE_STATUS: REJECTED"])
+    captured = capsys.readouterr()
+    assert status == 2
+    assert len(seen["implementations"]) == 3 and len(seen["acceptors"]) == 3 and len(set(seen["acceptors"])) == 1
+    assert "Status: HANDOFF REQUIRED" in captured.out and "Still missing." in captured.out
+    assert "Rework rounds: 2 of 2" in captured.out and "orchestrator rejected acceptance" in captured.out
 
 
 def test_findings_from_an_earlier_round_are_labelled_for_acceptance():
@@ -342,7 +380,8 @@ def test_a_rejection_by_the_taking_over_agent_is_final_and_not_shopped_to_a_thir
     # Run-007: Claude was disqualified, Codex took over and REJECTED, then Cursor accepted.
     acceptors, status = disqualified_orchestrator_session(tmp_path, monkeypatch, "Not convinced.\nACCEPTANCE_STATUS: REJECTED")
     out = capsys.readouterr().out
-    assert acceptors == ["codex"], acceptors
+    # The rejection is reworked (DOG-016) and re-judged by the same agent only; never by a third.
+    assert set(acceptors) == {"codex"} and len(acceptors) == 1 + module.MAX_REWORK_ROUNDS, acceptors
     assert status == 2 and "Status: HANDOFF REQUIRED" in out and "Not convinced." in out
 
 
@@ -364,9 +403,7 @@ def test_acceptance_evidence_marks_no_verdict_reviewer_as_provider_fault():
     assert "AGY review, ACCEPTED AS CLEAN" in evidence
 
 
-def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeypatch):
-    # DOG-002: acceptance was told to inspect the independent audit but was
-    # never given it, so it rejected a clean audit as "missing evidence".
+def record_prompts(monkeypatch):
     prompts = []
 
     class Recorder:
@@ -375,6 +412,13 @@ def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeyp
             return result("codex", role)
 
     monkeypatch.setattr(module.AgentBackendRegistry, "get_backend", lambda agent: Recorder())
+    return prompts
+
+
+def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeypatch):
+    # DOG-002: acceptance was told to inspect the independent audit but was
+    # never given it, so it rejected a clean audit as "missing evidence".
+    prompts = record_prompts(monkeypatch)
     doc = {"id": "x", "goal": "g", "constraints": [], "execution_budget": {}, "workspace_trust_policy": {"policy": "prepare"},
            "attempts": [
                {"stage": "review", "agent": "cursor", "state": "REVOKED", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED", "verdict_excerpt": "bug in due()"},
@@ -385,6 +429,27 @@ def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeyp
     assert "Cursor review, NOT CLEAN (AUDIT_FINDINGS_OR_UNCONFIRMED)" in acceptance and "bug in due()" in acceptance
     assert "AGY review, ACCEPTED AS CLEAN" in acceptance and "AUDIT_STATUS: CLEAN" in acceptance
     assert "Independent audit evidence" not in dict(prompts)["review"]
+
+
+def test_review_prompt_carries_harness_verification_and_a_blocking_only_verdict(tmp_path, monkeypatch):
+    # DOG-014: shell-less reviewers reported the test gate as unproven because
+    # HowlPlane never showed them its own run. DOG-013: "CLEAN only if you
+    # found no issue" let any minor note block the audit, so rework never converged.
+    prompts = record_prompts(monkeypatch)
+    doc = {"id": "x", "goal": "g", "constraints": [], "execution_budget": {}, "workspace_trust_policy": {"policy": "prepare"},
+           "attempts": [], "tests": [
+               {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "Ran 12 tests\nOK (round one)"},
+               {"command": "git diff --check", "exit_code": 0, "output": ""},
+               {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "Ran 19 tests\nOK"}]}
+    module.execute_assignment(doc, "review", "cursor", "UNKNOWN", tmp_path)
+    module.execute_assignment({**doc, "tests": []}, "review", "agy", "UNKNOWN", tmp_path)
+    review, without_tests = (prompt for _, prompt in prompts)
+    assert "HowlPlane itself ran these checks on the current tree" in review
+    assert "`bash scripts/test.sh` exit 0" in review and "Ran 19 tests" in review and "round one" not in review
+    assert "`git diff --check` exit 0" in review
+    assert "HowlPlane itself ran" not in without_tests
+    for prompt in (review, without_tests):
+        assert "BLOCKING or NON-BLOCKING" in prompt and "found no issue" not in prompt
 
 
 def test_cursor_backend_passes_selected_model_without_generation_probe(tmp_path, monkeypatch):
