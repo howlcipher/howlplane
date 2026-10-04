@@ -1122,7 +1122,9 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
                              f"(rework round {doc['rework']['round']}). Judge the current repository, and check whether "
                              "these reasons were actually resolved:\n" + doc["rework"]["findings"])
     elif role == "implementation":
-        instructions += "Implement the goal and run relevant local tests. Inspect existing partial changes first."
+        instructions += ("Implement the goal and run relevant local tests. Inspect existing partial changes first. Before "
+                         "finishing, check that every behavior your documentation promises holds for all inputs it "
+                         "covers, error cases included, and that its examples run in the order shown.")
         verify = implementation_verify_command(doc)
         if verify:
             # Backticks delimit it: a bare `-t .` followed by the sentence's full stop was run as `-t ..` (DOG-020).
@@ -1130,8 +1132,12 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
                              "written, without pipes or redirections.")
         if doc.get("rework"):
             source = "The acceptance check" if doc["rework"].get("source") == "acceptance" else "Independent review"
-            instructions += (f" {source} (rework round {doc['rework']['round']}) found issues with the current work. Fix every valid "
-                             "finding, run the tests again, and state which findings you rejected and why. If no change is warranted, "
+            # A finding is one reproduced instance; patching only that instance left the same false claim for the
+            # next review to find, until rework ran out (DOG-021, runs 019 and 021).
+            instructions += (f" {source} (rework round {doc['rework']['round']}) found issues with the current work. Treat "
+                             "each valid finding as an example of a defect class: fix its root cause, check the other inputs "
+                             "and error paths the same code or documented claim covers, and add regression tests for them. "
+                             "Run the tests again, and state which findings you rejected and why. If no change is warranted, "
                              "report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED with your reasons. Reviewer findings:\n"
                              + doc["rework"]["findings"])
         if is_existing_wip_context(doc["goal"], doc.get("constraints", [])):

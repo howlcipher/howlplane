@@ -440,6 +440,21 @@ def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeyp
     assert "Independent audit evidence" not in dict(prompts)["review"]
 
 
+def test_implementation_prompts_ask_for_class_fixes_and_true_documentation(tmp_path, monkeypatch):
+    # DOG-021 (runs 019, 021): rework patched only the cited instance of a false README promise, so each review
+    # found the next instance until rework ran out.
+    prompts = record_prompts(monkeypatch)
+    doc = {"id": "x", "goal": "g", "constraints": [], "execution_budget": {}, "workspace_trust_policy": {"policy": "prepare"},
+           "policy": "PLAN + EXECUTE", "attempts": []}
+    module.execute_assignment(doc, "implementation", "codex", "UNKNOWN", tmp_path)
+    doc["rework"] = {"round": 1, "source": "review", "findings": "- BLOCKING: --file . raises IsADirectoryError"}
+    module.execute_assignment(doc, "implementation", "codex", "UNKNOWN", tmp_path)
+    first, rework = (prompt for role, prompt in prompts)
+    assert "every behavior your documentation promises holds for all inputs it covers" in first
+    assert "example of a defect class: fix its root cause" in rework and "IsADirectoryError" in rework
+    assert "Fix every valid finding" not in rework
+
+
 def test_review_prompt_carries_harness_verification_and_a_blocking_only_verdict(tmp_path, monkeypatch):
     # DOG-014: shell-less reviewers reported the test gate as unproven because
     # HowlPlane never showed them its own run. DOG-013: "CLEAN only if you
