@@ -51,10 +51,12 @@ ATTEMPT_TIMEOUT_FAILURES = {"EXECUTION_BUDGET_EXCEEDED"}
 # from this workspace only: no role capacity, no session-wide capability loss,
 # and no readiness penalty for other directories.
 WORKSPACE_TRUST_FAILURES = {"WORKSPACE_TRUST_REQUIRED"}
+# Review reads the whole change and cannot be decomposed. Dogfooding measured
+# reviews at 97-300+ s; at 300 s, half of Cursor's real reviews were cut off.
 DEFAULT_EXECUTION_BUDGETS: dict[str, int] = {
     "planning": 300,
     "implementation": 600,
-    "review": 300,
+    "review": 600,
     "acceptance": 300,
 }
 DEFAULT_EXECUTION_BUDGET_SECONDS = 300
