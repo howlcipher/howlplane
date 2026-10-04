@@ -141,3 +141,34 @@ All campaign PRs merged except the records PR #147 (open; merge blocked for the 
 
 ## Reproduction
 Unchanged from Addendum 2, with the howlplane checkout on main (a7f3bc4 or later with identical src).
+
+# Addendum 4: Claude back in the agent pool (2026-10-04)
+
+## Result
+DOGFOOD RESULT: PASS. Clean runs **run-024 and run-025**, consecutive, on howlplane `dogfood/DOG-018-greenfield-denial` @7a516c0, fresh empty repositories, same mission, all five agents READY (Claude included), no recovery steps. Verification: runs/run-024, runs/run-025 `VERIFICATION.md`.
+Not counted: run-018 (found DOG-018), 019 (BLOCKED), 020 (rerouted), 021 (BLOCKED), 022 (clean, but 023 on the same engine was not), 023 (BLOCKED).
+
+## Findings (campaign 3)
+| ID | Summary | Commit |
+| --- | --- | --- |
+| DOG-018 | Greenfield test-run denial marked Claude interactive-only; implementers could not run their tests | 1ce49aa (grant gap), 2ee6c5b (plan's VERIFY_COMMAND granted; user's choice) |
+| DOG-019 | Verification ignored the plan's test command, so reviewers had no test evidence | 245c705 |
+| DOG-020 | Planned command ran as `-t ..` (prompt punctuation); refused commands truncated in progress output | f83882d |
+| DOG-021 | Rework fixed only cited instances | 22806e8 |
+| DOG-023 | Claude-implemented sessions rarely converged under Codex review: AUTO now prefers Codex for implementation (user's choice) | 7a516c0 |
+| DOG-022 | COMPLETE report shows superseded FINDINGS verdicts unlabelled | open, nonblocking |
+All commits pushed on dogfood/DOG-018-greenfield-denial; PR to be merged by the user.
+
+## What the runs proved live
+- Claude's documented recovery (`howl agents doctor --live`) now sticks: it stayed READY through runs 019-025.
+- Claude planned and implemented greenfield work with 0 permission denials (runs 021-023), within a bounded grant (plan's test command as an exact literal + read-only git).
+- HowlPlane verifies with the plan's command when nothing is discoverable (runs 020-025), and reviewers cite it.
+- The PERMISSION line names refused commands and Claude stays READY afterwards (run-020).
+
+## Remaining recommended work
+1. Merge the DOG-018 branch PR; until then the installed engine follows whatever the howlplane checkout has (returned to main after this campaign, so main lacks these fixes).
+2. DOG-022 (report labels for superseded verdicts).
+3. Review-convergence with Claude implementing remains weaker (1/4); revisit "later-round review focus" if Claude should implement by default again.
+
+## Reproduction
+As Addendum 2, with the howlplane checkout at 7a516c0 (or main after the PR merges); Claude may be READY.

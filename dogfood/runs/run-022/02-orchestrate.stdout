@@ -1,0 +1,63 @@
+HOWL ORCHESTRATION REPORT
+Session: 5e9d8de10ab14c8f8d94c6530bff8df1
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: claude_code
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 8
+Reroutes: 0
+Repository head: b510916bade33d001ea761d2482c30fd8f5782a1
+Repository status: ?? README.md
+?? __pycache__/household.cpython-314.pyc
+?? household.py
+?? tests/__pycache__/test_household.cpython-314.pyc
+?? tests/test_household.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests"], "exit_code": 0, "output": "name\nhousehold.py add: error: argument --every: '0' is not a whole number of days >= 1\nusage: household.py add [-h] --every EVERY [--start START] name\nhousehold.py add: error: argument --every: 'x' is not a whole number of days >= 1\nusage: household.py add [-h] --every EVERY [--start START] name\nhousehold.py add: error: the following arguments are required: --every\nusage: household.py add [-h] --every EVERY [--start START] name\nhousehold.py add: error: argument --start: invalid date '2026-13-01' (use YYYY-MM-DD)\nusage: household.py done [-h] [--on ON] task\nhousehold.py done: error: argument --on: invalid date 'yesterday' (use YYYY-MM-DD)\nusage: household.py due [-h] [--on ON]\nhousehold.py due: error: argument --on: invalid date 'bad' (use YYYY-MM-DD)\nusage: household.py [-h] [--data DATA] {add,list,due,done,remove} ...\nhousehold.py: error: the following arguments are required: command\n...\n----------------------------------------------------------------------\nRan 12 tests in 0.109s\n\nOK\n"}, {"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests"], "exit_code": 0, "output": "e\nhousehold.py add: error: argument --every: '0' is not a whole number of days >= 1\nusage: household.py add [-h] --every EVERY [--start START] name\nhousehold.py add: error: argument --every: 'x' is not a whole number of days >= 1\nusage: household.py add [-h] --every EVERY [--start START] name\nhousehold.py add: error: the following arguments are required: --every\nusage: household.py add [-h] --every EVERY [--start START] name\nhousehold.py add: error: argument --start: invalid date '2026-13-01' (use YYYY-MM-DD)\nusage: household.py done [-h] [--on ON] task\nhousehold.py done: error: argument --on: invalid date 'yesterday' (use YYYY-MM-DD)\nusage: household.py due [-h] [--on ON]\nhousehold.py due: error: argument --on: invalid date 'bad' (use YYYY-MM-DD)\nusage: household.py [-h] [--data DATA] {add,list,due,done,remove} ...\nhousehold.py: error: the following arguments are required: command\n......\n----------------------------------------------------------------------\nRan 16 tests in 0.532s\n\nOK\n"}, {"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests"], "exit_code": 0, "output": "household.py add: error: argument --every: '0' is not a whole number of days >= 1\nusage: household.py add [-h] --every EVERY [--start START] name\nhousehold.py add: error: argument --every: 'x' is not a whole number of days >= 1\nusage: household.py add [-h] --every EVERY [--start START] name\nhousehold.py add: error: the following arguments are required: --every\nusage: household.py add [-h] --every EVERY [--start START] name\nhousehold.py add: error: argument --start: invalid date '2026-13-01' (use YYYY-MM-DD)\nusage: household.py done [-h] [--on ON] task\nhousehold.py done: error: argument --on: invalid date 'yesterday' (use YYYY-MM-DD)\nusage: household.py due [-h] [--on ON]\nhousehold.py due: error: argument --on: invalid date 'bad' (use YYYY-MM-DD)\nusage: household.py [-h] [--data DATA] {add,list,due,done,remove} ...\nhousehold.py: error: the following arguments are required: command\n........\n----------------------------------------------------------------------\nRan 18 tests in 0.567s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests (named by the plan (VERIFY_COMMAND))
+Rework rounds: 2 of 2
+Failures: [{"stage": "review", "agent": "codex", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}, {"stage": "review", "agent": "codex", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}]
+Verdict from Codex (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  - **BLOCKING:** [household.py:40](/run/media/system/tallgeese/dev/dogfood-missions/run-022/household-tasks/household.py:40) incompletely validates stored tasks. A JSON task with `every_days: -7` is accepted; completing it schedules recurrence backward and invokes saving. A task with `name: null` produces an uncaught `AttributeError`. This contradicts [README.md:25](/run/media/system/tallgeese/dev/dogfood-missions/run-022/household-tasks/README.md:25), which promises corrupt data is reported and never overwritten. Validate field types and invariants and add regression tests.
+  
+  Files changed by this review: none. Reviewed untracked `household.py`, `README.md`, and `tests/test_household.py`.
+  
+  Verification: independently ran `git diff --check`, CLI help, empty listing, and in-memory corruption probes with saving mocked. Supplied harness evidence confirms 12 tests passed; I did not rerun the disk-writing suite under the read-only constraint.
+  
+  Remaining limitation: the tree contains no evidence establishing selection through the normal Howl workflow.
+  
+  Completion status: review complete; blocking finding remains.
+  
+  AUDIT_STATUS: FINDINGS
+Verdict from Codex (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  - **BLOCKING:** [household.py:237](/run/media/system/tallgeese/dev/dogfood-missions/run-022/household-tasks/household.py:237) prints success before saving. Injecting a save failure produced `Added #1 Vacuum…` despite nothing being persisted. The same ordering affects completion and removal. Print success only after saving; add failure-path tests.
+  - **NON-BLOCKING:** [household.py:50](/run/media/system/tallgeese/dev/dogfood-missions/run-022/household-tasks/household.py:50) accepts `next_id: 0` with an empty task list. Adding then produces ID 0, which subsequent loads reject. Reproduced with mocked storage; this requires malformed input.
+  
+  Files changed: none. Reviewed all three untracked source/documentation files; the tracked diff is empty.
+  
+  Verification: CLI help, `git diff --check`, and two in-memory fault probes ran. Harness evidence reports all 16 automated tests passing; I did not rerun the disk-writing suite under read-only restrictions.
+  
+  Remaining limitation: no local workflow artifacts establish how the implementation approach was selected. The review skill’s referenced prompt was also unavailable.
+  
+  Completion status: review complete; blocking finding remains.
+  
+  AUDIT_STATUS: FINDINGS
+Review notes from Codex (review, CLEAN):
+  No BLOCKING findings.
+  
+  NON-BLOCKING findings:
+  
+  - Concurrent commands can overwrite each other’s changes; atomic replacement prevents partial writes but provides no locking.
+  - Workflow provenance is unavailable: this checkout contains no Howl workflow records to verify implementation selection.
+  
+  Files reviewed: `household.py`, `tests/test_household.py`, `README.md`. Files changed by me: none.
+  
+  Verification: CLI help and in-memory add/list/complete/due lifecycle passed. Supplied harness evidence confirms all 18 tests passed and `git diff --check` passed. Persistence tests were not independently rerun because this session permits read-only access.
+  
+  Completion status: application requirements are covered by implementation and passing harness tests; review complete.
+  
+  AUDIT_STATUS: CLEAN

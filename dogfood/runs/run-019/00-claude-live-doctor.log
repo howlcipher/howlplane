@@ -1,0 +1,37 @@
+HOWLPLANE AGENT DOCTOR
+
+Worker       Status  Detail
+Claude Code  READY
+
+1 worker ready
+
+Next
+No action required.
+
+GLOBAL READINESS
+
+Claude Code
+  Backend:        claude
+  CLI:            AVAILABLE
+  Version:        2.1.288
+  Auth:           READY — CLI reports an active login (claude.ai)
+  Unattended:     YES (live smoke in workspace)
+  Edits allowed:  YES
+  Models:         not listed by this CLI
+  Live smoke:     STALE (last PASS 11h24m ago, 3.93s)
+  Capacity:       UNKNOWN — CLI does not expose remaining allowance
+  Verified:       2026-10-04T06:19:08.857975+00:00
+  Vendor trust:   NOT ENFORCED
+  Trust policy:   BYPASS
+  Workspace:      READY
+
+WORKSPACE READINESS
+  Workspace:      /run/media/system/tallgeese/dev/dogfood-missions/run-019/household-tasks
+  Authorized:     NO — run `howlplane factory prepare --repo <repo>`
+  Trust policy:   BYPASS (from config)
+
+  Claude Code
+    Vendor trust:        NOT ENFORCED — `claude -p` skips the workspace trust dialog (claude --help)
+    Trust policy:        BYPASS
+    Effective workspace: READY — noninteractive mode does not enforce workspace trust
+    Workspace smoke: PASS (2026-10-04T06:19:08.857975+00:00)

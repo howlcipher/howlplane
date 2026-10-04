@@ -1,0 +1,4 @@
+# run-023 — BLOCKED (engine 22806e8), not clean; streak on 22806e8 reset to 0/2
+Claude planned/implemented 3 rounds, 0 denials; plan verification passed each round. Codex review findings by round: (1) stored field values unvalidated ("every_days":"7" TypeError, 0 accepted); (2) `{"tasks": {}}` / `{"tasks": ""}` accepted, add then overwrites; (3) date.fromisoformat accepts `20261004` and `2026-W40-7` while README promises YYYY-MM-DD / exit 2. Each round fixed the cited class; the next review found a narrower instance. 2/2 rework rounds spent.
+Tally on Claude-eligible engines: Claude->Codex review 1/4 COMPLETE (019 B, 021 B, 022 C, 023 B); Codex->Cursor review 6/6 COMPLETE (runs 009, 010, 014-017). Implementer and reviewer are confounded.
+Finding DOG-023 (review/rework convergence policy), decision requested from the user.

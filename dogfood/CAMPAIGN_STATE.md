@@ -70,3 +70,14 @@ Engine a7f3bc4. Status: VERIFYING, streak 0/2. Runs run-016, run-017 pending.
 
 ## RESULT (re-verification)
 DOGFOOD RESULT: PASS (run-016, run-017, engine howlplane main a7f3bc4).
+| run-018 | a7f3bc4 | COMPLETE WITH WARNINGS | Claude refused greenfield test run -> DOG-018 |
+| run-019 | 2ee6c5b | BLOCKED | DOG-018 verified; DOG-019 |
+| run-020 | 245c705 | COMPLETE WITH WARNINGS | DOG-019 verified; DOG-020 |
+| run-021 | f83882d | BLOCKED | DOG-020 verified; DOG-021 |
+| run-022 | 22806e8 | CLEAN RUN 1/2: PASS | Claude implementer, rework converged |
+| run-023 | 22806e8 | BLOCKED | Codex review found narrower instances each round -> DOG-023 |
+| run-024 | 7a516c0 | CLEAN RUN 1/2: PASS | Claude plan, Codex impl, Claude review+accept |
+| run-025 | 7a516c0 | CLEAN RUN 2/2: PASS | |
+
+## RESULT (campaign 3, Claude in the pool)
+DOGFOOD RESULT: PASS (run-024, run-025, engine howlplane dogfood/DOG-018-greenfield-denial 7a516c0).

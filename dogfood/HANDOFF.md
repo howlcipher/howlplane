@@ -120,3 +120,16 @@ Status: PASS on howlplane main a7f3bc4 (run-016 + run-017). See FINAL_REPORT.md 
 Open: records PR #147 (branch dogfood/resume-check-20261003-2), the user's to merge. No active finding, no open code PRs.
 Live engine checkout: howlplane on main at a7f3bc4.
 Resume: nothing pending. If howlplane src changes after a7f3bc4, run two fresh missions (run-018, run-019) per FINAL_REPORT reproduction before re-asserting PASS.
+
+## Status update (DOG-018, 2026-10-04)
+PASS for the household mission still stands on main a7f3bc4 (runs 016/017, Codex/Cursor). Exploratory run-018 (Claude READY) found DOG-018.
+Live engine checkout: howlplane on branch dogfood/DOG-018-greenfield-denial (e821971) — this IS what `howl orchestrate` runs now.
+Next: (1) after the push lands, re-verify Claude (`howl agents doctor --live --agent claude_code --repo <repo>`), run run-019 on a fresh repo and confirm the PERMISSION line plus Claude still READY afterwards; (2) user decision on DOG-018 part 2; (3) PR for the branch; return the checkout to main if the PR is not merged.
+
+## Status update (FINAL, campaign 3, 2026-10-04)
+Status: PASS with Claude in the agent pool: run-024 + run-025 on howlplane dogfood/DOG-018-greenfield-denial 7a516c0. See FINAL_REPORT.md Addendum 4.
+Open PRs (the user's to merge): howlplane #148 (engine fixes DOG-018..021, 023; branch dogfood/DOG-018-greenfield-denial @7a516c0), howlplane #147 (campaign records; branch dogfood/resume-check-20261003-2).
+Live engine: the howlplane checkout was returned to main (a7f3bc4), which does NOT have the #148 fixes. Until #148 merges, a greenfield session with Claude READY will hit DOG-018 again (Claude marked interactive-only; recover with `howl agents doctor --live --agent claude_code --repo <repo>`).
+Open finding: DOG-022 (nonblocking report UX).
+Resume: after #148 merges, `git -C howlplane pull` on main; src then equals 7a516c0 plus any later merges. If src differs from 7a516c0, run two fresh missions (run-026, run-027) per FINAL_REPORT reproduction before re-asserting PASS.
+Warnings: pre-push hook runs the full suite (~11 min; slower while a mission runs); SlopsLint python_tests ceiling is 2 clones, so new tests must share helpers.
