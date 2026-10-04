@@ -30,3 +30,4 @@
 - 2026-10-03 run-015 COMPLETE + verified: CLEAN RUN 2/2 on 4a5d697. DOGFOOD RESULT: PASS. DOG-017 found from review notes, fixed separately (27a5080). PRs #142, #143, #144 opened. Checkout returned to main.
 - 2026-10-03 resume check 2 (new session): #142, #146 merged; main 4c4e69b src == 4a5d697 (empty diff). Live engine checkout fast-forwarded a0ada6a -> 4c4e69b. CLI health OK. PASS remains valid; no new runs. Only open item: PR #144 (DOG-017), the user's to merge.
 - 2026-10-04 PR #144 (DOG-017) merged a7f3bc4; engine src changed, PASS must be re-earned: run-016, run-017 next.
+- 2026-10-04 run-016 (engine a7f3bc4) COMPLETE, 1 rework round converged, verified: CLEAN RUN 1/2. Starting run-017.

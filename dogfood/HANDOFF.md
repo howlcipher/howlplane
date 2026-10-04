@@ -111,3 +111,6 @@ Warning: `pip check` shows litellm/mcp pin conflicts (jsonschema, pydantic); har
 ## Status update (DOG-017 merged, 2026-10-04)
 Status: VERIFYING. PR #144 (DOG-017) merged as a7f3bc4 (2026-10-04T01:57Z). Engine src changed vs 4a5d697 (control_plane/cli.py, route task-class inference), so PASS must be re-earned on a7f3bc4.
 Next: fast-forward the howlplane checkout to a7f3bc4 (live engine), then run-016 and run-017 from fresh empty repos under dogfood-missions/, per FINAL_REPORT.md reproduction. Clean streak on a7f3bc4: 0/2.
+
+## Status update (run-016, 2026-10-04)
+run-016 CLEAN RUN 1/2 on a7f3bc4. run-017 in progress (target dogfood-missions/run-017/household-tasks, same procedure).

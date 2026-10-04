@@ -1,0 +1,132 @@
+HOWL ORCHESTRATION REPORT
+Session: 39d05313a27d44149b4e3d059a21a30b
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: codex
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 6
+Reroutes: 0
+Repository head: 6cc97ed13334e1598a9d57cd176c5dbf5e0d7a31
+Repository status: ?? .gitignore
+?? README.md
+?? documentation/evidence_ledger.jsonl
+?? documentation/task_spec.json
+?? documentation/test_impact.json
+?? documentation/verification.md
+?? documentation/workflow.md
+?? household_tasks.py
+?? scripts/check_whitespace.py
+?? scripts/test.sh
+?? tests/test_household_tasks.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": ". ok\ntest_due_order_and_separate_tasks (test_household_tasks.HouseholdTasksTests.test_due_order_and_separate_tasks) ... ok\ntest_full_lifecycle_and_persistence (test_household_tasks.HouseholdTasksTests.test_full_lifecycle_and_persistence) ... ok\ntest_help_needs_no_database (test_household_tasks.HouseholdTasksTests.test_help_needs_no_database) ... ok\ntest_input_validation_does_not_create_database (test_household_tasks.HouseholdTasksTests.test_input_validation_does_not_create_database) ... ok\ntest_overflow_is_clean_and_does_not_add_task (test_household_tasks.HouseholdTasksTests.test_overflow_is_clean_and_does_not_add_task) ... ok\ntest_unknown_task_and_completion_dates (test_household_tasks.HouseholdTasksTests.test_unknown_task_and_completion_dates) ... ok\ntest_unsupported_schema_and_unwritable_path (test_household_tasks.HouseholdTasksTests.test_unsupported_schema_and_unwritable_path) ... ok\n\n----------------------------------------------------------------------\nRan 12 tests in 4.377s\n\nOK\n"}, {"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "m_completion_date (test_household_tasks.HouseholdTasksTests.test_early_completion_reschedules_from_completion_date) ... ok\ntest_full_lifecycle_and_persistence (test_household_tasks.HouseholdTasksTests.test_full_lifecycle_and_persistence) ... ok\ntest_help_needs_no_database (test_household_tasks.HouseholdTasksTests.test_help_needs_no_database) ... ok\ntest_input_validation_does_not_create_database (test_household_tasks.HouseholdTasksTests.test_input_validation_does_not_create_database) ... ok\ntest_overflow_is_clean_and_does_not_add_task (test_household_tasks.HouseholdTasksTests.test_overflow_is_clean_and_does_not_add_task) ... ok\ntest_unknown_task_and_completion_dates (test_household_tasks.HouseholdTasksTests.test_unknown_task_and_completion_dates) ... ok\ntest_unsupported_schema_and_unwritable_path (test_household_tasks.HouseholdTasksTests.test_unsupported_schema_and_unwritable_path) ... ok\n\n----------------------------------------------------------------------\nRan 14 tests in 5.162s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: bash scripts/test.sh (derived from the project's discovered test command)
+Rework rounds: 1 of 2
+Failures: [{"stage": "review", "agent": "cursor", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}]
+Verdict from Cursor (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  ## Review summary
+  
+  Functionally the CLI matches the goal (add/list/complete/history/due, SQLite persistence, tests, README). One **BLOCKING** issue: verification evidence treats `git diff --check` as a real gate for this delivery, but the tree is entirely untracked so that check is a no-op.
+  
+  ### Files changed (untracked on empty `master`)
+  - `household_tasks.py`
+  - `tests/test_household_tasks.py`
+  - `scripts/test.sh`
+  - `README.md`
+  - `.gitignore`
+  - `documentation/task_spec.json`, `workflow.md`, `verification.md`, `test_impact.json`, `evidence_ledger.jsonl`
+  
+  ### Tests run
+  Harness (not re-executed here; shell blocked in Ask mode):
+  - `git diff --check` → exit 0 (vacuous on untracked-only tree)
+  - `bash scripts/test.sh` → exit 0; flake8 + **12** unittest cases OK
+  
+  ### Findings
+  
+  **BLOCKING — vacuous `git diff --check` presented as verification**
+  - `documentation/verification.md` (line 7), `documentation/test_impact.json` (`regression_commands_run`), `documentation/evidence_ledger.jsonl`
+  - Implementation files are untracked; `git diff --check` only scans tracked diffs, so exit 0 does not inspect this deliverable. Listing it as regression/verification evidence is false assurance.
+  
+  **NON-BLOCKING**
+  - Default DB / `XDG_DATA_HOME` path not covered by tests (`--db` always used)
+  - `workflow.md` “leap-day recurrence” only means next due lands on `2024-02-29`
+  - Early-complete path documented, not dedicatedly tested
+  - Every connect uses `BEGIN IMMEDIATE` (brief write lock on reads); 5s timeout documented
+  - `scripts/test.sh` requires flake8 beyond stdlib unittest
+  - Local unencrypted SQLite; no edit/delete/sync (documented)
+  
+  ### Goal coverage
+  | Requirement | Status | Evidence |
+  |---|---|---|
+  | Add / list / complete / record date / due | Met | CLI + lifecycle, chronology, due-order tests |
+  | Persist locally | Met | Subprocess tests on real SQLite files |
+  | Automated tests | Met | 12 tests; harness exit 0 |
+  | Usage docs | Met | `README.md` |
+  | Howl approach selection | Documented | `documentation/workflow.md` + `task_spec.json` |
+  
+  ### Completion status
+  Implementation complete and harness-green for behavior. Audit not clean because verification evidence overstates `git diff --check`.
+  
+  Remaining risks: untested default data path, date-only recurrence (intentional), backup/concurrency limits as documented.
+  
+  AUDIT_STATUS: FINDINGS
+Review notes from Cursor (review, CLEAN):
+  ## Review verdict
+  
+  No BLOCKING defects found against the goal. The untracked tree is a coherent Python+SQLite CLI with matching tests, usage docs, and Howl workflow evidence.
+  
+  ### Files changed (all new / untracked vs empty `6cc97ed`)
+  
+  | Path | Role |
+  | --- | --- |
+  | `household_tasks.py` | CLI: add / list / due / complete / history + SQLite persistence |
+  | `tests/test_household_tasks.py` | 14 subprocess integration tests |
+  | `scripts/test.sh`, `scripts/check_whitespace.py` | Gate: whitespace + flake8 + unittest |
+  | `README.md` | Usage |
+  | `documentation/workflow.md` | Routing + design choice |
+  | `documentation/task_spec.json`, `test_impact.json`, `verification.md`, `evidence_ledger.jsonl` | HowlPlane artifacts |
+  | `.gitignore` | Local DB / demo ignores |
+  
+  No commits (constraint respected). Independent re-execution was blocked in this session; behavioral claims rest on static review + provided harness evidence.
+  
+  ### Tests run (harness evidence)
+  
+  - `git diff --check` → 0 (vacuous on untracked-only tree; correctly withdrawn in docs)
+  - `bash scripts/test.sh` → 0 — flake8 + **14** unittest tests OK (~5.2s)
+  
+  ### Goal coverage (falsification attempt)
+  
+  | Requirement | Evidence |
+  | --- | --- |
+  | Add / list / complete / history | CLI + lifecycle tests |
+  | Due again after completion | `due` + Feb 22→29 cycle in tests |
+  | Local persistence | Real SQLite via subprocess; default XDG/HOME paths tested |
+  | Automated tests | 14 integration tests |
+  | Usage docs | `README.md` |
+  | Howl approach selection | `task_spec.json` + `workflow.md` (Python/SQLite vs Go/HowlFrame/JSON) |
+  
+  Completion + `next_due` share one transaction; rollback test covers storage failure. Input validation exits 2 without creating the DB.
+  
+  ### Findings
+  
+  **BLOCKING:** none
+  
+  **NON-BLOCKING**
+  1. Every open takes `BEGIN IMMEDIATE` (read-only DB / FS will fail) — documented tradeoff.
+  2. `with connection:` + explicit `BEGIN IMMEDIATE` is a known fragile pattern across Python sqlite3 versions; verified only on the claimed 3.14.4 gate, while README says 3.10+.
+  3. No edit/delete/migrate/sync — documented product limits.
+  4. Gate depends on flake8 being installed (called out as a dev tool).
+  
+  ### Remaining risks
+  
+  Local-only unencrypted SQLite; calendar-day recurrence only; concurrent writers bound by a 5s lock timeout; this review did not re-run the suite.
+  
+  ### Completion status
+  
+  Implementation meets the stated goal and acceptance criteria; prior vacuous `git diff --check` gate was replaced with `scripts/check_whitespace.py`. Ready for human acceptance from a correctness standpoint.
+  
+  AUDIT_STATUS: CLEAN
