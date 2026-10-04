@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -24,7 +25,7 @@ from howlplane.control_plane import agent_readiness, workspace_trust
 from howlplane.control_plane.agent_execution import AgentBackendRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
 from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
-from howlplane.control_plane.provider_execution_profile import is_mutating_role
+from howlplane.control_plane.provider_execution_profile import command_to_bash_specifier, is_mutating_role
 from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 from howlplane.control_plane.task_spec import TaskSpec
 
@@ -35,6 +36,8 @@ SCHEMA = "howlplane.orchestration/v1"
 # never role capacity; load converts v2's budget EXHAUSTED entries.
 SCHEMA_VERSION = 3
 AGENTS = ("claude_code", "codex", "cursor", "agy", "devin_cli")
+# AUTO's first choice for mutating roles when the user named no orchestrator (DOG-023).
+IMPLEMENTATION_PREFERENCE = "codex"
 ROLES = ("planning", "implementation", "review", "acceptance")
 AGENT_STATES = {"AVAILABLE", "DEGRADED", "UNAVAILABLE", "RESERVED"}
 UNAVAILABLE_FAILURES = {"MISSING_EXECUTABLE", "AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE"}
@@ -235,6 +238,15 @@ class SessionProgress:
     def capability_downgrade(self, agent: str) -> None:
         self.last_change_at = self.clock()
         self._write("CAPABILITY", f"{AGENT_NAMES.get(agent, agent)} marked interactive-only for this session")
+
+    def permission_gap(self, agent: str, role: str, commands: list[str]) -> None:
+        self.last_change_at = self.clock()
+        name = AGENT_NAMES.get(agent, agent)
+        # Commands first: a progress line is cut at 160 characters, and the explanation used to push them out (DOG-020).
+        for command in commands:
+            self._write("PERMISSION", f"{name} refused (not granted): {command}")
+        self._write("PERMISSION", f"{name} changed files but needed commands HowlPlane did not grant; excluded from "
+                                  f"{role} for this session only, still ready for later sessions (extra_allowed_bash)")
 
     def role_excluded(self, agent: str, role: str, entry: dict[str, Any]) -> None:
         self.last_change_at = self.clock()
@@ -671,7 +683,23 @@ def record_capability_success(doc: dict[str, Any], agent: str) -> None:
                                   "evidence_time": now(), "scope": "session"})
 
 
-def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failure: str, at: str | None = None) -> dict[str, Any] | None:
+def permission_grant_gap(result: Any, stage: str, changed: bool) -> list[str]:
+    """Commands HowlPlane never granted, when they alone stopped a worker that was mutating the repository.
+
+    A worker that changed files unattended and was then refused only a Bash command
+    outside its derived profile (typically a greenfield test run, before any project
+    command exists to derive) has proven unattended mutation. The gap is HowlPlane's
+    grant, not the agent's capability (DOG-018). Returns [] when that is not the case.
+    """
+    metadata = getattr(result, "metadata", None) or {}
+    commands = [str(command) for command in metadata.get("denied_commands") or []]
+    if not (changed and is_mutating_role(stage) and commands and metadata.get("denied_tools") == ["Bash"]):
+        return []
+    return commands
+
+
+def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failure: str, at: str | None = None,
+                   grant_gap: bool = False) -> dict[str, Any] | None:
     """Apply one failed attempt to session evidence. Returns the role exclusion it created, if any."""
     state = agent_record(doc, agent)
     if failure in ATTEMPT_TIMEOUT_FAILURES:
@@ -683,10 +711,12 @@ def record_failure(doc: dict[str, Any], agent: str, role: str, model: str, failu
                                     "role": role, "source": "orchestrate session", "detected_at": at or now(),
                                     "policy": policy, "mechanism": workspace_trust.mechanism(agent, policy)}
         return None
-    if failure == "EXECUTION_PERMISSION_REQUIRED" and is_mutating_role(role):
+    if failure == "EXECUTION_PERMISSION_REQUIRED" and is_mutating_role(role) and not grant_gap:
         # A denial in a read-only role means the worker reached for a tool that
         # role never holds. It says nothing about unattended mutation, so it
-        # must not take the agent out of every other role (DOG-004).
+        # must not take the agent out of every other role (DOG-004). Nor does a
+        # denial of an ungranted command after real edits (DOG-018); that
+        # attempt still excludes the agent from this role below.
         record_capability_failure(doc, agent, failure, at)
     if failure in UNAVAILABLE_FAILURES:
         state["state"] = "UNAVAILABLE"
@@ -868,6 +898,13 @@ def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
     if role in {"planning", "acceptance"} and lead != "AUTO" and lead in order:
         order.remove(lead)
         order.insert(0, lead)
+    if (is_mutating_role(role) and doc.get("requested_orchestrator", "AUTO") == "AUTO"
+            and doc["strategy"] != "ECONOMY" and IMPLEMENTATION_PREFERENCE in order):
+        # Only when the user chose no orchestrator: otherwise the AUTO-selected planner also
+        # implements. Claude-implemented sessions converged 1 of 4 under falsifying review,
+        # Codex-implemented ones 6 of 6 (DOG-023); the others stay in order as fallbacks.
+        order.remove(IMPLEMENTATION_PREFERENCE)
+        order.insert(0, IMPLEMENTATION_PREFERENCE)
     if role == "acceptance":
         # Only the orchestrator accepts, unless it has been disqualified for a reason unrelated to
         # the work (capability, availability, capacity). Then the next eligible agent takes over so
@@ -1042,6 +1079,40 @@ def verification_evidence_for_review(doc: dict[str, Any]) -> str:
     return "".join(lines) + "\n--- end of verification evidence ---"
 
 
+PLAN_VERIFY_CONTRACT = (
+    " End the plan with one line VERIFY_COMMAND: <the single command, run from the repository root, that will run "
+    "the project's automated tests once implemented>, with no pipes, redirections, or chained commands; or "
+    "VERIFY_COMMAND: NONE if the goal needs no tests.")
+_VERIFY_LINE = re.compile(r"^\s*VERIFY_COMMAND:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def planned_verify_command(plan: str) -> list[str] | None:
+    """The plan's test command, if it named one HowlPlane may grant (DOG-018).
+
+    The implementer of a new repository is granted this command, so it is held to
+    the same deny floor as a discovered command: anything that floor refuses,
+    or that carries shell operators, is ignored rather than granted.
+    """
+    matches = _VERIFY_LINE.findall(plan or "")
+    if not matches:
+        return None
+    text = matches[-1].strip().strip("`").strip()
+    if not text or text.upper() == "NONE":
+        return None
+    try:
+        command = shlex.split(text)
+    except ValueError:
+        return None
+    if not command or any(marker in text for marker in ("&", ";", "|", "$", "`", ">", "<")):
+        return None
+    return command if command_to_bash_specifier(command) else None
+
+
+def implementation_verify_command(doc: dict[str, Any]) -> list[str] | None:
+    """The test command the implementer is told about and, for bounded shells, granted."""
+    return doc.get("verify_command") or doc.get("planned_verify_command")
+
+
 def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, repo: Path) -> Any:
     instructions = (
         f"Goal: {doc['goal']}\nRole: {role}. Work only in {repo}. "
@@ -1060,11 +1131,22 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
                              f"(rework round {doc['rework']['round']}). Judge the current repository, and check whether "
                              "these reasons were actually resolved:\n" + doc["rework"]["findings"])
     elif role == "implementation":
-        instructions += "Implement the goal and run relevant local tests. Inspect existing partial changes first."
+        instructions += ("Implement the goal and run relevant local tests. Inspect existing partial changes first. Before "
+                         "finishing, check that every behavior your documentation promises holds for all inputs it "
+                         "covers, error cases included, and that its examples run in the order shown.")
+        verify = implementation_verify_command(doc)
+        if verify:
+            # Backticks delimit it: a bare `-t .` followed by the sentence's full stop was run as `-t ..` (DOG-020).
+            instructions += (f" The plan's test command is `{shlex.join(verify)}`. Make it pass and run it exactly as "
+                             "written, without pipes or redirections.")
         if doc.get("rework"):
             source = "The acceptance check" if doc["rework"].get("source") == "acceptance" else "Independent review"
-            instructions += (f" {source} (rework round {doc['rework']['round']}) found issues with the current work. Fix every valid "
-                             "finding, run the tests again, and state which findings you rejected and why. If no change is warranted, "
+            # A finding is one reproduced instance; patching only that instance left the same false claim for the
+            # next review to find, until rework ran out (DOG-021, runs 019 and 021).
+            instructions += (f" {source} (rework round {doc['rework']['round']}) found issues with the current work. Treat "
+                             "each valid finding as an example of a defect class: fix its root cause, check the other inputs "
+                             "and error paths the same code or documented claim covers, and add regression tests for them. "
+                             "Run the tests again, and state which findings you rejected and why. If no change is warranted, "
                              "report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED with your reasons. Reviewer findings:\n"
                              + doc["rework"]["findings"])
         if is_existing_wip_context(doc["goal"], doc.get("constraints", [])):
@@ -1073,17 +1155,28 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
                              "verify them against local tests and report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED.")
     else:
         instructions += "Produce a bounded implementation plan and acceptance criteria. Do not edit files."
+        if doc["policy"] != "PLAN ONLY":
+            instructions += PLAN_VERIFY_CONTRACT
     if agent == "claude_code" and not is_mutating_role(role):
         # Claude's read-only roles hold Read, Grep and Glob but no shell; a
         # shell attempt is denied and fails the assignment, which then marks
         # the agent interactive-only for the whole session (DOG-004).
         instructions += " Shell commands are unavailable in this role: use only the Read, Grep and Glob tools to inspect files."
+    elif agent == "claude_code":
+        # Claude's shell is bounded to granted test commands and read-only Git; a
+        # refused shell write fails the attempt even if Claude recovers (DOG-018).
+        instructions += (" Create and change files only with the Edit and Write tools, and inspect them with Read, Glob "
+                         "and Grep: the shell is limited to the project's test commands and read-only git commands, one "
+                         "command per call (chained commands are refused), and anything else is refused.")
     if any(item.get("stage") == role and item.get("state") == "TIMED_OUT" and item.get("partial_changes") for item in doc["attempts"]):
         instructions += (" An earlier attempt at this role reached its execution budget and left partial changes: "
                          "inspect and continue them rather than starting over.")
     if model != "UNKNOWN":
         instructions += f" Use model {model} if the CLI supports selecting it; report actual model identity."
     task = TaskSpec(task_id=doc["id"], repository=str(repo), objective=doc["goal"], constraints=doc["constraints"])
+    if is_mutating_role(role) and implementation_verify_command(doc):
+        # A bounded shell (Claude) is granted this command alongside any it discovers (DOG-018).
+        task.metadata["verification_commands"] = [implementation_verify_command(doc)]
     backend = AgentBackendRegistry.get_backend(agent)
     extra: dict[str, Any] = {}
     parameters = inspect.signature(backend.execute).parameters
@@ -1297,6 +1390,10 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             if result.success and stage == "acceptance" and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
+            grant_gap = (permission_grant_gap(result, stage, before != after)
+                         if assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED" else [])
+            if grant_gap:
+                assignment["denied_commands"] = [redact(command) for command in grant_gap]
             if result.success and stage in {"review", "acceptance"}:
                 # The verdict is the only record of why a reviewer or the
                 # orchestrator stopped the session; the hash alone cannot be read.
@@ -1316,12 +1413,13 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 agent_readiness.record_workspace_trust(agent, str(repo), stage, "orchestrate session",
                                                        policy=invocation_policy)
             elif assignment["failure"] is None or assignment["failure"] in UNAVAILABLE_FAILURES | MODEL_LIMIT_FAILURES | (
-                    {"EXECUTION_PERMISSION_REQUIRED"} if is_mutating_role(stage) else set()):
+                    {"EXECUTION_PERMISSION_REQUIRED"} if is_mutating_role(stage) and not grant_gap else set()):
                 agent_readiness.record_session_outcome(agent, model, assignment["failure"],
                                                        detail=f"{result.error_message or ''}\n{result.stderr}")
             if assignment["state"] == "SUCCEEDED":
                 record_capability_success(doc, agent)
                 if stage == "planning":
+                    doc["planned_verify_command"] = planned_verify_command(result.stdout)
                     doc["orchestrator"] = agent
                     doc["selected_orchestrator"] = agent
                     if progress and doc.get("requested_orchestrator") == "AUTO":
@@ -1368,11 +1466,13 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 progress._write("FAIL", f"{AGENT_NAMES.get(agent, agent)} {stage} failed: {assignment['failure']}{no_change_detail}")
             # Record the failure before choosing a replacement: the next
             # candidate list must already exclude what this attempt proved.
-            exclusion = record_failure(doc, agent, stage, model, assignment["failure"])
+            exclusion = record_failure(doc, agent, stage, model, assignment["failure"], grant_gap=bool(grant_gap))
             if progress:
                 if assignment["failure"] in WORKSPACE_TRUST_FAILURES:
                     progress._write("TRUST", f"{AGENT_NAMES.get(agent, agent)} requires workspace trust for {repo}; "
                                              "rerouting (the agent stays eligible elsewhere)")
+                elif grant_gap:
+                    progress.permission_gap(agent, stage, assignment["denied_commands"])
                 elif assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED" and is_mutating_role(stage):
                     progress.capability_downgrade(agent)
                 elif exclusion:
@@ -1451,6 +1551,13 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                     doc["verify_command"], doc["verify_source"] = derived, "derived from the project's discovered test command"
                     if progress:
                         progress._write("VERIFY", f"No --verify given; using the project's test command: {' '.join(derived)}")
+                elif doc.get("planned_verify_command"):
+                    # Nothing discoverable (e.g. a plain unittest layout), but the plan named its
+                    # test command; without it reviewers get no test evidence at all (DOG-019).
+                    planned = doc["planned_verify_command"]
+                    doc["verify_command"], doc["verify_source"] = planned, "named by the plan (VERIFY_COMMAND)"
+                    if progress:
+                        progress._write("VERIFY", f"No --verify given; using the plan's test command: {' '.join(planned)}")
             if doc.get("verify_command"):
                 command = doc["verify_command"]
                 if progress:

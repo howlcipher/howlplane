@@ -307,28 +307,6 @@ def test_findings_from_an_earlier_round_are_labelled_for_acceptance():
     assert "Cursor review, ACCEPTED AS CLEAN" in evidence
 
 
-def test_verification_command_is_derived_from_the_project_when_not_given(tmp_path, monkeypatch, capsys):
-    # DOG-009 (run-007): a reroute after a partial write demanded --verify before the app, and its test script, existed.
-    repo = repository(tmp_path)
-    enable_fake_review_pair(tmp_path, monkeypatch)
-    (repo / "scripts").mkdir()
-    (repo / "scripts" / "test.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
-
-    def execute(doc, stage, agent, model, cwd):
-        if stage == "implementation":
-            (cwd / "README").write_text("changed\n")
-            doc["reconciliation"] = {"needs_validation": True}
-        outcome = result(agent, stage)
-        outcome.stdout = {"review": "AUDIT_STATUS: CLEAN", "acceptance": "ACCEPTANCE_STATUS: ACCEPTED"}.get(stage, "plan")
-        return outcome
-
-    monkeypatch.setattr(module, "execute_assignment", execute)
-    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 0
-    out = capsys.readouterr()
-    assert "Verification command: bash scripts/test.sh (derived from the project's discovered test command)" in out.out
-    assert "using the project's test command: bash scripts/test.sh" in out.err
-
-
 def test_derived_verification_failure_stops_the_session(tmp_path, monkeypatch, capsys):
     repo = repository(tmp_path)
     enable_fake_review_pair(tmp_path, monkeypatch)
@@ -337,6 +315,37 @@ def test_derived_verification_failure_stops_the_session(tmp_path, monkeypatch, c
     monkeypatch.setattr(module, "execute_assignment", scripted_execute())
     assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == 2
     assert "Configured validation failed" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("plan_command, with_script, status, expected", [
+    ("python3 -c pass", False, 0, "Verification command: python3 -c pass (named by the plan (VERIFY_COMMAND))"),
+    ("python3 -c 'raise SystemExit(3)'", False, 2, "Configured validation failed"),
+    ("python3 -c pass", True, 0, "Verification command: bash scripts/test.sh (derived from the project's discovered test command)"),
+    ("python3 -c pass", True, 0, "using the project's test command: bash scripts/test.sh"),
+])
+def test_plan_test_command_verifies_when_nothing_is_discoverable(tmp_path, monkeypatch, capsys, plan_command, with_script,
+                                                                  status, expected):
+    # DOG-009 (run-007): a reroute after a partial write demanded --verify before the app, and its test script, existed;
+    # the project's discovered command is used instead. DOG-019 (run-019): a plain unittest layout has no discoverable command, so only `git diff --check` ran and
+    # the sandboxed reviewer had no test evidence; a discovered command still takes precedence over the plan.
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+    if with_script:
+        (repo / "scripts").mkdir()
+        (repo / "scripts" / "test.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
+
+    def execute(doc, stage, agent, model, cwd):
+        if stage == "implementation":
+            (cwd / "README").write_text("changed\n")
+        outcome = result(agent, stage)
+        outcome.stdout = {"review": "AUDIT_STATUS: CLEAN", "acceptance": "ACCEPTANCE_STATUS: ACCEPTED"}.get(
+            stage, f"plan\nVERIFY_COMMAND: {plan_command}")
+        return outcome
+
+    monkeypatch.setattr(module, "execute_assignment", execute)
+    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT")) == status
+    captured = capsys.readouterr()
+    assert expected in captured.out + captured.err
 
 
 def disqualified_orchestrator_session(tmp_path, monkeypatch, codex_acceptance):
@@ -348,6 +357,8 @@ def disqualified_orchestrator_session(tmp_path, monkeypatch, codex_acceptance):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setattr(module.shutil, "which", lambda name: "/fake/" + name if name in {"claude", "codex", "agent"} else None)
     monkeypatch.setattr(module, "discover_models", lambda agent: [])
+    # The scenario needs the planner to implement first; AUTO now prefers Codex for that (DOG-023).
+    monkeypatch.setattr(module, "IMPLEMENTATION_PREFERENCE", "claude_code")
     acceptors = []
 
     def execute(doc, stage, agent, model, cwd):
@@ -429,6 +440,21 @@ def test_acceptance_prompt_includes_independent_audit_verdicts(tmp_path, monkeyp
     assert "Cursor review, NOT CLEAN (AUDIT_FINDINGS_OR_UNCONFIRMED)" in acceptance and "bug in due()" in acceptance
     assert "AGY review, ACCEPTED AS CLEAN" in acceptance and "AUDIT_STATUS: CLEAN" in acceptance
     assert "Independent audit evidence" not in dict(prompts)["review"]
+
+
+def test_implementation_prompts_ask_for_class_fixes_and_true_documentation(tmp_path, monkeypatch):
+    # DOG-021 (runs 019, 021): rework patched only the cited instance of a false README promise, so each review
+    # found the next instance until rework ran out.
+    prompts = record_prompts(monkeypatch)
+    doc = {"id": "x", "goal": "g", "constraints": [], "execution_budget": {}, "workspace_trust_policy": {"policy": "prepare"},
+           "policy": "PLAN + EXECUTE", "attempts": []}
+    module.execute_assignment(doc, "implementation", "codex", "UNKNOWN", tmp_path)
+    doc["rework"] = {"round": 1, "source": "review", "findings": "- BLOCKING: --file . raises IsADirectoryError"}
+    module.execute_assignment(doc, "implementation", "codex", "UNKNOWN", tmp_path)
+    first, rework = (prompt for role, prompt in prompts)
+    assert "every behavior your documentation promises holds for all inputs it covers" in first
+    assert "example of a defect class: fix its root cause" in rework and "IsADirectoryError" in rework
+    assert "Fix every valid finding" not in rework
 
 
 def test_review_prompt_carries_harness_verification_and_a_blocking_only_verdict(tmp_path, monkeypatch):

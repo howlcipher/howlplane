@@ -12,7 +12,9 @@ import json
 import pytest
 
 from howlplane.control_plane import orchestration as module
-from howlplane.control_plane.agent_execution import TIMEOUT_SOURCE_HARNESS, TIMEOUT_SOURCE_KEY
+from howlplane.control_plane.agent_execution import (
+    TIMEOUT_SOURCE_HARNESS, TIMEOUT_SOURCE_KEY, TOOL_PERMISSION_DENIED, TOOL_PERMISSION_KEY,
+)
 from tests.test_orchestration import arguments, repository, result
 
 
@@ -410,3 +412,174 @@ def test_permission_denial_marks_unattended_capability_only_for_mutating_roles(r
     module.record_failure(doc, "claude_code", role, "UNKNOWN", "EXECUTION_PERMISSION_REQUIRED")
     unattended = doc["agents"]["claude_code"]["capabilities"]["unattended_execution"]
     assert (unattended is False) is interactive_only
+
+
+# DOG-018: a denial of an ungranted command after real edits is HowlPlane's grant gap, not the agent's
+
+
+def denied_after_edit(name, role, repo, commands=("python3 -m unittest",), tools=("Bash",)):
+    (repo / "app.py").write_text("print('hi')\n")
+    outcome = result(name, role, False, "Required tool permissions were unavailable")
+    outcome.metadata = {TOOL_PERMISSION_KEY: TOOL_PERMISSION_DENIED, "denied_tools": list(tools),
+                        "denied_commands": list(commands)}
+    return outcome
+
+
+@pytest.mark.parametrize("stage, changed, tools, commands, expected", [
+    ("implementation", True, ["Bash"], ["python3 -m unittest"], ["python3 -m unittest"]),
+    ("implementation", False, ["Bash"], ["python3 -m unittest"], []),  # no edit: nothing proven
+    ("implementation", True, ["Bash", "Edit"], ["python3 -m unittest"], []),  # an edit tool was refused
+    ("implementation", True, ["Bash"], [], []),  # unnamed denial stays a capability failure
+    ("review", True, ["Bash"], ["python3 -m unittest"], []),
+])
+def test_permission_grant_gap_requires_edits_and_only_ungranted_bash(stage, changed, tools, commands, expected):
+    outcome = result("claude_code", stage, False)
+    outcome.metadata = {"denied_tools": tools, "denied_commands": commands}
+    assert module.permission_grant_gap(outcome, stage, changed) == expected
+
+
+def test_grant_gap_excludes_the_role_for_the_session_without_marking_interactive_only():
+    doc = {"agents": {"claude_code": {"state": "AVAILABLE", "capabilities": {"unattended_execution": None}, "capacity": {}}},
+           "model_states": {}, "timed_out_assignments": []}
+    exclusion = module.record_failure(doc, "claude_code", "implementation", "UNKNOWN", "EXECUTION_PERMISSION_REQUIRED",
+                                      grant_gap=True)
+    assert doc["agents"]["claude_code"]["capabilities"]["unattended_execution"] is None
+    assert exclusion["state"] == "FAILED"
+    assert doc["agents"]["claude_code"]["capacity"]["implementation"]["reason"] == "EXECUTION_PERMISSION_REQUIRED"
+
+
+def run_with_claude_implementer(tmp_path, monkeypatch, claude_attempt):
+    """Run a session whose Claude implementation returns `claude_attempt`; others succeed.
+
+    Returns the (role, agent) calls, the session document, and the readiness outcomes recorded.
+    """
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch, models=("m1",))
+    calls, outcomes = [], []
+
+    def execute(document, role, name, model, cwd):
+        calls.append((role, name))
+        if role == "implementation" and name == "claude_code":
+            return claude_attempt(name, role, repo)
+        if role == "implementation":
+            (repo / "app.py").write_text("print('done')\n")
+        return accepted(name, role)
+
+    record = module.agent_readiness.record_session_outcome
+    monkeypatch.setattr(module.agent_readiness, "record_session_outcome",
+                        lambda agent, model, failure, **kw: (outcomes.append((agent, failure)),
+                                                             record(agent, model, failure, **kw)))
+    monkeypatch.setattr(module, "execute_assignment", execute)
+    assert module.command(arguments(repo, orchestrator="claude_code", policy="PLAN + EXECUTE",
+                                    verify=["git", "diff", "--check"])) == 0
+    doc = module.active_sessions(module.state_root(), repo, include_terminal=True)[0]
+    return calls, doc, outcomes
+
+
+def test_greenfield_test_run_denial_reroutes_and_keeps_claude_ready_across_sessions(tmp_path, monkeypatch, capsys):
+    calls, doc, outcomes = run_with_claude_implementer(tmp_path, monkeypatch, denied_after_edit)
+
+    assert ("claude_code", "EXECUTION_PERMISSION_REQUIRED") not in outcomes
+    implementers = [name for role, name in calls if role == "implementation"]
+    assert implementers[0] == "claude_code" and implementers[1] != "claude_code"
+    denied = next(item for item in doc["attempts"] if item["agent"] == "claude_code" and item["stage"] == "implementation")
+    assert denied["denied_commands"] == ["python3 -m unittest"]
+    stderr = capsys.readouterr().err
+    assert "Claude refused (not granted): python3 -m unittest" in stderr
+    assert "marked interactive-only" not in stderr
+    assert_reroutes_match_assignments(stderr)
+
+
+def test_denial_without_edits_still_marks_interactive_only(tmp_path, monkeypatch, capsys):
+    def denied_without_edit(name, role, repo):
+        outcome = result(name, role, False, "requires approval")
+        outcome.metadata = {TOOL_PERMISSION_KEY: TOOL_PERMISSION_DENIED, "denied_tools": ["Bash"],
+                            "denied_commands": ["python3 -m unittest"]}
+        return outcome
+
+    _, _, outcomes = run_with_claude_implementer(tmp_path, monkeypatch, denied_without_edit)
+    assert ("claude_code", "EXECUTION_PERMISSION_REQUIRED") in outcomes
+    assert "marked interactive-only for this session" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("plan, expected", [
+    ("Plan...\nVERIFY_COMMAND: python3 -m unittest discover -s tests\n", ["python3", "-m", "unittest", "discover", "-s", "tests"]),
+    ("VERIFY_COMMAND: `go test ./...`", ["go", "test", "./..."]),
+    ("VERIFY_COMMAND: pytest\nrevised\nVERIFY_COMMAND: python3 -m pytest -q", ["python3", "-m", "pytest", "-q"]),
+    ("VERIFY_COMMAND: NONE", None),
+    ("no command line here", None),
+    ("VERIFY_COMMAND: python3 -m unittest 2>&1 | tail", None),
+    ("VERIFY_COMMAND: rm -rf build", None),
+    ("VERIFY_COMMAND: python3 -c 'unterminated", None),
+])
+def test_planned_verify_command_is_parsed_and_held_to_the_deny_floor(plan, expected):
+    assert module.planned_verify_command(plan) == expected
+
+
+@pytest.mark.parametrize("planned", ["python3 -m unittest discover -s tests",
+                                     # run-020: `-t .` + the sentence's full stop was run as `-t ..` (DOG-020)
+                                     "python3 -m unittest discover -s tests -t ."])
+def test_plan_test_command_reaches_claude_implementer_as_grant_and_instruction(tmp_path, monkeypatch, planned):
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch, models=("m1",))
+    seen = {}
+    real_execute = module.execute_assignment
+
+    class Backend:
+        def execute(self, task, cwd, role, prompt_override, **kwargs):
+            seen[role] = (task.metadata.get("verification_commands"), prompt_override)
+            if role == "implementation":
+                (repo / "tests").mkdir(exist_ok=True)
+                (repo / "tests" / "__init__.py").write_text("")
+                (repo / "tests" / "test_app.py").write_text("import unittest\n\n\nclass T(unittest.TestCase):\n"
+                                                           "    def test_ok(self):\n        pass\n")
+            return accepted("claude_code", role) if role != "planning" else result_with(
+                "Plan.\nVERIFY_COMMAND: " + planned)
+
+    def result_with(stdout):
+        outcome = result("claude_code", "planning")
+        outcome.stdout = stdout
+        return outcome
+
+    monkeypatch.setattr(module.AgentBackendRegistry, "get_backend", lambda agent: Backend())
+    monkeypatch.setattr(module, "execute_assignment", real_execute)
+    assert module.command(arguments(repo, orchestrator="claude_code", policy="PLAN + EXECUTE")) == 0
+
+    planning_grant, planning_prompt = seen["planning"]
+    assert planning_grant is None and "VERIFY_COMMAND:" in planning_prompt
+    grant, prompt = seen["implementation"]
+    assert grant == [planned.split()]
+    assert f"test command is `{planned}`." in prompt
+    assert "only with the Edit and Write tools" in prompt and "one command per call" in prompt
+    doc = module.active_sessions(module.state_root(), repo, include_terminal=True)[0]
+    assert doc["planned_verify_command"] == planned.split()
+    assert doc["verify_source"] == "named by the plan (VERIFY_COMMAND)"
+
+
+# DOG-023: with no orchestrator chosen, AUTO prefers Codex to implement; explicit choices and ECONOMY are unchanged
+
+
+@pytest.mark.parametrize("requested, strategy, role, first", [
+    ("AUTO", "BALANCED", "implementation", "codex"),
+    ("AUTO", "QUALITY", "implementation", "codex"),
+    ("AUTO", "BALANCED", "planning", "claude_code"),
+    ("AUTO", "ECONOMY", "implementation", "cursor"),
+    ("claude_code", "BALANCED", "implementation", "claude_code"),
+])
+def test_auto_prefers_codex_for_implementation_only_when_no_orchestrator_was_chosen(
+        tmp_path, monkeypatch, requested, strategy, role, first):
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch, models=("m1",))
+    doc = module.setup(arguments(repo, orchestrator=requested, strategy=strategy), repo)
+    if requested == "AUTO":
+        doc["orchestrator"] = doc["selected_orchestrator"] = "claude_code"  # Claude planned, so it leads
+    assert module.candidates(doc, role)[0][0] == first
+
+
+def test_preferred_implementer_falls_back_when_unavailable(tmp_path, monkeypatch):
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch, models=("m1",))
+    doc = module.setup(arguments(repo, orchestrator="AUTO"), repo)
+    doc["orchestrator"] = "claude_code"
+    module.record_failure(doc, "codex", "implementation", "m1", "ENGINEERING_FAILURE")
+    assert module.candidates(doc, "implementation")[0][0] == "claude_code"
