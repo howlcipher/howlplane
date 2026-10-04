@@ -93,3 +93,10 @@ run-012 clean on 82414bf, but DOG-015 changed the engine (a1d8ce2, push in progr
 
 ## Status update (run-013, 2026-10-03)
 run-013 HANDOFF REQUIRED -> DOG-016 fixed in 4a5d697 (same branch dogfood/DOG-013-review-convergence; live engine). Streak 0/2. Next: run-014, run-015 on 4a5d697.
+
+## Status update (FINAL, campaign 2, 2026-10-03)
+Status: PASS (run-014 + run-015 on 4a5d697). See FINAL_REPORT.md Addendum 2.
+Open PRs (not merged, the user's call): howlplane #142 (DOG-012), #143 (DOG-013..016, base #142's branch), #144 (DOG-017).
+Repository state: howlplane checkout returned to main (a0ada6a); repair worktrees removed. Campaign records: branch dogfood/resume-check-20261003 (worktree howlplane-dogfood-campaign), pushed.
+Resume instructions: nothing pending. To re-verify after merges: two fresh runs per FINAL_REPORT reproduction; record as run-016+.
+Active finding: NONE.

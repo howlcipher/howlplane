@@ -265,3 +265,17 @@ Review findings got bounded rework (DOG-011) but acceptance rejections did not, 
 ### Resolution
 A reasoned rejection goes back to implementation on the shared 2-round budget; the same orchestrator re-judges with its earlier reasons in its prompt; never passed to another acceptor; after the cap the existing handoff path applies. Tests: two new (rework then accept; cap then handoff), DOG-010 test now asserts "only the same agent ever accepts" (was "exactly one call"). Orchestration subset 513 passed; slopslint OK. Docs: ORCHESTRATE.md.
 Options weighed: tell the implementer about every global rule (unbounded, environment-specific); suppress global rules for acceptance (overrides user policy); rework the rejection (chosen; general, consistent with DOG-011).
+
+## DOG-017 — `howlplane route` crashes on any objective that mentions tests
+Status: FIX PUSHED (howlplane dogfood/DOG-017-route-task-class 27a5080, PR #144); separate from the PASS engine
+Severity: Medium (public CLI INTERNAL_ERROR on ordinary input; agents reworded objectives to work around it)
+Discovered in run: run-011 (Cursor note), confirmed run-015 (.howl_state/howlplane/diagnostics/HP-20261003-200408-6096.txt in the target)
+Owning component: HowlPlane CLI (`infer_task_metadata` in cli.py)
+### User action
+`howlplane route "Build a CLI with automated tests" --repo <repo> --json`
+### Actual
+`INTERNAL_ERROR … task_class 'test' invalid … likely a HowlPlane bug`.
+### Root cause
+Inference emitted "test" and "documentation"; TaskSpec accepts "test_improvement" and "docs". A unit test pinned "documentation".
+### Resolution
+Inference uses the valid names; contract test checks every inferred class validates (3 cases fail before the fix). Public CLI after the fix: SELECTED, class test_improvement. Related tests 257 passed; full pre-push suite passed.

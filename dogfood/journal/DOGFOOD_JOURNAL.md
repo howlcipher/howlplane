@@ -27,3 +27,4 @@
 - 2026-10-03 DOG-013/014 pushed (82414bf). run-012 COMPLETE (Cursor CLEAN first pass, Codex ACCEPTED), app verified: clean on 82414bf. Filed+fixed DOG-015 (a1d8ce2), so streak restarts: run-013 and run-014 on a1d8ce2.
 - 2026-10-03 DOG-015 pushed (a1d8ce2). run-013 HANDOFF REQUIRED: acceptance rejected for missing TIA evidence (user's global rule). DOG-014/015 verified live. Filed+fixed DOG-016 (4a5d697), push in progress. Next run-014 on 4a5d697.
 - 2026-10-03 DOG-016 pushed (4a5d697). run-014 COMPLETE, verified: CLEAN RUN 1/2 on 4a5d697. Starting run-015 on the same engine.
+- 2026-10-03 run-015 COMPLETE + verified: CLEAN RUN 2/2 on 4a5d697. DOGFOOD RESULT: PASS. DOG-017 found from review notes, fixed separately (27a5080). PRs #142, #143, #144 opened. Checkout returned to main.

@@ -91,3 +91,38 @@ DOG-004 to DOG-011. All resolved in code; DOG-011's rework loop is covered by te
 - A change that widens who may approve needs a test where the new approver disagrees (DOG-010).
 - Run `slopslint check --classify --enforce` before committing tests; it blocked pushes twice.
 - The howlplane checkout is the live engine (editable install): its checked-out branch is what `howl orchestrate` runs.
+
+
+---
+
+# Addendum 2: resume and second follow-up campaign (2026-10-03)
+
+## Result
+DOGFOOD RESULT: PASS. Clean runs **run-014 and run-015**, consecutive, on identical engine source (howlplane `dogfood/DOG-013-review-convergence` @4a5d697), each from a fresh empty repository, same mission, no recovery steps. Verification: runs/run-014, runs/run-015 `VERIFICATION.md`.
+Not counted: run-011 (BLOCKED), run-012 (clean, but the engine changed afterwards), run-013 (HANDOFF REQUIRED).
+
+## Findings
+Total this campaign: 6 (DOG-012..017). Resolved in code: 6. All pushed; none merged.
+| ID | Summary | Commit / PR |
+| --- | --- | --- |
+| DOG-012 | 300 s review budget killed half of Cursor's real reviews | 9a9a59c / #142 |
+| DOG-013 | Review rework could not converge ("CLEAN only if no issue") | 82414bf / #143 |
+| DOG-014 | Reviewers not shown HowlPlane's own verification results | 82414bf / #143 |
+| DOG-015 | CLEAN review notes invisible to the user | a1d8ce2 / #143 |
+| DOG-016 | A fixable acceptance rejection ended the session | 4a5d697 / #143 |
+| DOG-017 | `howlplane route` INTERNAL_ERROR on objectives mentioning tests | 27a5080 / #144 |
+Also: host fault (not Howl) — ~16 packages missing from ~/.local site-packages broke the pre-push hook; restored with pip.
+
+## What the runs proved live
+- DOG-011's rework loop fired for the first time (run-011) and works mechanically; with DOG-013 it converges.
+- A 307 s review completed under the new budget (run-011).
+- Reviewers cite the harness evidence (run-013); CLEAN notes are printed (runs 013-015).
+
+## Remaining recommended work
+1. Merge #142, then #143 (stacked), and #144; until then the installed engine (editable install of the howlplane checkout) runs whatever branch is checked out. The checkout was returned to `main` at the end of this campaign.
+2. Claude remains "interactive only" from an earlier real implementation denial; `howl agents doctor --live --repo <path>` re-verifies it. All runs used Codex/Cursor.
+3. Run-to-run variance of the generated app is large (Python package vs single file; SQLite location; exit-code schemes). All met the mission; acceptable, but worth knowing.
+
+## Reproduction
+Same as above, with the howlplane checkout at 4a5d697 (or main after #142 and #143 merge):
+`git init` an empty repo with one commit; `howl factory prepare --repo . --yes`; `howl orchestrate "<runs/run-001/00-mission.txt>" --repo .`; expect Status COMPLETE in about 10 minutes; run the generated README commands and test script.
