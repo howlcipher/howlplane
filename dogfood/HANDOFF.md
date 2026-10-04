@@ -135,3 +135,10 @@ Resume: after #148 merges, `git -C howlplane pull` on main; src then equals 7a51
 Warnings: pre-push hook runs the full suite (~11 min; slower while a mission runs); SlopsLint python_tests ceiling is 2 clones, so new tests must share helpers.
 
 Note (2026-10-04): the first push of records commit ad9264c failed the pre-push full suite; the immediate retry passed (2280 passed). The failing test was not captured, so an unidentified flaky test exists; capture the log (git push > log 2>&1) if it recurs.
+
+## Status update (post-merge, 2026-10-04)
+Status: PASS, valid on main. PRs #147 (790eee7) and #148 (4e31e53) merged. `git diff 7a516c0 4e31e53 -- src pyproject.toml` is empty, so main's engine is byte-identical to the engine of clean runs 024/025; no new runs needed.
+Live engine: howlplane checkout on main 4e31e53. `howl agents doctor`: all five agents READY (Claude included, no recovery needed).
+Other repos: howl and howlproof fast-forwarded (upstream changes are docs/Pages/CI only); howlforge, howlcreate, howldream up to date.
+Open: DOG-022 (nonblocking report UX). Unidentified flaky pre-push test (see note above).
+Resume: nothing pending. If howlplane src changes after 4e31e53, run two fresh missions (run-026, run-027) per FINAL_REPORT reproduction.

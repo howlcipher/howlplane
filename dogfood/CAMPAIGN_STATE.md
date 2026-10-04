@@ -81,3 +81,6 @@ DOGFOOD RESULT: PASS (run-016, run-017, engine howlplane main a7f3bc4).
 
 ## RESULT (campaign 3, Claude in the pool)
 DOGFOOD RESULT: PASS (run-024, run-025, engine howlplane dogfood/DOG-018-greenfield-denial 7a516c0).
+
+## Post-merge check (2026-10-04)
+PRs #147, #148 merged; main 4e31e53 src == 7a516c0. PASS (run-024, run-025) holds on main. All agents READY.

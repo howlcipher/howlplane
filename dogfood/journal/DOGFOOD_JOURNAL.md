@@ -42,3 +42,4 @@
 - 2026-10-04 DOG-023: user chose 'Prefer Codex implementer'; fixed 7a516c0 (push in progress). Next: run-024, run-025 on 7a516c0.
 - 2026-10-04 run-024 (7a516c0): COMPLETE, verified: CLEAN RUN 1/2. Starting run-025.
 - 2026-10-04 run-025 (7a516c0) COMPLETE, verified: CLEAN RUN 2/2. DOGFOOD RESULT: PASS (run-024, run-025) with Claude in the pool. FINAL_REPORT Addendum 4.
+- 2026-10-04 PRs #147 and #148 merged; main 4e31e53 src == 7a516c0; PASS holds on main; engine checkout on main; howl/howlproof fast-forwarded (docs only).

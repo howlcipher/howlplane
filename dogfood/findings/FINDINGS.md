@@ -282,7 +282,7 @@ Inference uses the valid names; contract test checks every inferred class valida
 
 ## DOG-018 — Claude is marked interactive-only after a greenfield test-run denial, right after the doctor called it READY
 
-Status: FIXED, pushed (howlplane dogfood/DOG-018-greenfield-denial: part 1 1ce49aa, part 2 2ee6c5b per the user's choice "grant planned command"; prompt delimiting follow-up DOG-020). Verified live: run-019 (Claude planned and implemented 3 rounds, 0 denials) and run-020 (PERMISSION line, Claude still READY afterwards without --live).
+Status: RESOLVED — merged to main via PR #148 (4e31e53); proven by clean runs 024/025. (Previously: FIXED, pushed (howlplane dogfood/DOG-018-greenfield-denial: part 1 1ce49aa, part 2 2ee6c5b per the user's choice "grant planned command"; prompt delimiting follow-up DOG-020). Verified live: run-019 (Claude planned and implemented 3 rounds, 0 denials) and run-020 (PERMISSION line, Claude still READY afterwards without --live).)
 Severity: High (silently removes Claude from every later session; the documented recovery loops: `doctor --live` -> READY -> next greenfield session -> interactive-only).
 Discovered in run: run-018
 Owning component: HowlPlane orchestrate (capability evidence) + execution profile (grant derivation)
@@ -327,7 +327,7 @@ Pending: a public-CLI run with Claude READY on a fresh repo should show the PERM
 
 ## DOG-019 — Harness verification ignores the plan's test command, so reviewers get no test evidence in new repositories
 
-Status: FIXED, pushed (howlplane dogfood/DOG-018-greenfield-denial 245c705). Verified live in run-020: "Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))", and the reviewer cited HowlPlane's 14 passing tests.
+Status: RESOLVED — merged to main via PR #148 (4e31e53); proven by clean runs 024/025. (Previously: FIXED, pushed (howlplane dogfood/DOG-018-greenfield-denial 245c705). Verified live in run-020: "Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))", and the reviewer cited HowlPlane's 14 passing tests.)
 Severity: Medium-High (reviews must re-derive test results; sandboxed reviewers cannot, so findings pile up and rework rounds run out)
 Discovered in run: run-019
 Owning component: HowlPlane orchestrate (default verification, DOG-009)
@@ -351,7 +351,7 @@ Without --verify and without a discovered command, verify with the plan's VERIFY
 
 ## DOG-020 — Planned test command ran as `-t ..`; refused commands cut off in the progress line
 
-Status: FIXED (howlplane f83882d, pushed). Verified live: runs 021-023 had 0 permission denials with Claude implementing.
+Status: RESOLVED — merged to main via PR #148 (4e31e53); proven by clean runs 024/025. (Previously: FIXED (howlplane f83882d, pushed). Verified live: runs 021-023 had 0 permission denials with Claude implementing.)
 Severity: High for Claude implementation (defeats DOG-018 part 2), Low for the truncation (UX)
 Discovered in run: run-020
 Owning component: HowlPlane orchestrate (implementer prompt, progress output). Introduced by the DOG-018 part 2 commit 2ee6c5b.
@@ -371,7 +371,7 @@ Handoff test parametrized with the `-t .` command (fails before the fix); greenf
 
 ## DOG-021 — Rework fixes only the cited instance, so reviews never converge when Claude implements
 
-Status: FIXED (howlplane 22806e8, pushed); prompt-level fix verified in part (run-022 converged on the class fixes, run-023 did not, see DOG-023)
+Status: RESOLVED — merged to main via PR #148 (4e31e53); proven by clean runs 024/025. (Previously: FIXED (howlplane 22806e8, pushed); prompt-level fix verified in part (run-022 converged on the class fixes, run-023 did not, see DOG-023))
 Severity: High (2/2 Claude-implemented runs BLOCKED: run-019, run-021; Codex-implemented runs complete). Since DOG-018 Claude is eligible again and AUTO picks it, so a user with Claude available now gets worse outcomes.
 Discovered in run: run-019, confirmed run-021
 Owning component: HowlPlane orchestrate (implementation and rework instructions)
@@ -398,7 +398,7 @@ Label each earlier-round verdict "round N, addressed by rework" (or print only t
 
 ## DOG-023 — Claude-implemented sessions rarely converge under Codex's falsifying review
 
-Status: FIX COMMITTED (howlplane dogfood/DOG-018-greenfield-denial 7a516c0, push in progress), per the user's decision "Prefer Codex implementer"; regression runs run-024/run-025 pending
+Status: RESOLVED — merged to main via PR #148 (4e31e53); proven by clean runs 024/025. (Previously: FIX COMMITTED (howlplane dogfood/DOG-018-greenfield-denial 7a516c0, push in progress), per the user's decision "Prefer Codex implementer"; regression runs run-024/run-025 pending)
 Severity: High (1 of 4 Claude-implemented sessions COMPLETE: run-019, 021, 023 BLOCKED; 022 COMPLETE)
 Discovered in run: run-023 (pattern across 019, 021, 022, 023)
 Owning component: HowlPlane orchestrate (AUTO routing)
