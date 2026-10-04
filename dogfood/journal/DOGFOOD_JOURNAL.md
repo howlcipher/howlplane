@@ -20,3 +20,11 @@
 - run-008: HANDOFF REQUIRED on real Cursor finding (README JSON-error claim). DOG-011 filed. PRs being opened for followups + readme.
 - run-009 COMPLETE + verified: clean run 1/2 on new code. Starting run-010.
 - run-010 COMPLETE + verified: clean run 2/2 on new code (009+010). Final report addendum written.
+- 2026-10-03 resume check (new session): all PRs merged, main src == aedf82f, PASS remains valid; howlframe fast-forwarded; no new runs.
+- 2026-10-03 host fault: ~16 user site-packages missing (httpx, pydantic, ...) broke pre-push; restored via pip --user. Records branch dogfood/resume-check-20261003 pushed (46357fe).
+- 2026-10-03 DOG-012 fixed (review budget 600 s), 9a9a59c; regression runs 011/012 planned on that engine. Target run-011 created (39f7b1a).
+- 2026-10-03 run-011 (engine 9a9a59c): BLOCKED after 2 rework rounds. DOG-012 verified live (307 s review). DOG-011 loop fired live. Filed DOG-013 (review never converges), DOG-014 (reviewer lacks harness verification). Fixed both in 82414bf; push in progress. Next: run-012 from a fresh target.
+- 2026-10-03 DOG-013/014 pushed (82414bf). run-012 COMPLETE (Cursor CLEAN first pass, Codex ACCEPTED), app verified: clean on 82414bf. Filed+fixed DOG-015 (a1d8ce2), so streak restarts: run-013 and run-014 on a1d8ce2.
+- 2026-10-03 DOG-015 pushed (a1d8ce2). run-013 HANDOFF REQUIRED: acceptance rejected for missing TIA evidence (user's global rule). DOG-014/015 verified live. Filed+fixed DOG-016 (4a5d697), push in progress. Next run-014 on 4a5d697.
+- 2026-10-03 DOG-016 pushed (4a5d697). run-014 COMPLETE, verified: CLEAN RUN 1/2 on 4a5d697. Starting run-015 on the same engine.
+- 2026-10-03 run-015 COMPLETE + verified: CLEAN RUN 2/2 on 4a5d697. DOGFOOD RESULT: PASS. DOG-017 found from review notes, fixed separately (27a5080). PRs #142, #143, #144 opened. Checkout returned to main.

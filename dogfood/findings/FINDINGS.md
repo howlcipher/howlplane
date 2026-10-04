@@ -169,3 +169,113 @@ Run-008 is not a clean run (HANDOFF REQUIRED). Streak: 0.
 ## Follow-up status (after DOG-009/011 implementation)
 DOG-009 and DOG-011 implemented on howlplane dogfood/rework-and-default-verify (user chose: bounded rework loop, project-derived verify). Run-009 verified DOG-009 live (derived verify ran and passed). DOG-011's loop is covered by tests but has not fired in a live run yet (run-009's reviewer returned CLEAN).
 Observation (not fixed, DOG-012 candidate): Cursor review in --mode ask takes 213-300+ s (runs 006, 008, 009), right at the 300 s default review budget, so it times out in some runs and is replaced. Raising the review budget or using a faster Cursor model is an operator choice (`--execution-budget review=600`); no code change made.
+
+## DOG-012 — Default review budget cuts off half of Cursor's real reviews
+
+Status: FIX COMMITTED (howlplane dogfood/DOG-012-review-budget 9a9a59c), awaiting regression runs 011 and 012
+Severity: Medium (reliability: the reviewer most likely to find real defects is silently replaced; the session still completes)
+Discovered in run: run-006, confirmed run-009
+Owning component: HowlPlane orchestration (`DEFAULT_EXECUTION_BUDGETS`)
+Repository: howlplane
+
+### User action
+`howl orchestrate "<mission>" --repo <target>` with default budgets.
+
+### Expected
+A normally sized whole-change review finishes within the default review budget.
+
+### Actual
+Review durations from runs 001-010 stderr: Cursor 90-300+ s (198, 221, 300 timeout and 300 timeout since `--mode ask`; 213 s measured directly), AGY 97-241 s. Default review budget was 300 s, so Cursor hit EXECUTION_BUDGET_EXCEEDED in runs 006 and 009 and AGY replaced it. Acceptance took 44-61 s.
+
+### Root cause
+Review default (300 s) was set without measurement; implementation was already raised to 600 s on dogfood evidence. A review covers the whole change and cannot be decomposed.
+
+### Resolution
+Review default 600 s; planning and acceptance stay 300 s. Docs: documentation/ORCHESTRATE.md. Operator override unchanged (`--execution-budget review=N`).
+Options weighed: per-agent Cursor budget (special-cases one vendor, rejected); leave as is (operator knob, but users cannot know to use it); role default 600 (chosen; worst cost is a hung reviewer burning 5 more minutes before failover).
+
+### Tests
+tests/test_orchestration_execution_budget.py split: default-budget contract (review 600) and override contract; 15 passed. Orchestration subset (-k orchestrat/budget/review/cursor/agy/handoff/failover/readiness) 467 passed. slopslint enforce OK.
+
+### Commit
+Repository: howlplane; Branch: dogfood/DOG-012-review-budget; SHA: 9a9a59c; Push: in progress (see HANDOFF)
+
+## DOG-013 — Review rework cannot converge: any minor note blocks the audit
+
+Status: FIX COMMITTED (howlplane dogfood/DOG-013-review-convergence 82414bf, stacked on DOG-012), awaiting regression runs
+Severity: High (complete workflow blocker whenever the reviewer is thorough; first live firing of DOG-011's loop ended BLOCKED)
+Discovered in run: run-011
+Owning component: HowlPlane orchestration (review prompt, `execute_assignment`)
+Repository: howlplane
+
+### User action
+`howl orchestrate "<mission>" --repo dogfood-missions/run-011/household-tasks`
+
+### Expected
+Rework fixes real defects; once none remain the audit is CLEAN and acceptance runs.
+
+### Actual
+Exit 2, Status BLOCKED, "AUDIT BLOCKED: review findings remain after 2 rework round(s)". Each round fixed the previous findings (tests 12 -> 14 -> 19), and each new Cursor review raised different, mostly Low or Minor items (exit-code wording, user_version=0 SQLite files, partial stdout on failure) plus one Medium real issue (documentation/demo.log shows an unquoted command that cannot succeed).
+
+### Evidence
+runs/run-011/02-orchestrate.{stdout,stderr} (three Cursor verdicts), exit in 02-exit.txt.
+
+### Root cause
+Review prompt: "End with AUDIT_STATUS: CLEAN only if you found no issue", plus "falsify correctness". A falsifying reviewer always finds a new note, so with a bounded loop the audit can never become CLEAN.
+
+### Resolution
+Reviewers classify findings BLOCKING (incorrect behavior, unmet requirement, required behavior without working tests, failing test, false docs or evidence) or NON-BLOCKING; only BLOCKING yields FINDINGS. Non-blocking notes remain in the verdict text that acceptance already receives (DOG-002), so nothing is hidden. Docs: ORCHESTRATE.md.
+Options weighed: more rework rounds (does not converge); let acceptance judge after the cap (the "advisory findings" option the user did not choose earlier); severity contract (chosen).
+
+### Tests
+test_review_prompt_carries_harness_verification_and_a_blocking_only_verdict (fails on old code, verified). tests/test_orchestration.py 35 passed; orchestration subset 469 passed; slopslint enforce OK.
+
+## DOG-014 — Reviewers are not shown HowlPlane's own verification results
+
+Status: FIX COMMITTED (same commit 82414bf)
+Severity: Medium (a shell-less reviewer reports the test gate as unproven; in run-011 round 1 it was a numbered finding)
+Discovered in run: run-011
+Owning component: HowlPlane orchestration
+### Actual
+Every Cursor review (ask mode has no shell) said "the suite was not re-run here … pass status is not established", although HowlPlane had just run `bash scripts/test.sh` (exit 0) itself.
+### Resolution
+Review prompt carries the latest harness result per check (`git diff --check`, verification command) with exit code and output tail. `doc["tests"]` is cleared when the repository changes outside the session, so the evidence is for the current tree.
+
+## Observation (not filed): implementer's `howlplane route` attempt failed
+Cursor noted `.howl_state/.../HP-20261003-185406-bced.txt`: Codex tried `howlplane route` with task_class 'test' and it was rejected as invalid. The mission asks for approach selection "through the normal Howl workflow", and the orchestrate session already is that workflow. Low priority; recheck if it recurs.
+
+## DOG-015 — CLEAN review notes are invisible to the user
+Status: FIX COMMITTED (howlplane dogfood/DOG-013-review-convergence a1d8ce2)
+Severity: Medium (false-success defense: after DOG-013 a reviewer may mark items NON-BLOCKING; the user must be able to see them)
+Discovered in run: run-012
+### Actual
+run-012 report showed only "Independent audit: CLEAN". The report printed verdicts only for non-clean attempts, and the session manifest is removed when a session completes (unless `--retain-report`), so the CLEAN reviewer's text was gone.
+### Resolution
+Report prints `Review notes from <agent> (review, CLEAN):` with the stored excerpt. Test: test_clean_review_notes_are_shown_in_the_report (failed before the fix). 327 related tests passed; slopslint OK.
+
+## DOG-016 — A fixable acceptance rejection ends the session; nothing acts on it
+Status: FIX COMMITTED (howlplane dogfood/DOG-013-review-convergence 4a5d697)
+Severity: High (workflow blocker; acceptance judged the app functionally complete)
+Discovered in run: run-013
+Owning component: HowlPlane orchestration (acceptance stage)
+### Actual
+Codex acceptance: "The application meets the functional goal, but required workflow evidence is incomplete … blocked by missing validated Test Impact Assessment evidence", citing the user's global rules (howlplane/.agents/prompts/ship_check.md, reachable by every agent via the global install). Session HANDOFF REQUIRED; Codex excluded; others "not the session orchestrator".
+### Root cause
+Review findings got bounded rework (DOG-011) but acceptance rejections did not, so any requirement the acceptor applies that the implementer missed is terminal. The rule itself is legitimate user policy, so suppressing it would be wrong.
+### Resolution
+A reasoned rejection goes back to implementation on the shared 2-round budget; the same orchestrator re-judges with its earlier reasons in its prompt; never passed to another acceptor; after the cap the existing handoff path applies. Tests: two new (rework then accept; cap then handoff), DOG-010 test now asserts "only the same agent ever accepts" (was "exactly one call"). Orchestration subset 513 passed; slopslint OK. Docs: ORCHESTRATE.md.
+Options weighed: tell the implementer about every global rule (unbounded, environment-specific); suppress global rules for acceptance (overrides user policy); rework the rejection (chosen; general, consistent with DOG-011).
+
+## DOG-017 — `howlplane route` crashes on any objective that mentions tests
+Status: FIX PUSHED (howlplane dogfood/DOG-017-route-task-class 27a5080, PR #144); separate from the PASS engine
+Severity: Medium (public CLI INTERNAL_ERROR on ordinary input; agents reworded objectives to work around it)
+Discovered in run: run-011 (Cursor note), confirmed run-015 (.howl_state/howlplane/diagnostics/HP-20261003-200408-6096.txt in the target)
+Owning component: HowlPlane CLI (`infer_task_metadata` in cli.py)
+### User action
+`howlplane route "Build a CLI with automated tests" --repo <repo> --json`
+### Actual
+`INTERNAL_ERROR … task_class 'test' invalid … likely a HowlPlane bug`.
+### Root cause
+Inference emitted "test" and "documentation"; TaskSpec accepts "test_improvement" and "docs". A unit test pinned "documentation".
+### Resolution
+Inference uses the valid names; contract test checks every inferred class validates (3 cases fail before the fix). Public CLI after the fix: SELECTED, class test_improvement. Related tests 257 passed; full pre-push suite passed.

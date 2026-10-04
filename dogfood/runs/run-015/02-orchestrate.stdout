@@ -1,0 +1,75 @@
+HOWL ORCHESTRATION REPORT
+Session: 0be88b89404343b29fdeb6d175f7cc40
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: codex
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: 77a29dd2a1352c7a14fd263d47d0b147aece758e
+Repository status: M README.md
+?? .gitignore
+?? documentation/design.md
+?? household_tasks.py
+?? scripts/demo.sh
+?? scripts/test.sh
+?? tests/test_cli.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "atomic) ... ok\ntest_empty_list_and_help (test_cli.HouseholdTests.test_empty_list_and_help) ... ok\ntest_invalid_inputs_do_not_create_tasks (test_cli.HouseholdTests.test_invalid_inputs_do_not_create_tasks) ... ok\ntest_multiple_tasks_have_stable_ids_and_order (test_cli.HouseholdTests.test_multiple_tasks_have_stable_ids_and_order) ... ok\ntest_persistence_completion_and_due_boundary (test_cli.HouseholdTests.test_persistence_completion_and_due_boundary) ... ok\ntest_schema_version_rejected_without_changes (test_cli.HouseholdTests.test_schema_version_rejected_without_changes) ... ok\ntest_sql_metacharacters_are_stored_as_text (test_cli.HouseholdTests.test_sql_metacharacters_are_stored_as_text) ... ok\ntest_text_output_and_empty_history (test_cli.HouseholdTests.test_text_output_and_empty_history) ... ok\ntest_unknown_task_and_bad_dates (test_cli.HouseholdTests.test_unknown_task_and_bad_dates) ... ok\n\n----------------------------------------------------------------------\nRan 12 tests in 4.109s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: bash scripts/test.sh (derived from the project's discovered test command)
+Failures: []
+Review notes from Cursor (review, CLEAN):
+  ## Review verdict
+  
+  The tree meets the goal: a working Python/SQLite CLI with add/list/complete/history, due detection, local persistence, unittest coverage, usage docs, and Howl selection notes. Harness evidence (`git diff --check` 0, `bash scripts/test.sh` 0, 12 tests OK) matches the suite in `tests/test_cli.py`. No BLOCKING defects found after independent inspection.
+  
+  ### Files changed (vs initial empty mission commit)
+  | Path | Role |
+  | --- | --- |
+  | `household_tasks.py` | CLI + SQLite persistence |
+  | `tests/test_cli.py` | Subprocess CLI tests |
+  | `scripts/test.sh` | unittest + flake8 gate |
+  | `scripts/demo.sh` | Self-cleaning CLI demo |
+  | `README.md` | Usage documentation |
+  | `documentation/design.md` | Howl routing + approach comparison |
+  | `.gitignore` | `data/`, `.howl_state/`, pyc |
+  
+  ### Tests run (harness, not re-executed here)
+  - `git diff --check` → 0  
+  - `bash scripts/test.sh` → 0 (12 unittest cases + flake8)
+  
+  ### Goal coverage
+  | Requirement | Evidence |
+  | --- | --- |
+  | Add / list / complete | CLI + tests |
+  | Record completion time | `completed_on` + UTC `recorded_at`; `history` |
+  | Due-again identification | `list --due` / `--on`; boundary test incl. leap day |
+  | Local persistence | SQLite via `--db` |
+  | Automated tests | `tests/test_cli.py` |
+  | Concise usage docs | `README.md` |
+  | Howl-selected approach | `documentation/design.md` + failed-route diagnostic under `.howl_state/` |
+  | Demonstrable CLI | README examples + `scripts/demo.sh` |
+  
+  ### Findings
+  
+  **BLOCKING:** none
+  
+  **NON-BLOCKING**
+  1. Successful Howl `route` result is asserted in prose only; tree keeps the failed `task_class 'test'` diagnostic, not a `SELECTED` artifact — claim is consistent with the failure log but not independently re-verifiable from files alone.
+  2. Pipe-delimited text `list` can look broken if a task name contains `|` (JSON path is fine).
+  3. `history --json` uses default `ensure_ascii` (unlike `list --json`), so non-ASCII is escaped.
+  4. `sqlite3.Error` is collapsed to a generic DB message (hides integrity/lock detail).
+  5. Default `add`/`complete` without `--due`/`--on` (today) is not asserted directly; same code path as explicit dates.
+  6. Documented scope gaps remain: no delete/edit, day intervals only, no backup/encryption.
+  
+  ### Remaining risks
+  Concurrent completion relies on `BEGIN IMMEDIATE` + PK; covered by a test but still environment-sensitive under heavy FS latency. Schema is create-if-not-exists only (no migration beyond `user_version` reject).
+  
+  ### Completion status
+  **Complete** for the stated goal. Review-only; no edits, commits, or pushes.
+  
+  AUDIT_STATUS: CLEAN

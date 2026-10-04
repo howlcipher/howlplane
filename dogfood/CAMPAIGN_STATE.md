@@ -37,3 +37,20 @@ Howl 0.1.1; HowlFrame, HowlChangeOps, HowlPlane (+ control-plane engine), HowlWr
 
 ## RESULT
 DOGFOOD RESULT: PASS (run-005 and run-006). See FINAL_REPORT.md.
+
+## Resume check (2026-10-03, new session)
+All campaign PRs merged: howlplane #139, #140, #141 (main a0ada6a); howl #14 (main 77482cb).
+`git diff aedf82f a0ada6a -- src` is empty, so main's engine source is byte-identical to the engine that produced clean runs 009 and 010. The installed engine is an editable install of howlplane/src (runtimes/howlplane-engine venv `.pth`), and the checkout is on main.
+Repository survey: all 12 Howl repos clean on main, none ahead; howlframe fast-forwarded 5a229d6 -> 9c73d28 (not used by this mission). No new runs were needed to keep the PASS valid.
+
+## Runs (follow-up campaign 2, 2026-10-03)
+| Run | Engine | Status | Notes |
+| --- | --- | --- | --- |
+| run-011 | 9a9a59c (DOG-012) | BLOCKED | rework fired live, never converged -> DOG-013, DOG-014 |
+| run-012 | 82414bf | COMPLETE, verified (clean) | CLEAN notes invisible -> DOG-015; engine changed, streak reset |
+| run-013 | a1d8ce2 | HANDOFF REQUIRED | acceptance rejected for missing TIA evidence -> DOG-016 |
+| run-014 | 4a5d697 | CLEAN RUN 1/2: PASS | |
+| run-015 | 4a5d697 | CLEAN RUN 2/2: PASS | |
+
+## RESULT (campaign 2)
+DOGFOOD RESULT: PASS (run-014, run-015, engine howlplane dogfood/DOG-013-review-convergence 4a5d697). PRs #142 (DOG-012), #143 (DOG-013..016, stacked), #144 (DOG-017, independent). None merged.
