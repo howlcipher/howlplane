@@ -117,34 +117,34 @@ First push of 82d3cde failed the repo pre-push suite: `slopslint check --enforce
 Branch howlplane dogfood/followups-reviewer-and-recovery (from merged main aeac4b9); howl dogfood/readme-orchestrate.
 
 ## DOG-004 — A read-only-role permission denial marks Claude interactive-only across sessions
-Status: FIX COMMITTED (338478b), awaiting regression run. Severity: High (silently removes an agent; poisons the cross-session cache).
+Status: RESOLVED — merged (#139), proven by clean runs 009/010; Claude recovery via `howl agents doctor --live` re-verified 2026-10-04. (Previously: FIX COMMITTED (338478b), awaiting regression run. Severity: High (silently removes an agent; poisons the cross-session cache).)
 Evidence: run-001 planning by Claude was denied `cat README.md; howl --help | head`; HowlPlane then wrote unattended=false to the readiness cache. Later `howl agents doctor` showed Claude "NEEDS ACTION interactive only" and `howl orchestrate --orchestrator claude_code` ended in INTERNAL_ERROR (ValueError traceback, "likely a HowlPlane bug").
 Root cause: the planning profile has no Bash by design, the model tried a shell, and the denial was recorded as evidence about unattended *mutation*. Also an unusable explicit orchestrator raised a bare ValueError.
 Fix: denial scopes to mutating roles only (implementation/remediation); Claude read-only roles are told to use Read/Grep/Glob; explicit unavailable orchestrator raises OperatorFailure ORCHESTRATOR_UNAVAILABLE with the recovery command. Three tests that encoded the old contract were updated (observed-incident fixtures now reserve Claude; planning denial leaves capability unknown) and two tests pin the new contract (planning/review do not, implementation does mark interactive-only).
 Live check: after clearing the stale cache, a Claude PLAN ONLY session completed in 15 s.
 
 ## DOG-005 — `agents doctor` advice for interactive-only does not recover it
-Status: FIX COMMITTED (338478b). Severity: Medium.
+Status: RESOLVED — merged (#139); documented recovery followed successfully 2026-10-04 (Claude NEEDS ACTION -> READY). (Previously: FIX COMMITTED (338478b). Severity: Medium.)
 Evidence: doctor's Next says `agents doctor --refresh`, and neither `--refresh` nor `--live` (no repo) cleared "interactive only" even with a passing smoke, because a session verdict outranks a smoke. Only `--live --repo <path>` (workspace smoke) cleared it.
 Fix: doctor now names that command for interactive-only workers; docs explain the precedence.
 
 ## DOG-006 — Cursor reviews return no text (root cause of repeated AUDIT_NO_VERDICT)
-Status: FIX COMMITTED (338478b), awaiting regression run. Severity: High (reviewer wasted ~4 min per run, 5 of 6 runs).
+Status: RESOLVED — merged (#139), proven by clean runs 009/010 (Cursor reviews return text). (Previously: FIX COMMITTED (338478b), awaiting regression run. Severity: High (reviewer wasted ~4 min per run, 5 of 6 runs).)
 Evidence (run outside HowlPlane, same review prompt, run-006 target): `agent -p --mode plan --output-format text` rc 0 after 4m08s, stdout 1 byte; `--mode plan --output-format json` timed out at 290 s with no output; `--mode ask` rc 0 in 213 s with a full review, including a legitimate finding (foreign-key integrity unenforced) and `AUDIT_STATUS: FINDINGS`. The planning role in plan mode works (19 s, real output).
 Fix: Cursor review and acceptance use `--mode ask`; planning keeps `--mode plan`. Note: with real reviews Cursor will now sometimes report genuine findings, which route through the normal findings path.
 
 ## DOG-007 — No recovery after an acceptance rejection
-Status: FIX COMMITTED (338478b). Severity: High.
+Status: RESOLVED — merged (#139), proven by clean runs 009/010. (Previously: FIX COMMITTED (338478b). Severity: High.)
 Evidence: `howl orchestrate resume` on run-001's rejected session re-printed the same HANDOFF with no worker and no guidance. The rejecting orchestrator stays excluded for acceptance for the session even after the repository changes.
 Fix: verdict-based review/acceptance exclusions (AUDIT_FINDINGS_OR_UNCONFIRMED, AUDIT_NO_VERDICT, ACCEPTANCE_REJECTED_OR_UNCONFIRMED) expire when the repository changes; stale audit/acceptance results are cleared; the rejection report prints exact next steps (repair then `resume --verify`, or `discard`). Test: test_rejected_acceptance_recovers_after_the_repository_is_repaired.
 Not done: automatic rework (feeding the rejection back to the implementer). That is a larger design change, recorded as a recommendation.
 
 ## DOG-008 — howl README omits `howl orchestrate`
-Status: FIX PUSHED (howl 95b78ac on dogfood/readme-orchestrate; PR pending). Severity: Medium (docs).
+Status: RESOLVED — howl PR #14 merged (77482cb). (Previously: FIX PUSHED (howl 95b78ac on dogfood/readme-orchestrate; PR pending). Severity: Medium (docs).)
 Fix: README section on agents doctor / factory prepare / orchestrate with a first-run example, consistent with docs/SCOPE.md.
 
 ## DOG-009 — A reroute after a partly written attempt demands a --verify command the user cannot know yet
-Status: OPEN (observed run-007; recovery followed as documented; not yet repaired). Severity: Medium (workflow needs an extra manual step, but the handoff states it).
+Status: RESOLVED — derived default verification merged (#140); every later run prints "Verification command: ... (derived ...)" (runs 009-017). (Previously: OPEN (observed run-007; recovery followed as documented; not yet repaired). Severity: Medium (workflow needs an extra manual step, but the handoff states it).)
 Evidence: run-007. Claude (now a working planner thanks to DOG-004) planned, then its implementation wrote files and was denied a shell command (EXECUTION_PERMISSION_REQUIRED; it also tried `cd` into the howlplane repo, outside the workspace). Codex continued from the partial files and completed. The session still ended HANDOFF REQUIRED: "Partial or recovered changes require an explicit --verify command", because a failed attempt that changed the repo sets needs_validation (existing safeguard).
 Impact: the mission goal contains no verification command and the app does not exist yet, so a user cannot supply one up front. After the fact it is discoverable (scripts/test.sh).
 Recovery used (documented): `howl orchestrate resume --repo <target> --verify bash scripts/test.sh` (runs/run-007/05-*).
@@ -152,14 +152,14 @@ Fix candidates (design decision, not made): derive a default verification from t
 Note: this was always possible; earlier runs never hit it because no attempt failed after writing files.
 
 ## DOG-010 — Acceptance deadlocks when the orchestrator is disqualified (and my first fix created a false success)
-Status: FIX COMMITTED (see HANDOFF for SHAs), awaiting a fresh clean run. Severity: High.
+Status: RESOLVED — merged (#139), proven by clean runs 009/010. (Previously: FIX COMMITTED (see HANDOFF for SHAs), awaiting a fresh clean run. Severity: High.)
 Evidence, run-007 (runs/run-007/): Claude, now a working planner (DOG-004), became session orchestrator; its implementation was denied permission and it was marked interactive-only; only the orchestrator may accept, so the first pass ended HANDOFF REQUIRED with every agent "not the session orchestrator".
 First fix (commit "let acceptance move off a disqualified orchestrator") let the next eligible agent take over. Live use of it on run-007 then produced a FALSE SUCCESS: Codex took over and REJECTED (genuine concerns: workflow evidence not shown, concurrent writers can overwrite, future completion dates), the session rerouted, Cursor ACCEPTED, and the session finished COMPLETE WITH WARNINGS. My "judged" guard only covered the original orchestrator. Run-007 is therefore NOT a clean run.
 Correct fix: takeover is allowed only for non-verdict disqualification; a verdict (ACCEPTANCE_REJECTED_OR_UNCONFIRMED and the other verdict failures) from ANY agent makes acceptance final until the repository changes. Tests: takeover completes; rejection by the taker is final (fails against the flawed logic, verified); rejection by the original orchestrator is final.
 Lesson: a fix that widens who may approve needs a test where the new approver disagrees. The live regression caught what the unit tests missed.
 
 ## DOG-011 — Real review findings cannot be acted on: `orchestrate` has no rework step
-Status: OPEN, needs a design decision (options presented to the user). Severity: High (blocks unattended completion whenever a reviewer finds a real issue).
+Status: RESOLVED — bounded rework loop merged (#140); fired live in run-011 and run-016, converges since DOG-013. (Previously: OPEN, needs a design decision (options presented to the user). Severity: High (blocks unattended completion whenever a reviewer finds a real issue).)
 Evidence, run-008 (fresh run, corrected code): Codex planned and implemented. Cursor (now in `--mode ask`, DOG-006) returned a genuine review with a real Major finding (README claims JSON errors for argparse failures; false) and three Minor ones. The session rerouted to AGY (CLEAN), then Codex acceptance rejected, correctly and without false success. Session ended HANDOFF REQUIRED with exact next steps (DOG-007), but nothing in the ecosystem fixes the finding.
 Why it surfaced now: before DOG-006 the Cursor review was always empty, so findings never existed; after it they are real, and before DOG-002 acceptance ignored them.
 Behavior today: findings route to "another reviewer"; the implementer is never asked to fix them. The only recovery is a human editing the repository, then `resume --verify`.
@@ -172,7 +172,7 @@ Observation (not fixed, DOG-012 candidate): Cursor review in --mode ask takes 21
 
 ## DOG-012 — Default review budget cuts off half of Cursor's real reviews
 
-Status: FIX COMMITTED (howlplane dogfood/DOG-012-review-budget 9a9a59c), awaiting regression runs 011 and 012
+Status: RESOLVED — merged (#142), proven by clean runs 014-017. (Previously: FIX COMMITTED (howlplane dogfood/DOG-012-review-budget 9a9a59c), awaiting regression runs 011 and 012)
 Severity: Medium (reliability: the reviewer most likely to find real defects is silently replaced; the session still completes)
 Discovered in run: run-006, confirmed run-009
 Owning component: HowlPlane orchestration (`DEFAULT_EXECUTION_BUDGETS`)
@@ -202,7 +202,7 @@ Repository: howlplane; Branch: dogfood/DOG-012-review-budget; SHA: 9a9a59c; Push
 
 ## DOG-013 — Review rework cannot converge: any minor note blocks the audit
 
-Status: FIX COMMITTED (howlplane dogfood/DOG-013-review-convergence 82414bf, stacked on DOG-012), awaiting regression runs
+Status: RESOLVED — merged (#146), proven by clean runs 014-017 (run-016 rework converged). (Previously: FIX COMMITTED (howlplane dogfood/DOG-013-review-convergence 82414bf, stacked on DOG-012), awaiting regression runs)
 Severity: High (complete workflow blocker whenever the reviewer is thorough; first live firing of DOG-011's loop ended BLOCKED)
 Discovered in run: run-011
 Owning component: HowlPlane orchestration (review prompt, `execute_assignment`)
@@ -232,7 +232,7 @@ test_review_prompt_carries_harness_verification_and_a_blocking_only_verdict (fai
 
 ## DOG-014 — Reviewers are not shown HowlPlane's own verification results
 
-Status: FIX COMMITTED (same commit 82414bf)
+Status: RESOLVED — merged (#146), proven by clean runs 014-017. (Previously: FIX COMMITTED (same commit 82414bf))
 Severity: Medium (a shell-less reviewer reports the test gate as unproven; in run-011 round 1 it was a numbered finding)
 Discovered in run: run-011
 Owning component: HowlPlane orchestration
@@ -245,7 +245,7 @@ Review prompt carries the latest harness result per check (`git diff --check`, v
 Cursor noted `.howl_state/.../HP-20261003-185406-bced.txt`: Codex tried `howlplane route` with task_class 'test' and it was rejected as invalid. The mission asks for approach selection "through the normal Howl workflow", and the orchestrate session already is that workflow. Low priority; recheck if it recurs.
 
 ## DOG-015 — CLEAN review notes are invisible to the user
-Status: FIX COMMITTED (howlplane dogfood/DOG-013-review-convergence a1d8ce2)
+Status: RESOLVED — merged (#146), proven by clean runs 014-017. (Previously: FIX COMMITTED (howlplane dogfood/DOG-013-review-convergence a1d8ce2))
 Severity: Medium (false-success defense: after DOG-013 a reviewer may mark items NON-BLOCKING; the user must be able to see them)
 Discovered in run: run-012
 ### Actual
@@ -254,7 +254,7 @@ run-012 report showed only "Independent audit: CLEAN". The report printed verdic
 Report prints `Review notes from <agent> (review, CLEAN):` with the stored excerpt. Test: test_clean_review_notes_are_shown_in_the_report (failed before the fix). 327 related tests passed; slopslint OK.
 
 ## DOG-016 — A fixable acceptance rejection ends the session; nothing acts on it
-Status: FIX COMMITTED (howlplane dogfood/DOG-013-review-convergence 4a5d697)
+Status: RESOLVED — merged (#146), proven by clean runs 014-017. (Previously: FIX COMMITTED (howlplane dogfood/DOG-013-review-convergence 4a5d697))
 Severity: High (workflow blocker; acceptance judged the app functionally complete)
 Discovered in run: run-013
 Owning component: HowlPlane orchestration (acceptance stage)
@@ -267,7 +267,7 @@ A reasoned rejection goes back to implementation on the shared 2-round budget; t
 Options weighed: tell the implementer about every global rule (unbounded, environment-specific); suppress global rules for acceptance (overrides user policy); rework the rejection (chosen; general, consistent with DOG-011).
 
 ## DOG-017 — `howlplane route` crashes on any objective that mentions tests
-Status: FIX PUSHED (howlplane dogfood/DOG-017-route-task-class 27a5080, PR #144); separate from the PASS engine
+Status: RESOLVED — merged (#144, a7f3bc4); engine re-proven by clean runs 016/017. (Previously: FIX PUSHED (howlplane dogfood/DOG-017-route-task-class 27a5080, PR #144); separate from the PASS engine)
 Severity: Medium (public CLI INTERNAL_ERROR on ordinary input; agents reworded objectives to work around it)
 Discovered in run: run-011 (Cursor note), confirmed run-015 (.howl_state/howlplane/diagnostics/HP-20261003-200408-6096.txt in the target)
 Owning component: HowlPlane CLI (`infer_task_metadata` in cli.py)
@@ -279,3 +279,139 @@ Owning component: HowlPlane CLI (`infer_task_metadata` in cli.py)
 Inference emitted "test" and "documentation"; TaskSpec accepts "test_improvement" and "docs". A unit test pinned "documentation".
 ### Resolution
 Inference uses the valid names; contract test checks every inferred class validates (3 cases fail before the fix). Public CLI after the fix: SELECTED, class test_improvement. Related tests 257 passed; full pre-push suite passed.
+
+## DOG-018 — Claude is marked interactive-only after a greenfield test-run denial, right after the doctor called it READY
+
+Status: FIXED, pushed (howlplane dogfood/DOG-018-greenfield-denial: part 1 1ce49aa, part 2 2ee6c5b per the user's choice "grant planned command"; prompt delimiting follow-up DOG-020). Verified live: run-019 (Claude planned and implemented 3 rounds, 0 denials) and run-020 (PERMISSION line, Claude still READY afterwards without --live).
+Severity: High (silently removes Claude from every later session; the documented recovery loops: `doctor --live` -> READY -> next greenfield session -> interactive-only).
+Discovered in run: run-018
+Owning component: HowlPlane orchestrate (capability evidence) + execution profile (grant derivation)
+Repository: howlplane
+
+### User action
+`howl agents doctor --live --agent claude_code --repo <repo>` (READY), then `howl orchestrate "<mission>" --repo <fresh empty repo>`.
+
+### Expected
+Claude, reported READY with "Edits allowed: YES", implements unattended, or HowlPlane explains precisely why it cannot.
+
+### Actual
+`[22:57:45] FAIL Claude implementation failed: EXECUTION_PERMISSION_REQUIRED`, reroute to Codex, session COMPLETE WITH WARNINGS. Afterwards `howl agents doctor` shows Claude NEEDS ACTION "interactive only" again. The report does not say which tool was denied.
+
+### Evidence
+runs/run-018/02-orchestrate.{stdout,stderr}; agent_readiness.json `unattended: false, source: orchestrate session, 02:57:45Z`.
+Rendered profile for a greenfield repo, implementation: `--allowedTools Read Glob Grep Edit Write Bash(git status|diff|log|show:*) --permission-mode acceptEdits` (no project command). For the populated repo after implementation it adds `Bash(bash scripts/test.sh)`.
+Direct reproduction with that profile: Claude wrote add.py and test_add.py, then `permission_denials` = two `python3 -m unittest` attempts; exit 0, is_error false.
+
+### User impact
+Claude can never complete greenfield implementation, and each attempt also poisons its cross-session readiness.
+
+### Root cause
+The execution profile derives Bash grants from discovered project commands; a new repository has none until the implementer writes them, so the implementer cannot run its own tests. The orchestrator treated that denial (with edits already made) as proof the agent cannot run unattended.
+
+### Resolution
+Part 1 (e821971): a mutating-role denial after a repository delta whose only refused tool is a named Bash command is a grant gap: role excluded for this session, no interactive-only verdict (session or readiness cache), a PERMISSION progress line names the commands and points to `extra_allowed_bash`. Denials without edits are unchanged. Docs: ORCHESTRATE.md, AI_RESOURCE_POOL.md.
+Part 2 (open, user decision): whether to grant greenfield implementers a bounded test-runner set so Claude can finish the work instead of being rerouted.
+
+### Tests
+New: tests/test_orchestration_capability_recovery.py (grant-gap classification table, record_failure contract, full-session reroute keeps readiness, no-edit denial still marks interactive-only). 7 fail on the old source; 33/33 pass with the fix. Subsystem: 318 passed (orchestration, readiness, agent execution, workspace trust, cursor). Full suite: pre-push hook.
+
+### Commit
+Repository: howlplane
+Branch: dogfood/DOG-018-greenfield-denial
+SHA: e821971
+Remote: origin
+Push status: PUSHED (amended to 1ce49aa after a SlopsLint duplication failure in the first pre-push run)
+
+### Regression verification
+Pending: a public-CLI run with Claude READY on a fresh repo should show the PERMISSION line and leave Claude READY afterwards.
+
+## DOG-019 — Harness verification ignores the plan's test command, so reviewers get no test evidence in new repositories
+
+Status: FIXED, pushed (howlplane dogfood/DOG-018-greenfield-denial 245c705). Verified live in run-020: "Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))", and the reviewer cited HowlPlane's 14 passing tests.
+Severity: Medium-High (reviews must re-derive test results; sandboxed reviewers cannot, so findings pile up and rework rounds run out)
+Discovered in run: run-019
+Owning component: HowlPlane orchestrate (default verification, DOG-009)
+Repository: howlplane
+
+### User action
+`howl orchestrate "<mission>" --repo <fresh repo>` (no --verify).
+
+### Expected
+HowlPlane runs the project's tests itself and shows the result to reviewers (DOG-014), as in runs 009-017 ("Verification command: bash scripts/test.sh (derived ...)").
+
+### Actual
+No "Verification command" line; `tests` holds only `git diff --check` x3. The generated app used `python3 -m unittest discover -s tests` with no scripts/test.sh, so nothing was derivable, although the plan had named exactly that command (planned_verify_command). Codex review: "9 errored during setup because the sandbox prohibits temporary-file creation. Persistence remains unverified."
+
+### Root cause
+`derive_verify_command` only uses discovered project commands; the plan's VERIFY_COMMAND (added for DOG-018) is used for the implementer's grant but not as a verification fallback.
+
+### Resolution / Tests / Commit
+Without --verify and without a discovered command, verify with the plan's VERIFY_COMMAND (deny floor applied) and report its source; discovered commands take precedence. Tests: tests/test_orchestration.py::test_plan_test_command_verifies_when_nothing_is_discoverable (3 cases; DOG-009 test folded in). Commit 245c705, branch dogfood/DOG-018-greenfield-denial, pushed.
+
+
+## DOG-020 — Planned test command ran as `-t ..`; refused commands cut off in the progress line
+
+Status: FIXED (howlplane f83882d, pushed). Verified live: runs 021-023 had 0 permission denials with Claude implementing.
+Severity: High for Claude implementation (defeats DOG-018 part 2), Low for the truncation (UX)
+Discovered in run: run-020
+Owning component: HowlPlane orchestrate (implementer prompt, progress output). Introduced by the DOG-018 part 2 commit 2ee6c5b.
+Repository: howlplane
+
+### Actual
+Run-020: Claude implementation refused, rerouted to Codex (session COMPLETE WITH WARNINGS). Progress: `PERMISSION Claude changed files but was refused commands HowlPlane did not grant: git status --short; ls -la; ls tests ..; python3 -m unittest discover -s tests -t ... Ex…` (cut at 160 chars).
+
+### Root cause
+Prompt "The plan's test command is: python3 -m unittest discover -s tests -t .. Make it pass": the command's `.` and the sentence's full stop merged; Claude ran `-t ..` (exact reproduction with HowlPlane's prompt builder and the real CLI: denied_commands ["python3 -m unittest discover -s tests -t .."], Claude's report asked the user to run `-t ..`). Claude also chained read-only probes. Progress lines are capped at 160 chars and the commands came after the explanation.
+
+### Resolution
+Backtick-delimited command; Claude mutating roles told to inspect with Read/Glob/Grep and run one command per call; one PERMISSION line per refused command, then the explanation. No new grants.
+
+### Tests
+Handoff test parametrized with the `-t .` command (fails before the fix); greenfield reroute test asserts the per-command line. 422 subsystem tests passed, SlopsLint at ceiling. Exact reproduction after the fix: success, 0 denials, 14 generated tests pass.
+
+## DOG-021 — Rework fixes only the cited instance, so reviews never converge when Claude implements
+
+Status: FIXED (howlplane 22806e8, pushed); prompt-level fix verified in part (run-022 converged on the class fixes, run-023 did not, see DOG-023)
+Severity: High (2/2 Claude-implemented runs BLOCKED: run-019, run-021; Codex-implemented runs complete). Since DOG-018 Claude is eligible again and AUTO picks it, so a user with Claude available now gets worse outcomes.
+Discovered in run: run-019, confirmed run-021
+Owning component: HowlPlane orchestrate (implementation and rework instructions)
+Repository: howlplane
+
+### Evidence
+run-021 review findings by round: (1) numeric names collide with IDs; README promises status 1 but argparse exits 2; README example sequence fails. (2) `--file .` -> uncaught IsADirectoryError, README promises `error: ...`. (3) `{"tasks": null}` -> TypeError, `{}` task -> KeyError, same README promise. run-019: (1) corrupt records accepted, PermissionError uncaught; (2) README exit code; (3) PermissionError on stat treated as empty store. Each round fixed exactly the cited cases. Rework rounds 12-30 s.
+
+### Root cause
+The rework prompt says "Fix every valid finding", which Claude reads literally: each finding is patched as one instance. The underlying claim (all errors produce `error:` + status 1) stays false for other inputs, which the next review finds.
+
+### Resolution
+Pending: rework treats each finding as an instance of a defect class (fix the root cause, check the same claim's other inputs and error paths, add tests); implementers check that every documented promise holds.
+
+## DOG-022 — A COMPLETE report shows superseded FINDINGS verdicts as if open
+
+Status: OPEN (minor UX, nonblocking)
+Discovered in run: run-022
+Owning component: HowlPlane orchestrate report
+### Actual
+After 2 converged rework rounds the report prints `Verdict from Codex (review, AUDIT_FINDINGS_OR_UNCONFIRMED): ... blocking finding remains` twice, then `Review notes from Codex (review, CLEAN)`. Nothing says the first two were resolved by later rounds. The acceptance prompt already labels earlier rounds; the report does not.
+### Proposed
+Label each earlier-round verdict "round N, addressed by rework" (or print only the final verdict plus a one-line round summary).
+
+## DOG-023 — Claude-implemented sessions rarely converge under Codex's falsifying review
+
+Status: FIX COMMITTED (howlplane dogfood/DOG-018-greenfield-denial 7a516c0, push in progress), per the user's decision "Prefer Codex implementer"; regression runs run-024/run-025 pending
+Severity: High (1 of 4 Claude-implemented sessions COMPLETE: run-019, 021, 023 BLOCKED; 022 COMPLETE)
+Discovered in run: run-023 (pattern across 019, 021, 022, 023)
+Owning component: HowlPlane orchestrate (AUTO routing)
+Repository: howlplane
+
+### Evidence
+run-023 findings by round: unvalidated stored field values -> `{"tasks": {}}` accepted -> `date.fromisoformat` accepting `20261004`/`2026-W40-7`. Each round fixed the cited class; the next review found a narrower instance. Codex->Cursor sessions: 6/6 COMPLETE (009, 010, 014-017). Implementer and reviewer pairing are confounded.
+
+### Options presented to the user
+Later-round review focus; more rework rounds; prefer Codex implementer; accept as-is. Chosen: prefer Codex implementer.
+
+### Resolution
+`candidates()`: for mutating roles, when requested_orchestrator is AUTO and strategy is not ECONOMY, Codex (IMPLEMENTATION_PREFERENCE) is moved to the front; other agents remain fallbacks; an explicit orchestrator still implements first. Docs: ORCHESTRATE.md.
+
+### Tests
+test_auto_prefers_codex_for_implementation_only_when_no_orchestrator_was_chosen (5 cases; 2 fail before the fix), test_preferred_implementer_falls_back_when_unavailable; DOG-010 takeover fixture pins the old preference. 429 subsystem tests passed; lint and SlopsLint clean.

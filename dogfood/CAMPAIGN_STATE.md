@@ -54,3 +54,30 @@ Repository survey: all 12 Howl repos clean on main, none ahead; howlframe fast-f
 
 ## RESULT (campaign 2)
 DOGFOOD RESULT: PASS (run-014, run-015, engine howlplane dogfood/DOG-013-review-convergence 4a5d697). PRs #142 (DOG-012), #143 (DOG-013..016, stacked), #144 (DOG-017, independent). None merged.
+
+## Resume check 2 (2026-10-03, new session)
+Merged since the campaign 2 PASS: howlplane #142 (DOG-012), #146 (DOG-013..016; replaced closed #143), #145 (records). Still open: #144 (DOG-017, `howlplane route` only, not on the mission path).
+`git diff 4a5d697 origin/main -- src pyproject.toml` is empty: main @4c4e69b is byte-identical in engine source to the engine that produced clean runs 014 and 015.
+The live engine checkout (howlplane, editable install via runtimes/howlplane-engine `.pth` -> howlplane/src) was 17 commits behind and has been fast-forwarded to 4c4e69b. Clean tree, no local work lost.
+Public CLI health: `howl --help` OK; `howl agents doctor --repo dogfood-missions/run-015/household-tasks` exit 0. `python3 -m pip check`: only version-pin conflicts (litellm, mcp), no missing packages.
+Other repos (howl 77482cb, howlforge, howlcreate, howldream, howlproof): clean on main, up to date.
+No new runs were needed: the PASS (run-014, run-015) holds for main.
+
+## Re-verification after DOG-017 merge (2026-10-04)
+Engine a7f3bc4. Status: VERIFYING, streak 0/2. Runs run-016, run-017 pending.
+| run-016 | a7f3bc4 | CLEAN RUN 1/2: PASS | rework 1 round, converged |
+| run-017 | a7f3bc4 | CLEAN RUN 2/2: PASS | first-pass CLEAN |
+
+## RESULT (re-verification)
+DOGFOOD RESULT: PASS (run-016, run-017, engine howlplane main a7f3bc4).
+| run-018 | a7f3bc4 | COMPLETE WITH WARNINGS | Claude refused greenfield test run -> DOG-018 |
+| run-019 | 2ee6c5b | BLOCKED | DOG-018 verified; DOG-019 |
+| run-020 | 245c705 | COMPLETE WITH WARNINGS | DOG-019 verified; DOG-020 |
+| run-021 | f83882d | BLOCKED | DOG-020 verified; DOG-021 |
+| run-022 | 22806e8 | CLEAN RUN 1/2: PASS | Claude implementer, rework converged |
+| run-023 | 22806e8 | BLOCKED | Codex review found narrower instances each round -> DOG-023 |
+| run-024 | 7a516c0 | CLEAN RUN 1/2: PASS | Claude plan, Codex impl, Claude review+accept |
+| run-025 | 7a516c0 | CLEAN RUN 2/2: PASS | |
+
+## RESULT (campaign 3, Claude in the pool)
+DOGFOOD RESULT: PASS (run-024, run-025, engine howlplane dogfood/DOG-018-greenfield-denial 7a516c0).

@@ -1,0 +1,47 @@
+HOWL ORCHESTRATION REPORT
+Session: e52c9ec20d1f4e2ab1b0c00a8df4a331
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE WITH WARNINGS
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 5
+Reroutes: 1
+Repository head: 63cef70ebf71602df3ff198a670705d029169305
+Repository status: ?? .gitignore
+?? README.md
+?? chores.py
+?? tests/__init__.py
+?? tests/test_chores.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "exit_code": 0, "output": "..............\n----------------------------------------------------------------------\nRan 14 tests in 0.636s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {"at": "2026-10-04T06:38:11.459647+00:00", "needs_validation": false, "from": "claude_code", "stage": "implementation"}
+Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))
+Failures: [{"stage": "implementation", "agent": "claude_code", "model": "UNKNOWN", "failure": "EXECUTION_PERMISSION_REQUIRED"}]
+Review notes from Claude (review, CLEAN):
+  No BLOCKING findings. I could only read files in this role, so I did not re-run anything. The 14 passing tests and the clean `git diff --check` are HowlPlane's results.
+  
+  **Files changed:** `chores.py`, `tests/__init__.py`, `tests/test_chores.py`, `README.md` and `.gitignore` are new and untracked. I did not read `.gitignore`.
+  
+  **Goal requirements, checked against the code:**
+  - **Add:** `add_task` rejects empty names, case-insensitive duplicates and intervals below 1.
+  - **List and due:** `list` and `due` use `due_date` and `is_due`. A task is due when it reaches `last completion + every` days, or `created + every` if it was never completed.
+  - **Mark complete:** `done` accepts an id or a name.
+  - **Record when completed:** each completion date is stored in a sorted history, and the latest one drives the next due date. The `--on` option allows backdating, and that case is tested.
+  - **Persist:** writes go through a temp file and `os.replace`. Invalid or corrupt stores exit with status 1 and are left unmodified, which `test_invalid_store_does_not_get_overwritten` checks. `OverflowError` on very large intervals or dates is converted to a `TaskError`.
+  - **Tests:** they cover core logic, a full CLI flow, subprocess runs, store validation, I/O errors, strict date parsing and overflow.
+  - **Documentation:** the README covers usage, storage, exit codes, limits and a reproducible demo. Its commands match the code.
+  
+  **NON-BLOCKING:**
+  1. The README test command, `python3 -m unittest discover -s tests -t ..`, is fragile. With `-t ..` the test module is imported as `household-tasks.tests.test_chores`, so it depends on the checkout directory's name. The harness ran `-t .` and passed. I could not run the README form, so I can't say whether it works. Recommend documenting `-t .` instead.
+  2. The README states that the Howl orchestration was attempted, failed and was not completed. That is honest, so the documentation is not false. The goal asked for selection through the Howl workflow, and it was not completed here. I treat that as an environment limitation, not a code defect.
+  3. Remaining risks:
+     - There is no file locking, so simultaneous writers can overwrite each other. The README says so.
+     - `find_task` prefers an id match over a name match for numeric references.
+     - Some tests are thin. There is no direct test of task-name matching by case or of the `due` sort order, but `due` is exercised end to end.
+  
+  **Completion status:** the application appears complete and working, with automated tests and documentation matching the code.
+  
+  AUDIT_STATUS: CLEAN
