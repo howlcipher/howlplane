@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -24,7 +25,7 @@ from howlplane.control_plane import agent_readiness, workspace_trust
 from howlplane.control_plane.agent_execution import AgentBackendRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
 from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
-from howlplane.control_plane.provider_execution_profile import is_mutating_role
+from howlplane.control_plane.provider_execution_profile import command_to_bash_specifier, is_mutating_role
 from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 from howlplane.control_plane.task_spec import TaskSpec
 
@@ -1067,6 +1068,40 @@ def verification_evidence_for_review(doc: dict[str, Any]) -> str:
     return "".join(lines) + "\n--- end of verification evidence ---"
 
 
+PLAN_VERIFY_CONTRACT = (
+    " End the plan with one line VERIFY_COMMAND: <the single command, run from the repository root, that will run "
+    "the project's automated tests once implemented>, with no pipes, redirections, or chained commands; or "
+    "VERIFY_COMMAND: NONE if the goal needs no tests.")
+_VERIFY_LINE = re.compile(r"^\s*VERIFY_COMMAND:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def planned_verify_command(plan: str) -> list[str] | None:
+    """The plan's test command, if it named one HowlPlane may grant (DOG-018).
+
+    The implementer of a new repository is granted this command, so it is held to
+    the same deny floor as a discovered command: anything that floor refuses,
+    or that carries shell operators, is ignored rather than granted.
+    """
+    matches = _VERIFY_LINE.findall(plan or "")
+    if not matches:
+        return None
+    text = matches[-1].strip().strip("`").strip()
+    if not text or text.upper() == "NONE":
+        return None
+    try:
+        command = shlex.split(text)
+    except ValueError:
+        return None
+    if not command or any(marker in text for marker in ("&", ";", "|", "$", "`", ">", "<")):
+        return None
+    return command if command_to_bash_specifier(command) else None
+
+
+def implementation_verify_command(doc: dict[str, Any]) -> list[str] | None:
+    """The test command the implementer is told about and, for bounded shells, granted."""
+    return doc.get("verify_command") or doc.get("planned_verify_command")
+
+
 def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, repo: Path) -> Any:
     instructions = (
         f"Goal: {doc['goal']}\nRole: {role}. Work only in {repo}. "
@@ -1086,6 +1121,10 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
                              "these reasons were actually resolved:\n" + doc["rework"]["findings"])
     elif role == "implementation":
         instructions += "Implement the goal and run relevant local tests. Inspect existing partial changes first."
+        verify = implementation_verify_command(doc)
+        if verify:
+            instructions += (f" The plan's test command is: {shlex.join(verify)}. Make it pass and run it exactly as "
+                             "written, without pipes or redirections.")
         if doc.get("rework"):
             source = "The acceptance check" if doc["rework"].get("source") == "acceptance" else "Independent review"
             instructions += (f" {source} (rework round {doc['rework']['round']}) found issues with the current work. Fix every valid "
@@ -1098,17 +1137,27 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
                              "verify them against local tests and report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED.")
     else:
         instructions += "Produce a bounded implementation plan and acceptance criteria. Do not edit files."
+        if doc["policy"] != "PLAN ONLY":
+            instructions += PLAN_VERIFY_CONTRACT
     if agent == "claude_code" and not is_mutating_role(role):
         # Claude's read-only roles hold Read, Grep and Glob but no shell; a
         # shell attempt is denied and fails the assignment, which then marks
         # the agent interactive-only for the whole session (DOG-004).
         instructions += " Shell commands are unavailable in this role: use only the Read, Grep and Glob tools to inspect files."
+    elif agent == "claude_code":
+        # Claude's shell is bounded to granted test commands and read-only Git; a
+        # refused shell write fails the attempt even if Claude recovers (DOG-018).
+        instructions += (" Create and change files only with the Edit and Write tools: the shell is limited to the "
+                         "project's test commands and read-only git commands, and anything else is refused.")
     if any(item.get("stage") == role and item.get("state") == "TIMED_OUT" and item.get("partial_changes") for item in doc["attempts"]):
         instructions += (" An earlier attempt at this role reached its execution budget and left partial changes: "
                          "inspect and continue them rather than starting over.")
     if model != "UNKNOWN":
         instructions += f" Use model {model} if the CLI supports selecting it; report actual model identity."
     task = TaskSpec(task_id=doc["id"], repository=str(repo), objective=doc["goal"], constraints=doc["constraints"])
+    if is_mutating_role(role) and implementation_verify_command(doc):
+        # A bounded shell (Claude) is granted this command alongside any it discovers (DOG-018).
+        task.metadata["verification_commands"] = [implementation_verify_command(doc)]
     backend = AgentBackendRegistry.get_backend(agent)
     extra: dict[str, Any] = {}
     parameters = inspect.signature(backend.execute).parameters
@@ -1351,6 +1400,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             if assignment["state"] == "SUCCEEDED":
                 record_capability_success(doc, agent)
                 if stage == "planning":
+                    doc["planned_verify_command"] = planned_verify_command(result.stdout)
                     doc["orchestrator"] = agent
                     doc["selected_orchestrator"] = agent
                     if progress and doc.get("requested_orchestrator") == "AUTO":

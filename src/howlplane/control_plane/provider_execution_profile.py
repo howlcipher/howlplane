@@ -236,6 +236,20 @@ def _iter_project_commands(project_context: Any) -> Iterable[Sequence[str]]:
                 yield command
 
 
+def _iter_task_verification_commands(task: Any) -> Iterable[Sequence[str]]:
+    """Yields the verification commands the session settled for this task.
+
+    A new repository has no discovered commands until the implementer writes
+    them, so the implementer could edit files but never run its own tests
+    (DOG-018). The session supplies the command its plan or operator named, as
+    `TaskSpec.metadata["verification_commands"]`; it passes the same deny floor
+    as any discovered command.
+    """
+    metadata = getattr(task, "metadata", None) or {}
+    for command in metadata.get("verification_commands") or []:
+        yield command.split() if isinstance(command, str) else command
+
+
 def _iter_verification_commands(verification_plan: Any) -> Iterable[Sequence[str]]:
     """Yields every argv command a VerificationPlan intends to execute."""
     if verification_plan is None:
@@ -308,6 +322,11 @@ def build_execution_profile(
             if specifier and specifier not in bash:
                 bash.append(specifier)
                 derived_from.append("verification_plan")
+        for command in _iter_task_verification_commands(task):
+            specifier = command_to_bash_specifier(command)
+            if specifier and specifier not in bash:
+                bash.append(specifier)
+                derived_from.append("task_verification")
         for specifier in READ_ONLY_GIT_SPECIFIERS:
             if specifier not in bash:
                 bash.append(specifier)

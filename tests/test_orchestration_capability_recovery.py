@@ -500,3 +500,50 @@ def test_denial_without_edits_still_marks_interactive_only(tmp_path, monkeypatch
     _, _, outcomes = run_with_claude_implementer(tmp_path, monkeypatch, denied_without_edit)
     assert ("claude_code", "EXECUTION_PERMISSION_REQUIRED") in outcomes
     assert "marked interactive-only for this session" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("plan, expected", [
+    ("Plan...\nVERIFY_COMMAND: python3 -m unittest discover -s tests\n", ["python3", "-m", "unittest", "discover", "-s", "tests"]),
+    ("VERIFY_COMMAND: `go test ./...`", ["go", "test", "./..."]),
+    ("VERIFY_COMMAND: pytest\nrevised\nVERIFY_COMMAND: python3 -m pytest -q", ["python3", "-m", "pytest", "-q"]),
+    ("VERIFY_COMMAND: NONE", None),
+    ("no command line here", None),
+    ("VERIFY_COMMAND: python3 -m unittest 2>&1 | tail", None),
+    ("VERIFY_COMMAND: rm -rf build", None),
+    ("VERIFY_COMMAND: python3 -c 'unterminated", None),
+])
+def test_planned_verify_command_is_parsed_and_held_to_the_deny_floor(plan, expected):
+    assert module.planned_verify_command(plan) == expected
+
+
+def test_plan_test_command_reaches_claude_implementer_as_grant_and_instruction(tmp_path, monkeypatch):
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch, models=("m1",))
+    seen = {}
+    real_execute = module.execute_assignment
+
+    class Backend:
+        def execute(self, task, cwd, role, prompt_override, **kwargs):
+            seen[role] = (task.metadata.get("verification_commands"), prompt_override)
+            if role == "implementation":
+                (repo / "app.py").write_text("print('done')\n")
+            return accepted("claude_code", role) if role != "planning" else result_with(
+                "Plan.\nVERIFY_COMMAND: python3 -m unittest discover -s tests")
+
+    def result_with(stdout):
+        outcome = result("claude_code", "planning")
+        outcome.stdout = stdout
+        return outcome
+
+    monkeypatch.setattr(module.AgentBackendRegistry, "get_backend", lambda agent: Backend())
+    monkeypatch.setattr(module, "execute_assignment", real_execute)
+    assert module.command(arguments(repo, orchestrator="claude_code", policy="PLAN + EXECUTE")) == 0
+
+    planning_grant, planning_prompt = seen["planning"]
+    assert planning_grant is None and "VERIFY_COMMAND:" in planning_prompt
+    grant, prompt = seen["implementation"]
+    assert grant == [["python3", "-m", "unittest", "discover", "-s", "tests"]]
+    assert "test command is: python3 -m unittest discover -s tests" in prompt
+    assert "only with the Edit and Write tools" in prompt
+    doc = module.active_sessions(module.state_root(), repo, include_terminal=True)[0]
+    assert doc["planned_verify_command"] == ["python3", "-m", "unittest", "discover", "-s", "tests"]
