@@ -154,6 +154,8 @@ def redact(value: str) -> str:
 
 
 VERDICT_EXCERPT_CHARS = 4000
+# The plan is the Howl workflow's design decision; implementers follow it and reviewers judge against it (DOG-025).
+PLAN_EXCERPT_CHARS = 6000
 MAX_REWORK_ROUNDS = 2
 AUDIT_EVIDENCE_CHARS = 2500
 AGENT_NAMES = {"claude_code": "Claude", "codex": "Codex", "cursor": "Cursor", "agy": "AGY", "devin_cli": "Devin"}
@@ -1116,10 +1118,19 @@ def implementation_verify_command(doc: dict[str, Any]) -> list[str] | None:
 def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, repo: Path) -> Any:
     instructions = (
         f"Goal: {doc['goal']}\nRole: {role}. Work only in {repo}. "
+        # Told nothing, workers re-ran `howlplane route` and copied this session's manifest, lease token
+        # included, into the user's repository to show "the normal Howl workflow" (DOG-025, run-027).
+        f"You are working inside HowlPlane orchestration session {doc['id'][:8]}, which is the Howl workflow for "
+        "this goal: HowlPlane itself runs planning, routing, independent review, and acceptance. Do not run howl or "
+        "howlplane commands, and do not read HowlPlane's state files or copy them into the repository. "
         "Report files changed, tests run, remaining risks, and completion status. "
         "Respect repository rules. Do not commit, push, publish, or change other worktrees. "
         f"Constraints: {'; '.join(doc['constraints']) or 'none'}. "
     )
+    plan = doc.get("plan_excerpt")
+    if plan and role in {"review", "acceptance"}:
+        instructions += ("HowlPlane's planning stage made this approach decision; it is the workflow evidence, so judge the "
+                         "work against it and do not require workflow artifacts in the repository:\n" + plan + "\n")
     if role == "review":
         instructions += ("Independently inspect the current diff and falsify correctness. Do not edit files. "
                          + REVIEW_VERDICT_CONTRACT + verification_evidence_for_review(doc))
@@ -1131,6 +1142,9 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
                              f"(rework round {doc['rework']['round']}). Judge the current repository, and check whether "
                              "these reasons were actually resolved:\n" + doc["rework"]["findings"])
     elif role == "implementation":
+        if plan:
+            instructions += ("HowlPlane's planning stage produced this plan; follow it unless the repository shows it is "
+                             "wrong, and say where you departed from it:\n" + plan + "\n")
         instructions += ("Implement the goal and run relevant local tests. Inspect existing partial changes first. Before "
                          "finishing, check that every behavior your documentation promises holds for all inputs it "
                          "covers, error cases included, and that its examples run in the order shown.")
@@ -1420,6 +1434,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 record_capability_success(doc, agent)
                 if stage == "planning":
                     doc["planned_verify_command"] = planned_verify_command(result.stdout)
+                    doc["plan_excerpt"] = redact((result.stdout or "").strip()[-PLAN_EXCERPT_CHARS:])
                     doc["orchestrator"] = agent
                     doc["selected_orchestrator"] = agent
                     if progress and doc.get("requested_orchestrator") == "AUTO":
