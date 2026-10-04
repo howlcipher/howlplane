@@ -388,7 +388,7 @@ Pending: rework treats each finding as an instance of a defect class (fix the ro
 
 ## DOG-022 — A COMPLETE report shows superseded FINDINGS verdicts as if open
 
-Status: FIX COMMITTED (howlplane dogfood/DOG-022-report-superseded-verdicts), regression runs run-026/027 pending
+Status: FIXED (37bb7b7, pushed); verified live in run-027 (earlier verdicts labelled, final one not); clean runs 028/029 on 5a806e3
 Discovered in run: run-022
 Owning component: HowlPlane orchestrate report
 ### Actual
@@ -437,3 +437,19 @@ Guard proven: with isolation disabled it fails naming the leaked worktree (that 
 
 ### Notes
 The 73 pre-existing leaked worktrees in ~/.local/share/howlplane/worktrees were left in place; removal is the user's call.
+
+## DOG-025 — Workers re-run the Howl workflow themselves and copy HowlPlane session state into the user's repo
+
+Status: FIXED (5a806e3, pushed); verified live in runs 028/029 (no HowlPlane artifacts in the trees, normal Codex durations 4m15s/4m36s, reviews no longer ask for workflow evidence)
+Severity: High (internal session state incl. the lease fence token written into the deliverable; implementation budget overrun -> reroute -> BLOCKED in run-027; reviewers repeatedly flag missing workflow evidence)
+Discovered in run: run-027 (symptoms in 019, 021, 022, 023 review notes)
+Owning component: HowlPlane orchestrate (worker instructions; plan handoff)
+
+### Evidence
+run-027 tree: documentation/howl_route.txt (a `howlplane route` decision: "Selected Agent: Antigravity CLI (agy)") and documentation/howl_workflow.json (the session manifest: planning attempts, "fence": "685aa1e4...", workspace trust policy). Codex implementation: EXECUTION_BUDGET_EXCEEDED at 600 s vs 134-430 s in 25 earlier Codex implementations. Review notes in runs 019/021/022/023: "No Howl workflow evidence ... selection compliance could not be verified".
+
+### Root cause
+The goal asks for the approach to be chosen "through the normal Howl workflow", but workers are never told they are running inside that workflow, and the planning stage's output (the approach decision) is discarded: implementation and review never see it. Workers therefore try to reproduce the workflow themselves, reaching into HowlPlane's CLI and state.
+
+### Resolution
+Pending: store the plan; give it to implementation and review/acceptance as the workflow's decision record; tell every role it runs inside a HowlPlane session and must not invoke howl/howlplane or read HowlPlane state.

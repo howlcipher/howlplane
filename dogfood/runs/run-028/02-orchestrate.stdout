@@ -1,0 +1,57 @@
+HOWL ORCHESTRATION REPORT
+Session: 79038c1960024e64b10cfe7538436660
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: 7a730f8873794b59f3d7a5d34e77e71b5b1ae342
+Repository status: ?? .gitignore
+?? README.md
+?? household_tasks/__init__.py
+?? household_tasks/__main__.py
+?? household_tasks/cli.py
+?? household_tasks/model.py
+?? household_tasks/store.py
+?? tests/__init__.py
+?? tests/test_cli.py
+?? tests/test_model.py
+?? tests/test_store.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "exit_code": 0, "output": "...........\n----------------------------------------------------------------------\nRan 11 tests in 0.331s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))
+Failures: []
+Review notes from Claude (review, CLEAN):
+  I found no blocking defects. I read every file and traced the behavior by hand, but I could not run anything in this role. The verification evidence you supplied shows 11 tests passing and `git diff --check` clean.
+  
+  **Spec and acceptance criteria**
+  - **Add and list across processes:** `add` persists the task, and the subprocess test shows a later invocation reads it back (`tests/test_cli.py:101`).
+  - **`done`:** it records the date, defaults to today, and rejects future dates. A repeat on the same date adds no duplicate. It matches by ID or name, and exact names win over IDs. `list` then shows the new last-done and next-due dates.
+  - **`due`:** it uses `next_due <= today`, prints days overdue, and exits 0 with "No tasks due." when nothing is due. Output is sorted by next due date, then ID.
+  - **Data file and date overrides:** flags beat the environment variables, and the tests check the flags both before and after the subcommand.
+  - **Corrupt data:** corrupt JSON, invalid UTF-8 and a wrong schema all exit 1, and the tests confirm the file bytes are unchanged. A missing parent directory and a directory used as the data path also exit 1.
+  - **Error paths:** every handled error exits 1 with a stderr message and no traceback. Argparse usage errors exit 2.
+  - **Remove:** IDs are not reused after `remove`, and the tests cover this.
+  - **Atomic write:** it uses a temp file, fsync and `os.replace`, with temp-file cleanup. A test covers a failed replace.
+  - **Test isolation:** the tests use temp directories and an environment patch, so they never touch the real home file.
+  - **README:** it documents the commands, options, environment variables, due rule, file format and a demo session. I traced the demo and its stated outputs are correct.
+  - **Dependencies and style:** stdlib only, and the code looks PEP 8 clean on inspection (I did not run flake8).
+  - **Commits:** nothing is committed. The working tree is untracked files only.
+  
+  **NON-BLOCKING**
+  - The month-end test only goes from Jan 31 to Feb 7. That is not a true month rollover, though the date arithmetic is stdlib `timedelta` and so is sound.
+  - The overflow edge near `date.max` has a model-level test but no CLI-level test.
+  - Backdating a completion before the start date is allowed. The spec is silent on this and the README documents it.
+  - The 2026-02-09 `due` check in the lifecycle test covers the overdue case.
+  - Concurrent writers can lose updates. The README documents this as out of scope.
+  
+  **Files changed (all new and untracked):** `README.md`, `.gitignore`, `household_tasks/{__init__,model,store,cli,__main__}.py`, `tests/{__init__,test_model,test_store,test_cli}.py`.
+  
+  **Tests run:** none by me. The harness ran `python3 -m unittest discover -s tests -t .`, which gave 11 tests, OK.
+  
+  AUDIT_STATUS: CLEAN

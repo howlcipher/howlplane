@@ -143,3 +143,8 @@ Other repos: howl and howlproof fast-forwarded (upstream changes are docs/Pages/
 Open: DOG-022 (nonblocking report UX). Unidentified flaky pre-push test (see note above).
 Resume: nothing pending. If howlplane src changes after 4e31e53, run two fresh missions (run-026, run-027) per FINAL_REPORT reproduction.
 DOG-024 (flaky pre-push test identified: test-suite leak into the real factory worktree root) fixed test-only in 48aa794, PR open. Engine source unchanged: PASS on main 4e31e53 still holds. The 73 leaked worktrees in ~/.local/share/howlplane/worktrees (gitdir under /tmp/pytest-of-*) were left for the user to remove.
+
+## Status update (FINAL, campaign 4, 2026-10-04)
+Status: PASS on 5a806e3 (runs 028/029). Engine fixes DOG-022 and DOG-025 plus all records are on branch dogfood/DOG-022-report-superseded-verdicts; PR open for the user to merge. Main (f864cb2) lacks DOG-022/025 until then.
+Live engine: howlplane checkout returned to main after this campaign.
+Resume: after the PR merges, pull main; if src differs from 5a806e3, run run-030/031.

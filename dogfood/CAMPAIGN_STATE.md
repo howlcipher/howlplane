@@ -84,3 +84,10 @@ DOGFOOD RESULT: PASS (run-024, run-025, engine howlplane dogfood/DOG-018-greenfi
 
 ## Post-merge check (2026-10-04)
 PRs #147, #148 merged; main 4e31e53 src == 7a516c0. PASS (run-024, run-025) holds on main. All agents READY.
+| run-026 | 37bb7b7 | CLEAN RUN 1/2: PASS | DOG-022 engine |
+| run-027 | 37bb7b7 | BLOCKED | Codex budget overrun re-running Howl workflow -> DOG-025 |
+| run-028 | 5a806e3 | CLEAN RUN 1/2: PASS | |
+| run-029 | 5a806e3 | CLEAN RUN 2/2: PASS | |
+
+## RESULT (campaign 4)
+DOGFOOD RESULT: PASS (run-028, run-029, engine 5a806e3 = main f864cb2 + DOG-022 + DOG-025).
