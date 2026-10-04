@@ -28,3 +28,17 @@
 - 2026-10-03 DOG-015 pushed (a1d8ce2). run-013 HANDOFF REQUIRED: acceptance rejected for missing TIA evidence (user's global rule). DOG-014/015 verified live. Filed+fixed DOG-016 (4a5d697), push in progress. Next run-014 on 4a5d697.
 - 2026-10-03 DOG-016 pushed (4a5d697). run-014 COMPLETE, verified: CLEAN RUN 1/2 on 4a5d697. Starting run-015 on the same engine.
 - 2026-10-03 run-015 COMPLETE + verified: CLEAN RUN 2/2 on 4a5d697. DOGFOOD RESULT: PASS. DOG-017 found from review notes, fixed separately (27a5080). PRs #142, #143, #144 opened. Checkout returned to main.
+- 2026-10-03 resume check 2 (new session): #142, #146 merged; main 4c4e69b src == 4a5d697 (empty diff). Live engine checkout fast-forwarded a0ada6a -> 4c4e69b. CLI health OK. PASS remains valid; no new runs. Only open item: PR #144 (DOG-017), the user's to merge.
+- 2026-10-04 PR #144 (DOG-017) merged a7f3bc4; engine src changed, PASS must be re-earned: run-016, run-017 next.
+- 2026-10-04 run-016 (engine a7f3bc4) COMPLETE, 1 rework round converged, verified: CLEAN RUN 1/2. Starting run-017.
+- 2026-10-04 run-017 (engine a7f3bc4) COMPLETE, verified: CLEAN RUN 2/2. DOGFOOD RESULT: PASS (run-016, run-017). FINAL_REPORT Addendum 3.
+- 2026-10-04 groomed FINDINGS statuses (all 17 RESOLVED). Claude recovered via documented `howl agents doctor --live` (NEEDS ACTION -> READY). run-018 started: exploratory run with Claude in the pool (not needed for PASS).
+- 2026-10-04 run-018 (exploratory, Claude READY): COMPLETE WITH WARNINGS; Claude implementation denied python3 test run in greenfield repo -> reroute -> Claude interactive-only again. DOG-018 filed; part 1 fix e821971 on dogfood/DOG-018-greenfield-denial (push in progress). Part 2 (greenfield grant policy) needs the user's decision.
+- 2026-10-04 run-019 (engine 2ee6c5b, Claude READY): BLOCKED after 2 rework rounds; DOG-018 verified live (Claude planned+implemented 3 rounds, 0 denials, 0 reroutes). Filed DOG-019 (verification ignores the plan's test command).
+- 2026-10-04 DOG-019 fixed 245c705 (pushed). run-020 (245c705): COMPLETE WITH WARNINGS; DOG-019 verified live; Claude refused `-t ..` -> DOG-020 (own regression from 2ee6c5b's prompt), fixed f83882d, push in progress. Next: two clean runs (run-021, run-022) on the DOG-020 engine.
+- 2026-10-04 run-021 (f83882d): BLOCKED after 2 rework rounds; Claude implemented with 0 denials (DOG-018/020 verified), plan verification passed every round (DOG-019). DOG-021 filed: rework fixes only cited instances.
+- 2026-10-04 DOG-021 fixed 22806e8. run-022 (22806e8): COMPLETE, Claude implemented, 2 rework rounds converged, verified: CLEAN RUN 1/2. DOG-022 (report UX) filed. Starting run-023.
+- 2026-10-04 run-023 (22806e8): BLOCKED, streak reset to 0/2. DOG-023 filed: Claude->Codex review converges 1/4. Asked the user for a policy decision.
+- 2026-10-04 DOG-023: user chose 'Prefer Codex implementer'; fixed 7a516c0 (push in progress). Next: run-024, run-025 on 7a516c0.
+- 2026-10-04 run-024 (7a516c0): COMPLETE, verified: CLEAN RUN 1/2. Starting run-025.
+- 2026-10-04 run-025 (7a516c0) COMPLETE, verified: CLEAN RUN 2/2. DOGFOOD RESULT: PASS (run-024, run-025) with Claude in the pool. FINAL_REPORT Addendum 4.

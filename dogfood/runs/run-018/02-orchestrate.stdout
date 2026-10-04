@@ -1,0 +1,88 @@
+HOWL ORCHESTRATION REPORT
+Session: cf4a224111a44cc1bbbd5c68dcb0bd99
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE WITH WARNINGS
+Resumable: no
+Orchestrator: codex
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 5
+Reroutes: 1
+Repository head: df21735dd3f2ee4e7bc3b69e55a342cf75247dc7
+Repository status: ?? .gitignore
+?? README.md
+?? documentation/DESIGN.md
+?? evidence/ledger.jsonl
+?? evidence/routing.json
+?? evidence/test-impact.json
+?? household.py
+?? scripts/demo.sh
+?? scripts/test.sh
+?? tests/test_household.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "raceback) ... ok\ntest_history_backfill_and_duplicate (test_household.CliTests.test_history_backfill_and_duplicate) ... ok\ntest_invalid_inputs_preserve_store (test_household.CliTests.test_invalid_inputs_preserve_store) ... ok\ntest_malformed_records_are_not_overwritten (test_household.CliTests.test_malformed_records_are_not_overwritten) ... ok\ntest_remove (test_household.CliTests.test_remove) ... ok\ntest_add_assigns_ids (test_household.LogicTests.test_add_assigns_ids) ... ok\ntest_add_validation (test_household.LogicTests.test_add_validation) ... ok\ntest_completion_history_and_latest_wins (test_household.LogicTests.test_completion_history_and_latest_wins) ... ok\ntest_due_boundaries (test_household.LogicTests.test_due_boundaries) ... ok\ntest_never_completed_is_due (test_household.LogicTests.test_never_completed_is_due) ... ok\ntest_unknown_id (test_household.LogicTests.test_unknown_id) ... ok\n\n----------------------------------------------------------------------\nRan 15 tests in 2.684s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {"at": "2026-10-04T02:57:45.731606+00:00", "needs_validation": false, "from": "claude_code", "stage": "implementation"}
+Verification command: bash scripts/test.sh (derived from the project's discovered test command)
+Failures: [{"stage": "implementation", "agent": "claude_code", "model": "UNKNOWN", "failure": "EXECUTION_PERMISSION_REQUIRED"}]
+Review notes from Cursor (review, CLEAN):
+  ## Review verdict
+  
+  No BLOCKING defects found. Goal behaviors are implemented, covered by working tests (harness: `scripts/test.sh` exit 0, 15 OK), and docs/evidence match the code.
+  
+  ### Files in the delivery tree
+  
+  | Path | Role |
+  | --- | --- |
+  | `household.py` | CLI + persistence + recurrence logic |
+  | `tests/test_household.py` | Logic + subprocess CLI tests |
+  | `README.md` | Usage docs |
+  | `documentation/DESIGN.md` | Approach selection / verification notes |
+  | `scripts/test.sh` | unittest + flake8 |
+  | `scripts/demo.sh` | Isolated CLI demo |
+  | `.gitignore` | `__pycache__`, `.demo-*/` |
+  | `evidence/routing.json` | HowlPlane routing artifact |
+  | `evidence/test-impact.json` | Test-impact assessment |
+  | `evidence/ledger.jsonl` | Evidence ledger entry |
+  
+  All still untracked relative to the empty `master` baseline (no commit made, as required).
+  
+  ### Tests run
+  
+  HowlPlane harness (trusted as harness evidence, re-checked against source):
+  
+  - `git diff --check` → 0
+  - `bash scripts/test.sh` → 0 (15 tests OK, including flake8)
+  
+  Coverage hits add/list/done/due/history/remove, persistence across processes, due boundaries, backfill/idempotent completions, corrupt schema preservation, and failed atomic replace.
+  
+  ### Goal checklist
+  
+  | Requirement | Status |
+  | --- | --- |
+  | Add / list / complete / record date / due-again | Met |
+  | Local persistence | Met (`~/.household-tasks.json`, `--data`, `HOUSEHOLD_DATA`) |
+  | Automated tests | Met |
+  | Concise usage docs | Met (`README.md`) |
+  | Howl approach selection | Met (`DESIGN.md` tradeoff table + `evidence/routing.json`) |
+  | Demonstrable CLI | Met (`household.py` + `scripts/demo.sh`) |
+  
+  ### Findings
+  
+  **BLOCKING:** none
+  
+  **NON-BLOCKING**
+  
+  1. `test_corrupt_file` checks stderr for `"corrupt"` but not nonzero exit (`tests/test_household.py`).
+  2. `HOUSEHOLD_DATA` and argparse exit-2 paths are documented but not asserted in tests.
+  3. `--data` / env paths do not `expanduser()`; quoted `~/...` won’t expand.
+  4. Idempotent same-day `done` still prints a “Completed …” success line.
+  5. CLI temp dirs use `TemporaryDirectory(dir=ROOT)` and are not gitignored (unlike `.demo-*/`).
+  6. `evidence/routing.json` has `task_class: "docs"` for an implementation task — process smell, not an app defect.
+  7. Known residual risk (documented): no multi-writer locking; concurrent updates can lose data.
+  
+  ### Completion status
+  
+  Working, goal-complete CLI with tests and usage docs. Remaining items are hardening/coverage polish only.
+  
+  AUDIT_STATUS: CLEAN

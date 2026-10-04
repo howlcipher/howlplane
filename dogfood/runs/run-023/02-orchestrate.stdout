@@ -1,0 +1,65 @@
+HOWL ORCHESTRATION REPORT
+Session: 0bec9195436744b0941c8d7e4725b163
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: BLOCKED
+Resumable: yes
+Orchestrator: claude_code
+Implementer: claude_code
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 7
+Reroutes: 0
+Repository head: ebb3cc44d787f4b537df5dd535f025b0609479c8
+Repository status: ?? README.md
+?? household/__init__.py
+?? household/__main__.py
+?? household/__pycache__/__init__.cpython-314.pyc
+?? household/__pycache__/cli.cpython-314.pyc
+?? household/__pycache__/store.cpython-314.pyc
+?? household/cli.py
+?? household/store.py
+?? tests/__init__.py
+?? tests/__pycache__/__init__.cpython-314.pyc
+?? tests/__pycache__/test_cli.cpython-314.pyc
+?? tests/test_cli.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "exit_code": 0, "output": "............\n----------------------------------------------------------------------\nRan 12 tests in 0.085s\n\nOK\n"}, {"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "exit_code": 0, "output": "..................\n----------------------------------------------------------------------\nRan 18 tests in 0.177s\n\nOK\n"}, {"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "exit_code": 0, "output": "..................\n----------------------------------------------------------------------\nRan 18 tests in 0.278s\n\nOK\n"}]
+Independent audit: AUDIT BLOCKED: review findings remain after 2 rework round(s)
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))
+Rework rounds: 2 of 2
+Failures: [{"stage": "review", "agent": "codex", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}, {"stage": "review", "agent": "codex", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}, {"stage": "review", "agent": "codex", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}]
+Verdict from Codex (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  - **BLOCKING:** [store.py:50](/run/media/system/tallgeese/dev/dogfood-missions/run-023/household-tasks/household/store.py:50) loads task fields without validation. Independently reproduced: `"every_days":"7"` causes an uncaught `TypeError` when listing; `every_days:0` is silently accepted. This contradicts the documented corrupt-file error handling. Existing tests cover invalid JSON and missing fields, but not invalid field values.
+  - **NON-BLOCKING:** Concurrent commands can overwrite each other’s updates. Atomic replacement prevents partial files but does not prevent lost updates.
+  
+  Files changed by review: none. Reviewed all six untracked source, test, and documentation files.
+  
+  Verification: CLI help and `git diff --check` passed; read-only, in-memory probes reproduced the blocking defect. Harness evidence reports all 12 tests passed. I did not rerun that suite because it creates temporary files.
+  
+  Completion status: review complete; application has a blocking finding. The repository contains no Howl workflow evidence, so workflow compliance remains unverified.
+  
+  AUDIT_STATUS: FINDINGS
+Verdict from Codex (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  - **BLOCKING:** [store.py](/run/media/system/tallgeese/dev/dogfood-missions/run-023/household-tasks/household/store.py:92) accepts `{"tasks": {}}` and `{"tasks": ""}` as empty stores. Read-only probes confirmed `list` succeeds and `add` proceeds to save, replacing malformed data. Validate that `tasks` is a list and add regression tests for both cases.
+  - **NON-BLOCKING:** Concurrent updates can overwrite each other; this risk is documented.
+  
+  Files changed by review: none. Inspected all untracked application, documentation, and test files.
+  
+  Verification: harness reports 18 passing tests; independently passed CLI help and `git diff --check`, and reproduced the finding with mocked file access. The full suite was not rerun under the read-only constraint.
+  
+  Completion: review complete; application approval blocked by the finding above. Howl workflow selection could not be verified from the available tree.
+  
+  AUDIT_STATUS: FINDINGS
+Verdict from Codex (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  - **BLOCKING — Date validation contradicts documentation.** [store.py:13](/run/media/system/tallgeese/dev/dogfood-missions/run-023/household-tasks/household/store.py:13) accepts `20261004` and `2026-W40-7`. Both resolve to October 4, and a completion succeeds with exit 0. The README specifies `YYYY-MM-DD` and promises malformed dates exit 2. Enforce that format with tests, or document the accepted alternatives.
+  - **NON-BLOCKING — Extreme dates can crash.** [store.py:43](/run/media/system/tallgeese/dev/dogfood-missions/run-023/household-tasks/household/store.py:43) raises an uncaught `OverflowError` when recurrence exceeds year 9999. This is an unlikely edge case.
+  
+  Files changed by review: none. Reviewed untracked `README.md`, `household/`, and `tests/`; the tracked diff is empty.
+  
+  Verification: harness evidence reports all 18 tests passing. Independently ran `git diff --check`, CLI help/error checks, and in-memory lifecycle and date probes with writes mocked.
+  
+  Remaining limitations: concurrent updates can overwrite data, as documented. The referenced canonical review prompt and local rules were unavailable; workflow-selection evidence is absent from this tree.
+  
+  Review complete; the blocking documentation/validation mismatch remains.
+  
+  AUDIT_STATUS: FINDINGS

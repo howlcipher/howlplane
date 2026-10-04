@@ -1,0 +1,68 @@
+HOWL ORCHESTRATION REPORT
+Session: 750b2fe1ea674beeb82144c1fcec82b9
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: d3b36b18a07acea08478526bd76ec8f69651b52e
+Repository status: ?? .gitignore
+?? DESIGN.md
+?? README.md
+?? household.py
+?? tests/test_cli.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests"], "exit_code": 0, "output": ".........\n----------------------------------------------------------------------\nRan 9 tests in 3.247s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests (named by the plan (VERIFY_COMMAND))
+Failures: []
+Review notes from Claude (review, CLEAN):
+  Review of `/run/media/system/tallgeese/dev/dogfood-missions/run-024/household-tasks`. I could only read files (no shell), so I did not run anything myself. The test and diff-check results below are the harness evidence you supplied.
+  
+  **Files changed (all untracked, none edited by me):** `.gitignore`, `DESIGN.md`, `README.md`, `household.py`, `tests/test_cli.py`. A stale `tests/__pycache__` exists but is git-ignored.
+  
+  **Tests run (harness evidence):** `git diff --check` exited 0. `python3 -m unittest discover -s tests` ran 9 tests, all OK.
+  
+  **Goal requirements checked against the code:**
+  - **Add a task:** `add NAME --every DAYS [--due DATE]` is implemented (`household.py:41-44`, `:57-61`).
+  - **List tasks:** `list` shows all tasks, ordered by due date then ID, with a DUE or scheduled status (`:62-74`).
+  - **Mark complete and record the date:** `complete ID [--on DATE]` inserts into `completions` and sets the next due date to the completion date plus the interval (`:89-104`). `history ID` lists the recorded dates.
+  - **Identify tasks due again:** `list --due --on DATE` shows tasks whose due date is on or before that date. The ISO date strings compare correctly as text.
+  - **Persist locally:** SQLite via `--db`, defaulting to `household.sqlite3`.
+  - **Tests:** 9 subprocess tests cover:
+    - the README sequence;
+    - empty output and `--help`;
+    - invalid arguments (exit 2);
+    - unknown IDs;
+    - atomic rejection of bad completions (same day, earlier day, future date);
+    - early and late completion, and a leap-year case;
+    - default dates, duplicate names and sort order;
+    - a corrupt database, a missing directory and a directory used as the database path;
+    - overflow rollback.
+  - **Usage docs:** the README commands match the implemented flags. I traced the README sequence by hand against the code and it matches the test `test_readme_sequence`.
+  
+  **Falsification attempts that did not break it:**
+  - `BEGIN IMMEDIATE` follows the `CREATE TABLE` statements. A `ValueError` raised inside the `with sqlite3.connect(...)` block rolls back, so failed completions leave data unchanged. The tests check this.
+  - The date parser rejects non-canonical forms such as `2026-1-01` by round-tripping through `isoformat()`.
+  - The overflow handling catches `OverflowError` from `date + timedelta`. The 4,000,000-day interval test exercises it.
+  - The `--due` default is evaluated at parse time, which is harmless for a one-shot CLI.
+  
+  **BLOCKING findings:** none.
+  
+  **NON-BLOCKING findings:**
+  1. `DESIGN.md` states plainly that the normal `howl orchestrate` workflow and an independent audit were not completed. The design options were written down, but the goal's "through the normal Howl workflow" is only partly met. The disclosure is honest, so I did not treat it as false evidence.
+  2. The ID validator is shared with `positive`, so IDs are capped at 365000. This matches the README and is practically irrelevant.
+  3. The connection is never explicitly closed. The `with` block only commits or rolls back. This is harmless for a short-lived process.
+  4. Some README continuation lines have a stray leading space, which is cosmetic. Completing a task twice on the same day is rejected by design and documented.
+  5. Residual risks:
+     - There is no schema versioning or migration; the README says so.
+     - Concurrency is handled only by `BEGIN IMMEDIATE`, and no test covers it.
+     - Time-dependent tests use today's date but compute their expectations relative to it, so they are stable.
+  
+  **Completion status:** the application works and is demonstrable from the command line. The tests pass and match the documented behavior.
+  
+  AUDIT_STATUS: CLEAN

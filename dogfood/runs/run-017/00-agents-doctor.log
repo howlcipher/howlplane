@@ -1,0 +1,125 @@
+HOWLPLANE AGENT DOCTOR
+
+Worker       Status        Detail
+Codex        READY
+Claude Code  NEEDS ACTION  interactive only
+Cursor       READY
+AGY          READY
+Devin        READY         unattended use unverified
+
+4 workers ready
+1 worker need action
+
+Next
+Fix the workers marked NEEDS ACTION or UNAVAILABLE (per-worker detail: howlplane agents doctor), then re-check:
+
+  howlplane agents doctor --refresh
+
+A worker marked 'interactive only' was denied permission in a real session. Re-verify it inside your repository:
+
+  howlplane agents doctor --live --repo <path-to-your-repo>
+
+GLOBAL READINESS
+
+Codex
+  Backend:        codex
+  CLI:            AVAILABLE
+  Version:        0.159.2
+  Auth:           READY — CLI reports an active login
+  Unattended:     YES (orchestrate session)
+  Edits allowed:  YES
+  Models:         10 listed (gpt-6.1-sol, gpt-6-astra, gpt-6-sol, gpt-6-luna, …); default gpt-6.1-sol (codex config.toml)
+  Live smoke:     STALE (last PASS 216h25m ago, 3.76s)
+  Capacity:       UNKNOWN — CLI does not expose remaining allowance
+  Verified:       2026-10-04T01:58:10.185140+00:00
+  Vendor trust:   NOT ENFORCED
+  Trust policy:   BYPASS
+  Workspace:      READY
+
+Claude Code
+  Backend:        claude
+  CLI:            AVAILABLE
+  Version:        2.1.288
+  Auth:           READY — CLI reports an active login (claude.ai)
+  Unattended:     INTERACTIVE_ONLY (orchestrate session)
+  Edits allowed:  YES
+  Models:         not listed by this CLI
+  Live smoke:     STALE (last PASS 7h31m ago, 3.93s)
+  Capacity:       UNKNOWN — CLI does not expose remaining allowance
+  Verified:       2026-10-04T01:58:10.185140+00:00
+  Vendor trust:   NOT ENFORCED
+  Trust policy:   BYPASS
+  Workspace:      READY
+
+Cursor
+  Backend:        agent
+  CLI:            AVAILABLE
+  Version:        2026.10.01-e373342
+  Auth:           READY — CLI reports an active login
+  Unattended:     YES (orchestrate session)
+  Edits allowed:  UNKNOWN
+  Models:         245 listed (gpt-5.3-codex-low, gpt-5.3-codex-low-fast, gpt-5.3-codex, gpt-5.3-codex-fast, …)
+  Live smoke:     BLOCKED — workspace trust required 216h24m ago (the smoke's fresh directory is untrusted; check a real workspace with --repo)
+  Capacity:       UNKNOWN — CLI does not expose remaining allowance
+  Verified:       2026-10-04T01:58:10.185140+00:00
+  Vendor trust:   READY
+  Trust policy:   BYPASS
+  Workspace:      READY
+
+AGY
+  Backend:        agy
+  CLI:            AVAILABLE
+  Version:        1.2.16
+  Auth:           READY — inferred: the account's model list was fetched
+  Unattended:     YES (orchestrate session)
+  Edits allowed:  YES
+  Models:         14 listed (gemini-3.8-flash-high, gemini-3.8-flash-medium, gemini-3.8-flash-low, gemini-3.7-flash-high, …)
+  Live smoke:     STALE (last PASS 216h25m ago, 8.17s)
+  Capacity:       UNKNOWN — CLI does not expose remaining allowance
+  Verified:       2026-10-04T01:58:10.185140+00:00
+  Vendor trust:   NOT ENFORCED
+  Trust policy:   BYPASS
+  Workspace:      READY
+
+Devin
+  Backend:        devin
+  CLI:            AVAILABLE
+  Version:        3000.11.3
+  Auth:           READY — CLI reports an active login
+  Unattended:     UNVERIFIED
+  Edits allowed:  YES
+  Models:         704 listed (adaptive, swe-2-high, swe-2-medium, swe-2-max, …)
+  Live smoke:     BLOCKED — workspace trust required 216h24m ago (the smoke's fresh directory is untrusted; check a real workspace with --repo)
+  Capacity:       UNKNOWN — CLI does not expose remaining allowance
+  Verified:       2026-10-04T01:58:10.185140+00:00
+  Vendor trust:   READY
+  Trust policy:   BYPASS
+  Workspace:      READY
+
+WORKSPACE READINESS
+  Workspace:      /run/media/system/tallgeese/dev/dogfood-missions/run-017/household-tasks
+  Authorized:     NO — run `howlplane factory prepare --repo <repo>`
+  Trust policy:   BYPASS (from config)
+
+  Codex
+    Vendor trust:        NOT ENFORCED — `codex exec` shows no workspace trust dialog (observed codex-cli 0.156.1)
+    Trust policy:        BYPASS
+    Effective workspace: READY — noninteractive mode does not enforce workspace trust
+  Claude Code
+    Vendor trust:        NOT ENFORCED — `claude -p` skips the workspace trust dialog (claude --help)
+    Trust policy:        BYPASS
+    Effective workspace: READY — noninteractive mode does not enforce workspace trust
+  Cursor
+    Vendor trust:        READY — inherited from /run/media/system/tallgeese/dev
+    Trust policy:        BYPASS
+    Effective workspace: READY — the vendor trusts this workspace
+    Preparation:         automatic: documented --trust flag, no inference; scope: this directory and its descendants
+  AGY
+    Vendor trust:        NOT ENFORCED — `agy -p` runs in an untrusted directory without prompting (observed agy 1.2.10)
+    Trust policy:        BYPASS
+    Effective workspace: READY — noninteractive mode does not enforce workspace trust
+  Devin
+    Vendor trust:        READY — inherited from /run/media/system/tallgeese/dev
+    Trust policy:        BYPASS
+    Effective workspace: READY — the vendor trusts this workspace
+    Preparation:         one-time: the operator answers the CLI's own prompt; scope: this directory and its descendants

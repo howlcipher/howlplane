@@ -100,3 +100,38 @@ Open PRs (not merged, the user's call): howlplane #142 (DOG-012), #143 (DOG-013.
 Repository state: howlplane checkout returned to main (a0ada6a); repair worktrees removed. Campaign records: branch dogfood/resume-check-20261003 (worktree howlplane-dogfood-campaign), pushed.
 Resume instructions: nothing pending. To re-verify after merges: two fresh runs per FINAL_REPORT reproduction; record as run-016+.
 Active finding: NONE.
+
+## Status update (resume check 2, 2026-10-03)
+Status: PASS, valid on main. howlplane main 4c4e69b has the same engine source as 4a5d697 (runs 014/015). The live engine checkout is on main at 4c4e69b.
+Open: howlplane PR #144 (DOG-017), unmerged, the user's call. Nothing else pending; no active finding; no unpushed work.
+Records branch: dogfood/resume-check-20261003-2 (worktree howlplane-dogfood-campaign).
+Resume: if howlplane src changes after 4c4e69b (e.g. #144 merges), run two fresh missions as run-016 and run-017 per FINAL_REPORT.md reproduction before re-asserting PASS.
+Warning: `pip check` shows litellm/mcp pin conflicts (jsonschema, pydantic); harmless today, but check it first if the pre-push hook fails.
+
+## Status update (DOG-017 merged, 2026-10-04)
+Status: VERIFYING. PR #144 (DOG-017) merged as a7f3bc4 (2026-10-04T01:57Z). Engine src changed vs 4a5d697 (control_plane/cli.py, route task-class inference), so PASS must be re-earned on a7f3bc4.
+Next: fast-forward the howlplane checkout to a7f3bc4 (live engine), then run-016 and run-017 from fresh empty repos under dogfood-missions/, per FINAL_REPORT.md reproduction. Clean streak on a7f3bc4: 0/2.
+
+## Status update (run-016, 2026-10-04)
+run-016 CLEAN RUN 1/2 on a7f3bc4. run-017 in progress (target dogfood-missions/run-017/household-tasks, same procedure).
+
+## Status update (FINAL, re-verification, 2026-10-04)
+Status: PASS on howlplane main a7f3bc4 (run-016 + run-017). See FINAL_REPORT.md Addendum 3.
+Open: records PR #147 (branch dogfood/resume-check-20261003-2), the user's to merge. No active finding, no open code PRs.
+Live engine checkout: howlplane on main at a7f3bc4.
+Resume: nothing pending. If howlplane src changes after a7f3bc4, run two fresh missions (run-018, run-019) per FINAL_REPORT reproduction before re-asserting PASS.
+
+## Status update (DOG-018, 2026-10-04)
+PASS for the household mission still stands on main a7f3bc4 (runs 016/017, Codex/Cursor). Exploratory run-018 (Claude READY) found DOG-018.
+Live engine checkout: howlplane on branch dogfood/DOG-018-greenfield-denial (e821971) — this IS what `howl orchestrate` runs now.
+Next: (1) after the push lands, re-verify Claude (`howl agents doctor --live --agent claude_code --repo <repo>`), run run-019 on a fresh repo and confirm the PERMISSION line plus Claude still READY afterwards; (2) user decision on DOG-018 part 2; (3) PR for the branch; return the checkout to main if the PR is not merged.
+
+## Status update (FINAL, campaign 3, 2026-10-04)
+Status: PASS with Claude in the agent pool: run-024 + run-025 on howlplane dogfood/DOG-018-greenfield-denial 7a516c0. See FINAL_REPORT.md Addendum 4.
+Open PRs (the user's to merge): howlplane #148 (engine fixes DOG-018..021, 023; branch dogfood/DOG-018-greenfield-denial @7a516c0), howlplane #147 (campaign records; branch dogfood/resume-check-20261003-2).
+Live engine: the howlplane checkout was returned to main (a7f3bc4), which does NOT have the #148 fixes. Until #148 merges, a greenfield session with Claude READY will hit DOG-018 again (Claude marked interactive-only; recover with `howl agents doctor --live --agent claude_code --repo <repo>`).
+Open finding: DOG-022 (nonblocking report UX).
+Resume: after #148 merges, `git -C howlplane pull` on main; src then equals 7a516c0 plus any later merges. If src differs from 7a516c0, run two fresh missions (run-026, run-027) per FINAL_REPORT reproduction before re-asserting PASS.
+Warnings: pre-push hook runs the full suite (~11 min; slower while a mission runs); SlopsLint python_tests ceiling is 2 clones, so new tests must share helpers.
+
+Note (2026-10-04): the first push of records commit ad9264c failed the pre-push full suite; the immediate retry passed (2280 passed). The failing test was not captured, so an unidentified flaky test exists; capture the log (git push > log 2>&1) if it recurs.

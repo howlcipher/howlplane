@@ -1,0 +1,61 @@
+HOWL ORCHESTRATION REPORT
+Session: 602b727a0ffc4f6e9a44a9e92c0ac912
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: BLOCKED
+Resumable: yes
+Orchestrator: claude_code
+Implementer: claude_code
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 7
+Reroutes: 0
+Repository head: 70dc0cef88f432d9451fd20914b5476da2e37aab
+Repository status: ?? README.md
+?? __pycache__/household.cpython-314.pyc
+?? household.py
+?? tests/__pycache__/test_household.cpython-314.pyc
+?? tests/test_household.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"], "exit_code": 0, "output": "Test.test_add_and_list) ... ok\ntest_completion_before_previous_rejected (test_household.CliTest.test_completion_before_previous_rejected) ... ok\ntest_corrupt_file (test_household.CliTest.test_corrupt_file) ... ok\ntest_done_records_date_and_reschedules (test_household.CliTest.test_done_records_date_and_reschedules) ... ok\ntest_due_filters_and_orders (test_household.CliTest.test_due_filters_and_orders) ... ok\ntest_empty_list (test_household.CliTest.test_empty_list) ... ok\ntest_errors (test_household.CliTest.test_errors) ... ok\ntest_persistence_across_invocations (test_household.CliTest.test_persistence_across_invocations) ... ok\ntest_remove (test_household.CliTest.test_remove) ... ok\ntest_task_becomes_due_again_after_interval (test_household.CliTest.test_task_becomes_due_again_after_interval) ... ok\ntest_uses_latest_completion (test_household.NextDueTest.test_uses_latest_completion) ... ok\n\n----------------------------------------------------------------------\nRan 11 tests in 0.082s\n\nOK\n"}, {"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"], "exit_code": 0, "output": "ed) ... ok\ntest_corrupt_file (test_household.CliTest.test_corrupt_file) ... ok\ntest_done_records_date_and_reschedules (test_household.CliTest.test_done_records_date_and_reschedules) ... ok\ntest_due_filters_and_orders (test_household.CliTest.test_due_filters_and_orders) ... ok\ntest_empty_list (test_household.CliTest.test_empty_list) ... ok\ntest_errors (test_household.CliTest.test_errors) ... ok\ntest_numeric_name_rejected_so_ids_stay_unambiguous (test_household.CliTest.test_numeric_name_rejected_so_ids_stay_unambiguous) ... ok\ntest_persistence_across_invocations (test_household.CliTest.test_persistence_across_invocations) ... ok\ntest_remove (test_household.CliTest.test_remove) ... ok\ntest_task_becomes_due_again_after_interval (test_household.CliTest.test_task_becomes_due_again_after_interval) ... ok\ntest_uses_latest_completion (test_household.NextDueTest.test_uses_latest_completion) ... ok\n\n----------------------------------------------------------------------\nRan 13 tests in 0.097s\n\nOK\n"}, {"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"], "exit_code": 0, "output": "dules (test_household.CliTest.test_done_records_date_and_reschedules) ... ok\ntest_due_filters_and_orders (test_household.CliTest.test_due_filters_and_orders) ... ok\ntest_empty_list (test_household.CliTest.test_empty_list) ... ok\ntest_errors (test_household.CliTest.test_errors) ... ok\ntest_numeric_name_rejected_so_ids_stay_unambiguous (test_household.CliTest.test_numeric_name_rejected_so_ids_stay_unambiguous) ... ok\ntest_persistence_across_invocations (test_household.CliTest.test_persistence_across_invocations) ... ok\ntest_remove (test_household.CliTest.test_remove) ... ok\ntest_task_becomes_due_again_after_interval (test_household.CliTest.test_task_becomes_due_again_after_interval) ... ok\ntest_unwritable_directory_reports_error (test_household.CliTest.test_unwritable_directory_reports_error) ... ok\ntest_uses_latest_completion (test_household.NextDueTest.test_uses_latest_completion) ... ok\n\n----------------------------------------------------------------------\nRan 15 tests in 0.103s\n\nOK\n"}]
+Independent audit: AUDIT BLOCKED: review findings remain after 2 rework round(s)
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests -v (named by the plan (VERIFY_COMMAND))
+Rework rounds: 2 of 2
+Failures: [{"stage": "review", "agent": "codex", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}, {"stage": "review", "agent": "codex", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}, {"stage": "review", "agent": "codex", "model": "UNKNOWN", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED"}]
+Verdict from Codex (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  Review complete; blocking findings remain.
+  
+  - **BLOCKING — Wrong task selected by name:** [household.py:80](/run/media/system/tallgeese/dev/dogfood-missions/run-021/household-tasks/household.py:80). Add a task named `2`, then another task with ID 2. `done 2` completes the second task; `remove 2` likewise targets it. Numeric names are accepted but collide with IDs. Reproduced in memory; no regression test covers this.
+  - **BLOCKING — False error documentation:** [README.md:23](/run/media/system/tallgeese/dev/dogfood-missions/run-021/household-tasks/README.md:23) promises status 1 for errors. `add X --every nope` exits 2 through argparse.
+  - **BLOCKING — Usage sequence fails:** [README.md:15](/run/media/system/tallgeese/dev/dogfood-missions/run-021/household-tasks/README.md:15). After completing “Water plants” today, the next example backdates its completion and is rejected. Reproduced.
+  - **NON-BLOCKING — Workflow evidence unavailable:** No Howl workflow artifacts exist in this workspace, so approach-selection compliance could not be verified.
+  
+  Files changed by review: none. Reviewed untracked `household.py`, `tests/test_household.py`, and `README.md`.
+  
+  Verification: `git diff --check`, CLI help, and empty-list checks passed. Independent unittest execution had one pass and ten setup errors caused by the read-only sandbox; supplied harness evidence reports all eleven passing. In-memory probes confirmed the defects above.
+  
+  Completion status: audit complete; application needs corrections.
+  
+  AUDIT_STATUS: FINDINGS
+Verdict from Codex (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  - **BLOCKING:** Documented error handling is false. `python3 household.py --file . list` produces an uncaught `IsADirectoryError` traceback instead of the `error: ...` message promised by [README.md](/run/media/system/tallgeese/dev/dogfood-missions/run-021/household-tasks/README.md:26). [main()](/run/media/system/tallgeese/dev/dogfood-missions/run-021/household-tasks/household.py:179) catches only `TaskError`. Handle filesystem errors and add a regression test.
+  - **NON-BLOCKING:** Howl approach-selection evidence is unavailable in this tree; workflow compliance could not be independently verified.
+  
+  Files changed by this review: none. Reviewed the untracked application, README, and tests; the tracked diff is empty.
+  
+  Checks: CLI help passed; error reproduction failed as described; `git diff --check` passed. Harness evidence reports all 13 tests passing. I did not rerun tests because they write temporary files and this session is read-only.
+  
+  Remaining risks: concurrent writes and malformed JSON structure lack coverage. Audit complete; acceptance remains blocked.
+  
+  AUDIT_STATUS: FINDINGS
+Verdict from Codex (review, AUDIT_FINDINGS_OR_UNCONFIRMED):
+  - **BLOCKING:** [household.py:25](/run/media/system/tallgeese/dev/dogfood-missions/run-021/household-tasks/household.py:25) accepts invalid JSON structures such as `{"next_id":1,"tasks":null}`. `list` then raises an uncaught `TypeError`; a task containing `{}` raises `KeyError`. In-memory probes reproduced both. This contradicts [README.md:26](/run/media/system/tallgeese/dev/dogfood-missions/run-021/household-tasks/README.md:26), which promises `error: ...` and status 1. Validate the stored schema and test these cases.
+  - **NON-BLOCKING:** Very large accepted intervals cause completion to raise `OverflowError` after saving. Bound intervals or validate the next due date before saving.
+  - **NON-BLOCKING:** The tree contains no evidence of implementation selection through the requested Howl workflow. That requirement remains unverified.
+  
+  Files changed by this review: none.
+  
+  Verification: `git diff --check` passed; CLI empty-list smoke test passed; in-memory falsification probes ran. The supplied harness reports all 15 tests passing; I did not rerun the suite because it writes temporary files.
+  
+  Review completed; application acceptance remains blocked. The review skill’s referenced canonical prompt was unavailable.
+  
+  AUDIT_STATUS: FINDINGS
