@@ -554,3 +554,32 @@ def test_plan_test_command_reaches_claude_implementer_as_grant_and_instruction(t
     doc = module.active_sessions(module.state_root(), repo, include_terminal=True)[0]
     assert doc["planned_verify_command"] == planned.split()
     assert doc["verify_source"] == "named by the plan (VERIFY_COMMAND)"
+
+
+# DOG-023: with no orchestrator chosen, AUTO prefers Codex to implement; explicit choices and ECONOMY are unchanged
+
+
+@pytest.mark.parametrize("requested, strategy, role, first", [
+    ("AUTO", "BALANCED", "implementation", "codex"),
+    ("AUTO", "QUALITY", "implementation", "codex"),
+    ("AUTO", "BALANCED", "planning", "claude_code"),
+    ("AUTO", "ECONOMY", "implementation", "cursor"),
+    ("claude_code", "BALANCED", "implementation", "claude_code"),
+])
+def test_auto_prefers_codex_for_implementation_only_when_no_orchestrator_was_chosen(
+        tmp_path, monkeypatch, requested, strategy, role, first):
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch, models=("m1",))
+    doc = module.setup(arguments(repo, orchestrator=requested, strategy=strategy), repo)
+    if requested == "AUTO":
+        doc["orchestrator"] = doc["selected_orchestrator"] = "claude_code"  # Claude planned, so it leads
+    assert module.candidates(doc, role)[0][0] == first
+
+
+def test_preferred_implementer_falls_back_when_unavailable(tmp_path, monkeypatch):
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch, models=("m1",))
+    doc = module.setup(arguments(repo, orchestrator="AUTO"), repo)
+    doc["orchestrator"] = "claude_code"
+    module.record_failure(doc, "codex", "implementation", "m1", "ENGINEERING_FAILURE")
+    assert module.candidates(doc, "implementation")[0][0] == "claude_code"

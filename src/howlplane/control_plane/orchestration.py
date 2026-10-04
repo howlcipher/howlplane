@@ -36,6 +36,8 @@ SCHEMA = "howlplane.orchestration/v1"
 # never role capacity; load converts v2's budget EXHAUSTED entries.
 SCHEMA_VERSION = 3
 AGENTS = ("claude_code", "codex", "cursor", "agy", "devin_cli")
+# AUTO's first choice for mutating roles when the user named no orchestrator (DOG-023).
+IMPLEMENTATION_PREFERENCE = "codex"
 ROLES = ("planning", "implementation", "review", "acceptance")
 AGENT_STATES = {"AVAILABLE", "DEGRADED", "UNAVAILABLE", "RESERVED"}
 UNAVAILABLE_FAILURES = {"MISSING_EXECUTABLE", "AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE"}
@@ -896,6 +898,13 @@ def candidates(doc: dict[str, Any], role: str) -> list[tuple[str, str]]:
     if role in {"planning", "acceptance"} and lead != "AUTO" and lead in order:
         order.remove(lead)
         order.insert(0, lead)
+    if (is_mutating_role(role) and doc.get("requested_orchestrator", "AUTO") == "AUTO"
+            and doc["strategy"] != "ECONOMY" and IMPLEMENTATION_PREFERENCE in order):
+        # Only when the user chose no orchestrator: otherwise the AUTO-selected planner also
+        # implements. Claude-implemented sessions converged 1 of 4 under falsifying review,
+        # Codex-implemented ones 6 of 6 (DOG-023); the others stay in order as fallbacks.
+        order.remove(IMPLEMENTATION_PREFERENCE)
+        order.insert(0, IMPLEMENTATION_PREFERENCE)
     if role == "acceptance":
         # Only the orchestrator accepts, unless it has been disqualified for a reason unrelated to
         # the work (capability, availability, capacity). Then the next eligible agent takes over so

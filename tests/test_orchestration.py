@@ -357,6 +357,8 @@ def disqualified_orchestrator_session(tmp_path, monkeypatch, codex_acceptance):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setattr(module.shutil, "which", lambda name: "/fake/" + name if name in {"claude", "codex", "agent"} else None)
     monkeypatch.setattr(module, "discover_models", lambda agent: [])
+    # The scenario needs the planner to implement first; AUTO now prefers Codex for that (DOG-023).
+    monkeypatch.setattr(module, "IMPLEMENTATION_PREFERENCE", "claude_code")
     acceptors = []
 
     def execute(doc, stage, agent, model, cwd):
