@@ -107,3 +107,7 @@ Open: howlplane PR #144 (DOG-017), unmerged, the user's call. Nothing else pendi
 Records branch: dogfood/resume-check-20261003-2 (worktree howlplane-dogfood-campaign).
 Resume: if howlplane src changes after 4c4e69b (e.g. #144 merges), run two fresh missions as run-016 and run-017 per FINAL_REPORT.md reproduction before re-asserting PASS.
 Warning: `pip check` shows litellm/mcp pin conflicts (jsonschema, pydantic); harmless today, but check it first if the pre-push hook fails.
+
+## Status update (DOG-017 merged, 2026-10-04)
+Status: VERIFYING. PR #144 (DOG-017) merged as a7f3bc4 (2026-10-04T01:57Z). Engine src changed vs 4a5d697 (control_plane/cli.py, route task-class inference), so PASS must be re-earned on a7f3bc4.
+Next: fast-forward the howlplane checkout to a7f3bc4 (live engine), then run-016 and run-017 from fresh empty repos under dogfood-missions/, per FINAL_REPORT.md reproduction. Clean streak on a7f3bc4: 0/2.

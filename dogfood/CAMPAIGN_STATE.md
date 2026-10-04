@@ -62,3 +62,6 @@ The live engine checkout (howlplane, editable install via runtimes/howlplane-eng
 Public CLI health: `howl --help` OK; `howl agents doctor --repo dogfood-missions/run-015/household-tasks` exit 0. `python3 -m pip check`: only version-pin conflicts (litellm, mcp), no missing packages.
 Other repos (howl 77482cb, howlforge, howlcreate, howldream, howlproof): clean on main, up to date.
 No new runs were needed: the PASS (run-014, run-015) holds for main.
+
+## Re-verification after DOG-017 merge (2026-10-04)
+Engine a7f3bc4. Status: VERIFYING, streak 0/2. Runs run-016, run-017 pending.
