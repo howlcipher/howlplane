@@ -239,10 +239,12 @@ class SessionProgress:
 
     def permission_gap(self, agent: str, role: str, commands: list[str]) -> None:
         self.last_change_at = self.clock()
-        self._write("PERMISSION", f"{AGENT_NAMES.get(agent, agent)} changed files but was refused commands HowlPlane "
-                                  f"did not grant: {'; '.join(commands)}. Excluded from {role} for this session only; "
-                                  "it stays ready for later sessions. To grant such commands, see extra_allowed_bash "
-                                  "in AI_RESOURCE_POOL.md")
+        name = AGENT_NAMES.get(agent, agent)
+        # Commands first: a progress line is cut at 160 characters, and the explanation used to push them out (DOG-020).
+        for command in commands:
+            self._write("PERMISSION", f"{name} refused (not granted): {command}")
+        self._write("PERMISSION", f"{name} changed files but needed commands HowlPlane did not grant; excluded from "
+                                  f"{role} for this session only, still ready for later sessions (extra_allowed_bash)")
 
     def role_excluded(self, agent: str, role: str, entry: dict[str, Any]) -> None:
         self.last_change_at = self.clock()
@@ -1123,7 +1125,8 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         instructions += "Implement the goal and run relevant local tests. Inspect existing partial changes first."
         verify = implementation_verify_command(doc)
         if verify:
-            instructions += (f" The plan's test command is: {shlex.join(verify)}. Make it pass and run it exactly as "
+            # Backticks delimit it: a bare `-t .` followed by the sentence's full stop was run as `-t ..` (DOG-020).
+            instructions += (f" The plan's test command is `{shlex.join(verify)}`. Make it pass and run it exactly as "
                              "written, without pipes or redirections.")
         if doc.get("rework"):
             source = "The acceptance check" if doc["rework"].get("source") == "acceptance" else "Independent review"
@@ -1147,8 +1150,9 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
     elif agent == "claude_code":
         # Claude's shell is bounded to granted test commands and read-only Git; a
         # refused shell write fails the attempt even if Claude recovers (DOG-018).
-        instructions += (" Create and change files only with the Edit and Write tools: the shell is limited to the "
-                         "project's test commands and read-only git commands, and anything else is refused.")
+        instructions += (" Create and change files only with the Edit and Write tools, and inspect them with Read, Glob "
+                         "and Grep: the shell is limited to the project's test commands and read-only git commands, one "
+                         "command per call (chained commands are refused), and anything else is refused.")
     if any(item.get("stage") == role and item.get("state") == "TIMED_OUT" and item.get("partial_changes") for item in doc["attempts"]):
         instructions += (" An earlier attempt at this role reached its execution budget and left partial changes: "
                          "inspect and continue them rather than starting over.")

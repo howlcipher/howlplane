@@ -485,7 +485,7 @@ def test_greenfield_test_run_denial_reroutes_and_keeps_claude_ready_across_sessi
     denied = next(item for item in doc["attempts"] if item["agent"] == "claude_code" and item["stage"] == "implementation")
     assert denied["denied_commands"] == ["python3 -m unittest"]
     stderr = capsys.readouterr().err
-    assert "did not grant: python3 -m unittest" in stderr
+    assert "Claude refused (not granted): python3 -m unittest" in stderr
     assert "marked interactive-only" not in stderr
     assert_reroutes_match_assignments(stderr)
 
@@ -516,7 +516,10 @@ def test_planned_verify_command_is_parsed_and_held_to_the_deny_floor(plan, expec
     assert module.planned_verify_command(plan) == expected
 
 
-def test_plan_test_command_reaches_claude_implementer_as_grant_and_instruction(tmp_path, monkeypatch):
+@pytest.mark.parametrize("planned", ["python3 -m unittest discover -s tests",
+                                     # run-020: `-t .` + the sentence's full stop was run as `-t ..` (DOG-020)
+                                     "python3 -m unittest discover -s tests -t ."])
+def test_plan_test_command_reaches_claude_implementer_as_grant_and_instruction(tmp_path, monkeypatch, planned):
     repo = repository(tmp_path)
     install_all(tmp_path, monkeypatch, models=("m1",))
     seen = {}
@@ -527,10 +530,11 @@ def test_plan_test_command_reaches_claude_implementer_as_grant_and_instruction(t
             seen[role] = (task.metadata.get("verification_commands"), prompt_override)
             if role == "implementation":
                 (repo / "tests").mkdir(exist_ok=True)
+                (repo / "tests" / "__init__.py").write_text("")
                 (repo / "tests" / "test_app.py").write_text("import unittest\n\n\nclass T(unittest.TestCase):\n"
                                                            "    def test_ok(self):\n        pass\n")
             return accepted("claude_code", role) if role != "planning" else result_with(
-                "Plan.\nVERIFY_COMMAND: python3 -m unittest discover -s tests")
+                "Plan.\nVERIFY_COMMAND: " + planned)
 
     def result_with(stdout):
         outcome = result("claude_code", "planning")
@@ -544,9 +548,9 @@ def test_plan_test_command_reaches_claude_implementer_as_grant_and_instruction(t
     planning_grant, planning_prompt = seen["planning"]
     assert planning_grant is None and "VERIFY_COMMAND:" in planning_prompt
     grant, prompt = seen["implementation"]
-    assert grant == [["python3", "-m", "unittest", "discover", "-s", "tests"]]
-    assert "test command is: python3 -m unittest discover -s tests" in prompt
-    assert "only with the Edit and Write tools" in prompt
+    assert grant == [planned.split()]
+    assert f"test command is `{planned}`." in prompt
+    assert "only with the Edit and Write tools" in prompt and "one command per call" in prompt
     doc = module.active_sessions(module.state_root(), repo, include_terminal=True)[0]
-    assert doc["planned_verify_command"] == ["python3", "-m", "unittest", "discover", "-s", "tests"]
+    assert doc["planned_verify_command"] == planned.split()
     assert doc["verify_source"] == "named by the plan (VERIFY_COMMAND)"
