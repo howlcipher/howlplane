@@ -114,3 +114,9 @@ Next: fast-forward the howlplane checkout to a7f3bc4 (live engine), then run-016
 
 ## Status update (run-016, 2026-10-04)
 run-016 CLEAN RUN 1/2 on a7f3bc4. run-017 in progress (target dogfood-missions/run-017/household-tasks, same procedure).
+
+## Status update (FINAL, re-verification, 2026-10-04)
+Status: PASS on howlplane main a7f3bc4 (run-016 + run-017). See FINAL_REPORT.md Addendum 3.
+Open: records PR #147 (branch dogfood/resume-check-20261003-2), the user's to merge. No active finding, no open code PRs.
+Live engine checkout: howlplane on main at a7f3bc4.
+Resume: nothing pending. If howlplane src changes after a7f3bc4, run two fresh missions (run-018, run-019) per FINAL_REPORT reproduction before re-asserting PASS.

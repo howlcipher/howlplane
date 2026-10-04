@@ -66,3 +66,7 @@ No new runs were needed: the PASS (run-014, run-015) holds for main.
 ## Re-verification after DOG-017 merge (2026-10-04)
 Engine a7f3bc4. Status: VERIFYING, streak 0/2. Runs run-016, run-017 pending.
 | run-016 | a7f3bc4 | CLEAN RUN 1/2: PASS | rework 1 round, converged |
+| run-017 | a7f3bc4 | CLEAN RUN 2/2: PASS | first-pass CLEAN |
+
+## RESULT (re-verification)
+DOGFOOD RESULT: PASS (run-016, run-017, engine howlplane main a7f3bc4).

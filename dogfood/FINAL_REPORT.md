@@ -126,3 +126,18 @@ Also: host fault (not Howl) — ~16 packages missing from ~/.local site-packages
 ## Reproduction
 Same as above, with the howlplane checkout at 4a5d697 (or main after #142 and #143 merge):
 `git init` an empty repo with one commit; `howl factory prepare --repo . --yes`; `howl orchestrate "<runs/run-001/00-mission.txt>" --repo .`; expect Status COMPLETE in about 10 minutes; run the generated README commands and test script.
+
+# Addendum 3: re-verification after merges (2026-10-04)
+
+## Result
+DOGFOOD RESULT: PASS. Clean runs **run-016 and run-017**, consecutive, on howlplane main @a7f3bc4 (includes #142 DOG-012, #146 DOG-013..016, #144 DOG-017), each from a fresh empty repository, same mission, no recovery steps. Verification: runs/run-016, runs/run-017 `VERIFICATION.md`.
+run-016 exercised the DOG-011/013 rework loop live (1 of 2 rounds, converged to CLEAN); run-017 passed review on the first round.
+
+## Findings
+None new. Non-blocking observation: a delivered working tree may contain gitignored demo databases left by the agent's own checks (run-016 `.demo/`); not reachable by a git clone.
+
+## Repository state
+All campaign PRs merged except the records PR #147 (open; merge blocked for the agent by the Claude Code permission guard, left to the user). Live engine checkout on main a7f3bc4.
+
+## Reproduction
+Unchanged from Addendum 2, with the howlplane checkout on main (a7f3bc4 or later with identical src).

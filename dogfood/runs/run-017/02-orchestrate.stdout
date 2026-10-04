@@ -1,0 +1,82 @@
+HOWL ORCHESTRATION REPORT
+Session: 7ccae04aaa45412a901d3ebddbe89b9a
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: codex
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: c3bd31b2a36b266a8a81f0dbcb549ca3aa38f685
+Repository status: ?? .gitignore
+?? README.md
+?? app/household.py
+?? documentation/design.md
+?? documentation/evidence.jsonl
+?? documentation/test_impact.json
+?? scripts/run.sh
+?? scripts/test.sh
+?? tests/test_cli.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["bash", "scripts/test.sh"], "exit_code": 0, "output": "test_complete_lifecycle_persistence_and_due_boundary (test_cli.CliTests.test_complete_lifecycle_persistence_and_due_boundary) ... ok\ntest_help_needs_no_database (test_cli.CliTests.test_help_needs_no_database) ... ok\ntest_invalid_inputs_do_not_mutate (test_cli.CliTests.test_invalid_inputs_do_not_mutate) ... ok\ntest_names_are_data_and_ids_are_stable (test_cli.CliTests.test_names_are_data_and_ids_are_stable) ... ok\ntest_rejected_completion_preserves_history_and_schedule (test_cli.CliTests.test_rejected_completion_preserves_history_and_schedule) ... ok\ntest_storage_errors_and_unknown_versions (test_cli.CliTests.test_storage_errors_and_unknown_versions) ... ok\n\n----------------------------------------------------------------------\nRan 6 tests in 3.319s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: bash scripts/test.sh (derived from the project's discovered test command)
+Failures: []
+Review notes from Cursor (review, CLEAN):
+  ## Review verdict
+  
+  Static review of the untracked tree against the goal found **no BLOCKING defects**. Goal behaviors are implemented in `app/household.py`, exercised by subprocess/SQLite integration tests, and documented in `README.md`. Howl routing/selection is recorded in `documentation/design.md`.
+  
+  ## Files changed
+  
+  All new relative to empty `master` (`chore: empty mission target`):
+  
+  | Path | Role |
+  | --- | --- |
+  | `app/household.py` | CLI + SQLite domain logic |
+  | `scripts/run.sh` | Entrypoint |
+  | `scripts/test.sh` | unittest + flake8 |
+  | `tests/test_cli.py` | 6 CLI integration tests |
+  | `README.md` | Usage docs |
+  | `documentation/design.md` | Howl approach decision |
+  | `documentation/test_impact.json` | Test-impact record |
+  | `documentation/evidence.jsonl` | Evidence log |
+  | `.gitignore` | Ignores `data/`, caches |
+  
+  ## Tests run
+  
+  Harness evidence (not re-executed in this ask-mode review):
+  
+  - `git diff --check` → exit 0  
+  - `bash scripts/test.sh` → exit 0 (`Ran 6 tests … OK`, plus flake8)
+  
+  Covered: add/list/complete/history/due, inclusive due boundary, cross-process persistence, validation non-mutation, rejected completion rollback, name-as-data/stable IDs, corrupt DB + unknown `user_version`, help without creating DB.
+  
+  ## Correctness checks (falsification)
+  
+  - Recurrence `completed_on + timedelta(days=interval)` matches README/design; leap-year case in tests (`2024-01-31` + 30 → `2024-03-01`) is consistent.
+  - Due filter/status use inclusive `next_due <= as_of` (ISO date strings).
+  - Completions and `next_due` update share one write transaction; invalid completes leave history/schedule unchanged (tested).
+  - Persistence is proven across separate CLI processes, not in-process mocks.
+  - Docs match behavior for intervals, future/duplicate completion rejection, local calendar dates, and DB path.
+  
+  ## Findings
+  
+  No **BLOCKING** findings.
+  
+  **NON-BLOCKING** residual risks:
+  
+  1. `due` on an empty DB prints `No tasks due.` (same as “none due”), not a distinct empty-state message.
+  2. Task IDs reuse the `1…365000` argparse bound meant for intervals (impractical to hit).
+  3. List lines are `|`-delimited; names containing ` | ` are ambiguous to parse visually.
+  4. `flake8` is required by `scripts/test.sh` but not vendored; missing install fails the suite for reasons unrelated to app logic.
+  5. `git diff --check` does not scan untracked files (whitespace was clean on inspection).
+  6. Multi-writer concurrency is only lightly defended (`BEGIN IMMEDIATE`); not stress-tested.
+  
+  ## Completion status
+  
+  Goal met for review purposes: working local CLI (add/list/complete with recorded dates/due/history/persistence), automated tests, concise usage docs, Howl-selected Python/SQLite approach. No edits, commits, pushes, or other worktrees touched.
+  
+  AUDIT_STATUS: CLEAN
