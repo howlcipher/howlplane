@@ -258,9 +258,9 @@ def infer_task_metadata(
     elif any(k in lowered for k in ["refactor", "clean", "simplify", "restructure"]):
         task_class = "refactor"
     elif any(k in lowered for k in ["test", "falsif", "mock", "assert", "coverage"]):
-        task_class = "test"
+        task_class = "test_improvement"
     elif any(k in lowered for k in ["doc", "readme", "comment", "guide"]):
-        task_class = "documentation"
+        task_class = "docs"
     elif any(k in lowered for k in ["deploy", "infra", "terraform", "helm", "k8s", "docker"]):
         task_class = "infrastructure"
     else:
@@ -281,7 +281,7 @@ def infer_task_metadata(
         reasoning_tier = explicit_tier
     elif risk_level in ("high", "critical") or task_class in ("security_patch", "infrastructure"):
         reasoning_tier = "tier_1"
-    elif risk_level == "low" and task_class == "documentation":
+    elif risk_level == "low" and task_class == "docs":
         reasoning_tier = "tier_3"
     else:
         reasoning_tier = "tier_2"
