@@ -415,3 +415,25 @@ Later-round review focus; more rework rounds; prefer Codex implementer; accept a
 
 ### Tests
 test_auto_prefers_codex_for_implementation_only_when_no_orchestrator_was_chosen (5 cases; 2 fail before the fix), test_preferred_implementer_falls_back_when_unavailable; DOG-010 takeover fixture pins the old preference. 429 subsystem tests passed; lint and SlopsLint clean.
+
+## DOG-024 — Test suite writes factory worktrees into the real data home; intermittent pre-push failure
+
+Status: FIXED, pushed (howlplane dogfood/DOG-024-test-xdg-isolation 48aa794), PR open
+Severity: Medium (pollutes the operator's real ~/.local/share/howlplane/worktrees; flaky pre-push gate blocked pushes twice)
+Discovered in: records pushes ad9264c (first attempt) and 9976f67 (pre-push gate)
+Owning component: howlplane test suite (tests/conftest.py)
+
+### Evidence
+`FAILED tests/test_factory_canary_isolation.py::test_explicit_state_dir_wins_in_bounded_run` — `CampaignError: Factory target exists but is not a healthy Git worktree: ~/.local/share/howlplane/worktrees/edae7d.../target` (gitdir points into a deleted /tmp/pytest-of-howlcipher/... repo). 73 of 100 entries in the real worktrees root have a gitdir under /tmp/pytest-of-*.
+
+### Root cause
+Tests that prepare a factory campaign without `set_xdg_paths` resolve the real XDG data home; the worktree name is a hash of the temp repo path, so pytest temp-path reuse meets a stale target. The product's refusal to reuse an unhealthy target is intentional.
+
+### Resolution
+tests/conftest.py: autouse `_isolate_xdg_homes` (per-test XDG_DATA_HOME/XDG_STATE_HOME) and session guard `_fail_on_factory_worktrees_in_the_real_data_home`. Test-only; engine source unchanged, so the PASS is unaffected.
+
+### Tests
+Guard proven: with isolation disabled it fails naming the leaked worktree (that one worktree, created by the check, was removed). Full suite: 2313 passed; real worktree count unchanged.
+
+### Notes
+The 73 pre-existing leaked worktrees in ~/.local/share/howlplane/worktrees were left in place; removal is the user's call.

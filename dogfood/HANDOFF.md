@@ -142,3 +142,4 @@ Live engine: howlplane checkout on main 4e31e53. `howl agents doctor`: all five 
 Other repos: howl and howlproof fast-forwarded (upstream changes are docs/Pages/CI only); howlforge, howlcreate, howldream up to date.
 Open: DOG-022 (nonblocking report UX). Unidentified flaky pre-push test (see note above).
 Resume: nothing pending. If howlplane src changes after 4e31e53, run two fresh missions (run-026, run-027) per FINAL_REPORT reproduction.
+DOG-024 (flaky pre-push test identified: test-suite leak into the real factory worktree root) fixed test-only in 48aa794, PR open. Engine source unchanged: PASS on main 4e31e53 still holds. The 73 leaked worktrees in ~/.local/share/howlplane/worktrees (gitdir under /tmp/pytest-of-*) were left for the user to remove.
