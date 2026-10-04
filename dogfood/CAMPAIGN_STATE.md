@@ -54,3 +54,11 @@ Repository survey: all 12 Howl repos clean on main, none ahead; howlframe fast-f
 
 ## RESULT (campaign 2)
 DOGFOOD RESULT: PASS (run-014, run-015, engine howlplane dogfood/DOG-013-review-convergence 4a5d697). PRs #142 (DOG-012), #143 (DOG-013..016, stacked), #144 (DOG-017, independent). None merged.
+
+## Resume check 2 (2026-10-03, new session)
+Merged since the campaign 2 PASS: howlplane #142 (DOG-012), #146 (DOG-013..016; replaced closed #143), #145 (records). Still open: #144 (DOG-017, `howlplane route` only, not on the mission path).
+`git diff 4a5d697 origin/main -- src pyproject.toml` is empty: main @4c4e69b is byte-identical in engine source to the engine that produced clean runs 014 and 015.
+The live engine checkout (howlplane, editable install via runtimes/howlplane-engine `.pth` -> howlplane/src) was 17 commits behind and has been fast-forwarded to 4c4e69b. Clean tree, no local work lost.
+Public CLI health: `howl --help` OK; `howl agents doctor --repo dogfood-missions/run-015/household-tasks` exit 0. `python3 -m pip check`: only version-pin conflicts (litellm, mcp), no missing packages.
+Other repos (howl 77482cb, howlforge, howlcreate, howldream, howlproof): clean on main, up to date.
+No new runs were needed: the PASS (run-014, run-015) holds for main.

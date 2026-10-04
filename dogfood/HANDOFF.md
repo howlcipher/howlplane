@@ -100,3 +100,10 @@ Open PRs (not merged, the user's call): howlplane #142 (DOG-012), #143 (DOG-013.
 Repository state: howlplane checkout returned to main (a0ada6a); repair worktrees removed. Campaign records: branch dogfood/resume-check-20261003 (worktree howlplane-dogfood-campaign), pushed.
 Resume instructions: nothing pending. To re-verify after merges: two fresh runs per FINAL_REPORT reproduction; record as run-016+.
 Active finding: NONE.
+
+## Status update (resume check 2, 2026-10-03)
+Status: PASS, valid on main. howlplane main 4c4e69b has the same engine source as 4a5d697 (runs 014/015). The live engine checkout is on main at 4c4e69b.
+Open: howlplane PR #144 (DOG-017), unmerged, the user's call. Nothing else pending; no active finding; no unpushed work.
+Records branch: dogfood/resume-check-20261003-2 (worktree howlplane-dogfood-campaign).
+Resume: if howlplane src changes after 4c4e69b (e.g. #144 merges), run two fresh missions as run-016 and run-017 per FINAL_REPORT.md reproduction before re-asserting PASS.
+Warning: `pip check` shows litellm/mcp pin conflicts (jsonschema, pydantic); harmless today, but check it first if the pre-push hook fails.
