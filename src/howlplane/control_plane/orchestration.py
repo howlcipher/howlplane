@@ -1012,6 +1012,36 @@ def audit_evidence_for_acceptance(doc: dict[str, Any]) -> str:
     return "".join(lines) + "\n--- end of audit evidence ---"
 
 
+# Any finding at all used to block the audit, and a falsifying reviewer always
+# finds something new, so bounded rework could never converge (DOG-013).
+# Non-blocking notes still reach acceptance through the stored verdict text.
+REVIEW_VERDICT_CONTRACT = (
+    "Classify every finding as BLOCKING or NON-BLOCKING. BLOCKING means: incorrect behavior, a goal requirement "
+    "not met, required behavior without working tests, a failing test, or documentation or evidence that is false. "
+    "Hardening ideas, style, unlikely edge cases, and residual risks are NON-BLOCKING. End with exactly "
+    "AUDIT_STATUS: FINDINGS if any BLOCKING finding remains; otherwise end with exactly AUDIT_STATUS: CLEAN.")
+
+
+def verification_evidence_for_review(doc: dict[str, Any]) -> str:
+    """Give the reviewer the checks HowlPlane itself ran on the current tree.
+
+    Read-only reviewers often have no shell, so without this they report the
+    test gate as unproven (DOG-014). `doc["tests"]` is cleared whenever the
+    repository changes outside the session, and every review directly follows
+    a verification, so the latest result per command describes this tree.
+    """
+    latest: dict[str, dict[str, Any]] = {}
+    for item in doc.get("tests", []):
+        command = item["command"] if isinstance(item["command"], str) else " ".join(item["command"])
+        latest[command] = item
+    if not latest:
+        return ""
+    lines = [" HowlPlane itself ran these checks on the current tree (harness evidence, not implementer claims):"]
+    for command, item in latest.items():
+        lines.append(f"\n--- `{command}` exit {item['exit_code']} ---\n{item.get('output', '').strip()[-600:]}")
+    return "".join(lines) + "\n--- end of verification evidence ---"
+
+
 def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, repo: Path) -> Any:
     instructions = (
         f"Goal: {doc['goal']}\nRole: {role}. Work only in {repo}. "
@@ -1020,14 +1050,20 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         f"Constraints: {'; '.join(doc['constraints']) or 'none'}. "
     )
     if role == "review":
-        instructions += "Independently inspect the current diff and falsify correctness. Do not edit files. End with exactly AUDIT_STATUS: CLEAN only if you found no issue; otherwise end with AUDIT_STATUS: FINDINGS."
+        instructions += ("Independently inspect the current diff and falsify correctness. Do not edit files. "
+                         + REVIEW_VERDICT_CONTRACT + verification_evidence_for_review(doc))
     elif role == "acceptance":
         instructions += "As session orchestrator, inspect implementation, tests, and independent audit. Do not edit files. End with exactly ACCEPTANCE_STATUS: ACCEPTED only if evidence supports the goal; otherwise end with ACCEPTANCE_STATUS: REJECTED."
         instructions += audit_evidence_for_acceptance(doc)
+        if (doc.get("rework") or {}).get("source") == "acceptance":
+            instructions += (f" An earlier acceptance check rejected the work and the implementer was sent back to address it "
+                             f"(rework round {doc['rework']['round']}). Judge the current repository, and check whether "
+                             "these reasons were actually resolved:\n" + doc["rework"]["findings"])
     elif role == "implementation":
         instructions += "Implement the goal and run relevant local tests. Inspect existing partial changes first."
         if doc.get("rework"):
-            instructions += (f" Independent review round {doc['rework']['round']} found issues with the current work. Fix every valid "
+            source = "The acceptance check" if doc["rework"].get("source") == "acceptance" else "Independent review"
+            instructions += (f" {source} (rework round {doc['rework']['round']}) found issues with the current work. Fix every valid "
                              "finding, run the tests again, and state which findings you rejected and why. If no change is warranted, "
                              "report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED with your reasons. Reviewer findings:\n"
                              + doc["rework"]["findings"])
@@ -1078,9 +1114,10 @@ def derive_verify_command(repo: Path) -> list[str] | None:
 
 
 def begin_rework(doc: dict[str, Any], findings: dict[str, Any]) -> None:
-    """Send a reviewer's real findings back to implementation (bounded by MAX_REWORK_ROUNDS)."""
+    """Send review findings or an acceptance rejection back to implementation (bounded by MAX_REWORK_ROUNDS)."""
     doc["rework_rounds"] = doc.get("rework_rounds", 0) + 1
-    doc["rework"] = {"round": doc["rework_rounds"], "reviewer": findings["agent"], "findings": findings["verdict_excerpt"], "at": now()}
+    doc["rework"] = {"round": doc["rework_rounds"], "reviewer": findings["agent"], "source": findings["stage"],
+                     "findings": findings["verdict_excerpt"], "at": now()}
     doc["previous_implementer"] = doc.pop("implementer", None)
     doc.pop("audit", None)
 
@@ -1315,6 +1352,17 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                     progress._write("FINDINGS", f"{AGENT_NAMES.get(agent, agent)} review reported findings")
                 checkpoint(doc, path, token, repo)
                 break
+            if (stage == "acceptance" and assignment["failure"] == "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
+                    and assignment.get("verdict_excerpt") and "implementation" in stages
+                    and doc.get("rework_rounds", 0) < MAX_REWORK_ROUNDS):
+                # A reasoned rejection is actionable (DOG-016): rework it, then the same orchestrator judges
+                # the changed repository. It is never shopped to another acceptor (DOG-010); once rework is
+                # spent, the failure path below records it and hands off.
+                findings_attempt = assignment
+                if progress:
+                    progress._write("FINDINGS", f"{AGENT_NAMES.get(agent, agent)} acceptance rejected; reasons go back to implementation")
+                checkpoint(doc, path, token, repo)
+                break
             doc["reroutes"].append({"from": f"{agent}:{model}", "stage": stage, "reason": assignment["failure"]})
             if progress:
                 progress._write("FAIL", f"{AGENT_NAMES.get(agent, agent)} {stage} failed: {assignment['failure']}{no_change_detail}")
@@ -1475,6 +1523,10 @@ def report(doc: dict[str, Any]) -> int:
     for attempt in doc["attempts"]:
         if attempt.get("failure") in {"AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"} and attempt.get("verdict_excerpt"):
             print(f"Verdict from {AGENT_NAMES.get(attempt['agent'], attempt['agent'])} ({attempt['stage']}, {attempt['failure']}):")
+            print("\n".join(f"  {line}" for line in attempt["verdict_excerpt"].splitlines()))
+        elif attempt.get("stage") == "review" and attempt.get("state") == "SUCCEEDED" and attempt.get("verdict_excerpt"):
+            # Non-blocking notes exist only here, and a finished session's manifest is removed (DOG-015).
+            print(f"Review notes from {AGENT_NAMES.get(attempt['agent'], attempt['agent'])} (review, CLEAN):")
             print("\n".join(f"  {line}" for line in attempt["verdict_excerpt"].splitlines()))
     return 0 if doc["status"] in {"COMPLETE", "COMPLETE WITH WARNINGS"} else 2
 
