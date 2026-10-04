@@ -159,6 +159,12 @@ Readiness distinguishes between executable presence (`status: READY`) and mutati
 (`unattended_mutation_capable: true/false`). A provider lacking required mutation tools fails
 with `EXECUTION_PERMISSION_REQUIRED`, triggering bounded provider failover rather than misreporting
 a false success.
+In a new repository there are no discovered commands yet. `howlplane orchestrate` asks the plan to
+end with `VERIFY_COMMAND: <command>`; the implementer is told that command and granted it (an
+operator `--verify` command takes precedence), subject to the same deny floor as discovered
+commands, so an interpreter is granted only as that exact command line. If a refusal still
+happens after edits, the role is rerouted for the session without marking the agent
+interactive-only (see ORCHESTRATE.md).
 
 ## CLI
 
