@@ -69,15 +69,22 @@ def test_execution_budget_parses_per_role_and_global_values_within_a_finite_ceil
             module.parse_execution_budget(bad)
 
 
-def test_default_budget_is_unchanged_and_an_override_reaches_the_backend_and_agy_print_timeout(tmp_path, monkeypatch):
+def test_default_budgets_give_implementation_and_review_600s(tmp_path, monkeypatch):
     repo = repository(tmp_path)
     install_all(tmp_path, monkeypatch)
-    doc = module.setup(arguments(repo, execution_budget=["implementation=600"]), repo)
-    assert doc["execution_budget"] == {"planning": 300, "implementation": 600, "review": 300, "acceptance": 300}
+    doc = module.setup(arguments(repo), repo)
+    assert doc["execution_budget"] == {"planning": 300, "implementation": 600, "review": 600, "acceptance": 300}
+
+
+def test_a_budget_override_reaches_the_backend_and_agy_print_timeout(tmp_path, monkeypatch):
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch)
+    doc = module.setup(arguments(repo, execution_budget=["implementation=900", "review=450"]), repo)
+    assert doc["execution_budget"] == {"planning": 300, "implementation": 900, "review": 450, "acceptance": 300}
     calls = record_backend(monkeypatch)
     module.execute_assignment(doc, "implementation", "agy", "m1", repo)
     module.execute_assignment(doc, "review", "agy", "m1", repo)
-    assert [(role, timeout) for role, timeout, _ in calls] == [("implementation", 600), ("review", 300)]
+    assert [(role, timeout) for role, timeout, _ in calls] == [("implementation", 900), ("review", 450)]
     command = AgyBackend().build_command(TaskSpec(task_id="t", repository=str(repo), objective="o"), repo,
                                          "implementation", "prompt", timeout_seconds=600)
     assert command[command.index("--print-timeout") + 1] == "585s"
