@@ -133,3 +133,5 @@ Live engine: the howlplane checkout was returned to main (a7f3bc4), which does N
 Open finding: DOG-022 (nonblocking report UX).
 Resume: after #148 merges, `git -C howlplane pull` on main; src then equals 7a516c0 plus any later merges. If src differs from 7a516c0, run two fresh missions (run-026, run-027) per FINAL_REPORT reproduction before re-asserting PASS.
 Warnings: pre-push hook runs the full suite (~11 min; slower while a mission runs); SlopsLint python_tests ceiling is 2 clones, so new tests must share helpers.
+
+Note (2026-10-04): the first push of records commit ad9264c failed the pre-push full suite; the immediate retry passed (2280 passed). The failing test was not captured, so an unidentified flaky test exists; capture the log (git push > log 2>&1) if it recurs.
