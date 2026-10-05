@@ -91,3 +91,6 @@ PRs #147, #148 merged; main 4e31e53 src == 7a516c0. PASS (run-024, run-025) hold
 
 ## RESULT (campaign 4)
 DOGFOOD RESULT: PASS (run-028, run-029, engine 5a806e3 = main f864cb2 + DOG-022 + DOG-025).
+
+## Post-merge check 2 (2026-10-04)
+PR #151 merged (e74e460); main src == 5a806e3. PASS (run-028, run-029) holds on main.

@@ -49,3 +49,4 @@
 - 2026-10-04 DOG-022 pushed (37bb7b7). run-027 (37bb7b7): BLOCKED after Codex budget overrun -> DOG-025 (workers re-run Howl workflow; session manifest with fence token copied into repo). Streak 0/2.
 - 2026-10-04 DOG-025 fixed 5a806e3 (pushed). run-028 (5a806e3): COMPLETE, verified: CLEAN RUN 1/2. Starting run-029.
 - 2026-10-04 run-029 (5a806e3) COMPLETE, verified: CLEAN RUN 2/2. DOGFOOD RESULT: PASS (run-028, run-029). FINAL_REPORT Addendum 5.
+- 2026-10-04 PR #151 merged (e74e460); main src == 5a806e3; PASS holds on main; howlframe fast-forwarded; all agents READY.
