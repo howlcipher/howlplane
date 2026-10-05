@@ -61,3 +61,5 @@
 - run-033 (744bc4a): COMPLETE 8.5 min, CLEAN; verification passed first time (DOG-026 not exercised). Resume of run-032's paused session on 744bc4a: verification failed -> REWORK round 1 -> fixed -> COMPLETE. DOG-026 verified live.
 - Resume review notes: reviewer had no shell, could not diff vs HEAD -> DOG-027. Building its test exposed DOG-028 (HowlPlane's git status/diff run core.fsmonitor/textconv/diff.external from .git/config). Fixed both in 175b57a (stacked), pushed, pre-push 2327 passed. Live engine -> 175b57a.
 - run-034 (175b57a) Mission D, test-only characterization of legacy shopcalc/pricing.py (must stay unchanged): started.
+- run-034 (175b57a) test-only characterization: COMPLETE 5.8 min, CLEAN; pricing.py untouched, 91 tests, 15/15 mutants killed. DOG-027 verified live (reviewer confirmed scope from HowlPlane's diff).
+- run-035 (175b57a) greenfield Rust ini2json: COMPLETE 6.6 min, CLEAN; 19/19 operator oracle cases. Final adaptive pair clean on 175b57a. Next: household baseline fixture x2 on 175b57a (engine changed since the last baseline PASS), as run-036/run-037.

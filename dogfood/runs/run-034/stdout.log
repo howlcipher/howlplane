@@ -1,0 +1,50 @@
+HOWL ORCHESTRATION REPORT
+Session: b97da1d9aad646f68341ddc0e62e4648
+Goal: shopcalc/pricing.py has no tests, and we need to refactor it next quarter. Before anyone touches it, add a characterization test suite that pins down its current behaviour exactly.
+
+Requirements:
+- Do not change shopcalc/pricing.py at all. This task is tests and documentation only.
+- Use the standard library `unittest` (no new dependencies), runnable with `python3 -m unittest discover -s tests -t .` from the repository root.
+- Cover every public function and the rules they encode: line rounding, tier boundaries, promo codes (case and whitespace handling, date windows including the boundary days, unknown codes), how tier and promo discounts combine, shipping methods and the free-shipping threshold, tax by state including unlisted states, and the totals that `price_order` returns. Include error cases.
+- Tests must be deterministic: never depend on today's date.
+- Where current behaviour looks like a bug or is surprising, do not fix it. Pin the current behaviour in a test, and list each such case with a short explanation in TESTING_NOTES.md so the team can decide later.
+- Update README.md with how to run the tests.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: ffd7bb4b2003261f1ab741caf475f7eb5dd45c48
+Repository status: M README.md
+?? TESTING_NOTES.md
+?? tests/__init__.py
+?? tests/test_pricing.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "rework_round": 0, "exit_code": 0, "output": "...........................................................................................\n----------------------------------------------------------------------\nRan 91 tests in 0.004s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))
+Failures: []
+Review notes from Claude (review, CLEAN):
+  I found no blocking problems. I could only read files in this role, so I did not run the tests or check `git status`. I relied on HowlPlane's evidence (91 tests, exit 0, `git diff --check` clean) and checked the assertions by hand against `shopcalc/pricing.py`.
+  
+  **Checked**
+  - **Scope:** `shopcalc/pricing.py` is not in the diff. Only `README.md`, `TESTING_NOTES.md`, `tests/__init__.py` and `tests/test_pricing.py` changed or were added.
+  - **Arithmetic:** I recomputed the worked examples (standard CA 44.16, express NY with SPRING10 295.75, WELCOME5 on 78.00 giving 74.10 plus 6.95 shipping = 81.05, and the negative-price order −3.78) and each one matches.
+  - **Rounding:** half-even on lines (`1.005`→1.00, `1.015`→1.02, `2.675`→2.68) and half-up on tier, promo and tax (`100.25`→2.01, `10 × 0.0725`→0.73, `-0.725`→−0.73) match the code.
+  - **Error cases:** the `KeyError` messages (including `None` rendering as `None`), the `TypeError`, `AttributeError`, `InvalidOperation` and `ValueError` cases, and the error order across arguments all match the code.
+  - **Coverage:** every public function has happy-path, boundary and error tests. This includes the promo window days, the tier and 75 thresholds, tax for CA, NY, OR and unlisted states, and the exact result keys with `Decimal` values.
+  - **Dates:** every date is a fixed literal. The `today=None` and `today=False` fallbacks use a stub with only `today()`, so the real clock is never read. A separate test confirms the clock is not touched when `today` is passed.
+  - **Test discovery:** the tests generated through `setattr` on `PricingTests` are picked up by the unittest loader, which matches the 91 tests run.
+  - **Notes file:** it opens with the "pinned, not endorsed, no fix applied" statement and has 15 entries. Every entry cites test names that exist, and the matching tests carry "Note N" comments or docstrings. The numeric claims in the notes (for example 28.50 vs 30, and 2% at exactly 200) match the code.
+  - **README:** it gives the run command and links `TESTING_NOTES.md`.
+  
+  **Non-blocking**
+  - `tests/__pycache__/*.pyc` exists. It is probably ignored by git, since the original repo already had a 3.14 pycache, but I could not confirm that. Check `git status` before committing.
+  - The optional mutation check (`>` to `>=` in `tier_discount`, `ROUND_HALF_UP` to `ROUND_HALF_EVEN`) is not evidenced in the diff. By inspection, `test_tier_exact_*` and the `half_up` tests would catch those two changes.
+  - The tests are generated dynamically through `add_value_tests` and `add_error_tests`. That is a bit harder to read, but each case still has its own named test.
+  - The `README.md` says Python 3.10+. The test code uses nothing from 3.11 or later.
+  
+  AUDIT_STATUS: CLEAN
