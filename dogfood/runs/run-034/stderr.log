@@ -1,0 +1,14 @@
+HOWL ORCHESTRATION
+Session: b97da1d9...
+Goal: shopcalc/pricing.py has no tests, and we need to refactor it next quarter. Before anyone…
+Requested orchestrator: AUTO
+Selected orchestrator: pending
+Strategy: BALANCED
+Failover: AUTO REROUTE
+Execution: PLAN + EXECUTE + INDEPENDENT AUDIT
+
+Starting orchestration...
+[21:52:59] PLAN        Building implementation plan
+[21:52:59] SELECT      Claude for planning: unattended verified · live smoke stale · capacity UNKNOWN
+[21:52:59] ASSIGN      Claude assigned task b97da1d9: planning
+[21:52:59] START       Claude started planning

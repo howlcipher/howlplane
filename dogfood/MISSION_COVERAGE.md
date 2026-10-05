@@ -8,24 +8,28 @@ Prevents repetitive dogfood. One row per run; adaptive tranches start at run-030
 | --- | --- | --- | --- | --- | --- | --- |
 | 001-029 | Household recurring-task CLI (baseline fixture) | Greenfield | Python | CLI, local persistence, tests, docs | PASS (028/029 latest clean pair) | DOG-001..025 |
 | 030 | logsum: time-window filter + JSON output | Existing | Go | existing-code modification, compatibility, timezone edge cases, docs | CLEAN | no |
-| 031 | bookmarks API: 3 user-reported bugs (concurrency, tag match, ordering) | Existing | Python | bug investigation, HTTP API, concurrency, DB migration | in progress | |
+| 031 | bookmarks API: 3 user-reported bugs (concurrency, tag match, ordering) | Existing | Python | bug investigation, HTTP API, concurrency, DB migration | CLEAN | no |
+| 032 | invoicegen: centralize config, JSON config file, precedence, validation; uncommitted user WIP present | Existing (dirty tree) | Node.js | refactor, configuration, dirty working tree | HANDOFF | DOG-026 (verification not reworked); DOG-027/028 found on resume |
+| 033 | same as 032, identical start, engine 744bc4a | Existing (dirty tree) | Node.js | regression | CLEAN | no |
+| 034 | shopcalc: characterization tests only, source must not change | Existing | Python | test-only, legacy behaviour, determinism | in progress | |
 
 ## Capability matrix
 
 - [x] greenfield CLI (001-029)
 - [x] existing-code modification (030, 031)
-- [ ] bug repair (031)
-- [ ] refactor
+- [x] bug repair (031)
+- [x] refactor (032/033)
 - [x] persistent storage (001-029)
-- [ ] data migration (031)
-- [ ] REST/API (031)
+- [x] data migration (031: automatic legacy DB upgrade)
+- [x] REST/API (031)
 - [ ] file transformation
-- [ ] concurrency (031)
-- [ ] configuration
+- [x] concurrency (031)
+- [x] configuration (032/033)
 - [x] multi-module change (030)
 - [x] compatibility preservation (030)
-- [ ] test-only task
+- [ ] test-only task (034)
 - [x] documentation-sensitive task (030)
-- [ ] error-recovery task
+- [x] error-recovery (032 resume after engine upgrade)
 - [ ] integration task
 - [x] non-Python language (030: Go)
+- [x] dirty working tree / uncommitted user WIP (032/033)

@@ -3,13 +3,13 @@
 ## CURRENT (adaptive tranche 1, started 2026-10-04) — read this first
 - Overall: baseline PASS holds for main (41a1621 src == 5a806e3, runs 028/029). Tranche 1 in progress.
 - Records branch dogfood/adaptive-tranche-1 (worktree howlplane-dogfood-campaign). Coverage: MISSION_COVERAGE.md.
-- Runs so far: run-030 CLEAN (Go feature), run-031 CLEAN (Python HTTP bugs), run-032 HANDOFF -> DOG-026 (Node config refactor, dirty tree).
-- Active finding: DOG-026 (failed verification ends session without rework; output truncated). Fixed in howlplane dogfood/DOG-026-verification-rework 744bc4a, PUSHED (full pre-push suite 2321 passed). No PR yet.
-- LIVE ENGINE: the howlplane checkout is ON dogfood/DOG-026-verification-rework (744bc4a). Return it to main if the PR is not merged when the tranche ends.
-- Current run: run-033 = run-032's mission on 744bc4a from an identical start (dogfood-missions/run-033/invoicegen; WIP sha256 in ../wip.sha256).
-- Engine changed, so tranche convergence needs the final two missions clean on 744bc4a (run-033 + one more new mission).
-- Next finding ID: DOG-027. Next run ID: run-034.
-- Resume: `howl orchestrate inspect --repo <target>`; verify per runs/<run>/MISSION.md; write VERIFICATION.md/RESULT.md.
+- Runs: 030 CLEAN (Go feature), 031 CLEAN (Python HTTP bugs), 032 HANDOFF -> DOG-026, 033 CLEAN (032 rerun on 744bc4a), 032-resume proved DOG-026 live, 034 running (test-only characterization, Python).
+- Findings this tranche: DOG-026 RESOLVED (744bc4a). DOG-027 (reviewers diff-blind) and DOG-028 (git runs repo-configured programs, P1 security) FIXED in 175b57a, pushed (pre-push 2327 passed), awaiting live proof.
+- Branches (no PRs yet; user merges): howlplane dogfood/DOG-026-verification-rework 744bc4a; dogfood/DOG-027-review-diff-evidence 175b57a (stacked on 744bc4a).
+- LIVE ENGINE: howlplane checkout is ON dogfood/DOG-027-review-diff-evidence (175b57a). Return it to main when the tranche ends unless merged.
+- Convergence: need the final two missions clean on 175b57a: run-034 + run-035 (a new mission type).
+- Next finding ID: DOG-029. Next run ID: run-035.
+- Resume: `howl orchestrate inspect --repo <target>`; verify per runs/<run>/MISSION.md; write VERIFICATION.md/RESULT.md. run-034 check: pricing.py sha256 in dogfood-missions/run-034/pricing.sha256 must be unchanged.
 - Always export HOWL_FORBID_LOCAL_INFERENCE=1.
 - Older history below.
 

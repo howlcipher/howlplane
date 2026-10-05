@@ -483,3 +483,53 @@ Repository: howlplane. Branch: dogfood/DOG-026-verification-rework. SHA: 744bc4a
 - Live proof: `howl orchestrate resume --repo dogfood-missions/run-032/invoicegen` on 744bc4a (the user-upgrades-then-resumes path; runs/run-032/03-resume.*): `Configured validation failed: \`npm test\` exited 1` -> `REWORK Round 1 of 2: sending the failed verification back to implementation` -> Codex fixed it -> `npm test` passed (62/62) -> review CLEAN -> ACCEPTED -> COMPLETE, `Rework rounds: 1 of 2`, exit 0. User WIP sha256 unchanged.
 ### Notes
 Caught by testing my own report text: an earlier draft claimed resume-without-changes would get another implementation attempt; it does not (budget spent), and the text now says so.
+
+## DOG-027 — Reviewers cannot see the diff they are asked to inspect, so compatibility requirements go unverified
+Status: FIXED (pending live regression run)
+Severity: P2 (independent review weaker than claimed; no false success observed)
+Discovered in: run-032 resume review notes (also visible in run-030: "I read the diff and tests with Read only")
+Owning component: HowlPlane orchestration (review/acceptance prompt evidence)
+Repository: howlplane
+### User action
+Normal `howl orchestrate` on existing repositories with explicit compatibility requirements (runs 030-033).
+### Expected
+The independent reviewer can see what the implementation changed relative to the original and judge "existing tests unchanged" and "output byte-identical" claims.
+### Actual
+Claude review notes (run-032 resume): "no shell was available in this role", "I could not diff against HEAD to confirm that the original CLI tests and render tests are unmodified", "I could not confirm that the original source gave the same defaults and byte-identical env-only output", marked NON-BLOCKING. Review roles get Read/Glob/Grep only (provider_execution_profile.py: read-only git granted to mutating roles only; pinned by test_review_roles_stay_read_only), while the prompt says "Independently inspect the current diff".
+### User impact
+Under AUTO routing Claude reviews every normal run, so every audit of an existing codebase is diff-blind; compatibility regressions could pass review.
+### Root cause
+Evidence the reviewer needs exists only as git state, which the read-only contract (rightly) keeps away from review roles; HowlPlane did not supply it, unlike verification output (DOG-014).
+### Resolution
+Design choice (pros/cons recorded in the session): HowlPlane computes the diff itself rather than widening reviewer grants (keeps the read-only contract; avoids reviewers running git, which can execute repo-configured programs, see DOG-028). `session_diff_evidence` adds `git diff HEAD` (bounded, 12000 chars) plus new-file list to review and acceptance prompts. `base_dirty` recorded at session start so the user's pre-existing uncommitted changes are named and excluded; files mixing both are labelled.
+### Tests
+tests/test_orchestration_review_diff_evidence.py (5 tests, real prompt building through a recording backend). test_provider_permissions unchanged and passing.
+### Commit
+howlplane dogfood/DOG-027-review-diff-evidence 175b57a (stacked on DOG-026 744bc4a). Push: in progress.
+### Regression verification
+Pending: next missions on 175b57a; check reviewer notes no longer say they cannot see the diff.
+
+## DOG-028 — HowlPlane's own git calls run programs named in repository config (sandbox escape path)
+Status: FIXED (pending push)
+Severity: P1 (security: trust-boundary violation)
+Discovered in: building DOG-027's regression test (a planted textconv driver fired during an ordinary session)
+Owning component: HowlPlane git launcher (git_env.py) and orchestration evidence
+Repository: howlplane
+### User action
+Any `howl orchestrate` session (checkpoint fingerprint runs `git status` and `git diff` at every checkpoint).
+### Expected
+HowlPlane reads the repository as data; agents' tool sandboxes are the only place agent-influenced code runs.
+### Actual
+git 2.53 executes `core.fsmonitor` on `git status`/index refresh, and `diff.<driver>.textconv` on `git diff --binary --no-ext-diff` (HowlPlane's fingerprint). Reproduced: a `.git/config` with these set made HowlPlane create a marker file during a session. `git_baseline.py` and `human_boundary.py` also ran unguarded `git diff HEAD` (diff.external too).
+### User impact
+An implementer agent (Edit/Write tools, or Codex workspace-write) that writes `.git/config`, for example under prompt injection from repository content, gets HowlPlane to run an arbitrary program with the user's full privileges outside the agent sandbox.
+### Root cause
+Defect class: git invocations treated as read-only although git config can name executables. The sanitized git env (2026-08-26) scrubbed only repository-selection variables.
+### Resolution
+`git_env.guarded_git_args`: `-c core.fsmonitor=false` on every call; `--no-ext-diff --no-textconv` on diff/log/show. Applied in `run_git_in_repo` (all canonical callers), orchestration's git calls, and the factory campaign helper. User-supplied `--verify` commands still run as given.
+### Tests
+test_git_env_isolation::test_repository_configured_programs_never_run_from_howlplane_git_calls (status/diff/log/show + evidence; proves unguarded git would run it); full-session test in test_orchestration_review_diff_evidence.
+### Commit
+Same commit as DOG-027 (175b57a), shared files.
+### Notes
+Not addressed (out of scope, recorded): git hooks in `.git/hooks` / `core.hooksPath` still run on HowlPlane's own commits in git_integration; disabling them would change semantics for users who rely on their hooks. Candidate for a separate design decision.

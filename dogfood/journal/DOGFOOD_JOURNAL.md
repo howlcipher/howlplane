@@ -58,3 +58,6 @@
 - run-031 (41a1621): COMPLETE 5.0 min, first-pass CLEAN; verified (legacy DB upgraded in place, 100-way concurrent POST all 201/unique, exact tags, stable newest-first paging). CLEAN.
 - run-032 (41a1621) Mission C, Node invoicegen config refactor with uncommitted user WIP: HANDOFF REQUIRED; `npm test` 1/59 failed and the session stopped with no rework, output truncated, Failures: []. User WIP preserved (sha256). DOG-026 filed (P1).
 - DOG-026 fixed 744bc4a (failed verification -> bounded rework; failure-first excerpts; run_verification guards OSError/timeout; Blocked by + Next in report/inspect). Pushed, pre-push 2321 passed. Live engine switched to the branch. run-033 (same mission, identical start) started.
+- run-033 (744bc4a): COMPLETE 8.5 min, CLEAN; verification passed first time (DOG-026 not exercised). Resume of run-032's paused session on 744bc4a: verification failed -> REWORK round 1 -> fixed -> COMPLETE. DOG-026 verified live.
+- Resume review notes: reviewer had no shell, could not diff vs HEAD -> DOG-027. Building its test exposed DOG-028 (HowlPlane's git status/diff run core.fsmonitor/textconv/diff.external from .git/config). Fixed both in 175b57a (stacked), pushed, pre-push 2327 passed. Live engine -> 175b57a.
+- run-034 (175b57a) Mission D, test-only characterization of legacy shopcalc/pricing.py (must stay unchanged): started.
