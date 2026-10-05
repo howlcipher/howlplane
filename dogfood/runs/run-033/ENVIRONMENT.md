@@ -1,0 +1,3 @@
+- Engine: howlplane dogfood/DOG-026-verification-rework 744bc4a (live editable install verified: run_verification present).
+- Target: dogfood-missions/run-033/invoicegen, HEAD c03d40d, WIP sha256 in dogfood-missions/run-033/wip.sha256.
+- HOWL_FORBID_LOCAL_INFERENCE=1.

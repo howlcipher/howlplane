@@ -1,5 +1,16 @@
 # Howl Dogfood Handoff
 
+## CURRENT (adaptive tranche 1) — read this first
+- ADAPTIVE DOGFOOD TRANCHE 1: PASS (2026-10-04). See FINAL_REPORT.md "Adaptive Dogfood Tranche 1".
+- Final engine: 175b57a. PRs (user merges): howlplane #153 (DOG-026, base main), #154 (DOG-027/028, base #153's branch; merge #153 first).
+- LIVE ENGINE: the howlplane checkout was returned to main (41a1621), which LACKS DOG-026/027/028 until the PRs merge.
+- Records: branch dogfood/adaptive-tranche-1 (worktree howlplane-dogfood-campaign).
+- Active finding: none. Next finding DOG-029; next run run-039.
+- After merges: `git -C howlplane pull` on main; if `git diff 175b57a main -- src pyproject.toml` is empty, the tranche PASS and baseline (036/037) apply to main; otherwise rerun the baseline fixture twice (run-039/040).
+- Open items: DOG-023 limitation; git-hooks policy for HowlPlane's own commits; OBS-030-1 worktree cleanup.
+- Always export HOWL_FORBID_LOCAL_INFERENCE=1.
+- Older history below.
+
 ## Mission
 Prove a normal user can ask Howl for a household recurring-task CLI app (add, list, complete with timestamp, due-again detection, local persistence, tests, usage docs) via the public CLI and get a working result. Two consecutive clean runs required.
 

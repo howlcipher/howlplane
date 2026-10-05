@@ -453,3 +453,85 @@ The goal asks for the approach to be chosen "through the normal Howl workflow", 
 
 ### Resolution
 Pending: store the plan; give it to implementation and review/acceptance as the workflow's decision record; tell every role it runs inside a HowlPlane session and must not invoke howl/howlplane or read HowlPlane state.
+
+## DOG-026 — A failed verification ends the session instead of going back to the implementer; the failing output is cut off
+Status: RESOLVED (verified live)
+Severity: P1 (workflow blocker with no actionable evidence)
+Discovered in: run-032 (adaptive tranche 1, Mission C, existing Node.js project invoicegen)
+Owning component: HowlPlane orchestration (`src/howlplane/control_plane/orchestration.py`)
+Repository: howlplane
+### User action
+`howl orchestrate "<config refactor request>" --repo dogfood-missions/run-032/invoicegen` (after `howl factory prepare --yes`).
+### Expected
+When HowlPlane's own verification (`npm test`, derived) fails after implementation, the failure goes back to the implementer like a review finding, within the bounded rework budget; if it still fails, the report says what failed and what to do.
+### Actual
+Codex finished; `npm test` failed 1 of 59 (`CLI rejects invalid outDir before any output`: file `outDir: 42` masked by `INVOICE_OUT_DIR`). The session stopped at HANDOFF REQUIRED on the first verification attempt with no rework. The report's Tests entry held only the last 1000 characters (TAP summary), not the failing case; `Failures: []`; `Independent audit: not requested or incomplete`. `howl orchestrate inspect` showed only `Stage: implementation`. `resume` would rerun implementation with no mention of the failure.
+### Evidence
+runs/run-032/stdout.log, stderr.log, exit.txt (2). Code: orchestration.py (41a1621) lines 1584-1592 (`[-1000:]`, immediate handoff); 1315/1383 the same unguarded `subprocess.run` (OSError/TimeoutExpired would crash the session).
+### User impact
+The user must rerun the tests, find the failure, and fix it or re-run Howl blind, for a defect Howl had already detected. Uncommitted user WIP was preserved (checked by sha256), so no data loss.
+### Root cause
+Defect class: evidence HowlPlane itself produces is not routed back to the implementer. Rework (DOG-011/013/016) was wired only for review and acceptance verdicts; verification was a terminal gate. Output capture was tail-only, and verification execution errors were unhandled at all four call sites.
+### Resolution
+Failed verification -> `begin_rework` with source `verification` (command, exit code, failure-first output), sharing MAX_REWORK_ROUNDS (not enlarged). `test_output_excerpt` keeps failure lines with context plus the tail. `run_verification` centralizes all four call sites; OSError -> reported "could not run" (no rework), timeout -> exit 124 (reworkable). Report/inspect print `Blocked by:`, the failing output, and an accurate Next step.
+### Tests
+New tests/test_orchestration_verification_rework.py (5 tests): rework converges; exhaustion handoff with reason/output/inspect; resume unchanged stops again; resume after user fix completes without another implementation; unrunnable and timed-out commands; excerpt extraction. Orchestration modules: 108 passed. make lint clean. Full suite: pre-push hook.
+### Commit
+Repository: howlplane. Branch: dogfood/DOG-026-verification-rework. SHA: 744bc4a. Push status: PUSHED (pre-push full suite 2321 passed). PR: not yet opened.
+### Regression verification
+- run-033 (same mission, identical start, 744bc4a): COMPLETE, verified CLEAN; verification passed first time, so it proves no regression but not the fix.
+- Live proof: `howl orchestrate resume --repo dogfood-missions/run-032/invoicegen` on 744bc4a (the user-upgrades-then-resumes path; runs/run-032/03-resume.*): `Configured validation failed: \`npm test\` exited 1` -> `REWORK Round 1 of 2: sending the failed verification back to implementation` -> Codex fixed it -> `npm test` passed (62/62) -> review CLEAN -> ACCEPTED -> COMPLETE, `Rework rounds: 1 of 2`, exit 0. User WIP sha256 unchanged.
+### Notes
+Caught by testing my own report text: an earlier draft claimed resume-without-changes would get another implementation attempt; it does not (budget spent), and the text now says so.
+
+## DOG-027 — Reviewers cannot see the diff they are asked to inspect, so compatibility requirements go unverified
+Status: RESOLVED (verified live, run-034)
+Severity: P2 (independent review weaker than claimed; no false success observed)
+Discovered in: run-032 resume review notes (also visible in run-030: "I read the diff and tests with Read only")
+Owning component: HowlPlane orchestration (review/acceptance prompt evidence)
+Repository: howlplane
+### User action
+Normal `howl orchestrate` on existing repositories with explicit compatibility requirements (runs 030-033).
+### Expected
+The independent reviewer can see what the implementation changed relative to the original and judge "existing tests unchanged" and "output byte-identical" claims.
+### Actual
+Claude review notes (run-032 resume): "no shell was available in this role", "I could not diff against HEAD to confirm that the original CLI tests and render tests are unmodified", "I could not confirm that the original source gave the same defaults and byte-identical env-only output", marked NON-BLOCKING. Review roles get Read/Glob/Grep only (provider_execution_profile.py: read-only git granted to mutating roles only; pinned by test_review_roles_stay_read_only), while the prompt says "Independently inspect the current diff".
+### User impact
+Under AUTO routing Claude reviews every normal run, so every audit of an existing codebase is diff-blind; compatibility regressions could pass review.
+### Root cause
+Evidence the reviewer needs exists only as git state, which the read-only contract (rightly) keeps away from review roles; HowlPlane did not supply it, unlike verification output (DOG-014).
+### Resolution
+Design choice (pros/cons recorded in the session): HowlPlane computes the diff itself rather than widening reviewer grants (keeps the read-only contract; avoids reviewers running git, which can execute repo-configured programs, see DOG-028). `session_diff_evidence` adds `git diff HEAD` (bounded, 12000 chars) plus new-file list to review and acceptance prompts. `base_dirty` recorded at session start so the user's pre-existing uncommitted changes are named and excluded; files mixing both are labelled.
+### Tests
+tests/test_orchestration_review_diff_evidence.py (5 tests, real prompt building through a recording backend). test_provider_permissions unchanged and passing.
+### Commit
+howlplane dogfood/DOG-027-review-diff-evidence 175b57a (stacked on DOG-026 744bc4a). Push: PUSHED (pre-push full suite 2327 passed).
+### Regression verification
+run-034 (175b57a): reviewer wrote "shopcalc/pricing.py is not in the diff. Only README.md, TESTING_NOTES.md, tests/__init__.py and tests/test_pricing.py changed or were added", a scope check impossible before. Runs 035-037 on the same engine clean.
+
+## DOG-028 — HowlPlane's own git calls run programs named in repository config (sandbox escape path)
+Status: RESOLVED (verified live, run-038 targeted experiment)
+Severity: P1 (security: trust-boundary violation)
+Discovered in: building DOG-027's regression test (a planted textconv driver fired during an ordinary session)
+Owning component: HowlPlane git launcher (git_env.py) and orchestration evidence
+Repository: howlplane
+### User action
+Any `howl orchestrate` session (checkpoint fingerprint runs `git status` and `git diff` at every checkpoint).
+### Expected
+HowlPlane reads the repository as data; agents' tool sandboxes are the only place agent-influenced code runs.
+### Actual
+git 2.53 executes `core.fsmonitor` on `git status`/index refresh, and `diff.<driver>.textconv` on `git diff --binary --no-ext-diff` (HowlPlane's fingerprint). Reproduced: a `.git/config` with these set made HowlPlane create a marker file during a session. `git_baseline.py` and `human_boundary.py` also ran unguarded `git diff HEAD` (diff.external too).
+### User impact
+An implementer agent (Edit/Write tools, or Codex workspace-write) that writes `.git/config`, for example under prompt injection from repository content, gets HowlPlane to run an arbitrary program with the user's full privileges outside the agent sandbox.
+### Root cause
+Defect class: git invocations treated as read-only although git config can name executables. The sanitized git env (2026-08-26) scrubbed only repository-selection variables.
+### Resolution
+`git_env.guarded_git_args`: `-c core.fsmonitor=false` on every call; `--no-ext-diff --no-textconv` on diff/log/show. Applied in `run_git_in_repo` (all canonical callers), orchestration's git calls, and the factory campaign helper. User-supplied `--verify` commands still run as given.
+### Tests
+test_git_env_isolation::test_repository_configured_programs_never_run_from_howlplane_git_calls (status/diff/log/show + evidence; proves unguarded git would run it); full-session test in test_orchestration_review_diff_evidence.
+### Commit
+Same commit as DOG-027 (175b57a), shared files. PUSHED.
+### Regression verification
+run-038 TARGETED DOGFOOD EXPERIMENT: core.fsmonitor logging hook in the target repo; public-CLI session made 4 hook calls, all from Codex's sandboxed git, 0 from HowlPlane (control: plain git status fires it).
+### Notes
+Not addressed (out of scope, recorded): git hooks in `.git/hooks` / `core.hooksPath` still run on HowlPlane's own commits in git_integration; disabling them would change semantics for users who rely on their hooks. Candidate for a separate design decision.

@@ -1,0 +1,1 @@
+HOWL_FORBID_LOCAL_INFERENCE=1 howl orchestrate "$(cat MISSION.md)" --repo .../run-038/notes-app (engine 175b57a; TARGETED)

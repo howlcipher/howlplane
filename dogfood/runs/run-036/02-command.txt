@@ -1,0 +1,1 @@
+HOWL_FORBID_LOCAL_INFERENCE=1 howl orchestrate "$(cat 00-mission.txt)" --repo /run/media/system/tallgeese/dev/dogfood-missions/run-036/household-tasks  (engine 175b57a; baseline fixture)
