@@ -463,7 +463,10 @@ def session_diff_evidence(doc: dict[str, Any], repo: Path) -> str:
             diff = ""
         if len(diff) > REVIEW_DIFF_CHARS:
             diff = diff[:REVIEW_DIFF_CHARS] + "\n[... diff truncated by HowlPlane; Read the files for the rest ...]"
-        lines.append("\n--- diff of changed tracked files against HEAD ---\n" + redact(diff) + "\n--- end of diff ---")
+        # Not redacted: the diff is never persisted, and the reviewer can Read the same files. Redacting it
+        # only showed the reviewer text that is not in the repository (DOG-030: a README placeholder
+        # `API_TOKEN='paste-the-printed-token-here'` arrived as `API_TOKEN='[REDACTED]'`).
+        lines.append("\n--- diff of changed tracked files against HEAD ---\n" + diff + "\n--- end of diff ---")
     return "".join(lines)
 
 

@@ -142,3 +142,18 @@ def test_dirty_paths_keeps_names_intact_for_every_status_shape(tmp_path):
 
     assert set(paths) == {"modified.txt", "deleted.txt", "now named.txt", "untracked.txt"}
     assert paths["deleted.txt"] is None and paths["modified.txt"]
+
+
+def test_reviewers_see_the_repository_text_not_a_redacted_version(tmp_path, monkeypatch, capsys):
+    """DOG-030: credential-looking examples in the diff reach the reviewer exactly as the files hold them."""
+    def prepare(repo):
+        commit(repo, "README.md", "# app\n")
+
+    def implement(repo):
+        (repo / "README.md").write_text("# app\n\n    API_TOKEN='paste-the-printed-token-here'\n    password=example123\n")
+
+    _, status, prompts = run_session(tmp_path, monkeypatch, implement, prepare)
+
+    assert status == 0, capsys.readouterr().out
+    assert "+    API_TOKEN='paste-the-printed-token-here'" in prompts["review"]
+    assert "+    password=example123" in prompts["review"]
