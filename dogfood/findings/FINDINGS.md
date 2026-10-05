@@ -455,7 +455,7 @@ The goal asks for the approach to be chosen "through the normal Howl workflow", 
 Pending: store the plan; give it to implementation and review/acceptance as the workflow's decision record; tell every role it runs inside a HowlPlane session and must not invoke howl/howlplane or read HowlPlane state.
 
 ## DOG-026 — A failed verification ends the session instead of going back to the implementer; the failing output is cut off
-Status: FIXED (pending live regression run)
+Status: RESOLVED (verified live)
 Severity: P1 (workflow blocker with no actionable evidence)
 Discovered in: run-032 (adaptive tranche 1, Mission C, existing Node.js project invoicegen)
 Owning component: HowlPlane orchestration (`src/howlplane/control_plane/orchestration.py`)
@@ -477,8 +477,9 @@ Failed verification -> `begin_rework` with source `verification` (command, exit 
 ### Tests
 New tests/test_orchestration_verification_rework.py (5 tests): rework converges; exhaustion handoff with reason/output/inspect; resume unchanged stops again; resume after user fix completes without another implementation; unrunnable and timed-out commands; excerpt extraction. Orchestration modules: 108 passed. make lint clean. Full suite: pre-push hook.
 ### Commit
-Repository: howlplane. Branch: dogfood/DOG-026-verification-rework. SHA: 744bc4a. Push status: in progress.
+Repository: howlplane. Branch: dogfood/DOG-026-verification-rework. SHA: 744bc4a. Push status: PUSHED (pre-push full suite 2321 passed). PR: not yet opened.
 ### Regression verification
-Pending: rerun the run-032 mission from a fresh copy of the same starting state on the fixed engine (run-033).
+- run-033 (same mission, identical start, 744bc4a): COMPLETE, verified CLEAN; verification passed first time, so it proves no regression but not the fix.
+- Live proof: `howl orchestrate resume --repo dogfood-missions/run-032/invoicegen` on 744bc4a (the user-upgrades-then-resumes path; runs/run-032/03-resume.*): `Configured validation failed: \`npm test\` exited 1` -> `REWORK Round 1 of 2: sending the failed verification back to implementation` -> Codex fixed it -> `npm test` passed (62/62) -> review CLEAN -> ACCEPTED -> COMPLETE, `Rework rounds: 1 of 2`, exit 0. User WIP sha256 unchanged.
 ### Notes
 Caught by testing my own report text: an earlier draft claimed resume-without-changes would get another implementation attempt; it does not (budget spent), and the text now says so.

@@ -1,0 +1,1 @@
+HOWL_FORBID_LOCAL_INFERENCE=1 howl orchestrate resume --repo /run/media/system/tallgeese/dev/dogfood-missions/run-032/invoicegen  (engine 744bc4a, after upgrading from 41a1621)
