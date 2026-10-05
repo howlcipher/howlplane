@@ -1,0 +1,14 @@
+HOWL ORCHESTRATION
+Session: 42f4b597...
+Goal: Bug report for this bookmarks service. We run it in production with several clients, and…
+Requested orchestrator: AUTO
+Selected orchestrator: pending
+Strategy: BALANCED
+Failover: AUTO REROUTE
+Execution: PLAN + EXECUTE + INDEPENDENT AUDIT
+
+Starting orchestration...
+[20:53:48] PLAN        Building implementation plan
+[20:53:48] SELECT      Claude for planning: unattended verified · live smoke stale · capacity UNKNOWN
+[20:53:48] ASSIGN      Claude assigned task 42f4b597: planning
+[20:53:48] START       Claude started planning

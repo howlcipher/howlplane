@@ -1,0 +1,4 @@
+- Engine: howlplane main 41a1621 (src == 5a806e3, PASS engine of runs 028/029), editable install.
+- howl CLI: main 7c4cbb1. go1.26.0 linux/amd64.
+- HOWL_FORBID_LOCAL_INFERENCE=1 set for every howl command.
+- Target: /run/media/system/tallgeese/dev/dogfood-missions/run-030/logsum, initial commit de86f10 (pre-existing project, 3 packages, 6 tests, README).

@@ -1,5 +1,16 @@
 # Howl Dogfood Handoff
 
+## CURRENT (adaptive tranche 1, started 2026-10-04) — read this first
+- Overall: baseline PASS holds (main 41a1621 src == 5a806e3, runs 028/029); no baseline rerun needed.
+- Campaign: adaptive tranche 1 (varied missions). Records branch dogfood/adaptive-tranche-1 (worktree howlplane-dogfood-campaign). Coverage: MISSION_COVERAGE.md.
+- Current run: run-031, Mission B, existing Python bookmarks API (dogfood-missions/run-031/bookmarks, base 195012a): 3 user-reported bugs. run-030 CLEAN. Legacy DB fixture: dogfood-missions/run-031/old.db (made by the pre-fix version) for upgrade verification.
+- Engine: howlplane checkout on main 41a1621 (live editable install).
+- Next finding ID: DOG-026. Next run ID: run-032.
+- Active finding: none yet.
+- Resume: `howl orchestrate inspect --repo <target>`; if the session finished, verify per runs/run-030/MISSION.md and write VERIFICATION.md/RESULT.md.
+- Always export HOWL_FORBID_LOCAL_INFERENCE=1.
+- Older history below.
+
 ## Mission
 Prove a normal user can ask Howl for a household recurring-task CLI app (add, list, complete with timestamp, due-again detection, local persistence, tests, usage docs) via the public CLI and get a working result. Two consecutive clean runs required.
 

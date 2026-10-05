@@ -50,3 +50,8 @@
 - 2026-10-04 DOG-025 fixed 5a806e3 (pushed). run-028 (5a806e3): COMPLETE, verified: CLEAN RUN 1/2. Starting run-029.
 - 2026-10-04 run-029 (5a806e3) COMPLETE, verified: CLEAN RUN 2/2. DOGFOOD RESULT: PASS (run-028, run-029). FINAL_REPORT Addendum 5.
 - 2026-10-04 PR #151 merged (e74e460); main src == 5a806e3; PASS holds on main; howlframe fast-forwarded; all agents READY.
+
+## Adaptive tranche 1 (2026-10-04)
+- Resume check: main 41a1621, `git diff 5a806e3 41a1621 -- src pyproject.toml` empty -> baseline PASS (028/029) holds; no baseline rerun. All 12 ecosystem repos clean and current. Records branch dogfood/adaptive-tranche-1. MISSION_COVERAGE.md created.
+- run-030 (41a1621) Mission A, existing Go project logsum (+since/until, -format json): COMPLETE in 4.5 min, Claude plan/review, Codex impl, first-pass CLEAN; independently verified (byte-identical default output vs pre-change binary, cross-offset windows, README JSON example exact). CLEAN. No findings; observation OBS-030-1 (no public cleanup for factory worktrees).
+- run-031 (41a1621) Mission B, existing Python HTTP/SQLite service, 3 symptom-only bug reports + automatic DB upgrade: started.
