@@ -18,6 +18,7 @@ from typing import List, Optional, Union
 import uuid
 
 from howlplane.control_plane.atomic_io import atomic_write_json, safe_load_json
+from howlplane.control_plane.git_env import guarded_git_args
 from howlplane.control_plane.launcher import TargetRepositoryNotFoundError, find_git_repo_root
 from howlplane.control_plane.locking import get_systemd_main_pid, is_process_record_active
 
@@ -52,7 +53,7 @@ def factory_workspace_root(repository: "RepositoryIdentity") -> Path:
 def _run_git(repo: Path, args: list[str]) -> str:
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo), *args], text=True, stdout=subprocess.PIPE,
+            ["git", "-C", str(repo), *guarded_git_args(args)], text=True, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, check=False, timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:

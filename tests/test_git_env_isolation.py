@@ -208,3 +208,27 @@ def test_real_repository_was_not_contaminated_by_the_suite():
         injected = run_git_in_repo(REPO_ROOT, ["config", "--local", "--get", key])
         assert injected.stdout.strip() != "HowlPlane CI", f"local {key} was injected"
         assert injected.stdout.strip() != "ci@howlplane.local", f"local {key} was injected"
+
+
+def test_repository_configured_programs_never_run_from_howlplane_git_calls(tmp_path):
+    """DOG-028: core.fsmonitor, diff.external and textconv drivers in .git/config are programs git runs on
+    its own. An agent able to write .git/config must not get HowlPlane, outside the agent's sandbox, to run them."""
+    from howlplane.control_plane.orchestration import evidence
+
+    repo = init_git_repo(tmp_path / "repo", files={"a.txt": "old\n", ".gitattributes": "* diff=planted\n"})
+    marker = tmp_path / "planted-program-ran"
+    hook = tmp_path / "planted.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\ncat \"$1\" 2>/dev/null\n")
+    hook.chmod(0o755)
+    for key in ("core.fsmonitor", "diff.external", "diff.planted.textconv"):
+        git_in_repo(repo, ["config", key, str(hook)])
+    (repo / "a.txt").write_text("new\n")
+
+    for args in (["status", "--porcelain"], ["diff"], ["diff", "HEAD", "--", "a.txt"], ["log", "-p", "-1"], ["show", "HEAD"]):
+        assert run_git_in_repo(repo, args).returncode == 0, args
+    evidence(repo)
+
+    assert not marker.exists()
+    # The guard is what made the difference: plain git does run the planted program.
+    subprocess.run(["git", "-C", str(repo), "status"], capture_output=True, env=sanitized_git_env())
+    assert marker.exists()
