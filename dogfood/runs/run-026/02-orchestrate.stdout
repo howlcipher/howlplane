@@ -1,0 +1,52 @@
+HOWL ORCHESTRATION REPORT
+Session: f583611bc031450f930bc4f8def3ef50
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: bf1acff7837153eb606c8866c41a74370843ec2b
+Repository status: ?? .gitignore
+?? PLAN.md
+?? README.md
+?? household_tasks.py
+?? tests/__init__.py
+?? tests/test_cli.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "exit_code": 0, "output": ".............\n----------------------------------------------------------------------\nRan 13 tests in 7.581s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))
+Failures: []
+Review notes from Claude (review, CLEAN):
+  Review found no BLOCKING defects. I could only read files here, so I did not run anything myself. The test result below is the harness evidence you supplied.
+  
+  **Files reviewed** (all untracked, so the diff is the whole content):
+  - `household_tasks.py`
+  - `tests/test_cli.py`
+  - `tests/__init__.py`
+  - `README.md`
+  - `PLAN.md` and `.gitignore` are also untracked; I did not read them.
+  
+  **Tests:** per the harness, `git diff --check` exited 0, and `python3 -m unittest discover -s tests -t .` ran 13 tests, all OK. I did not run flake8.
+  
+  **Goal requirements**
+  - **Add a task:** `add` is implemented and covered, including empty, over-long, non-printable and SQL-looking names, and duplicate names.
+  - **List tasks:** `list` and `due` are implemented. The sort by due date then ID is covered by `test_sort_and_overdue`.
+  - **Mark complete and record the date:** `complete` writes a row to a `completions` table in the same transaction as the next-due update. `test_transaction_rolls_back_history_on_update_failure` confirms a failed update leaves no history row.
+  - **Due again:** a task is due when its due date is on or before the evaluated date, and the README demo sequence is asserted by `test_readme_sequence`. Early, late and leap-year completions are covered, as are the year-9999 overflow and the rejection of a completion dated before the latest one.
+  - **Local persistence:** SQLite via the standard library, with `BEGIN IMMEDIATE` to serialize writers.
+  - **Tests:** CLI-level subprocess tests cover the happy path, invalid arguments (exit 2), unknown IDs (exit 1), bad and corrupt database paths, and the boundary values. They also cover defaults and `--help`.
+  - **Documentation:** the README commands match the code's behavior and the exit codes it states. I found no false claims.
+  
+  **NON-BLOCKING**
+  1. `--start` and `--on` defaults are evaluated when the parser is built. That is fine for a one-shot CLI.
+  2. Task names allow any printable Unicode, which is not in the README beyond "printable characters".
+  3. The README says "Python 3.9+" but only 3.14 `.pyc` files exist, so older versions were not exercised. `date.fromisoformat` and the rest of the code look compatible.
+  4. There is no concurrency test for the `BEGIN IMMEDIATE` locking, and no delete or edit command. The README says deletion is out of scope.
+  5. flake8 is documented as optional and was not part of the harness evidence.
+  
+  AUDIT_STATUS: CLEAN

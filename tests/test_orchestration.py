@@ -298,6 +298,36 @@ def test_acceptance_rework_shares_the_cap_and_a_final_rejection_hands_off(tmp_pa
     assert "Rework rounds: 2 of 2" in captured.out and "orchestrator rejected acceptance" in captured.out
 
 
+@pytest.mark.parametrize("clean_after, status", [(1, 0), (None, 2)])
+def test_report_labels_superseded_review_verdicts(tmp_path, monkeypatch, capsys, clean_after, status):
+    # DOG-022 (run-022): a COMPLETE report printed earlier rounds' "blocking finding remains" verdicts unlabelled.
+    repo = repository(tmp_path)
+    enable_fake_review_pair(tmp_path, monkeypatch)
+    reviews = []
+
+    def execute(doc, stage, agent, model, cwd):
+        if stage == "implementation":
+            (cwd / "README").write_text(f"changed {len(reviews)}\n")
+        outcome = result(agent, stage)
+        if stage == "review":
+            reviews.append(agent)
+            done = clean_after is not None and len(reviews) > clean_after
+            outcome.stdout = "AUDIT_STATUS: CLEAN" if done else f"- BLOCKING: bug {len(reviews)}\nAUDIT_STATUS: FINDINGS"
+        else:
+            outcome.stdout = {"acceptance": "ACCEPTANCE_STATUS: ACCEPTED"}.get(stage, "plan")
+        return outcome
+
+    monkeypatch.setattr(module, "execute_assignment", execute)
+    assert module.command(arguments(repo, policy="PLAN + EXECUTE + INDEPENDENT AUDIT", verify=["git", "diff", "--check"])) == status
+    out = capsys.readouterr().out
+    headers = [line for line in out.splitlines() if line.startswith("Verdict from")]
+    superseded = [line for line in headers if "sent back to implementation and re-judged" in line]
+    if clean_after is not None:
+        assert headers and superseded == headers  # every FINDINGS verdict was reworked
+    else:
+        assert len(superseded) == len(headers) - 1 and "re-judged" not in headers[-1]  # the last one still stands
+
+
 def test_findings_from_an_earlier_round_are_labelled_for_acceptance():
     doc = {"rework_rounds": 1, "attempts": [
         {"stage": "review", "agent": "cursor", "state": "REVOKED", "failure": "AUDIT_FINDINGS_OR_UNCONFIRMED", "verdict_excerpt": "bug", "rework_round": 0},
@@ -455,6 +485,27 @@ def test_implementation_prompts_ask_for_class_fixes_and_true_documentation(tmp_p
     assert "every behavior your documentation promises holds for all inputs it covers" in first
     assert "example of a defect class: fix its root cause" in rework and "IsADirectoryError" in rework
     assert "Fix every valid finding" not in rework
+
+
+def test_every_role_knows_it_runs_inside_howlplane_and_later_roles_get_the_plan(tmp_path, monkeypatch):
+    # DOG-025 (run-027): an implementer ran `howlplane route` and copied the session manifest, lease token
+    # included, into the user's repository; reviewers kept asking for "Howl workflow evidence".
+    prompts = record_prompts(monkeypatch)
+    doc = {"id": "abcdef123456", "goal": "g", "constraints": [], "execution_budget": {},
+           "workspace_trust_policy": {"policy": "prepare"}, "policy": "PLAN + EXECUTE", "attempts": []}
+    module.execute_assignment(doc, "planning", "codex", "UNKNOWN", tmp_path)
+    doc["plan_excerpt"] = "Use Python and SQLite.\nVERIFY_COMMAND: python3 -m unittest"
+    for role in ("implementation", "review", "acceptance"):
+        module.execute_assignment(doc, role, "codex", "UNKNOWN", tmp_path)
+    by_role = dict(prompts)
+    for role, prompt in by_role.items():
+        assert "inside HowlPlane orchestration session abcdef12" in prompt, role
+        assert "Do not run howl or howlplane commands" in prompt, role
+    assert "Use Python and SQLite." not in by_role["planning"]
+    assert "follow it unless the repository shows it is wrong" in by_role["implementation"]
+    for role in ("implementation", "review", "acceptance"):
+        assert "Use Python and SQLite." in by_role[role], role
+    assert "do not require workflow artifacts" in by_role["review"]
 
 
 def test_review_prompt_carries_harness_verification_and_a_blocking_only_verdict(tmp_path, monkeypatch):

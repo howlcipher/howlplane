@@ -42,3 +42,10 @@
 - 2026-10-04 DOG-023: user chose 'Prefer Codex implementer'; fixed 7a516c0 (push in progress). Next: run-024, run-025 on 7a516c0.
 - 2026-10-04 run-024 (7a516c0): COMPLETE, verified: CLEAN RUN 1/2. Starting run-025.
 - 2026-10-04 run-025 (7a516c0) COMPLETE, verified: CLEAN RUN 2/2. DOGFOOD RESULT: PASS (run-024, run-025) with Claude in the pool. FINAL_REPORT Addendum 4.
+- 2026-10-04 PRs #147 and #148 merged; main 4e31e53 src == 7a516c0; PASS holds on main; engine checkout on main; howl/howlproof fast-forwarded (docs only).
+- 2026-10-04 post-merge records push hit the flaky pre-push test; captured it: DOG-024 (test suite leaks factory worktrees into the real data home). Fixed test-only on dogfood/DOG-024-test-xdg-isolation.
+- 2026-10-04 #149/#150 merged (#150 landed on the #149 branch, not main; carried to main by the DOG-022 PR). Removed 73 pytest-leaked worktrees (user approved). DOG-022 fixed on dogfood/DOG-022-report-superseded-verdicts; engine src changed, so run-026/run-027 re-verify.
+- 2026-10-04 run-026 (37bb7b7): COMPLETE, verified: CLEAN RUN 1/2. Starting run-027.
+- 2026-10-04 DOG-022 pushed (37bb7b7). run-027 (37bb7b7): BLOCKED after Codex budget overrun -> DOG-025 (workers re-run Howl workflow; session manifest with fence token copied into repo). Streak 0/2.
+- 2026-10-04 DOG-025 fixed 5a806e3 (pushed). run-028 (5a806e3): COMPLETE, verified: CLEAN RUN 1/2. Starting run-029.
+- 2026-10-04 run-029 (5a806e3) COMPLETE, verified: CLEAN RUN 2/2. DOGFOOD RESULT: PASS (run-028, run-029). FINAL_REPORT Addendum 5.

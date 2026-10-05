@@ -172,3 +172,23 @@ All commits pushed on dogfood/DOG-018-greenfield-denial; PR to be merged by the 
 
 ## Reproduction
 As Addendum 2, with the howlplane checkout at 7a516c0 (or main after the PR merges); Claude may be READY.
+
+## Post-merge (2026-10-04)
+PR #148 merged as 4e31e53 and #147 as 790eee7; main engine source is identical to 7a516c0, so the Addendum 4 PASS applies to main.
+
+# Addendum 5: post-merge follow-ups (2026-10-04)
+
+## Result
+DOGFOOD RESULT: PASS. Clean runs **run-028 and run-029** on howlplane `dogfood/DOG-022-report-superseded-verdicts` @5a806e3 (main f864cb2 + DOG-022 + DOG-025). Not counted: run-026 (clean, but run-027 on the same engine was not), run-027 (BLOCKED, found DOG-025).
+
+## Findings
+| ID | Summary | Commit |
+| --- | --- | --- |
+| DOG-022 | Report showed superseded FINDINGS verdicts as if open | 37bb7b7 |
+| DOG-024 | Test suite leaked factory worktrees into the real data home; intermittent pre-push failure | 48aa794 (merged, #149) |
+| DOG-025 | Workers re-ran the Howl workflow and copied the session manifest (lease token) into the user's repo; plan was discarded | 5a806e3 |
+Housekeeping: 73 pytest-leaked worktrees removed from ~/.local/share/howlplane/worktrees (user approved); 27 real ones kept.
+
+## Remaining recommended work
+1. Merge the PR for dogfood/DOG-022-report-superseded-verdicts (carries DOG-022, DOG-025 and the campaign records stranded by #150 merging into #149's branch).
+2. Claude-implemented review convergence (DOG-023) is routed around, not solved.

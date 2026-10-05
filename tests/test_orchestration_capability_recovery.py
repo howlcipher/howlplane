@@ -554,6 +554,7 @@ def test_plan_test_command_reaches_claude_implementer_as_grant_and_instruction(t
     doc = module.active_sessions(module.state_root(), repo, include_terminal=True)[0]
     assert doc["planned_verify_command"] == planned.split()
     assert doc["verify_source"] == "named by the plan (VERIFY_COMMAND)"
+    assert doc["plan_excerpt"].endswith("VERIFY_COMMAND: " + planned)  # kept for later roles (DOG-025)
 
 
 # DOG-023: with no orchestrator chosen, AUTO prefers Codex to implement; explicit choices and ECONOMY are unchanged
