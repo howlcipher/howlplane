@@ -1,0 +1,65 @@
+HOWLPLANE FACTORY PREPARE
+
+This authorizes HowlPlane to prepare and use, unattended:
+  Repository checkout:     /run/media/system/tallgeese/dev/dogfood-missions/run-033/invoicegen
+  Factory workspace root:  /home/howlcipher/.local/share/howlplane/worktrees/4d6952c5dee1ac853929e7da
+  Factory worktree:        /home/howlcipher/.local/share/howlplane/worktrees/4d6952c5dee1ac853929e7da/target
+  Workspace trust policy:  BYPASS
+
+Agents:
+  Codex: none needed
+  Claude Code: none needed
+  Cursor: not required under BYPASS (each invocation passes --trust)
+  AGY: none needed
+  Devin: not required under BYPASS (each invocation passes --respect-workspace-trust false)
+
+Nothing outside these paths is authorized. Vendor trust prompts are never answered by HowlPlane.
+
+TRUST PREPARATION
+  Nothing to prepare.
+
+WORKSPACE READINESS
+  Workspace:      /home/howlcipher/.local/share/howlplane/worktrees/4d6952c5dee1ac853929e7da/target
+  Authorized:     YES — /run/media/system/tallgeese/dev/dogfood-missions/run-033/invoicegen (factory root /home/howlcipher/.local/share/howlplane/worktrees/4d6952c5dee1ac853929e7da)
+  Trust policy:   BYPASS (from cli)
+
+  Codex
+    Vendor trust:        NOT ENFORCED — `codex exec` shows no workspace trust dialog (observed codex-cli 0.156.1)
+    Trust policy:        BYPASS
+    Effective workspace: READY — noninteractive mode does not enforce workspace trust
+  Claude Code
+    Vendor trust:        NOT ENFORCED — `claude -p` skips the workspace trust dialog (claude --help)
+    Trust policy:        BYPASS
+    Effective workspace: READY — noninteractive mode does not enforce workspace trust
+  Cursor
+    Vendor trust:        TRUST REQUIRED — no trust marker for this directory or an eligible ancestor
+    Trust policy:        BYPASS
+    Effective workspace: READY — vendor trust is recorded by the CLI itself on first use
+    Mechanism:           --trust
+    Preparation:         not required under BYPASS
+  AGY
+    Vendor trust:        NOT ENFORCED — `agy -p` runs in an untrusted directory without prompting (observed agy 1.2.10)
+    Trust policy:        BYPASS
+    Effective workspace: READY — noninteractive mode does not enforce workspace trust
+  Devin
+    Vendor trust:        TRUST REQUIRED — not inside any Devin-trusted workspace
+    Trust policy:        BYPASS
+    Effective workspace: READY — vendor trust not required for this invocation (check skipped, directory not trusted)
+    Mechanism:           --respect-workspace-trust false
+    Preparation:         not required under BYPASS
+
+FACTORY READINESS: DEGRADED
+  Implementation-capable: Codex, Claude Code, Cursor, AGY, Devin
+  Review-capable:         Codex, Claude Code, Cursor, AGY, Devin
+  Independent audit:      available
+  Interactive-only:       none
+  Unavailable:            none
+  Unattended unverified:  AGY, Devin
+  Capacity unknown:       Codex, Claude Code, Cursor, AGY, Devin
+  Known exhausted:        none
+  Live smoke passed:      none
+  Workspace trust gated:  none
+  Trust policy:           BYPASS
+  Trust check bypassed:   Cursor, Devin
+  Workspace:              /home/howlcipher/.local/share/howlplane/worktrees/4d6952c5dee1ac853929e7da/target (authorized: yes)
+  Execution budget:       planning 300s, implementation 600s, review 600s, acceptance 300s

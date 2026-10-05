@@ -1,13 +1,15 @@
 # Howl Dogfood Handoff
 
 ## CURRENT (adaptive tranche 1, started 2026-10-04) — read this first
-- Overall: baseline PASS holds (main 41a1621 src == 5a806e3, runs 028/029); no baseline rerun needed.
-- Campaign: adaptive tranche 1 (varied missions). Records branch dogfood/adaptive-tranche-1 (worktree howlplane-dogfood-campaign). Coverage: MISSION_COVERAGE.md.
-- Current run: run-031, Mission B, existing Python bookmarks API (dogfood-missions/run-031/bookmarks, base 195012a): 3 user-reported bugs. run-030 CLEAN. Legacy DB fixture: dogfood-missions/run-031/old.db (made by the pre-fix version) for upgrade verification.
-- Engine: howlplane checkout on main 41a1621 (live editable install).
-- Next finding ID: DOG-026. Next run ID: run-032.
-- Active finding: none yet.
-- Resume: `howl orchestrate inspect --repo <target>`; if the session finished, verify per runs/run-030/MISSION.md and write VERIFICATION.md/RESULT.md.
+- Overall: baseline PASS holds for main (41a1621 src == 5a806e3, runs 028/029). Tranche 1 in progress.
+- Records branch dogfood/adaptive-tranche-1 (worktree howlplane-dogfood-campaign). Coverage: MISSION_COVERAGE.md.
+- Runs so far: run-030 CLEAN (Go feature), run-031 CLEAN (Python HTTP bugs), run-032 HANDOFF -> DOG-026 (Node config refactor, dirty tree).
+- Active finding: DOG-026 (failed verification ends session without rework; output truncated). Fixed in howlplane dogfood/DOG-026-verification-rework 744bc4a, PUSHED (full pre-push suite 2321 passed). No PR yet.
+- LIVE ENGINE: the howlplane checkout is ON dogfood/DOG-026-verification-rework (744bc4a). Return it to main if the PR is not merged when the tranche ends.
+- Current run: run-033 = run-032's mission on 744bc4a from an identical start (dogfood-missions/run-033/invoicegen; WIP sha256 in ../wip.sha256).
+- Engine changed, so tranche convergence needs the final two missions clean on 744bc4a (run-033 + one more new mission).
+- Next finding ID: DOG-027. Next run ID: run-034.
+- Resume: `howl orchestrate inspect --repo <target>`; verify per runs/<run>/MISSION.md; write VERIFICATION.md/RESULT.md.
 - Always export HOWL_FORBID_LOCAL_INFERENCE=1.
 - Older history below.
 

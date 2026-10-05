@@ -1,0 +1,32 @@
+HOWL ORCHESTRATION REPORT
+Session: c94268e0140541e79c17ec4f2168e75b
+Goal: invoicegen currently reads its settings straight from `process.env` in several places. We want to deploy it for multiple clients, and environment variables alone are getting unwieldy. Please refactor configuration handling:
+
+1. Move all configuration loading into a single module so the rest of the code receives a plain config object instead of reading `process.env` directly.
+2. Support a JSON config file. Use the file given by a new `--config PATH` option; when that option is absent, use `.invoicegen.json` in the current working directory if it exists. Keys: `company`, `currency`, `taxRate`, `outDir`.
+3. Precedence, highest first: environment variables, then the config file, then built-in defaults. A relative `outDir` in a config file is resolved relative to that file's directory.
+4. Validate the final configuration: `taxRate` must be a number from 0 to 1, `currency` must be three uppercase letters, and `company` must be a non-empty string. Invalid configuration, an unreadable or malformed `--config` file, or an unknown key in the file must exit with code 2 and a message naming the problem, before any output is written. (A missing auto-discovered `.invoicegen.json` is not an error.)
+
+Compatibility: users who configure only through the existing environment variables must see exactly the same output and behaviour as today, including the current defaults. Keep the existing tests passing, add tests for the new behaviour (precedence, discovery, relative outDir, each validation error), and update the README.
+Status: HANDOFF REQUIRED
+Resumable: yes
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 2
+Reroutes: 0
+Repository head: c03d40d7285f222c6c63e454c971aaaf1f4a9ea9
+Repository status: M README.md
+ M src/cli.js
+ M src/render.js
+ M templates/footer.txt
+ M test/cli.test.js
+?? notes/todo.md
+?? src/config.js
+?? test/config.test.js
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["npm", "test"], "exit_code": 1, "output": " missing explicit file\n  ---\n  duration_ms: 0.640515\n  type: 'test'\n  ...\n# Subtest: unreadable explicit file\nok 55 - unreadable explicit file\n  ---\n  duration_ms: 0.515139\n  type: 'test'\n  ...\n# Subtest: valid taxRate endpoints\nok 56 - valid taxRate endpoints\n  ---\n  duration_ms: 0.768845\n  type: 'test'\n  ...\n# Subtest: money avoids float drift\nok 57 - money avoids float drift\n  ---\n  duration_ms: 2.884114\n  type: 'test'\n  ...\n# Subtest: defaults\nok 58 - defaults\n  ---\n  duration_ms: 2.473882\n  type: 'test'\n  ...\n# Subtest: env overrides\nok 59 - env overrides\n  ---\n  duration_ms: 1.335511\n  type: 'test'\n  ...\n1..59\n# tests 59\n# suites 0\n# pass 58\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 6167.967014\nnpm warn cli npm v12.0.2 does not support Node.js v22.22.1. This version of npm supports the following node versions: `^22.22.2 || ^24.15.0 || >=26.0.0`. You can find the latest version at https://nodejs.org/.\nnpm notice run invoicegen@1.3.0 test\nnpm notice run node --test\n"}]
+Independent audit: not requested or incomplete
+Recovery: {}
+Verification command: npm test (derived from the project's discovered test command)
+Failures: []

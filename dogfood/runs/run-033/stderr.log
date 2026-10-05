@@ -1,0 +1,14 @@
+HOWL ORCHESTRATION
+Session: 16ea3eeb...
+Goal: invoicegen currently reads its settings straight from `process.env` in several places. We…
+Requested orchestrator: AUTO
+Selected orchestrator: pending
+Strategy: BALANCED
+Failover: AUTO REROUTE
+Execution: PLAN + EXECUTE + INDEPENDENT AUDIT
+
+Starting orchestration...
+[21:22:38] PLAN        Building implementation plan
+[21:22:38] SELECT      Claude for planning: unattended verified · live smoke stale · capacity UNKNOWN
+[21:22:38] ASSIGN      Claude assigned task 16ea3eeb: planning
+[21:22:38] START       Claude started planning

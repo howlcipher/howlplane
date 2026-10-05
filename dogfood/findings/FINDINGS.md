@@ -453,3 +453,32 @@ The goal asks for the approach to be chosen "through the normal Howl workflow", 
 
 ### Resolution
 Pending: store the plan; give it to implementation and review/acceptance as the workflow's decision record; tell every role it runs inside a HowlPlane session and must not invoke howl/howlplane or read HowlPlane state.
+
+## DOG-026 — A failed verification ends the session instead of going back to the implementer; the failing output is cut off
+Status: FIXED (pending live regression run)
+Severity: P1 (workflow blocker with no actionable evidence)
+Discovered in: run-032 (adaptive tranche 1, Mission C, existing Node.js project invoicegen)
+Owning component: HowlPlane orchestration (`src/howlplane/control_plane/orchestration.py`)
+Repository: howlplane
+### User action
+`howl orchestrate "<config refactor request>" --repo dogfood-missions/run-032/invoicegen` (after `howl factory prepare --yes`).
+### Expected
+When HowlPlane's own verification (`npm test`, derived) fails after implementation, the failure goes back to the implementer like a review finding, within the bounded rework budget; if it still fails, the report says what failed and what to do.
+### Actual
+Codex finished; `npm test` failed 1 of 59 (`CLI rejects invalid outDir before any output`: file `outDir: 42` masked by `INVOICE_OUT_DIR`). The session stopped at HANDOFF REQUIRED on the first verification attempt with no rework. The report's Tests entry held only the last 1000 characters (TAP summary), not the failing case; `Failures: []`; `Independent audit: not requested or incomplete`. `howl orchestrate inspect` showed only `Stage: implementation`. `resume` would rerun implementation with no mention of the failure.
+### Evidence
+runs/run-032/stdout.log, stderr.log, exit.txt (2). Code: orchestration.py (41a1621) lines 1584-1592 (`[-1000:]`, immediate handoff); 1315/1383 the same unguarded `subprocess.run` (OSError/TimeoutExpired would crash the session).
+### User impact
+The user must rerun the tests, find the failure, and fix it or re-run Howl blind, for a defect Howl had already detected. Uncommitted user WIP was preserved (checked by sha256), so no data loss.
+### Root cause
+Defect class: evidence HowlPlane itself produces is not routed back to the implementer. Rework (DOG-011/013/016) was wired only for review and acceptance verdicts; verification was a terminal gate. Output capture was tail-only, and verification execution errors were unhandled at all four call sites.
+### Resolution
+Failed verification -> `begin_rework` with source `verification` (command, exit code, failure-first output), sharing MAX_REWORK_ROUNDS (not enlarged). `test_output_excerpt` keeps failure lines with context plus the tail. `run_verification` centralizes all four call sites; OSError -> reported "could not run" (no rework), timeout -> exit 124 (reworkable). Report/inspect print `Blocked by:`, the failing output, and an accurate Next step.
+### Tests
+New tests/test_orchestration_verification_rework.py (5 tests): rework converges; exhaustion handoff with reason/output/inspect; resume unchanged stops again; resume after user fix completes without another implementation; unrunnable and timed-out commands; excerpt extraction. Orchestration modules: 108 passed. make lint clean. Full suite: pre-push hook.
+### Commit
+Repository: howlplane. Branch: dogfood/DOG-026-verification-rework. SHA: 744bc4a. Push status: in progress.
+### Regression verification
+Pending: rerun the run-032 mission from a fresh copy of the same starting state on the fixed engine (run-033).
+### Notes
+Caught by testing my own report text: an earlier draft claimed resume-without-changes would get another implementation attempt; it does not (budget spent), and the text now says so.

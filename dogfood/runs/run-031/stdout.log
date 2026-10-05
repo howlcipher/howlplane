@@ -1,0 +1,66 @@
+HOWL ORCHESTRATION REPORT
+Session: 42f4b59724d04e0d8f25fa5495057fc2
+Goal: Bug report for this bookmarks service. We run it in production with several clients, and users have reported three problems:
+
+1. When a few clients save bookmarks at the same moment, some of the requests fail with a 500 error or the connection is dropped, and the bookmark is lost. It works fine when we test by hand one request at a time.
+2. Filtering with `GET /bookmarks?tag=py` also returns bookmarks tagged only `python` (and `?tag=go` returns `golang` ones). A tag filter should match the exact tag.
+3. The README says `GET /bookmarks` is newest first, but bookmarks saved within the same second come back oldest first, so a client that just saved several bookmarks sees them in the wrong order and pagination boundaries look inconsistent.
+
+Please investigate, find the root causes, and fix them. Requirements:
+- Keep the HTTP API and JSON shapes backward compatible for existing clients.
+- Our existing `bookmarks.db` files, created by the current version, must keep working after the upgrade with no data loss and no manual steps. If the schema has to change, the service must upgrade an old database automatically on startup.
+- Add regression tests for each problem, including one that exercises concurrent requests against the real HTTP server, and keep the existing tests passing.
+- Update the README if behaviour or operations change.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: 195012ae488b456c143896869108735137ea19ee
+Repository status: M README.md
+ M bookmarks/server.py
+ M bookmarks/store.py
+ M tests/test_api.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "exit_code": 0, "output": ".../usr/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 404: 'Not Found'>\n  _warnings.warn(self.warn_message, ResourceWarning)\n...../usr/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 500: 'Internal Server Error'>\n  _warnings.warn(self.warn_message, ResourceWarning)\n./usr/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 400: 'Bad Request'>\n  _warnings.warn(self.warn_message, ResourceWarning)\n.\n----------------------------------------------------------------------\nRan 10 tests in 5.730s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))
+Failures: []
+Review notes from Claude (review, CLEAN):
+  **Review: the three fixes and the legacy-DB upgrade hold up. I found no blocking issues.**
+  
+  I could only read files in this role, so I didn't run anything myself. The 10-test pass and the clean `git diff --check` come from HowlPlane's harness output.
+  
+  **Root causes and fixes**
+  - **Concurrent saves (`store.py:30-46`):** `add` now takes the write lock with `BEGIN IMMEDIATE` before reading the max id, so the read and insert are serialized. It reads the new row back in the same transaction and commits explicitly. WAL and `busy_timeout=5000` are set. Connections are closed through `closing`.
+  - **Server hardening (`server.py`):**
+    - `handle_errors` wraps `do_GET`, `do_POST` and `do_DELETE`, so unexpected store failures return a JSON 500 `{"error": ...}` instead of a dropped connection.
+    - Bad or negative `Content-Length` returns 400.
+    - `request_queue_size = 128` lets a burst of clients queue.
+    - No existing status code or JSON shape changed.
+  - **Tag filter (`store.py:66`):** `instr(',' || tags || ',', ',' || ? || ',')` gives an exact, case-sensitive match and treats `%` and `_` literally.
+  - **Ordering (`store.py:68`):** `ORDER BY created_at DESC, id DESC` is newest first with a stable tiebreak, so paging is stable.
+  - **Schema and old databases:** the schema is unchanged, and WAL is a persistent in-place switch. Old databases open with no manual steps, which matches the approved plan. Old rows without a primary key still work because `id` is `UNIQUE`.
+  
+  **Tests**
+  - All four original tests are unchanged, and each requirement has a new one.
+  - `test_concurrent_posts` sends 40 POSTs through a `Barrier` against the real server. It checks all 201s, unique ids, and that all 40 show up in the list.
+  - `test_exact_tags` covers `py`/`python`, `go`/`golang`, case sensitivity, and literal `%` and `_`.
+  - `test_same_second_order_and_pages` pins a fixed timestamp and checks the order and that `limit=2` pages don't overlap or leave gaps.
+  - `test_legacy_database` builds a raw old-schema database with tied `created_at` values and tags `python,py`. It checks rows intact, tag filter and order, next id 3, and WAL enabled with 3 rows persisted.
+  - Two more tests cover the JSON 500 path and bad `Content-Length`.
+  
+  **README:** it states exact, case-sensitive tag matching and the id tiebreak order. It also covers the WAL sidecar files and backup guidance, serialized writes with the 5s timeout, and the comma-tag limitation. I found nothing in it that is false.
+  
+  **NON-BLOCKING**
+  - Tag matching is now case-sensitive, where `LIKE` was case-insensitive for ASCII. This is documented in the README and should be flagged to users.
+  - Tags containing commas are still stored as separate tags, as before.
+  - WAL needs a local filesystem and adds sidecar files that affect backups. This is documented.
+  - If the highest id is deleted, the next insert reuses it. This is existing behaviour, and the ordering stays correct.
+  - The harness output shows `ResourceWarning` messages about unclosed `HTTPError`s in the test helper. They're cosmetic.
+  - The concurrency test is probabilistic against the old code, but deterministic against the fixed code.
+  
+  AUDIT_STATUS: CLEAN
