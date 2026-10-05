@@ -1,0 +1,37 @@
+HOWL ORCHESTRATION REPORT
+Session: 0b1476e6865340298fa71cd3a1b76fad
+Goal: Add a subtract(a, b) function to calc.py next to add, with unittest tests in tests/test_calc.py runnable via python3 -m unittest discover -s tests -t ., and a short README.md describing both functions.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: 0e18004ff8c919af1411a5ccd13e8b2215d2f066
+Repository status: M calc.py
+?? README.md
+?? __pycache__/calc.cpython-314.pyc
+?? tests/__init__.py
+?? tests/__pycache__/__init__.cpython-314.pyc
+?? tests/__pycache__/test_calc.cpython-314.pyc
+?? tests/test_calc.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "rework_round": 0, "exit_code": 0, "output": "........\n----------------------------------------------------------------------\nRan 8 tests in 0.000s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))
+Failures: []
+Review notes from Claude (review, CLEAN):
+  I found no blocking issues.
+  
+  - **`calc.py`:** `subtract(a, b)` returns `a - b` and sits after `add`. `add` is unchanged.
+  - **Tests:** `tests/test_calc.py` has 3 `add` tests and 5 `subtract` tests. Together they cover positive and negative operands, zero, and floats (using `assertAlmostEqual`). `test_subtract_negative_result` and the mixed-sign case would both fail if `subtract` were swapped to `b - a`. `tests/__init__.py` exists and is empty. HowlPlane's run of `python3 -m unittest discover -s tests -t .` exited 0 with 8 tests passing. I did not run it myself.
+  - **README:** It describes both functions with examples and gives the test command. The `add` example imports both functions, which is harmless. It has no decorative dashes.
+  - **Scope:** The source changes are the four planned files. `README.md` and `tests/` were already untracked in git status.
+  
+  **NON-BLOCKING**
+  - `__pycache__/` and `tests/__pycache__/` are untracked build artifacts, and there is no `.gitignore`. They should not be committed.
+  - The README `add` example imports `subtract` but does not use it in that block.
+  
+  AUDIT_STATUS: CLEAN

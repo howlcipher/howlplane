@@ -1,15 +1,13 @@
 # Howl Dogfood Handoff
 
-## CURRENT (adaptive tranche 1, started 2026-10-04) — read this first
-- Overall: baseline PASS holds for main (41a1621 src == 5a806e3, runs 028/029). Tranche 1 in progress.
-- Records branch dogfood/adaptive-tranche-1 (worktree howlplane-dogfood-campaign). Coverage: MISSION_COVERAGE.md.
-- Runs: 030 CLEAN (Go feature), 031 CLEAN (Python HTTP bugs), 032 HANDOFF -> DOG-026, 033 CLEAN (032 rerun on 744bc4a), 032-resume proved DOG-026 live, 034 running (test-only characterization, Python).
-- Findings this tranche: DOG-026 RESOLVED (744bc4a). DOG-027 (reviewers diff-blind) and DOG-028 (git runs repo-configured programs, P1 security) FIXED in 175b57a, pushed (pre-push 2327 passed), awaiting live proof.
-- Branches (no PRs yet; user merges): howlplane dogfood/DOG-026-verification-rework 744bc4a; dogfood/DOG-027-review-diff-evidence 175b57a (stacked on 744bc4a).
-- LIVE ENGINE: howlplane checkout is ON dogfood/DOG-027-review-diff-evidence (175b57a). Return it to main when the tranche ends unless merged.
-- Convergence: need the final two missions clean on 175b57a: run-034 + run-035 (a new mission type).
-- Next finding ID: DOG-029. Next run ID: run-035.
-- Resume: `howl orchestrate inspect --repo <target>`; verify per runs/<run>/MISSION.md; write VERIFICATION.md/RESULT.md. run-034 check: pricing.py sha256 in dogfood-missions/run-034/pricing.sha256 must be unchanged.
+## CURRENT (adaptive tranche 1) — read this first
+- ADAPTIVE DOGFOOD TRANCHE 1: PASS (2026-10-04). See FINAL_REPORT.md "Adaptive Dogfood Tranche 1".
+- Final engine: 175b57a. PRs (user merges): howlplane #153 (DOG-026, base main), #154 (DOG-027/028, base #153's branch; merge #153 first).
+- LIVE ENGINE: the howlplane checkout was returned to main (41a1621), which LACKS DOG-026/027/028 until the PRs merge.
+- Records: branch dogfood/adaptive-tranche-1 (worktree howlplane-dogfood-campaign).
+- Active finding: none. Next finding DOG-029; next run run-039.
+- After merges: `git -C howlplane pull` on main; if `git diff 175b57a main -- src pyproject.toml` is empty, the tranche PASS and baseline (036/037) apply to main; otherwise rerun the baseline fixture twice (run-039/040).
+- Open items: DOG-023 limitation; git-hooks policy for HowlPlane's own commits; OBS-030-1 worktree cleanup.
 - Always export HOWL_FORBID_LOCAL_INFERENCE=1.
 - Older history below.
 

@@ -485,7 +485,7 @@ Repository: howlplane. Branch: dogfood/DOG-026-verification-rework. SHA: 744bc4a
 Caught by testing my own report text: an earlier draft claimed resume-without-changes would get another implementation attempt; it does not (budget spent), and the text now says so.
 
 ## DOG-027 — Reviewers cannot see the diff they are asked to inspect, so compatibility requirements go unverified
-Status: FIXED (pending live regression run)
+Status: RESOLVED (verified live, run-034)
 Severity: P2 (independent review weaker than claimed; no false success observed)
 Discovered in: run-032 resume review notes (also visible in run-030: "I read the diff and tests with Read only")
 Owning component: HowlPlane orchestration (review/acceptance prompt evidence)
@@ -505,12 +505,12 @@ Design choice (pros/cons recorded in the session): HowlPlane computes the diff i
 ### Tests
 tests/test_orchestration_review_diff_evidence.py (5 tests, real prompt building through a recording backend). test_provider_permissions unchanged and passing.
 ### Commit
-howlplane dogfood/DOG-027-review-diff-evidence 175b57a (stacked on DOG-026 744bc4a). Push: in progress.
+howlplane dogfood/DOG-027-review-diff-evidence 175b57a (stacked on DOG-026 744bc4a). Push: PUSHED (pre-push full suite 2327 passed).
 ### Regression verification
-Pending: next missions on 175b57a; check reviewer notes no longer say they cannot see the diff.
+run-034 (175b57a): reviewer wrote "shopcalc/pricing.py is not in the diff. Only README.md, TESTING_NOTES.md, tests/__init__.py and tests/test_pricing.py changed or were added", a scope check impossible before. Runs 035-037 on the same engine clean.
 
 ## DOG-028 — HowlPlane's own git calls run programs named in repository config (sandbox escape path)
-Status: FIXED (pending push)
+Status: RESOLVED (verified live, run-038 targeted experiment)
 Severity: P1 (security: trust-boundary violation)
 Discovered in: building DOG-027's regression test (a planted textconv driver fired during an ordinary session)
 Owning component: HowlPlane git launcher (git_env.py) and orchestration evidence
@@ -530,6 +530,8 @@ Defect class: git invocations treated as read-only although git config can name 
 ### Tests
 test_git_env_isolation::test_repository_configured_programs_never_run_from_howlplane_git_calls (status/diff/log/show + evidence; proves unguarded git would run it); full-session test in test_orchestration_review_diff_evidence.
 ### Commit
-Same commit as DOG-027 (175b57a), shared files.
+Same commit as DOG-027 (175b57a), shared files. PUSHED.
+### Regression verification
+run-038 TARGETED DOGFOOD EXPERIMENT: core.fsmonitor logging hook in the target repo; public-CLI session made 4 hook calls, all from Codex's sandboxed git, 0 from HowlPlane (control: plain git status fires it).
 ### Notes
 Not addressed (out of scope, recorded): git hooks in `.git/hooks` / `core.hooksPath` still run on HowlPlane's own commits in git_integration; disabling them would change semantics for users who rely on their hooks. Candidate for a separate design decision.

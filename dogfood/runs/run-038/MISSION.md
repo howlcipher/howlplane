@@ -1,0 +1,1 @@
+Add a subtract(a, b) function to calc.py next to add, with unittest tests in tests/test_calc.py runnable via python3 -m unittest discover -s tests -t ., and a short README.md describing both functions.

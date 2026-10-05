@@ -1,0 +1,48 @@
+HOWL ORCHESTRATION REPORT
+Session: 3adaf8e10f5743cc978f877f6ec8fef7
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: 11bba9ee694e78351508332f05210a17fd4852bf
+Repository status: ?? .gitignore
+?? README.md
+?? household/__init__.py
+?? household/__main__.py
+?? household/cli.py
+?? household/model.py
+?? household/store.py
+?? tests/__init__.py
+?? tests/test_cli.py
+?? tests/test_model.py
+?? tests/test_store.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "rework_round": 0, "exit_code": 0, "output": "..........\n----------------------------------------------------------------------\nRan 10 tests in 0.496s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))
+Failures: []
+Review notes from Claude (review, CLEAN):
+  No blocking findings. I read every source, test and doc file but ran nothing myself. The pass result below is the harness evidence.
+  
+  **Requirements and acceptance criteria**
+  - **Commands:** `add`, `list`, `complete` (with `--on`) and `due` (with `--as-of`) are all implemented in `household/cli.py` and reachable through `python3 -m household`. `tests/test_cli.py::test_separate_processes` exercises add, list, complete, due and list in separate processes, and the persisted data is checked afterwards.
+  - **Due logic:** `household/model.py` sets the due date to the latest completion plus the interval, or to the creation date if never completed. A task is due when its due date is on or before the reference date, and overdue rows show the day count.
+  - **Model tests:** `test_model.py` covers leap day, year boundary, never-completed tasks, out-of-order and duplicate completion dates, and duplicate names.
+  - **Error handling:** bad interval, empty name, unknown id, malformed or future date, and a corrupt file each give a non-zero exit with a one-line stderr message and no traceback. Usage errors exit 2 and runtime errors exit 1. `test_errors_are_single_line` asserts the code, empty stdout, a single stderr line and no `Traceback`.
+  - **Persistence:** `store.py` writes through a temp file and `os.replace`, with a schema version and an `next_id` counter so ids are never reused. `test_store.py` covers the round trip, id non-reuse, corrupt payloads, and a failed replace that leaves the original file intact and no temp file behind.
+  - **Path precedence and isolation:** `test_path_precedence` covers `--data` winning over the environment variable. The tests use a temp directory and an injected `today`, so the home directory is never touched.
+  - **Constraints:** the code is standard library only, and I saw no `match` statements or `X | Y` unions. I saw no line over 79 characters. `README.md` covers usage, an example session, the data file location, the concurrency caveat and the test command, and what I checked of it matches the code.
+  - **Harness evidence:** `git diff --check` exited 0 and the 10 tests pass.
+  
+  **Non-blocking notes**
+  - `task.due_date` on `cli.py:76` is a bare expression kept to trigger a date-overflow check. It would be clearer with a comment.
+  - Printing non-ASCII names could raise `UnicodeEncodeError` under a non-UTF-8 stdout locale. That error is not caught and would produce a traceback.
+  - The `--on` value is validated against `today` twice, once in the CLI and once in the model. The duplication is harmless.
+  - The tests do not cover the `HOUSEHOLD_TASKS_FILE` fallback when `--data` is absent. `test_path_precedence` only checks that `--data` wins.
+  
+  AUDIT_STATUS: CLEAN

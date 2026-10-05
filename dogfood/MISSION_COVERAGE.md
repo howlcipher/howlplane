@@ -13,6 +13,9 @@ Prevents repetitive dogfood. One row per run; adaptive tranches start at run-030
 | 033 | same as 032, identical start, engine 744bc4a | Existing (dirty tree) | Node.js | regression | CLEAN | no |
 | 034 | shopcalc: characterization tests only, source must not change | Existing | Python | test-only, legacy behaviour, determinism | CLEAN (15/15 mutants killed) | no |
 | 035 | ini2json: INI to JSON converter | Greenfield | Rust | file transformation, parsing, encoding, error semantics, offline build | CLEAN (19/19 oracle cases) | no |
+| 036 | household baseline fixture | Greenfield | Python | baseline regression on 175b57a | CLEAN 1/2 | no |
+| 037 | household baseline fixture | Greenfield | Python | baseline regression on 175b57a | CLEAN 2/2 | no |
+| 038 | TARGETED: DOG-028 fsmonitor hook, small calc change | Existing | Python | security boundary experiment | COMPLETE; 0 HowlPlane-invoked hooks | no |
 
 ## Capability matrix
 
