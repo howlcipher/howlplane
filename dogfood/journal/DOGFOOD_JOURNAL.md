@@ -66,3 +66,7 @@
 - run-036, run-037 (175b57a) household baseline fixture: both COMPLETE, verified CLEAN -> baseline restored on the new engine.
 - run-038 TARGETED (DOG-028): fsmonitor logging hook in the target repo; 4 calls from Codex's sandbox, 0 from HowlPlane. DOG-028 verified live.
 - PRs opened: #153 (DOG-026), #154 (DOG-027/028, stacked). ADAPTIVE DOGFOOD TRANCHE 1: PASS. Live engine checkout returned to main.
+
+## Adaptive tranche 2 (2026-10-05)
+- Post-merge check: #153, #155 on main; #154 landed on its stack base, not main (175b57a missing). Opened #156 with only 175b57a. Live engine kept on 175b57a (= main + #156).
+- run-039 (175b57a): large multi-user/auth/migration change to the bookmarks service, started.

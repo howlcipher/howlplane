@@ -1,13 +1,12 @@
 # Howl Dogfood Handoff
 
-## CURRENT (adaptive tranche 1) — read this first
-- ADAPTIVE DOGFOOD TRANCHE 1: PASS (2026-10-04). See FINAL_REPORT.md "Adaptive Dogfood Tranche 1".
-- Final engine: 175b57a. PRs (user merges): howlplane #153 (DOG-026, base main), #154 (DOG-027/028, base #153's branch; merge #153 first).
-- LIVE ENGINE: the howlplane checkout was returned to main (41a1621), which LACKS DOG-026/027/028 until the PRs merge.
-- Records: branch dogfood/adaptive-tranche-1 (worktree howlplane-dogfood-campaign).
-- Active finding: none. Next finding DOG-029; next run run-039.
-- After merges: `git -C howlplane pull` on main; if `git diff 175b57a main -- src pyproject.toml` is empty, the tranche PASS and baseline (036/037) apply to main; otherwise rerun the baseline fixture twice (run-039/040).
-- Open items: DOG-023 limitation; git-hooks policy for HowlPlane's own commits; OBS-030-1 worktree cleanup.
+## CURRENT (adaptive tranche 2, started 2026-10-05) — read this first
+- Tranche 1: PASS (FINAL_REPORT.md). PRs #153 and #155 merged to main. #154 merged into its stack base (dogfood/DOG-026-verification-rework), NOT main, so main (068e3d7) has DOG-026 but not DOG-027/028. Corrective PR #156 (dogfood/DOG-027-review-diff-evidence -> main, only commit 175b57a) is open; the user merges.
+- LIVE ENGINE: howlplane checkout on dogfood/DOG-027-review-diff-evidence 175b57a (= main + #156 in src). After #156 merges: checkout main, pull, confirm `git diff 175b57a main -- src pyproject.toml` is empty.
+- Records branch: dogfood/adaptive-tranche-2 (worktree howlplane-dogfood-campaign).
+- Current run: run-039, large multi-user change to the bookmarks service (dogfood-missions/run-039/bookmarks, base d6328d3; legacy DB ../legacy.db). Tests behaviour near the 600 s implementation budget.
+- Next finding DOG-029; next run run-040.
+- WARNING (recurring, #150 and #154): never open stacked PRs; base every PR on main, or retarget the child to main before merging the parent.
 - Always export HOWL_FORBID_LOCAL_INFERENCE=1.
 - Older history below.
 
