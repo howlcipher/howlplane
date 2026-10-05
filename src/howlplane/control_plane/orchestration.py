@@ -154,6 +154,12 @@ def redact(value: str) -> str:
 
 
 VERDICT_EXCERPT_CHARS = 4000
+# Test output is kept failure-first: runners such as node's TAP, go test and pytest print the failing case
+# before a long summary, so a plain tail dropped the only evidence of what failed (DOG-026).
+TEST_OUTPUT_CHARS = 3000
+VERIFY_TIMEOUT_SECONDS = 300
+_FAILURE_LINE = re.compile(r"^\s*not ok\b|\bFAIL(?:ED|URE|S)?\b|\b\w*(?:Error|Exception)\b|\bTraceback\b|\bpanic(?:ked)?\b"
+                           r"|\berror\b|\bfailed\b", re.IGNORECASE)
 # The plan is the Howl workflow's design decision; implementers follow it and reviewers judge against it (DOG-025).
 PLAN_EXCERPT_CHARS = 6000
 MAX_REWORK_ROUNDS = 2
@@ -1154,14 +1160,15 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
             instructions += (f" The plan's test command is `{shlex.join(verify)}`. Make it pass and run it exactly as "
                              "written, without pipes or redirections.")
         if doc.get("rework"):
-            source = "The acceptance check" if doc["rework"].get("source") == "acceptance" else "Independent review"
+            source = {"acceptance": "The acceptance check", "verification": "HowlPlane's verification run"}.get(
+                doc["rework"].get("source"), "Independent review")
             # A finding is one reproduced instance; patching only that instance left the same false claim for the
             # next review to find, until rework ran out (DOG-021, runs 019 and 021).
             instructions += (f" {source} (rework round {doc['rework']['round']}) found issues with the current work. Treat "
                              "each valid finding as an example of a defect class: fix its root cause, check the other inputs "
                              "and error paths the same code or documented claim covers, and add regression tests for them. "
                              "Run the tests again, and state which findings you rejected and why. If no change is warranted, "
-                             "report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED with your reasons. Reviewer findings:\n"
+                             "report IMPLEMENTATION_STATUS: NO_CHANGE_REQUIRED with your reasons. Findings:\n"
                              + doc["rework"]["findings"])
         if is_existing_wip_context(doc["goal"], doc.get("constraints", [])):
             instructions += (" Treat current repository changes as intentional work in progress. "
@@ -1220,8 +1227,77 @@ def derive_verify_command(repo: Path) -> list[str] | None:
     return list(commands[0]) if commands else None
 
 
+def test_output_excerpt(text: str, limit: int = TEST_OUTPUT_CHARS) -> str:
+    """Keep the lines that say what failed, plus the tail with the runner's summary."""
+    text = redact(text)
+    if len(text) <= limit:
+        return text
+    tail = text[-(limit // 2):]
+    lines = text[:-(limit // 2)].splitlines()
+    spans: list[tuple[int, int]] = []
+    for number, line in enumerate(lines):
+        if _FAILURE_LINE.search(line):
+            start, end = max(number - 1, 0), min(number + 12, len(lines))
+            if spans and start <= spans[-1][1]:
+                spans[-1] = (spans[-1][0], end)
+            else:
+                spans.append((start, end))
+    if not spans:
+        return "[... earlier output trimmed by HowlPlane ...]\n" + text[-limit:]
+    budget, parts = limit - len(tail), []
+    for start, end in spans:
+        block = "\n".join(lines[start:end])
+        if len(block) > budget:
+            if not parts:
+                parts.append(block[:budget])
+            break
+        parts.append(block)
+        budget -= len(block)
+    return "\n[...]\n".join(parts) + "\n[... output trimmed by HowlPlane; tail follows ...]\n" + tail
+
+
+def run_verification(doc: dict[str, Any], repo: Path) -> dict[str, Any]:
+    """Run the session's verification command and return its test record.
+
+    A command that cannot start or overruns its deadline is a verification
+    result, not a crash: the record says so in place of the runner's output.
+    """
+    command = doc["verify_command"]
+    record: dict[str, Any] = {"command": command, "rework_round": doc.get("rework_rounds", 0)}
+    try:
+        verified = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=VERIFY_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        partial = "".join(part.decode(errors="replace") if isinstance(part, bytes) else part
+                          for part in (exc.stdout, exc.stderr) if part)
+        record.update(exit_code=124, timed_out=True, output=test_output_excerpt(
+            f"{partial}\nHowlPlane stopped the command after {VERIFY_TIMEOUT_SECONDS}s."))
+    except OSError as exc:
+        record.update(exit_code=127, not_runnable=True, output=redact(f"HowlPlane could not run the command: {exc}"))
+    else:
+        record.update(exit_code=verified.returncode, output=test_output_excerpt(verified.stdout + verified.stderr))
+    return record
+
+
+def verification_findings(record: dict[str, Any]) -> dict[str, Any]:
+    """Shape a failed verification like a verdict, so it can drive the bounded rework loop."""
+    command = record["command"] if isinstance(record["command"], str) else shlex.join(record["command"])
+    return {"agent": "howlplane", "stage": "verification",
+            "verdict_excerpt": f"HowlPlane ran `{command}` on the implemented tree and it exited {record['exit_code']}. "
+                               f"Make it pass. Its output (failures first):\n{record.get('output', '')}"}
+
+
+def validation_failure_reason(doc: dict[str, Any]) -> str:
+    failure = doc["validation_failure"]
+    command = failure["command"] if isinstance(failure["command"], str) else shlex.join(failure["command"])
+    if failure.get("not_runnable"):
+        return f"Configured validation could not run: `{command}` (check the command and its tools are installed)"
+    return (f"Configured validation failed: `{command}` exited {failure['exit_code']} after "
+            f"{failure['rework_rounds']} of {MAX_REWORK_ROUNDS} rework round(s)")
+
+
 def begin_rework(doc: dict[str, Any], findings: dict[str, Any]) -> None:
-    """Send review findings or an acceptance rejection back to implementation (bounded by MAX_REWORK_ROUNDS)."""
+    """Send review findings, an acceptance rejection, or a failed verification back to implementation
+    (bounded by MAX_REWORK_ROUNDS)."""
     doc["rework_rounds"] = doc.get("rework_rounds", 0) + 1
     doc["rework"] = {"round": doc["rework_rounds"], "reviewer": findings["agent"], "source": findings["stage"],
                      "findings": findings["verdict_excerpt"], "at": now()}
@@ -1312,12 +1388,13 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             elif doc.get("reconciliation", {}).get("needs_validation") and doc.get("verify_command"):
                 check = subprocess.run(["git", "-C", str(repo), "diff", "--check"], capture_output=True, text=True, timeout=30)
                 if check.returncode == 0:
-                    verified = subprocess.run(doc["verify_command"], cwd=repo, capture_output=True, text=True, timeout=300)
-                    if verified.returncode == 0:
+                    verified = run_verification(doc, repo)
+                    if verified["exit_code"] == 0:
                         doc["implementer"] = "external"
                         doc["tests"].append({"command": "git diff --check", "exit_code": check.returncode, "output": redact(check.stderr[:500])})
-                        doc["tests"].append({"command": doc["verify_command"], "exit_code": verified.returncode, "output": redact((verified.stdout + verified.stderr)[-1000:])})
+                        doc["tests"].append(verified)
                         doc["reconciliation"]["needs_validation"] = False
+                        doc.pop("validation_failure", None)
                         succeeded = True
 
         while not succeeded:
@@ -1380,8 +1457,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                     check = subprocess.run(["git", "-C", str(repo), "diff", "--check"], capture_output=True, text=True, timeout=30)
                     verified_ok = True
                     if doc.get("verify_command"):
-                        verified = subprocess.run(doc["verify_command"], cwd=repo, capture_output=True, text=True, timeout=300)
-                        verified_ok = (verified.returncode == 0)
+                        verified_ok = run_verification(doc, repo)["exit_code"] == 0
                     if check.returncode == 0 and verified_ok:
                         accepted_no_change = True
                         assignment["state"] = "SUCCEEDED"
@@ -1578,18 +1654,35 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 if progress:
                     progress.validation(True, f"Running configured validation: {' '.join(command)}")
                     with progress.waiting():
-                        verified = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=300)
+                        verified = run_verification(doc, repo)
                 else:
-                    verified = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=300)
-                doc["tests"].append({"command": command, "exit_code": verified.returncode, "output": redact((verified.stdout + verified.stderr)[-1000:])})
+                    verified = run_verification(doc, repo)
+                doc["tests"].append(verified)
                 if progress:
-                    progress.validation(False, "Configured validation passed" if verified.returncode == 0 else "Configured validation failed")
-                if verified.returncode:
+                    progress.validation(False, "Configured validation passed" if verified["exit_code"] == 0 else
+                                        f"Configured validation failed: `{' '.join(command)}` exited {verified['exit_code']}")
+                if verified["exit_code"]:
+                    # A failing test is a finding about the implementation, as actionable as a reviewer's;
+                    # handing off at once left the user to rediscover what HowlPlane had just seen (DOG-026).
+                    # A command that cannot start is not the implementer's to fix.
+                    if not verified.get("not_runnable") and doc.get("rework_rounds", 0) < MAX_REWORK_ROUNDS:
+                        begin_rework(doc, verification_findings(verified))
+                        if progress:
+                            progress._write("REWORK", f"Round {doc['rework_rounds']} of {MAX_REWORK_ROUNDS}: sending the "
+                                                      "failed verification back to implementation")
+                        checkpoint(doc, path, token, repo)
+                        index = stages.index("implementation")
+                        continue
                     doc["status"] = "HANDOFF REQUIRED"
+                    doc["validation_failure"] = {"command": command, "exit_code": verified["exit_code"],
+                                                 "rework_rounds": doc.get("rework_rounds", 0),
+                                                 "not_runnable": bool(verified.get("not_runnable"))}
                     checkpoint(doc, path, token, repo)
                     if progress:
-                        progress.blocked("HANDOFF REQUIRED", "Configured validation failed", f"howlplane orchestrate resume --repo {repo}" if is_resumable(doc) else None)
+                        progress.blocked("HANDOFF REQUIRED", validation_failure_reason(doc),
+                                         f"howlplane orchestrate resume --repo {repo}" if is_resumable(doc) else None)
                     return report(doc)
+                doc.pop("validation_failure", None)
                 if doc.get("reconciliation"):
                     doc["reconciliation"]["needs_validation"] = False
             elif doc.get("reconciliation", {}).get("needs_validation"):
@@ -1629,6 +1722,16 @@ def report(doc: dict[str, Any]) -> int:
         print(f"Rework rounds: {doc['rework_rounds']} of {MAX_REWORK_ROUNDS}")
     if doc.get("validation_gap"):
         print(f"Validation gap: {doc['validation_gap']}")
+    if doc.get("validation_failure") and doc["status"] == "HANDOFF REQUIRED":
+        print(f"Blocked by: {validation_failure_reason(doc)}")
+        failed = [item for item in doc["tests"] if item.get("exit_code")]
+        if failed:
+            print("Failing output (failures first):")
+            print("\n".join(f"  {line}" for line in failed[-1].get("output", "").splitlines()))
+        print(f"Next: fix what the output shows (or have an agent do it), then run\n"
+              f"  howlplane orchestrate resume --repo {doc['repository']}\n"
+              "Resume re-runs the check on the changed repository and continues to review once it passes; the "
+              "rework budget is spent, so resuming without a fix fails the same way.")
     if doc.get("timed_out_assignments"):
         print(f"Timed-out assignments: {json.dumps([{key: item.get(key) for key in ('stage', 'agent', 'model', 'execution_budget_seconds')} for item in doc['timed_out_assignments']])}")
     if doc.get("timeout_hint") and is_resumable(doc):
@@ -1700,6 +1803,8 @@ def command(args: argparse.Namespace) -> int:
                         print(f"Status: {s.get('status', '')}")
                         print(f"Resumable: {'yes' if s.get('resumable') else 'no'}")
                         print(f"Stage: {s.get('stage', '')}")
+                        if s.get("validation_failure") and s.get("status") == "HANDOFF REQUIRED":
+                            print(f"Blocked by: {validation_failure_reason(s)}")
                         if s.get("implementer"):
                             print(f"Implementer: {s['implementer']}")
             return 0
