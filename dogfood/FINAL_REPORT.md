@@ -192,3 +192,6 @@ Housekeeping: 73 pytest-leaked worktrees removed from ~/.local/share/howlplane/w
 ## Remaining recommended work
 1. Merge the PR for dogfood/DOG-022-report-superseded-verdicts (carries DOG-022, DOG-025 and the campaign records stranded by #150 merging into #149's branch).
 2. Claude-implemented review convergence (DOG-023) is routed around, not solved.
+
+## Post-merge (campaign 4)
+PR #151 merged as e74e460; main engine source is identical to 5a806e3, so the Addendum 5 PASS applies to main.

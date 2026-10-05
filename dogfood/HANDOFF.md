@@ -148,3 +148,10 @@ DOG-024 (flaky pre-push test identified: test-suite leak into the real factory w
 Status: PASS on 5a806e3 (runs 028/029). Engine fixes DOG-022 and DOG-025 plus all records are on branch dogfood/DOG-022-report-superseded-verdicts; PR open for the user to merge. Main (f864cb2) lacks DOG-022/025 until then.
 Live engine: howlplane checkout returned to main after this campaign.
 Resume: after the PR merges, pull main; if src differs from 5a806e3, run run-030/031.
+
+## Status update (post-merge 2, 2026-10-04)
+Status: PASS, valid on main. PR #151 merged as e74e460; `git diff 5a806e3 e74e460 -- src pyproject.toml` is empty, so main's engine equals the engine of clean runs 028/029. No new runs needed.
+Live engine: howlplane checkout on main e74e460. `howl agents doctor`: Codex, Claude, Cursor READY; AGY and Devin READY with "unattended use unverified".
+Repos: howl, howlforge, howlcreate, howldream, howlproof current; howlframe fast-forwarded to bd3c2a9 (not used by this mission).
+Open: nothing blocking. Known limitation: DOG-023 (Claude-implemented convergence) is routed around, not solved.
+Resume: if howlplane src changes after e74e460, run two fresh missions (run-030, run-031) per FINAL_REPORT reproduction before re-asserting PASS.
