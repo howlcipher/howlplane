@@ -63,6 +63,26 @@ GIT_REPOSITORY_SELECTION_ENV_VARS: Tuple[str, ...] = (
 )
 
 
+# Repository configuration can name programs that git runs on its own: core.fsmonitor on any index
+# refresh (status, diff, add), diff.external and diff.<driver>.textconv when producing a diff. An agent
+# that writes .git/config would otherwise get those run by HowlPlane itself, outside the agent's tool
+# sandbox (DOG-028). HowlPlane reads repositories as data, so its git calls switch them off.
+INSPECTION_GUARD_CONFIG: Tuple[str, ...] = ("-c", "core.fsmonitor=false")
+_DIFF_PRODUCING_SUBCOMMANDS = frozenset({"diff", "log", "show"})
+_DIFF_GUARD_FLAGS: Tuple[str, ...] = ("--no-ext-diff", "--no-textconv")
+
+
+def guarded_git_args(args: List[str]) -> List[str]:
+    """Git arguments with repository-configured program execution switched off."""
+    args = list(args)
+    index = 0
+    while index < len(args) and args[index] == "-c":
+        index += 2  # skip caller-supplied `-c key=value` pairs to find the subcommand
+    if index < len(args) and args[index] in _DIFF_PRODUCING_SUBCOMMANDS:
+        args[index + 1:index + 1] = [flag for flag in _DIFF_GUARD_FLAGS if flag not in args]
+    return [*INSPECTION_GUARD_CONFIG, *args]
+
+
 def sanitized_git_env(
     base: Optional[Mapping[str, str]] = None,
     overrides: Optional[Mapping[str, str]] = None,
@@ -97,7 +117,7 @@ def run_git_in_repo(
     `GIT_DIR` overrides both.
     """
     return subprocess.run(  # nosec B603 B607 - fixed argv, no shell
-        ["git", "-C", str(repo_root)] + list(args),
+        ["git", "-C", str(repo_root)] + guarded_git_args(args),
         capture_output=True,
         text=True,
         timeout=timeout,
