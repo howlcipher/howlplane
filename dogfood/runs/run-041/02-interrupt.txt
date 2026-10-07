@@ -1,0 +1,19 @@
+--- real interrupt (harness retry) at 2026-10-05T00:00:22-04:00
+    PID    PGID     ELAPSED COMMAND
+2157966 2157966       02:39 howl orchestrate linkcheck checks URLs one at a time, which takes minutes for our 2,000-link docs site
+2157973 2157966       02:39  \_ /home/howlcipher/.local/bin/howlplane orchestrate linkcheck checks URLs one at a time, which takes
+2157982 2157966       02:39      \_ /home/howlcipher/.local/share/howl/runtimes/howlplane-engine/venv/bin/python /home/howlcipher/
+2158503 2157966       01:51          \_ codex exec --skip-git-repo-check --sandbox workspace-write Goal: linkcheck checks URLs one
+2158783 2158783       01:42              \_ /home/howlcipher/.codex/packages/standalone/releases/0.159.2-x86_64-unknown-linux-musl
+group gone after 2s
+--- codex processes 5s later:
+9734 /home/howlcipher/.codex/packages/app-server-daemon/releases/0.160.0-x86_64-unknown-linux-musl/bin/codex app-server daemon pid-update-lo
+269656 [codex] <defunct>
+1372180 /home/howlcipher/.codex/packages/app-server-daemon/releases/0.160.0-x86_64-unknown-linux-musl/bin/codex app-server --listen unix:// 
+1397463 /home/howlcipher/.codex/packages/app-server-daemon/releases/0.160.0-x86_64-unknown-linux-musl/bin/codex-code-mode-host
+2159740 /usr/bin/bash -c source /home/howlcipher/.claude/shell-snapshots/snapshot-bash-1790989819612-ysrfl4.sh 2>/dev/null || true && shopt 
+2159795 /usr/bin/bash -c source /home/howlcipher/.claude/shell-snapshots/snapshot-bash-1790989819612-ysrfl4.sh 2>/dev/null || true && shopt 
+--- repo status now:
+ M main.go
+--- repo status +15s: b59b78e142dfe9d837421469f388a2d2  -
+--- repo status +30s: b59b78e142dfe9d837421469f388a2d2  -

@@ -1,0 +1,3 @@
+- HowlPlane engine: local integration c9ee1c4; engine runtime additionally holds editable howldream f1cc5ca, howlwriter 5e09bf6, howlcreate bab145a and howl-provider-core 5837d46 (installed per the preflight's own remediation, after DOG-031's fixed doctor resynced the runtimes).
+- howl binary: dogfood/DOG-031 5ee87c1 build (for doctor only).
+- HOWL_FORBID_LOCAL_INFERENCE=1. Remote profile: user-reviewed claude -p, no tools.

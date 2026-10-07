@@ -70,3 +70,7 @@
 ## Adaptive tranche 2 (2026-10-05)
 - Post-merge check: #153, #155 on main; #154 landed on its stack base, not main (175b57a missing). Opened #156 with only 175b57a. Live engine kept on 175b57a (= main + #156).
 - run-039 (175b57a): large multi-user/auth/migration change to the bookmarks service, started.
+- run-039: large multi-user change, deliverable correct; goal rewritten by redaction -> DOG-029 (fixed, #157). run-040 rerun: DOG-029 verified live; reviewer saw redacted diff -> DOG-030 (fixed on #156).
+- run-041 TARGETED: Ctrl-C mid-implementation, clean checkpoint, resume COMPLETE.
+- run-042 ecosystem creative pipeline: DOG-031 (howl doctor false HEALTHY; howl#15), DOG-032 (installer gap, open), DOG-033 (hidden review items; fixed). Pipeline COMPLETED with intact lineage.
+- 2026-10-07: tranche 2 STOPPED at the user's request. Engine checkout returned to main.

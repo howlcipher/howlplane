@@ -1,0 +1,1 @@
+HOWL_FORBID_LOCAL_INFERENCE=1 howlplane creative run --run-dir runs/c1 --objective "<objective>" --constraint "<2 constraints>" --copy-spec copy-spec.json --command-config remote.json --sandbox <run-042>/site

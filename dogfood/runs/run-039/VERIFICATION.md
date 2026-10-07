@@ -1,0 +1,4 @@
+# run-039 independent verification (operator, 2026-10-05)
+Deliverable (despite the corrupted goal, DOG-029): 20 tests OK. Admin tool: create-user/issue-token/revoke-tokens/list-users; a token is printed once and only its SHA-256 is stored (no plaintext token in a full DB dump). Auth: missing, malformed (`Token x`), unknown, empty and revoked tokens -> 401 {"error":"unauthorized"}. Isolation: another user's id on GET and DELETE -> 404 identical to a missing id; a bookmark posted by bob is invisible to legacy; a second token for the same user works. Upgrade: legacy.db (2 rows from the pre-change code) -> rows owned by `legacy`; opening twice leaves users=1, bookmarks=2.
+Howl defect: the goal agents received and the report's review notes were altered by redaction (8 false `<redacted>`). DOG-029.
+Verdict: deliverable meets requirements; run NOT clean (DOG-029).

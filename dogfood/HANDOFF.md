@@ -1,12 +1,13 @@
 # Howl Dogfood Handoff
 
-## CURRENT (adaptive tranche 2, started 2026-10-05) — read this first
-- Tranche 1: PASS (FINAL_REPORT.md). PRs #153 and #155 merged to main. #154 merged into its stack base (dogfood/DOG-026-verification-rework), NOT main, so main (068e3d7) has DOG-026 but not DOG-027/028. Corrective PR #156 (dogfood/DOG-027-review-diff-evidence -> main, only commit 175b57a) is open; the user merges.
-- LIVE ENGINE: howlplane checkout on dogfood/DOG-027-review-diff-evidence 175b57a (= main + #156 in src). After #156 merges: checkout main, pull, confirm `git diff 175b57a main -- src pyproject.toml` is empty.
-- Records branch: dogfood/adaptive-tranche-2 (worktree howlplane-dogfood-campaign).
-- Current run: run-039, large multi-user change to the bookmarks service (dogfood-missions/run-039/bookmarks, base d6328d3; legacy DB ../legacy.db). Tests behaviour near the 600 s implementation budget.
-- Next finding DOG-029; next run run-040.
-- WARNING (recurring, #150 and #154): never open stacked PRs; base every PR on main, or retarget the child to main before merging the parent.
+## CURRENT — read this first (updated 2026-10-07)
+- Tranche 2 STOPPED at the user's request after run-042 (not PASS). See FINAL_REPORT.md "Adaptive Dogfood Tranche 2".
+- Open PRs (user merges, all based on main): howlplane #156 (DOG-027/028/030), #157 (DOG-029), DOG-033 (dogfood/DOG-033-creative-review-visibility), records (dogfood/adaptive-tranche-2); howl #15 (DOG-031).
+- LIVE ENGINE: howlplane checkout returned to main 068e3d7, which has DOG-026 only. Until #156/#157 merge, main lacks DOG-027..030 (including the DOG-028 security fix). The local branch dogfood/live-integration-t2 (c9ee1c4) holds the combination used for runs 041-042.
+- Host changes made this tranche (keep in mind): howlplane-engine runtime additionally holds editable howldream, howlwriter, howlcreate and howl-provider-core 5837d46 (DOG-032 workaround); both editable runtimes were reinstalled by the DOG-031 build of `howl doctor --fix` and carry source-dependencies.json markers; howlcreate's dev venv was resynced with `uv pip install -e .`. The installed ~/.local/bin/howl is still the pre-DOG-031 binary.
+- Next finding DOG-034; next run run-043.
+- Resume: after merges, pull main, rerun two fresh missions (run-043/044); decide DOG-032.
+- WARNING: never stack PRs (#150, #154 landed on their stack bases, not main).
 - Always export HOWL_FORBID_LOCAL_INFERENCE=1.
 - Older history below.
 

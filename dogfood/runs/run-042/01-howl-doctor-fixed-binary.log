@@ -1,0 +1,21 @@
+Howl Doctor
+Timestamp: 2026-10-05T11:49:44Z
+
+CATEGORY               CHECK                            STATUS  MESSAGE
+Environment            OS / Architecture                PASS    Ubuntu 26.04 LTS (amd64)
+Environment            Execution environment            PASS    running inside distrobox (host: Bazzite)
+Environment            Installation directory writable  PASS    /home/howlcipher/.local/share/howl
+Dependencies           python3                          PASS    Python 3.14.4
+Optional Capabilities  ollama                           PASS    Warning: could not connect to a running Ollama instance
+Manifest               ecosystem release manifest       PASS    valid (ecosystem 0.1.0, channel stable)
+Compatibility          installed component versions     PASS    compatible
+Lock                   installation lock                PASS    not held
+State                  interrupted operation            PASS    none
+Component Health       howlframe                        PASS    healthy
+Component Health       howlchangeops                    PASS    healthy
+Component Health       howlplane-engine                 FAIL    health check failed
+Component Health       howlplane                        PASS    healthy
+Component Health       howlwriter                       FAIL    health check failed
+
+Ecosystem Status: FAILED
+Error: ecosystem health check failed
