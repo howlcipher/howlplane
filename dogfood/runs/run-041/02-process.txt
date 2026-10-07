@@ -1,0 +1,69 @@
+pid=2157961 pgid=
+--- process tree before SIGINT:
+    PID    PGID     ELAPSED COMMAND
+1629527 1629527    04:59:55 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+1629532 1629532    04:59:55  \_ /usr/bin/bash -l
+ 674140  674140  3-14:01:43 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+ 674144  674144  3-14:01:43  \_ /usr/bin/bash -l
+ 674796  674796  3-14:01:09      \_ codex
+  18333   18333  4-06:05:15 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+  18337   18337  4-06:05:15  \_ /usr/bin/bash -l
+ 797638  797638  3-11:43:53      \_ agy
+  18023   18023  4-06:05:18 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+  18027   18027  4-06:05:18  \_ /usr/bin/bash -l
+  19204   19204  4-06:03:59      \_ claude
+  17330   17330  4-06:05:25 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+  17334   17334  4-06:05:25  \_ /usr/bin/bash -l
+1379815 1379815  3-06:51:19      \_ codex
+  16385   16385  4-06:05:37 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+  16389   16389  4-06:05:37  \_ /usr/bin/bash -l
+  20076   20076  4-06:03:38      \_ devin
+ 792261   20076  3-11:50:46          \_ /home/howlcipher/.local/share/devin/cli/_versions/3000.11.3/bin/devin acp
+   9443    9443  4-06:12:26 /usr/bin/bash -l
+  10940   10940  4-06:11:00  \_ claude
+   8700    8700  4-06:12:36 /usr/bin/bash -l
+  10363   10363  4-06:11:22  \_ devin
+  88288   10363  4-05:22:43      \_ /home/howlcipher/.local/share/devin/cli/_versions/3000.11.3/bin/devin acp
+   7617    7617  4-06:12:49 /usr/bin/bash -l
+   6991    6991  4-06:12:59 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+   6995    6995  4-06:12:59  \_ /usr/bin/bash -l
+2690545 2690545  2-02:51:08      \_ claude
+   4597    4597  4-06:15:02 /bin/bash
+   6550    6550  4-06:13:00  \_ /usr/bin/sh /usr/bin/distrobox enter devbox
+   6552    6550  4-06:13:00      \_ podman exec --interactive --detach-keys= --user=howlcipher --tty --workdir=/var/home/howlcipher --env=PW
+   3107    3107  4-06:15:11 /usr/bin/startplasma-wayland
+--- survivors 5s after exit:
+    PID COMMAND
+   3107 /usr/bin/startplasma-wayland
+   4597 /bin/bash
+   6550 /usr/bin/sh /usr/bin/distrobox enter devbox
+   6552 podman exec --interactive --detach-keys= --user=howlcipher --tty --workdir=/var/home/howlcipher --env=PWD=/var/home/howlcipher --env
+   6991 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+   6995 /usr/bin/bash -l
+   7617 /usr/bin/bash -l
+   8700 /usr/bin/bash -l
+   9443 /usr/bin/bash -l
+  10363 devin
+  10940 claude
+  16385 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+  16389 /usr/bin/bash -l
+  17330 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+  17334 /usr/bin/bash -l
+  18023 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+  18027 /usr/bin/bash -l
+  18333 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+  18337 /usr/bin/bash -l
+  19204 claude
+  20076 devin
+  88288 /home/howlcipher/.local/share/devin/cli/_versions/3000.11.3/bin/devin acp
+ 674140 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+ 674144 /usr/bin/bash -l
+ 674796 codex
+ 792261 /home/howlcipher/.local/share/devin/cli/_versions/3000.11.3/bin/devin acp
+ 797638 agy
+1379815 codex
+1629527 /bin/sh -c $(getent passwd 'howlcipher' | cut -f 7 -d :) -l
+1629532 /usr/bin/bash -l
+2690545 claude
+2157918 /usr/bin/bash -c source /home/howlcipher/.claude/shell-snapshots/snapshot-bash-1790989819612-ysrfl4.sh 2>/dev/null || true && shopt 
+2158503 codex exec --skip-git-repo-check --sandbox workspace-write Goal: linkcheck checks URLs one at a time, which takes minutes for our 2,

@@ -1,0 +1,3 @@
+# Mission selection rationale (run-042, adaptive tranche 2)
+Every earlier run used only HowlPlane's `orchestrate`. HowlPlane's README documents a native creative pipeline composing three other ecosystem components through their own contracts. This is the first test of a promised cross-component handoff (prompt Phase 24, "ecosystem-wide dogfood goal"), with factual-fidelity constraints that exercise HowlWriter's provenance checks.
+Getting to a runnable pipeline exposed DOG-031 (installer reported HowlWriter healthy while it lacked a declared dependency) and DOG-032 (the creative components are not reachable through the official installer).

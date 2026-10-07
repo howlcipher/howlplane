@@ -1,0 +1,64 @@
+HOWL ORCHESTRATION REPORT
+Session: 541477a73afd490eb5965347c411b0e9
+Goal: Our bookmarks service is single-tenant today: anyone who can reach it sees every bookmark. We need to make it multi-user before we open it to more teams.
+
+1. Users and API tokens. Add an admin command-line tool, `python3 -m bookmarks.admin --db PATH`, with subcommands to create a user (prints a newly generated API token once), list users, revoke a user's tokens, and issue a new token for an existing user. Store only a hash of each token, never the token itself.
+2. Authentication. Every `/bookmarks` endpoint requires `Authorization: Bearer <token>`. A missing, malformed, unknown or revoked token returns 401 with the usual `{"error": ...}` body.
+3. Isolation. Each bookmark belongs to the user who created it. Listing, fetching and deleting only ever see the caller's own bookmarks; another user's bookmark id behaves exactly like a missing one (404), never 403.
+4. Upgrade. Existing databases must upgrade automatically on startup with no data loss: existing bookmarks are assigned to a user named `legacy`, created during the upgrade if it doesn't exist, and the admin tool must be able to issue that user a token. Running the upgrade twice must be harmless.
+5. Keep the existing behaviour otherwise: JSON shapes, validation, ordering, tag filtering, pagination and the concurrency guarantees from the last round of fixes. Update the existing tests to authenticate rather than deleting them.
+6. Add tests for authentication, isolation (including id guessing across users), the admin tool, and the upgrade path, and update the README, including an operations section on creating users and issuing tokens.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: d6328d381a36c33975a910381bc95ffecbb14ad0
+Repository status: M README.md
+ M bookmarks/server.py
+ M bookmarks/store.py
+ M tests/test_api.py
+?? bookmarks/admin.py
+?? tests/support.py
+?? tests/test_admin.py
+?? tests/test_auth.py
+?? tests/test_isolation.py
+?? tests/test_upgrade.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "rework_round": 0, "exit_code": 0, "output": "...................................\n----------------------------------------------------------------------\nRan 35 tests in 16.579s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))
+Failures: []
+Review notes from Claude (review, CLEAN):
+  No blocking findings. I read `store.py`, `admin.py`, `server.py`, `tests/support.py` and grepped the test names. I didn't run anything, and I didn't read every test body or the truncated part of the diff. The harness evidence shows the full suite passing (35 tests) and `git diff --check` clean.
+  
+  **Checked against the plan**
+  - **Auth:**
+    - Auth runs first on every `/bookmarks` path, before the body read or validation.
+    - The Bearer parsing is strict: the scheme is case-insensitive, with exactly one non-empty token and no extra whitespace. A duplicate `Authorization` header is rejected.
+    - A 401 carries `WWW-Authenticate: Bearer` and the same `{"error": "unauthorized"}` body for every failure.
+    - Other paths still return 404.
+    - Lookups sit inside `handle_errors`, so a store failure gives the JSON 500.
+  - **Isolation:** `get`, `delete` and `list` all filter on `user_id`. Another user's id returns the same 404 as a missing one. The bookmark dict has no owner field.
+  - **Upgrade:**
+    - `BEGIN IMMEDIATE` covers the schema check and the migration.
+    - An old table is rebuilt with a `NOT NULL` owner and every row goes to `legacy`. An existing `legacy` user is reused.
+    - A re-run is a no-op, an empty old table still gets `legacy`, and a fresh database gets none.
+    - WAL is enabled.
+    - `test_failed_upgrade_rolls_back_without_data_loss` and `test_concurrent_upgraders` cover rollback and concurrent starters.
+  - **Tokens and admin:** Only the SHA-256 digest is stored. The four subcommands exist, and errors go to stderr with a non-zero exit and no traceback. `--db` is required, and opening the database runs the upgrade, so `issue-token legacy` works on an old database.
+  - **Tests:** Every item in the acceptance list has a matching test, and the existing tests in `tests/test_api.py` were kept and authenticated. Test names also cover the `subprocess` run, the 500 on an auth store failure, and the hash-only storage check.
+  - **README:** The README matches the behaviour and has the operations section. It covers the legacy 401 note, backing up before the first upgrade, and a token shown once. Its note about the in-memory test transport is backed by `tests/support.py`.
+  
+  **NON-BLOCKING**
+  1. A misspelled `--db` path in the admin tool silently creates a new empty database, because the Store creates the file on open.
+  2. New bookmark ids come from a global `MAX(id)+1`. After the highest id is deleted, it can be reused by another user. This was already the behaviour and doesn't leak any data.
+  3. The user-name check only rejects empty or whitespace-only names. Leading or trailing spaces are kept.
+  4. The README example uses `API_TOKEN='[REDACTED]'` as a placeholder.
+  5. `server.py` has formatting-only churn (quote and wrap changes). It's harmless but adds noise to the diff.
+  6. Existing clients get 401 until an operator issues a `legacy` token. This is documented in the README.
+  
+  AUDIT_STATUS: CLEAN

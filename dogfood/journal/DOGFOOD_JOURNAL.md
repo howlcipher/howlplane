@@ -66,3 +66,12 @@
 - run-036, run-037 (175b57a) household baseline fixture: both COMPLETE, verified CLEAN -> baseline restored on the new engine.
 - run-038 TARGETED (DOG-028): fsmonitor logging hook in the target repo; 4 calls from Codex's sandbox, 0 from HowlPlane. DOG-028 verified live.
 - PRs opened: #153 (DOG-026), #154 (DOG-027/028, stacked). ADAPTIVE DOGFOOD TRANCHE 1: PASS. Live engine checkout returned to main.
+
+## Adaptive tranche 2 (2026-10-05)
+- Post-merge check: #153, #155 on main; #154 landed on its stack base, not main (175b57a missing). Opened #156 with only 175b57a. Live engine kept on 175b57a (= main + #156).
+- run-039 (175b57a): large multi-user/auth/migration change to the bookmarks service, started.
+- run-039: large multi-user change, deliverable correct; goal rewritten by redaction -> DOG-029 (fixed, #157). run-040 rerun: DOG-029 verified live; reviewer saw redacted diff -> DOG-030 (fixed on #156).
+- run-041 TARGETED: Ctrl-C mid-implementation, clean checkpoint, resume COMPLETE.
+- run-042 ecosystem creative pipeline: DOG-031 (howl doctor false HEALTHY; howl#15), DOG-032 (installer gap, open), DOG-033 (hidden review items; fixed). Pipeline COMPLETED with intact lineage.
+- 2026-10-07: tranche 2 STOPPED at the user's request. Engine checkout returned to main.
+- 2026-10-07 user: "push and merge everything". Merged #157, #156 (after update-branch + CI), howl#15. DOG-033 first push failed the pre-push SlopsLint clone ceiling (my duplicated test helper); deduplicated, pushed 4d3a214, PR #158.

@@ -1,0 +1,67 @@
+HOWL ORCHESTRATION REPORT
+Session: 7577e4e0a2ca4324b85d6bd1a527fdd7
+Goal: Our bookmarks service is single-tenant today: anyone who can reach it sees every bookmark. We need to make it multi-user before we open it to more teams.
+
+1. Users and API tokens. Add an admin command-line tool, `python3 -m bookmarks.admin --db PATH`, with subcommands to create a user (prints a newly generated API token <redacted>, list users, revoke a user's tokens, and issue a new token <redacted> an existing user. Store only a hash of each token, never the token <redacted>
+2. Authentication. Every `/bookmarks` endpoint requires `Authorization: Bearer <redacted> A missing, malformed, unknown or revoked token <redacted> 401 with the usual `{"error": ...}` body.
+3. Isolation. Each bookmark belongs to the user who created it. Listing, fetching and deleting only ever see the caller's own bookmarks; another user's bookmark id behaves exactly like a missing one (404), never 403.
+4. Upgrade. Existing databases must upgrade automatically on startup with no data loss: existing bookmarks are assigned to a user named `legacy`, created during the upgrade if it doesn't exist, and the admin tool must be able to issue that user a token. Running the upgrade twice must be harmless.
+5. Keep the existing behaviour otherwise: JSON shapes, validation, ordering, tag filtering, pagination and the concurrency guarantees from the last round of fixes. Update the existing tests to authenticate rather than deleting them.
+6. Add tests for authentication, isolation (including id guessing across users), the admin tool, and the upgrade path, and update the README, including an operations section on creating users and issuing tokens.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: d6328d381a36c33975a910381bc95ffecbb14ad0
+Repository status: M README.md
+ M bookmarks/server.py
+ M bookmarks/store.py
+ M tests/test_api.py
+?? bookmarks/admin.py
+?? tests/helpers.py
+?? tests/test_admin.py
+?? tests/test_auth.py
+?? tests/test_isolation.py
+?? tests/test_upgrade.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "rework_round": 0, "exit_code": 0, "output": "/usr/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 401: 'Unauthorized'>\n  _warnings.warn(self.warn_message, ResourceWarning)\n..../usr/lib/python3.14/threading.py:301: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f9e4ac39e40>\n  if hasattr(lock, '_release_save'):\nResourceWarning: Enable tracemalloc to get the object allocation traceback\n../usr/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 404: 'Not Found'>\n  _warnings.warn(self.warn_message, ResourceWarning)\n...../usr/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 500: 'Internal Server Error'>\n  _warnings.warn(self.warn_message, ResourceWarning)\n./usr/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 400: 'Bad Request'>\n  _warnings.warn(self.warn_message, ResourceWarning)\n..../usr/lib/python3.14/threading.py:880: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f9e4ac39e40>\n  def __init__(self, group=None, target=None, name=None,\nResourceWarning: Enable tracemalloc to get the object allocation traceback\n/usr/lib/python3.14/threading.py:880: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x7f9e49750220>\n  def __init__(self, group=None, target=None, name=None,\nResourceWarning: Enable tracemalloc to get the object allocation traceback\n....\n----------------------------------------------------------------------\nRan 20 tests in 9.275s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))
+Failures: []
+Review notes from Claude (review, CLEAN):
+  all test files. I did not run anything; the 20-test pass is HowlPlane's harness evidence.
+  
+  **Requirements checked**
+  - **Authentication:**
+    - The check in `handle_errors` covers every `/bookmarks` path and runs before validation, body parsing and lookup, so a 401 beats a 400 or 404.
+    - It requires exactly one `Authorization` header and a case-insensitive `Bearer <redacted> with a restricted token <redacted> Unknown and revoked tokens fail because the hash lookup finds nothing.
+    - The 401 body is `{"error": "unauthorized"}`.
+  - **Token <redacted> only the SHA-256 hex digest is stored. `create-user` and `issue-token` print the token <redacted> `list-users` prints only ids and names. The CLI never takes a token <redacted> an argument.
+  - **Isolation:** `get`, `delete` and `list` all filter on `user_id`, so another user's id gives the same 404 path as a missing id, with no 403. Ids stay global, and `add` still takes the write lock before reading `MAX(id)`, so concurrent-post uniqueness is preserved. WAL mode, the busy timeout and the JSON 500 path are unchanged.
+  - **Upgrade:**
+    - It runs under `BEGIN IMMEDIATE`, with the schema inspection inside the lock, so concurrent opens are safe. It inserts `legacy` only if it is missing (`INSERT OR IGNORE`), then copies the rows in the legacy column order with ids intact and rebuilds the table.
+    - It is a no-op on re-run, and a fresh database creates no `legacy` user. The admin tool opens a `Store`, so it triggers the upgrade too. `legacy` can be issued a token.
+  - **Admin:** all four subcommands exist. Duplicate names, unknown users and invalid names exit 1 with a message on stderr, and argparse errors exit 2. `main(argv)` returns the exit code.
+  - **Tests:**
+    - All original `test_api` tests are kept and authenticated, including `test_legacy_database`, which now claims the data through a `legacy` token <redacted> checks ids 1, 2, then 3.
+    - `test_auth`, `test_isolation`, `test_admin` and `test_upgrade` cover what the approach listed: the invalid-header matrix on all four endpoints, 401-before-400/404, cross-user 404s with identical bodies, concurrent users, hash storage with a byte scan, revoke, subprocess use, legacy and pre-existing `legacy` upgrades, double-open, and concurrent open.
+  - **README:**
+    - It documents the bearer <redacted>, 401, 404-for-other-users' ids, id gaps, the TLS proxy advice, the operations section, the `legacy` claim, the back-up-first warning, and the "Run" mention. The Tests section is kept.
+    - The old "no schema change" sentence is replaced.
+    - The README says tokens have no expiry or per-token <redacted>, and that retry duplicates remain possible.
+  - **Stdlib only:** nothing outside the standard library is imported, and nothing requires newer than 3.10.
+  
+  **NON-BLOCKING**
+  1. **README layout:** the "Writes are serialized…" paragraph now follows the backup sentence with no blank line, so it sits under "Database upgrades and backups" and reads as part of that paragraph. Adding a blank line or a separate heading would fix it.
+  2. **ResourceWarnings in the harness output:** these probably come from the tests' own `with sqlite3.connect(...)` blocks, which don't close the connection. Every `Store` connection uses `closing`.
+  3. **Subprocess test:** it relies on the working directory being the repo root. That holds for the stated verify command.
+  4. **Guessed-id sweep:** the sweep in `test_isolation` covers only the ids actually created plus 999, not a wide range. This is adequate for the behavior.
+  5. **Style:** several lines in `server.py` and `store.py` exceed 79 characters.
+  6. **Unread POST body on 401:** the server closes the connection (HTTP/1.0), so a client sending a large body could see a reset. This is unlikely and out of scope.
+  7. **Residual risks:** these match the approach, are documented in the README, and are not defects. They are global ids, no token <redacted> or per-token <redacted>, an irreversible upgrade, cleartext tokens without TLS, and retry duplicates.
+  
+  AUDIT_STATUS: CLEAN

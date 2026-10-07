@@ -1,0 +1,2 @@
+- Engine: local integration c9ee1c4 (main 068e3d7 + #156 540ca27 + #157 8e5b2ab). go1.26. HOWL_FORBID_LOCAL_INFERENCE=1.
+- Target: dogfood-missions/run-041/linkcheck base 3ff3768.

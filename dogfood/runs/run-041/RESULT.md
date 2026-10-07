@@ -1,0 +1,7 @@
+# run-041 result — TARGETED DOGFOOD EXPERIMENT (interruption + resume); not counted in the clean streak
+Mission (Go concurrency in existing linkcheck): delivered and independently verified. gofmt/vet/`go test -race` clean, 14 tests. Against an operator HTTP server: peak concurrency = workers (4); 503 retried twice then OK (3 hits); 500 3 hits; 404 1 hit (no retry); hang -> context deadline on each of 3 attempts; duplicate fetched once, listed per occurrence; input order kept; SIGINT -> partial ordered results + summary, exit 130, immediate. README documents all of it.
+Experiment: SIGINT to the howl process group ~1m50s into Codex implementation (after an operator harness bug: the first attempt sent nothing because setsid forked).
+- `INTERRUPT Stopping new dispatches and checkpointing session...` + `CHECKPOINT ... resume with: howlplane orchestrate resume --repo ...` within 1 s; the whole tree, including Codex's separately grouped binary, was gone in 2 s; no orphan, and the repo was byte-stable for 30 s after.
+- `howl orchestrate inspect`: Status INTERRUPTED, Resumable yes, Stage implementation.
+- `howl orchestrate resume`: Codex re-dispatched over the partial main.go, finished in 3m40s; go test passed; review CLEAN; accepted; COMPLETE exit 0. Report lists the interrupted attempt as INTERRUPTED_OR_STALE_LEASE (accurate).
+Observation (P3, not pursued): the resume hint names `howlplane orchestrate resume` although the user ran `howl orchestrate`; both commands exist and work.

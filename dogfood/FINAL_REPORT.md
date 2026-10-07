@@ -259,3 +259,47 @@ Long or multi-hour tasks; tasks needing network services or external credentials
 3. A provider failure injected mid-implementation (resume and reroute under the new rework paths).
 4. An ecosystem handoff the docs actually promise (for example HowlWriter for a documentation-heavy deliverable).
 5. Decide the git-hooks policy for HowlPlane's own commits.
+
+# Adaptive Dogfood Tranche 2 (2026-10-05 to 2026-10-07)
+
+## Result
+STOPPED at the user's request after run-042. Not PASS: the convergence criterion (final two missions clean on the final engine) was not reached, because the engine changed with each fix and no clean pair followed DOG-030/033. Not BLOCKED: no external blocker.
+
+## Engine
+Live runs used local integration branches of howlplane: a911cc9 (main 068e3d7 + #156 175b57a + #157 8e5b2ab) for run-040, then c9ee1c4 (+ DOG-030 540ca27) for runs 041-042. Not pushed (integration only); every component commit is pushed on its own branch.
+
+## Runs
+| Run | Mission | Result |
+| --- | --- | --- |
+| 039 | Python, existing: multi-user, API tokens, auth, isolation, upgrade (large change) | Deliverable correct; NOT CLEAN -> DOG-029 |
+| 040 | 039 rerun, identical start | Deliverable correct; DOG-029 verified live; NOT CLEAN -> DOG-030 |
+| 041 | TARGETED: Go concurrency + Ctrl-C during implementation + resume | Interruption and resume work; deliverable correct |
+| 042 | Ecosystem: `howlplane creative run` (Dream -> Writer -> Create) landing page | COMPLETED with intact lineage; NOT CLEAN -> DOG-031/032/033 |
+
+## Findings
+| ID | Sev | Summary | State |
+| --- | --- | --- | --- |
+| DOG-029 | P1 | Redaction rewrote the user's goal and review notes ("token once" -> "token <redacted>") | Fixed 8e5b2ab, PR #157, verified live (run-040) |
+| DOG-030 | P2 | Reviewers shown a redacted diff (text not in the repo) | Fixed 540ca27 on PR #156 |
+| DOG-031 | P1 | `howl doctor` HEALTHY while an editable runtime lacked a declared dependency; --fix ignored the install profile and could not find checkouts | Fixed howl 5ee87c1, PR howl#15, verified on the real install |
+| DOG-032 | P2 | Creative pipeline not reachable through the official installer | OPEN: product decision (installer-owned vs HowlPlane-owned composition) |
+| DOG-033 | P2 | COMPLETED creative run hides copy withheld for factual review | Fixed 2e8113a (branch dogfood/DOG-033-creative-review-visibility) |
+Observations: P3 resume hint names `howlplane` while the user typed `howl`; P3 HowlWriter fidelity check over-conservative on "default 8 concurrent checks".
+
+## What Is Now Proven
+- Large cross-cutting changes (auth, isolation, migration) finish in one implementation pass and are delivered correctly.
+- Ctrl-C mid-implementation checkpoints cleanly (no orphan workers, repo stable), `inspect` shows INTERRUPTED, and `resume` completes correctly.
+- The Dream -> Writer -> Create handoff runs end to end with intact provenance, once installed by hand.
+
+## What Is NOT Proven
+- A clean pair on the final engine (DOG-030 and DOG-033 fixes are untested live).
+- The creative pipeline on a standard (non-developer) install.
+- Provider failure mid-session; multi-hour tasks.
+
+## PRs
+Merged at the user's request: howlplane #157 (DOG-029), #156 (DOG-027/028/030), howl #15 (DOG-031); #158 (DOG-033) and the records PR merged after CI. All engine commits verified on main by ancestry.
+
+## Recommended Next Steps
+1. Run two fresh missions on main (now carrying DOG-026..033) to earn a clean pair.
+2. Decide DOG-032 (A: installer owns creative components; B: HowlPlane runs each component's own console script).
+3. Decide the git-hooks policy for HowlPlane's own commits (from tranche 1).

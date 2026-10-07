@@ -1,0 +1,8 @@
+Our bookmarks service is single-tenant today: anyone who can reach it sees every bookmark. We need to make it multi-user before we open it to more teams.
+
+1. Users and API tokens. Add an admin command-line tool, `python3 -m bookmarks.admin --db PATH`, with subcommands to create a user (prints a newly generated API token once), list users, revoke a user's tokens, and issue a new token for an existing user. Store only a hash of each token, never the token itself.
+2. Authentication. Every `/bookmarks` endpoint requires `Authorization: Bearer <token>`. A missing, malformed, unknown or revoked token returns 401 with the usual `{"error": ...}` body.
+3. Isolation. Each bookmark belongs to the user who created it. Listing, fetching and deleting only ever see the caller's own bookmarks; another user's bookmark id behaves exactly like a missing one (404), never 403.
+4. Upgrade. Existing databases must upgrade automatically on startup with no data loss: existing bookmarks are assigned to a user named `legacy`, created during the upgrade if it doesn't exist, and the admin tool must be able to issue that user a token. Running the upgrade twice must be harmless.
+5. Keep the existing behaviour otherwise: JSON shapes, validation, ordering, tag filtering, pagination and the concurrency guarantees from the last round of fixes. Update the existing tests to authenticate rather than deleting them.
+6. Add tests for authentication, isolation (including id guessing across users), the admin tool, and the upgrade path, and update the README, including an operations section on creating users and issuing tokens.

@@ -1,0 +1,24 @@
+HowlPlane creative preflight: FAIL
+9 PASS, 0 WARN, 6 FAIL
+
+PASS  Python interpreter: /home/howlcipher/.local/share/howl/runtimes/howlplane-engine/venv/bin/python (Python 3.14.4)
+PASS  Virtual environment: /home/howlcipher/.local/share/howl/runtimes/howlplane-engine/venv
+FAIL  howl-provider-core installed: Not installed
+      Suggested action: pip install 'git+https://github.com/howlcipher/howl-provider-core.git@main'
+FAIL  howldream installed: Not installed
+      Suggested action: pip install 'git+https://github.com/howlcipher/howldream.git@main'
+FAIL  howlwriter installed: Not installed
+      Suggested action: pip install 'git+https://github.com/howlcipher/howlwriter.git@main'
+FAIL  howlcreate installed: Not installed
+      Suggested action: pip install 'git+https://github.com/howlcipher/howlcreate.git@main'
+PASS  Shared provider-core pin: no pinned consumers installed
+FAIL  Writer -> Create contract: howlwriter or howlcreate is not importable
+      Suggested action: Install both components from merged main.
+PASS  howldream CLI: /home/howlcipher/.local/bin/howldream
+PASS  howlwriter CLI: /home/howlcipher/.local/bin/howlwriter
+PASS  howlcreate CLI: /home/howlcipher/.local/bin/howlcreate
+FAIL  Remote provider configuration: howl-provider-core is not importable
+      Suggested action: Install howl-provider-core.
+PASS  HOWL_FORBID_LOCAL_INFERENCE: Local inference is forbidden
+PASS  Local model configuration: None detected
+PASS  Workspace permissions: /run/media/system/tallgeese/dev/dogfood-missions/run-042 is writable

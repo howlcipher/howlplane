@@ -1,0 +1,2 @@
+- Engine: howlplane dogfood/DOG-027-review-diff-evidence 175b57a (= main 068e3d7 + PR #156). HOWL_FORBID_LOCAL_INFERENCE=1.
+- Target: dogfood-missions/run-039/bookmarks, base d6328d3 (run-031 result). Legacy DB: dogfood-missions/run-039/legacy.db (2 rows).

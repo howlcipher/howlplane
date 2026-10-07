@@ -16,6 +16,10 @@ Prevents repetitive dogfood. One row per run; adaptive tranches start at run-030
 | 036 | household baseline fixture | Greenfield | Python | baseline regression on 175b57a | CLEAN 1/2 | no |
 | 037 | household baseline fixture | Greenfield | Python | baseline regression on 175b57a | CLEAN 2/2 | no |
 | 038 | TARGETED: DOG-028 fsmonitor hook, small calc change | Existing | Python | security boundary experiment | COMPLETE; 0 HowlPlane-invoked hooks | no |
+| 039 | bookmarks: multi-user, API tokens, auth, isolation, upgrade | Existing | Python | large cross-cutting change, security semantics | deliverable OK; NOT CLEAN | DOG-029 |
+| 040 | 039 rerun, identical start | Existing | Python | regression | deliverable OK; NOT CLEAN | DOG-030 |
+| 041 | TARGETED: linkcheck concurrency + Ctrl-C mid-implementation + resume | Existing | Go | concurrency, interruption/resume | resume COMPLETE, deliverable OK | no (P3 hint wording) |
+| 042 | creative pipeline: linkcheck landing page (Dream -> Writer -> Create) | Greenfield | ecosystem | cross-component handoff, provenance | COMPLETED; NOT CLEAN | DOG-031, DOG-032, DOG-033 |
 
 ## Capability matrix
 
@@ -38,3 +42,6 @@ Prevents repetitive dogfood. One row per run; adaptive tranches start at run-030
 - [x] non-Python language (030: Go)
 - [x] dirty working tree / uncommitted user WIP (032/033)
 - [x] greenfield non-Python (035: Rust)
+- [x] interruption / resume (041)
+- [x] ecosystem integration (042: HowlDream -> HowlWriter -> HowlCreate)
+- [x] large cross-cutting change (039/040)

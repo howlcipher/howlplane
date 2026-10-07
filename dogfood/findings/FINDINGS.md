@@ -535,3 +535,101 @@ Same commit as DOG-027 (175b57a), shared files. PUSHED.
 run-038 TARGETED DOGFOOD EXPERIMENT: core.fsmonitor logging hook in the target repo; public-CLI session made 4 hook calls, all from Codex's sandboxed git, 0 from HowlPlane (control: plain git status fires it).
 ### Notes
 Not addressed (out of scope, recorded): git hooks in `.git/hooks` / `core.hooksPath` still run on HowlPlane's own commits in git_integration; disabling them would change semantics for users who rely on their hooks. Candidate for a separate design decision.
+
+## DOG-029 — Secret redaction rewrites the user's goal and review notes ("token once" -> "token <redacted>")
+Status: RESOLVED (verified live, run-040)
+Severity: P1 (requirements altered before any agent reads them; risk of missed requirements and false completion)
+Discovered in: run-039 (adaptive tranche 2, multi-user/API-token change to the bookmarks service)
+Owning component: HowlPlane orchestration redaction (orchestration.SECRET) vs canonical presentation/redact.py
+Repository: howlplane
+### User action
+`howl orchestrate "<goal about API tokens and Bearer auth>" --repo dogfood-missions/run-039/bookmarks`.
+### Expected
+Agents receive the goal as written; only real credentials are masked in stored and reported text.
+### Actual
+The report's Goal line (= doc["goal"], used in every worker prompt) read: "prints a newly generated API token <redacted>, ... issue a new token <redacted> an existing user. Store only a hash of each token, never the token <redacted>", "requires `Authorization: Bearer <redacted> A missing, malformed, unknown or revoked token <redacted> 401". Words lost: once, for, itself, `<token>`, returns. The review notes were mangled the same way ("Token <redacted> only the SHA-256 hex digest is stored").
+### Evidence
+runs/run-039/stdout.log (8 `<redacted>` occurrences, none of them secrets). Pattern: `(token|password|secret|api[_-]?key)[=: ]+(\S+)`, where a bare space counts as a separator.
+### User impact
+Any goal about authentication, tokens, passwords or secrets reaches agents altered. Here Codex inferred the intent (the deliverable met every requirement), but "revoked token returns 401" lost its verb. Review findings sent to rework pass through the same filter.
+### Root cause
+Defect class: two redaction implementations diverged. Orchestration's private pattern used keyword + space. The canonical primitive (which claims to be the only one) would also have masked documentation placeholders (`Authorization: Bearer <token>`). Redaction treated any word near a keyword as a credential instead of requiring the value to look like one.
+### Resolution
+orchestration.redact delegates to presentation.redact.redact_operator_text. The canonical patterns require credential-shaped values: name=value (any non-placeholder value), name: value (credential charset, 6+ characters, contains a digit), Bearer/Authorization (8+ characters, contains a digit). Placeholders (<x>, $X, {x}) are never masked. Quoted JSON keys stay unmatched, so HowlPlane's lease token survives manifest redaction. Trade-off recorded: "password: changeme" is no longer masked.
+### Tests
+tests/test_redaction_preserves_prose.py (prose and placeholders survive; 8 credential forms masked; orchestration == canonical; goal stored and saved verbatim). 331 passed in the affected modules; make lint clean.
+### Commit
+howlplane dogfood/DOG-029-redaction-prose 8e5b2ab (based on main 068e3d7, not stacked). Push: PUSHED (pre-push 2338 passed). PR #157 (base main).
+### Regression verification
+run-040 (same mission, identical start, local integration a911cc9): the live session manifest goal was byte-identical to the mission text (no redaction markers); the report showed 1 [REDACTED], which was DOG-030 (below), not the goal.
+
+## DOG-030 — Reviewers were shown a redacted diff: text that is not in the repository
+Status: FIXED (merged via #156; not re-run live after the fix)
+Severity: P2 (reviewers judge distorted evidence; risk of false findings and needless rework)
+Discovered in: run-040 review notes ("The README example uses `API_TOKEN='[REDACTED]'` as a placeholder")
+Owning component: HowlPlane orchestration, session_diff_evidence (DOG-027 code)
+Repository: howlplane
+### Actual
+README line `API_TOKEN='paste-the-printed-token-here'` reached the reviewer as `API_TOKEN='[REDACTED]'`; the reviewer flagged the README for content it does not contain.
+### Root cause
+Same class as DOG-029: redaction applied to evidence passed between agents. The diff is never persisted and the reviewer can Read the files, so redacting it adds no confidentiality, only distortion. Introduced by my DOG-027 change.
+### Resolution
+The diff is no longer redacted. Residual risk recorded: plan and verdict excerpts are stored redacted in the manifest and re-fed to agents; with DOG-029's narrower patterns, only literal name=value lines can be altered.
+### Tests
+test_orchestration_review_diff_evidence::test_reviewers_see_the_repository_text_not_a_redacted_version (fails on the old line).
+### Commit
+howlplane dogfood/DOG-027-review-diff-evidence (PR #156), 540ca27 on top of 175b57a, PUSHED (pre-push 2328 passed).
+
+## DOG-031 — `howl doctor` reports HEALTHY while a developer-profile runtime lacks a dependency its checkout declares
+Status: RESOLVED (verified through the public CLI on the real installation)
+Severity: P1 (false health; HowlWriter's native path and the creative pipeline unusable with no signal)
+Discovered in: run-042 setup (creative pipeline preflight)
+Owning component: Howl installer (health checks, doctor --fix, developer source installs)
+Repository: howl
+### User action
+`howl status`, `howl doctor`, then `howlwriter native write --request ... --command-config remote.json`.
+### Expected
+If an installed component cannot run its documented commands because a declared dependency is missing, doctor says so and `--fix` repairs it.
+### Actual
+`howl doctor`: every component healthy, "Ecosystem Status: HEALTHY". `howlwriter native write`: ModuleNotFoundError: howl_provider_core. The developer-profile HowlWriter runtime is an editable install of the checkout; the checkout later added a hard, pinned dependency; the runtime never received it. The health check is `--version`, and pip's metadata (written at install time) makes `pip check` pass too.
+Two adjacent defects in the repair path: doctor checked and reinstalled the raw manifest component, so `--fix` would have replaced a developer's editable checkout with the release wheel; and the source reinstall could not find the checkout unless HOWL_<NAME>_DIR or HOWL_DEV_WORKSPACE was set or doctor ran from a sibling directory.
+### Root cause
+Defect class: installed state was trusted after install-time resolution. Nothing tied a runtime to its source's current dependency declarations, and repair ignored the recorded install profile and the runtime's own record of its checkout.
+### Resolution
+Editable installs record a hash of the checkout's dependency declarations; the health check fails on change, or on an unrecorded editable runtime (PEP 610 direct_url.json), with "run `howl doctor --fix`". Doctor applies the recorded profile (`Component.ForProfile`, shared with planning). Source reinstall falls back to the checkout the runtime records.
+### Tests
+pyruntime (no-op without editable, unrecorded, drift per declaration file + resync, InstalledCheckout cases), health (drift fails a passing exec check), doctor (repair method follows profile). gofmt, vet, `go test -race ./...`, build clean.
+Public CLI: fixed `howl doctor` -> FAIL howlwriter + howlplane-engine (unverified) -> `howl doctor --fix` -> reinstalled both -> HEALTHY; howl_provider_core importable; `howlwriter native write` produced a package (FACTUALLY_PRESERVED).
+### Commit
+howl dogfood/DOG-031-editable-dependency-drift 5ee87c1, PUSHED; PR howlcipher/howl#15. (The installed ~/.local/bin/howl is still the old binary until the PR merges and howl self-updates; the repair was run with a build of the branch.)
+### Notes
+Host observation (not a Howl defect): howlcreate's own developer venv (in its checkout, not installer-managed) had a stale provider-core lacking `classify_failure`; resynced with `uv pip install -e .`.
+
+## DOG-032 — The documented creative pipeline is not reachable through the official installer
+Status: OPEN (needs a product decision; user-mode workaround documented)
+Severity: P2 (promised integration unavailable without hand-installing into an installer-owned runtime)
+Discovered in: run-042
+Owning component: Howl installer manifest and HowlPlane creative pipeline (boundary between them)
+Repository: howl, howlplane
+### Actual
+HowlPlane's README presents `howlplane creative run` (HowlDream -> HowlWriter -> HowlCreate) as native. The pipeline runs each stage as `<HowlPlane's python> -m <component>` and its preflight requires all four packages importable in HowlPlane's engine runtime. The installer manifest does not include howldream, howlcreate or howl-provider-core, and installs HowlWriter into a separate runtime. On a standard install, `howlplane doctor --creative` therefore fails 6 checks, and its remediation (`pip install 'git+...@main'`) means hand-installing into an installer-owned virtualenv. The README's "Plane runs each component through its own CLI" is inaccurate (it runs their modules under its own interpreter).
+### User-mode workaround used in run-042
+Installed editable howldream, howlwriter and howlcreate into the engine runtime (pip resolved the shared provider-core pin 5837d46); preflight PASS 18/18. Note: installing the local editable provider-core alongside conflicts with the consumers' pinned direct URL (operator error, not a defect; the preflight's pin check covers it).
+### Options (for the user)
+A) Installer owns composition: add the creative components to the manifest as an optional capability installed into the engine runtime.
+B) HowlPlane owns composition: run each component's console script in its own installer-managed runtime (what the README describes), and make the preflight check CLIs and contracts by subprocess.
+
+## DOG-033 — A COMPLETED creative run hides copy that failed Writer's fidelity check
+Status: FIXED (PR #158; not re-run live)
+Severity: P2 (part of the request silently not delivered; same class as DOG-015/022)
+Discovered in: run-042
+Owning component: HowlPlane creative pipeline report (creative_pipeline.py)
+Repository: howlplane
+### Actual
+Writer marked the subhead FACTUAL_REVIEW_REQUIRED; Create kept the original placeholder for it (usable=false). The CLI printed "Creative run ...: COMPLETED" and seven COMPLETED stages, nothing else; creative-run.json recorded only the package-level factual_status.
+### Resolution
+writer_write records review_required (item, status, findings); materialize records withheld_items; the report prints a "Review required" section. Status and exit code unchanged. The guidance names the package to review and does not claim an untested amend/resume path.
+### Tests
+test_creative_pipeline: review section with findings and withheld items; no section for a fully verified run (26 creative tests pass; make lint clean).
+### Commit
+howlplane dogfood/DOG-033-creative-review-visibility 4d3a214 (first push rejected by the pre-push SlopsLint clone ceiling, my duplicated test helper; deduplicated). PR #158.
