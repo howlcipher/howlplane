@@ -24,6 +24,7 @@ from typing import Any, Callable, TextIO
 from howlplane.control_plane import agent_readiness, workspace_trust
 from howlplane.control_plane.agent_execution import AgentBackendRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
+from howlplane.control_plane.git_env import guarded_git_args
 from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
 from howlplane.control_plane.presentation.redact import redact_operator_text
 from howlplane.control_plane.provider_execution_profile import command_to_bash_specifier, is_mutating_role
@@ -357,7 +358,7 @@ def state_root() -> Path:
 
 
 def git(repo: Path, *args: str) -> str:
-    result = subprocess.run(["git", "-C", str(repo), *args], text=True, capture_output=True, timeout=20)
+    result = subprocess.run(["git", "-C", str(repo), *guarded_git_args([*args])], text=True, capture_output=True, timeout=20)
     if result.returncode:
         raise ValueError(f"Git inspection failed: {redact(result.stderr.strip())}")
     return result.stdout.strip()
@@ -388,6 +389,83 @@ def evidence(repo: Path) -> dict[str, Any]:
 def fingerprint(snapshot: dict[str, Any]) -> str:
     import hashlib
     return hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest()
+
+
+def dirty_paths(root: Path) -> dict[str, str | None]:
+    """Each path that differs from HEAD (or is untracked), with its content hash; None when deleted."""
+    import hashlib
+    # Not git(): its strip() would eat the leading space of a " M path" entry.
+    status = subprocess.run(["git", "-C", str(root), *guarded_git_args(["status", "--porcelain=v1", "-z", "--untracked-files=all"])],
+                            capture_output=True, text=True, timeout=20)
+    if status.returncode:
+        raise ValueError(f"Git inspection failed: {redact(status.stderr.strip())}")
+    entries = status.stdout.split("\0")
+    paths: dict[str, str | None] = {}
+    index = 0
+    while index < len(entries):
+        entry = entries[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        if entry[0] in "RC":
+            index += 1  # -z puts a rename's source path in the next field
+        name = entry[3:]
+        candidate = root / name
+        paths[name] = (hashlib.sha256(candidate.read_bytes()).hexdigest()
+                       if candidate.is_file() and not candidate.is_symlink() else None)
+    return paths
+
+
+REVIEW_DIFF_CHARS = 12000
+
+
+def session_diff_evidence(doc: dict[str, Any], repo: Path) -> str:
+    """Give read-only roles the diff of this session's work, which HowlPlane computes itself.
+
+    Review and acceptance hold no shell, so they could not see what changed or the
+    original version of a file, and compatibility requirements went unverified (DOG-027).
+    Git runs here with external diff and textconv drivers off, so no repository-configured
+    program executes. Changes the user already had uncommitted when the session began are
+    named separately, so they are never judged as the implementer's work.
+    """
+    try:
+        root = Path(git(repo, "rev-parse", "--show-toplevel")).resolve()
+        current = dirty_paths(root)
+        has_head = subprocess.run(["git", "-C", str(root), *guarded_git_args(["rev-parse", "--verify", "-q", "HEAD"])],
+                                  capture_output=True, text=True, timeout=20).returncode == 0
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return ""
+    base = doc.get("base_dirty") or {}
+    untouched = sorted(name for name in current if name in base and current[name] == base[name])
+    session = sorted(name for name in current if name not in untouched)
+    if not session and not untouched:
+        return ""
+    lines = [" HowlPlane computed this session's changes against the last commit (HEAD); you cannot run git yourself, "
+             "so use this to see what changed and the original lines, and Read files for full context."]
+    if untouched:
+        lines.append("\nUncommitted changes the user already had before this session began, untouched by it (not the "
+                     "implementer's work; do not judge them): " + ", ".join(untouched))
+    mixed = sorted(name for name in session if name in base)
+    if mixed:
+        lines.append("\nThese files already had uncommitted user changes before this session; their diff below includes "
+                     "those user changes as well: " + ", ".join(mixed))
+    tracked = [name for name in session if has_head and subprocess.run(
+        ["git", "-C", str(root), *guarded_git_args(["cat-file", "-e", f"HEAD:{name}"])], capture_output=True, timeout=20).returncode == 0]
+    added = [name for name in session if name not in tracked]
+    if added:
+        lines.append("\nNew files (not in HEAD; Read them): " + ", ".join(added))
+    if tracked:
+        try:
+            diff = git(root, "diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color", "--", *tracked)
+        except ValueError:
+            diff = ""
+        if len(diff) > REVIEW_DIFF_CHARS:
+            diff = diff[:REVIEW_DIFF_CHARS] + "\n[... diff truncated by HowlPlane; Read the files for the rest ...]"
+        # Not redacted: the diff is never persisted, and the reviewer can Read the same files. Redacting it
+        # only showed the reviewer text that is not in the repository (DOG-030: a README placeholder
+        # `API_TOKEN='paste-the-printed-token-here'` arrived as `API_TOKEN='[REDACTED]'`).
+        lines.append("\n--- diff of changed tracked files against HEAD ---\n" + diff + "\n--- end of diff ---")
+    return "".join(lines)
 
 
 @contextmanager
@@ -1027,7 +1105,8 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         "model_states": model_states, "known_models": {}, "attempts": [], "tests": [], "reroutes": [],
         "execution_budget": budget, "timed_out_assignments": [], "workspace_trust_policy": resolved_policy,
         "verify_command": args.verify,
-        "repository_evidence": snapshot, "lease": {"token": token, "pid": os.getpid(), "renewed_at": time.time()},
+        "repository_evidence": snapshot, "base_dirty": dirty_paths(Path(snapshot["root"])),
+        "lease": {"token": token, "pid": os.getpid(), "renewed_at": time.time()},
     }
 
 
@@ -1137,10 +1216,10 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
                          "work against it and do not require workflow artifacts in the repository:\n" + plan + "\n")
     if role == "review":
         instructions += ("Independently inspect the current diff and falsify correctness. Do not edit files. "
-                         + REVIEW_VERDICT_CONTRACT + verification_evidence_for_review(doc))
+                         + REVIEW_VERDICT_CONTRACT + verification_evidence_for_review(doc) + session_diff_evidence(doc, repo))
     elif role == "acceptance":
         instructions += "As session orchestrator, inspect implementation, tests, and independent audit. Do not edit files. End with exactly ACCEPTANCE_STATUS: ACCEPTED only if evidence supports the goal; otherwise end with ACCEPTANCE_STATUS: REJECTED."
-        instructions += audit_evidence_for_acceptance(doc)
+        instructions += audit_evidence_for_acceptance(doc) + session_diff_evidence(doc, repo)
         if (doc.get("rework") or {}).get("source") == "acceptance":
             instructions += (f" An earlier acceptance check rejected the work and the implementer was sent back to address it "
                              f"(rework round {doc['rework']['round']}). Judge the current repository, and check whether "
@@ -1384,7 +1463,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 # Implementation already completed or previously succeeded
                 succeeded = True
             elif doc.get("reconciliation", {}).get("needs_validation") and doc.get("verify_command"):
-                check = subprocess.run(["git", "-C", str(repo), "diff", "--check"], capture_output=True, text=True, timeout=30)
+                check = subprocess.run(["git", "-C", str(repo), *guarded_git_args(["diff", "--check"])], capture_output=True, text=True, timeout=30)
                 if check.returncode == 0:
                     verified = run_verification(doc, repo)
                     if verified["exit_code"] == 0:
@@ -1452,7 +1531,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 )
                 accepted_no_change = False
                 if has_repo_wip and (is_wip or reports_no_change):
-                    check = subprocess.run(["git", "-C", str(repo), "diff", "--check"], capture_output=True, text=True, timeout=30)
+                    check = subprocess.run(["git", "-C", str(repo), *guarded_git_args(["diff", "--check"])], capture_output=True, text=True, timeout=30)
                     verified_ok = True
                     if doc.get("verify_command"):
                         verified_ok = run_verification(doc, repo)["exit_code"] == 0
@@ -1623,7 +1702,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
         if stage == "implementation":
             if progress:
                 progress.validation(True, "Running repository diff validation")
-            check = subprocess.run(["git", "-C", str(repo), "diff", "--check"], capture_output=True, text=True, timeout=30)
+            check = subprocess.run(["git", "-C", str(repo), *guarded_git_args(["diff", "--check"])], capture_output=True, text=True, timeout=30)
             doc["tests"].append({"command": "git diff --check", "exit_code": check.returncode, "output": redact(check.stderr[:500])})
             if progress:
                 progress.validation(False, "Repository diff validation passed" if check.returncode == 0 else "Repository diff validation failed")
