@@ -25,6 +25,7 @@ from howlplane.control_plane import agent_readiness, workspace_trust
 from howlplane.control_plane.agent_execution import AgentBackendRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
 from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+from howlplane.control_plane.presentation.redact import redact_operator_text
 from howlplane.control_plane.provider_execution_profile import command_to_bash_specifier, is_mutating_role
 from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 from howlplane.control_plane.task_spec import TaskSpec
@@ -144,13 +145,10 @@ def is_existing_wip_context(goal: str, constraints: list[str] | None = None) -> 
     )
     return any(term in text for term in indicators)
 
-# A value stops at a quote or backslash so redacting serialized JSON cannot
-# consume the string delimiter and corrupt the manifest.
-SECRET = re.compile(r"(?i)(bearer\s+|(?:token|password|secret|api[_-]?key)[=: ]+)([^\s,;\x22\\]+)|\b(?:sk-|ghp_|gho_|github_pat_)[\w-]{8,}")
-
-
 def redact(value: str) -> str:
-    return SECRET.sub(lambda match: match.group(1) + "<redacted>" if match.group(1) else "<redacted>", value)
+    # The canonical primitive: a private, looser pattern here treated "token once" as a secret and
+    # rewrote users' goals before workers read them (DOG-029).
+    return redact_operator_text(value)
 
 
 VERDICT_EXCERPT_CHARS = 4000

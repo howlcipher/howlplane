@@ -10,12 +10,26 @@ import re
 
 _REDACTED = "[REDACTED]"
 
+# A value is only treated as a credential when it looks like one: credential characters, long enough,
+# and (where prose could match) containing a digit. Requirements and review notes are full of phrases
+# such as "API token once", "Bearer <token>" and "the token: it is hashed"; masking the word after a
+# keyword rewrote what users asked for before any agent read it (DOG-029). Placeholders such as
+# <token>, $TOKEN and {token} are documentation, not secrets.
+_CREDENTIAL = r"[A-Za-z0-9._~+/=-]"
+_HAS_DIGIT = rf"(?={_CREDENTIAL}*\d)"
+_SECRET_NAME = r"[\w-]*(?:token|password|passwd|secret|api[_-]?key)"
+
 _PATTERNS = [
     # Authorization headers and bearer tokens.
-    re.compile(r"(?i)(authorization\s*[:=]\s*)(?:bearer\s+|basic\s+)?[^\s\"',;]+"),
-    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{8,}"),
-    # key=value / key: value for secret-looking names. Stops at quotes so JSON stays valid.
-    re.compile(r"(?i)((?:[\w-]*(?:token|password|passwd|secret|api[_-]?key))\s*[=:]\s*)[^\s,;\"'\\]+"),
+    re.compile(rf"(?i)(authorization\s*[:=]\s*[\"']?(?:bearer\s+|basic\s+)?){_HAS_DIGIT}{_CREDENTIAL}{{8,}}"),
+    re.compile(rf"(?i)(\bbearer\s+){_HAS_DIGIT}{_CREDENTIAL}{{8,}}"),
+    # name=value for secret-looking names: `=` does not occur in prose, so any non-placeholder value.
+    # Stops at quotes so JSON stays valid.
+    re.compile(rf"(?i)((?:{_SECRET_NAME})\s*=\s*[\"']?)(?![<${{])[^\s,;\"'\\]+"),
+    # name: value is common in prose, so only a credential-shaped value (as in YAML) counts. A quoted
+    # JSON key is not matched: HowlPlane redacts its own serialized manifest, whose lease "token" is a
+    # coordination value, not a credential.
+    re.compile(rf"(?i)((?:{_SECRET_NAME})\s*:\s*[\"']?){_HAS_DIGIT}{_CREDENTIAL}{{6,}}"),
     # Credentials embedded in URLs.
     re.compile(r"(://[^/\s:@]+:)[^@\s/]+(@)"),
 ]
