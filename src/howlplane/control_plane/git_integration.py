@@ -22,6 +22,7 @@ Design principles carried over from the rest of the control plane:
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
+import os
 import re
 import subprocess
 import time
@@ -107,6 +108,53 @@ PREMATURE_MERGE_SUCCESS_PATTERN = re.compile(
 )
 
 CommandRunner = Callable[[Union[str, Path], List[str], int], subprocess.CompletedProcess]
+
+
+def hook_fingerprint(repo_root: Union[str, Path]) -> Optional[Dict[str, Any]]:
+    """The repository's effective git hook setup: core.hooksPath and every hook file's content.
+
+    Agents can write `.git/hooks/*` and `.git/config`, which no reviewer sees in the
+    diff, and git would run what they planted when HowlPlane commits (DOG-034).
+    Returns None when the directory is not a readable git repository.
+    """
+    import hashlib
+
+    root = Path(repo_root)
+    if not root.is_dir():
+        return None
+    try:
+        hooks = run_git_in_repo(root, ["rev-parse", "--git-path", "hooks"], timeout=15)
+        configured = run_git_in_repo(root, ["config", "--get-all", "core.hooksPath"], timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if hooks.returncode != 0 or not hooks.stdout.strip():
+        return None
+    hooks_dir = Path(hooks.stdout.strip())
+    if not hooks_dir.is_absolute():
+        hooks_dir = root / hooks_dir
+    files: Dict[str, str] = {}
+    if hooks_dir.is_dir():
+        for entry in sorted(hooks_dir.iterdir()):
+            if entry.is_file() and not entry.name.endswith(".sample"):
+                digest = hashlib.sha256(entry.read_bytes()).hexdigest()
+                files[entry.name] = f"{digest}:{'x' if os.access(entry, os.X_OK) else '-'}"
+    return {"hooks_path_config": configured.stdout.split() if configured.returncode == 0 else [],
+            "hooks_dir": str(hooks_dir), "hooks": files}
+
+
+def describe_hook_change(before: Dict[str, Any], after: Dict[str, Any]) -> str:
+    changes = []
+    if before["hooks_path_config"] != after["hooks_path_config"]:
+        changes.append(f"core.hooksPath {before['hooks_path_config'] or 'unset'} -> "
+                       f"{after['hooks_path_config'] or 'unset'}")
+    for name in sorted(set(before["hooks"]) | set(after["hooks"])):
+        if name not in before["hooks"]:
+            changes.append(f"hook {name} added")
+        elif name not in after["hooks"]:
+            changes.append(f"hook {name} removed")
+        elif before["hooks"][name] != after["hooks"][name]:
+            changes.append(f"hook {name} changed")
+    return "; ".join(changes) or "hooks directory changed"
 
 
 class GitIntegrationError(Exception):
@@ -648,6 +696,8 @@ class GitIntegrationExecutor(AuthorityExecutor):
         # process restarts/resumes, not just within a single process's
         # in-memory lifetime.
         self._merges_so_far = merges_so_far
+        # Hook setup when this process created the task branch, before any agent worked (DOG-034).
+        self._hook_baseline: Optional[Dict[str, Any]] = None
 
     @property
     def name(self) -> str:
@@ -899,6 +949,7 @@ class GitIntegrationExecutor(AuthorityExecutor):
         verify = self._git(self.repo_root, ["rev-parse", "--verify", branch], 15)
         if verify.returncode != 0:
             raise GitIntegrationError(f"branch '{branch}' does not exist after creation attempt")
+        self._hook_baseline = hook_fingerprint(self.repo_root)
         return branch
 
     def stage_and_commit(
@@ -917,6 +968,7 @@ class GitIntegrationExecutor(AuthorityExecutor):
                     f"commit_task_changes rejected: path(s) outside task-declared scope {allowed_paths}: {violations}"
                 )
         self._reject_premature_acceptance_merge_claims(paths)
+        self._reject_hook_changes()
         add_proc = self._git(self.repo_root, ["add", "--"] + list(paths), 30)
         if add_proc.returncode != 0:
             raise GitIntegrationError(f"git add of task-owned paths failed: {add_proc.stderr}")
@@ -930,6 +982,22 @@ class GitIntegrationExecutor(AuthorityExecutor):
         if baseline_sha and sha == baseline_sha:
             raise GitIntegrationError("HEAD did not move after commit -- commit did not actually happen")
         return sha
+
+    def _reject_hook_changes(self) -> None:
+        """Refuse to commit when the hook setup changed since the task branch was created.
+
+        The user's own hooks keep running on HowlPlane's commits; hooks that appeared or
+        changed while agents worked are not trusted, because nothing reviewed them (DOG-034).
+        """
+        if self._hook_baseline is None:
+            return
+        current = hook_fingerprint(self.repo_root)
+        if current != self._hook_baseline:
+            change = describe_hook_change(self._hook_baseline, current) if current else "hook setup unreadable"
+            raise GitIntegrationError(
+                f"git hook setup changed while the task ran ({change}); HowlPlane will not run hooks it did "
+                "not start with. Inspect .git/hooks and core.hooksPath, restore or approve the change, then commit "
+                "the task yourself or rerun it.")
 
     def _reject_premature_acceptance_merge_claims(self, paths: List[str]) -> None:
         """Reject unverified merge success claims before any git subprocess runs."""
