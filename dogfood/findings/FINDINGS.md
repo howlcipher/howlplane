@@ -564,7 +564,7 @@ howlplane dogfood/DOG-029-redaction-prose 8e5b2ab (based on main 068e3d7, not st
 run-040 (same mission, identical start, local integration a911cc9): the live session manifest goal was byte-identical to the mission text (no redaction markers); the report showed 1 [REDACTED], which was DOG-030 (below), not the goal.
 
 ## DOG-030 — Reviewers were shown a redacted diff: text that is not in the repository
-Status: FIXED (pushed; PR #156; not re-run live after the fix)
+Status: FIXED (merged via #156; not re-run live after the fix)
 Severity: P2 (reviewers judge distorted evidence; risk of false findings and needless rework)
 Discovered in: run-040 review notes ("The README example uses `API_TOKEN='[REDACTED]'` as a placeholder")
 Owning component: HowlPlane orchestration, session_diff_evidence (DOG-027 code)
@@ -620,7 +620,7 @@ A) Installer owns composition: add the creative components to the manifest as an
 B) HowlPlane owns composition: run each component's console script in its own installer-managed runtime (what the README describes), and make the preflight check CLIs and contracts by subprocess.
 
 ## DOG-033 — A COMPLETED creative run hides copy that failed Writer's fidelity check
-Status: FIXED (push in progress; not re-run live)
+Status: FIXED (PR #158; not re-run live)
 Severity: P2 (part of the request silently not delivered; same class as DOG-015/022)
 Discovered in: run-042
 Owning component: HowlPlane creative pipeline report (creative_pipeline.py)
@@ -632,4 +632,4 @@ writer_write records review_required (item, status, findings); materialize recor
 ### Tests
 test_creative_pipeline: review section with findings and withheld items; no section for a fully verified run (26 creative tests pass; make lint clean).
 ### Commit
-howlplane dogfood/DOG-033-creative-review-visibility 2e8113a (based on main).
+howlplane dogfood/DOG-033-creative-review-visibility 4d3a214 (first push rejected by the pre-push SlopsLint clone ceiling, my duplicated test helper; deduplicated). PR #158.

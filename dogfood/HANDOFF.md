@@ -1,13 +1,14 @@
 # Howl Dogfood Handoff
 
-## CURRENT — read this first (updated 2026-10-07)
+## CURRENT — read this first (updated 2026-10-07, after merges)
 - Tranche 2 STOPPED at the user's request after run-042 (not PASS). See FINAL_REPORT.md "Adaptive Dogfood Tranche 2".
-- Open PRs (user merges, all based on main): howlplane #156 (DOG-027/028/030), #157 (DOG-029), DOG-033 (dogfood/DOG-033-creative-review-visibility), records (dogfood/adaptive-tranche-2); howl #15 (DOG-031).
-- LIVE ENGINE: howlplane checkout returned to main 068e3d7, which has DOG-026 only. Until #156/#157 merge, main lacks DOG-027..030 (including the DOG-028 security fix). The local branch dogfood/live-integration-t2 (c9ee1c4) holds the combination used for runs 041-042.
-- Host changes made this tranche (keep in mind): howlplane-engine runtime additionally holds editable howldream, howlwriter, howlcreate and howl-provider-core 5837d46 (DOG-032 workaround); both editable runtimes were reinstalled by the DOG-031 build of `howl doctor --fix` and carry source-dependencies.json markers; howlcreate's dev venv was resynced with `uv pip install -e .`. The installed ~/.local/bin/howl is still the pre-DOG-031 binary.
+- Merged at the user's request: howlplane #157 (DOG-029, 927f022), #156 (DOG-027/028/030, ebf2bda); howl #15 (DOG-031, c9d37d5). Verified by ancestry: 744bc4a, 175b57a, 540ca27, 8e5b2ab are all on howlplane main. Pending at time of writing: #158 (DOG-033) and the records PR (this branch); both to be merged once CI is green.
+- LIVE ENGINE: howlplane checkout on main; pull main after #158 merges. Main's engine has never run a dogfood mission as a whole (runs 040-042 used local integration branches with the same commits, minus DOG-033): the next session should run two fresh missions (run-043/044) on main to earn a clean pair.
+- Installed howl binary is still pre-DOG-031; run `howl update` (or rebuild) to get the new doctor behaviour.
+- Host changes: howlplane-engine runtime additionally holds editable howldream, howlwriter, howlcreate and howl-provider-core 5837d46 (DOG-032 workaround); editable runtimes carry source-dependencies.json markers; howlcreate's dev venv resynced with uv.
+- Open: DOG-032 (product decision A/B in FINDINGS), git-hooks policy (tranche 1).
 - Next finding DOG-034; next run run-043.
-- Resume: after merges, pull main, rerun two fresh missions (run-043/044); decide DOG-032.
-- WARNING: never stack PRs (#150, #154 landed on their stack bases, not main).
+- WARNING: never stack PRs. When a PR is BEHIND, `gh pr update-branch`, wait for CI, then merge; confirm by ancestry.
 - Always export HOWL_FORBID_LOCAL_INFERENCE=1.
 - Older history below.
 

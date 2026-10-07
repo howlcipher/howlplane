@@ -296,10 +296,10 @@ Observations: P3 resume hint names `howlplane` while the user typed `howl`; P3 H
 - The creative pipeline on a standard (non-developer) install.
 - Provider failure mid-session; multi-hour tasks.
 
-## Open PRs (user merges)
-howlplane #156 (DOG-027/028/030), #157 (DOG-029), DOG-033 branch PR, records PR; howl #15 (DOG-031). All based on main; merge in any order.
+## PRs
+Merged at the user's request: howlplane #157 (DOG-029), #156 (DOG-027/028/030), howl #15 (DOG-031); #158 (DOG-033) and the records PR merged after CI. All engine commits verified on main by ancestry.
 
 ## Recommended Next Steps
-1. Merge the PRs, then run two fresh missions on main to restore a clean pair.
+1. Run two fresh missions on main (now carrying DOG-026..033) to earn a clean pair.
 2. Decide DOG-032 (A: installer owns creative components; B: HowlPlane runs each component's own console script).
 3. Decide the git-hooks policy for HowlPlane's own commits (from tranche 1).

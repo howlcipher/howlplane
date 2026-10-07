@@ -74,3 +74,4 @@
 - run-041 TARGETED: Ctrl-C mid-implementation, clean checkpoint, resume COMPLETE.
 - run-042 ecosystem creative pipeline: DOG-031 (howl doctor false HEALTHY; howl#15), DOG-032 (installer gap, open), DOG-033 (hidden review items; fixed). Pipeline COMPLETED with intact lineage.
 - 2026-10-07: tranche 2 STOPPED at the user's request. Engine checkout returned to main.
+- 2026-10-07 user: "push and merge everything". Merged #157, #156 (after update-branch + CI), howl#15. DOG-033 first push failed the pre-push SlopsLint clone ceiling (my duplicated test helper); deduplicated, pushed 4d3a214, PR #158.
