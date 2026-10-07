@@ -20,6 +20,7 @@ def fake_env(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONPATH", str(FAKES))
     monkeypatch.setenv("FAKE_COUNTER_DIR", str(counters))
     monkeypatch.delenv("FAKE_FAIL_STAGE", raising=False)
+    monkeypatch.delenv("FAKE_REVIEW_ITEM", raising=False)
     return counters
 
 
@@ -128,14 +129,18 @@ def test_explore_source_and_scaffold_without_sandbox(tmp_path, fake_env):
     assert (fake_env / "create-scaffold").read_text() == "1"
 
 
-def test_cli_run_and_status(tmp_path, fake_env, capsys):
+def run_cli(tmp_path):
     for name in ("ideas.json", "spec.json", "remote.json"):
         (tmp_path / name).write_text("{}")
-    code = cli.main(["creative", "run", "--run-dir", str(tmp_path / "run"),
+    return cli.main(["creative", "run", "--run-dir", str(tmp_path / "run"),
                      "--external-ideas", str(tmp_path / "ideas.json"),
                      "--copy-spec", str(tmp_path / "spec.json"),
                      "--command-config", str(tmp_path / "remote.json"),
                      "--sandbox", str(tmp_path / "sandbox"), "--skip-doctor"])
+
+
+def test_cli_run_and_status(tmp_path, fake_env, capsys):
+    code = run_cli(tmp_path)
     assert code == 0, capsys.readouterr()
     assert "COMPLETED" in capsys.readouterr().out
     assert cli.main(["creative", "status", "--run-dir", str(tmp_path / "run"), "--json"]) == 0
@@ -148,3 +153,25 @@ def test_cli_requires_exactly_one_dream_source(tmp_path, capsys):
                      "--copy-spec", str(tmp_path / "spec.json"), "--command-config", "x"])
     assert code == 2
     assert "exactly one Dream source" in capsys.readouterr().err
+
+
+def test_completed_run_names_copy_that_needs_review(tmp_path, fake_env, monkeypatch, capsys):
+    """DOG-033: run-042 printed only COMPLETED while Writer's subhead failed its fidelity check and the
+    page kept the original placeholder text for it."""
+    monkeypatch.setenv("FAKE_REVIEW_ITEM", "subhead")
+
+    assert run_cli(tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "COMPLETED" in out
+    assert "Review required: 1 copy item(s) could not be verified against the evidence." in out
+    assert "subhead: FACTUAL_REVIEW_REQUIRED" in out
+    assert '"8" counts check' in out
+    assert "The materialized page keeps the original copy for: subhead." in out
+    state = json.loads((tmp_path / "run" / "creative-run.json").read_text())
+    assert state["stages"]["writer_write"]["review_required"][0]["item_id"] == "subhead"
+    assert state["stages"]["materialize"]["withheld_items"] == ["subhead"]
+
+
+def test_fully_verified_run_prints_no_review_section(tmp_path, fake_env, capsys):
+    assert run_cli(tmp_path) == 0
+    assert "Review required" not in capsys.readouterr().out
