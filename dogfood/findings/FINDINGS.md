@@ -606,7 +606,7 @@ howl dogfood/DOG-031-editable-dependency-drift 5ee87c1, PUSHED; PR howlcipher/ho
 Host observation (not a Howl defect): howlcreate's own developer venv (in its checkout, not installer-managed) had a stale provider-core lacking `classify_failure`; resynced with `uv pip install -e .`.
 
 ## DOG-032 — The documented creative pipeline is not reachable through the official installer
-Status: OPEN (needs a product decision; user-mode workaround documented)
+Status: RESOLVED (option B, chosen by the user; verified live)
 Severity: P2 (promised integration unavailable without hand-installing into an installer-owned runtime)
 Discovered in: run-042
 Owning component: Howl installer manifest and HowlPlane creative pipeline (boundary between them)
@@ -618,9 +618,15 @@ Installed editable howldream, howlwriter and howlcreate into the engine runtime 
 ### Options (for the user)
 A) Installer owns composition: add the creative components to the manifest as an optional capability installed into the engine runtime.
 B) HowlPlane owns composition: run each component's console script in its own installer-managed runtime (what the README describes), and make the preflight check CLIs and contracts by subprocess.
+### Resolution (2026-10-07)
+User chose option B. Stages run the `howldream`, `howlwriter` and `howlcreate` console scripts from PATH in their own environments, recording each resolved executable; a missing CLI fails the stage clearly and blocks the preflight. The preflight checks each component with `<cli> --version` (still catches stale component venvs) and validates the command profile by shape when provider-core is not in HowlPlane's interpreter. In-process package/symbol/pin/schema checks and `--repos-root` removed.
+### Live verification
+Workaround removed first (engine runtime package set restored to its pre-workaround state). Then `howlplane doctor --creative` PASS 9/9 and `howlplane creative run` (runs/c2-optionB) COMPLETED all 7 stages, lineage intact, each stage running /home/.../.local/bin/<component>. The same run showed DOG-033's "Review required" section live.
+### Commit
+howlplane cb74193, PR #160, merged 86eb74f.
 
 ## DOG-033 — A COMPLETED creative run hides copy that failed Writer's fidelity check
-Status: FIXED (PR #158; not re-run live)
+Status: RESOLVED (merged #158; verified live in run-042's option-B rerun)
 Severity: P2 (part of the request silently not delivered; same class as DOG-015/022)
 Discovered in: run-042
 Owning component: HowlPlane creative pipeline report (creative_pipeline.py)
@@ -633,3 +639,18 @@ writer_write records review_required (item, status, findings); materialize recor
 test_creative_pipeline: review section with findings and withheld items; no section for a fully verified run (26 creative tests pass; make lint clean).
 ### Commit
 howlplane dogfood/DOG-033-creative-review-visibility 4d3a214 (first push rejected by the pre-push SlopsLint clone ceiling, my duplicated test helper; deduplicated). PR #158.
+
+## DOG-034 — HowlPlane's own commits run git hooks that agents could plant mid-task
+Status: FIXED (pending merge)
+Severity: P1 (security: same class as DOG-028)
+Discovered in: follow-up to DOG-028 (tranche 1 open item), policy chosen with the user on 2026-10-07
+Owning component: HowlPlane git integration (factory/marathon commits)
+Repository: howlplane
+### Actual
+GitIntegrationExecutor.stage_and_commit runs `git commit`, which executes `.git/hooks/*` or the core.hooksPath directory. Agents can write both; reviewers never see them in the diff.
+### Resolution
+Keep the user's hooks; refuse to commit when the hook setup changed after the task branch was created. create_task_branch fingerprints core.hooksPath plus each hook's content and executable bit; stage_and_commit refuses before staging when it differs, naming the change. Limitation: a commit from a process that did not create the branch (resumed campaign) has no baseline.
+### Tests
+tests/test_git_hook_change_guard.py on a real repo with a bare origin: user hook still runs; new hook, changed hook and hooksPath redirect each block the commit with the planted hook unrun and HEAD unmoved. Git integration, marathon, crash recovery, acceptance canary modules unchanged (96 pass).
+### Commit
+howlplane dogfood/DOG-034-hook-change-guard 8bbceb0.

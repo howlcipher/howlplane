@@ -1,0 +1,14 @@
+Creative run crt-2f3dfba3fcf9: COMPLETED
+  preflight       COMPLETED
+  dream           COMPLETED
+  writer_request  COMPLETED
+  writer_write    COMPLETED
+  create_develop  COMPLETED
+  materialize     COMPLETED
+  audit           COMPLETED
+Review required: 1 copy item(s) could not be verified against the evidence.
+  subhead: FACTUAL_REVIEW_REQUIRED
+    - "8" counts check; the source does not say what that number counts.
+    - "2" counts attempt; the source does not say what that number counts.
+  The materialized page keeps the original copy for: subhead.
+  Review those proposals and findings in writer/copy-package.json before publishing the page.
