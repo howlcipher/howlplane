@@ -75,3 +75,4 @@
 - run-042 ecosystem creative pipeline: DOG-031 (howl doctor false HEALTHY; howl#15), DOG-032 (installer gap, open), DOG-033 (hidden review items; fixed). Pipeline COMPLETED with intact lineage.
 - 2026-10-07: tranche 2 STOPPED at the user's request. Engine checkout returned to main.
 - 2026-10-07 user: "push and merge everything". Merged #157, #156 (after update-branch + CI), howl#15. DOG-033 first push failed the pre-push SlopsLint clone ceiling (my duplicated test helper); deduplicated, pushed 4d3a214, PR #158.
+- 2026-10-07 follow-ups (user): (1) `howl update` -> "up to date" (no howl releases); rebuilt howl from main c9d37d5 and installed it, old binary kept as howl.prev; doctor HEALTHY. (3) DOG-032 option B implemented, verified live (preflight 9/9, pipeline 7/7 via component CLIs), merged #160. (5) Workaround packages removed from the engine runtime. (4) Hook policy: DOG-034 guard implemented (user hooks kept; hooks changed mid-task block the commit).

@@ -1,14 +1,14 @@
 # Howl Dogfood Handoff
 
-## CURRENT — read this first (updated 2026-10-07, after merges)
-- Tranche 2 STOPPED at the user's request after run-042 (not PASS). See FINAL_REPORT.md "Adaptive Dogfood Tranche 2".
-- Merged at the user's request: howlplane #157 (DOG-029, 927f022), #156 (DOG-027/028/030, ebf2bda); howl #15 (DOG-031, c9d37d5). Verified by ancestry: 744bc4a, 175b57a, 540ca27, 8e5b2ab are all on howlplane main. Pending at time of writing: #158 (DOG-033) and the records PR (this branch); both to be merged once CI is green.
-- LIVE ENGINE: howlplane checkout on main; pull main after #158 merges. Main's engine has never run a dogfood mission as a whole (runs 040-042 used local integration branches with the same commits, minus DOG-033): the next session should run two fresh missions (run-043/044) on main to earn a clean pair.
-- Installed howl binary is still pre-DOG-031; run `howl update` (or rebuild) to get the new doctor behaviour.
-- Host changes: howlplane-engine runtime additionally holds editable howldream, howlwriter, howlcreate and howl-provider-core 5837d46 (DOG-032 workaround); editable runtimes carry source-dependencies.json markers; howlcreate's dev venv resynced with uv.
-- Open: DOG-032 (product decision A/B in FINDINGS), git-hooks policy (tranche 1).
-- Next finding DOG-034; next run run-043.
-- WARNING: never stack PRs. When a PR is BEHIND, `gh pr update-branch`, wait for CI, then merge; confirm by ancestry.
+## CURRENT — read this first (updated 2026-10-07, follow-ups)
+- Tranche 2 STOPPED at the user's request after run-042 (not PASS). See FINAL_REPORT.md.
+- All engine fixes DOG-026..033 are merged on howlplane main; DOG-032 resolved with option B (#160). DOG-034 (hook guard) merged #161; howl#15 (DOG-031) merged. No open PRs besides this records PR.
+- Installed `howl` rebuilt from howl main c9d37d5 (`howl update` reported up to date because the howl repo has no releases); the previous binary is ~/.local/bin/howl.prev.
+- HowlPlane engine runtime is back to its installer state (creative workaround packages removed); the creative pipeline now uses each component's own CLI.
+- LIVE ENGINE: howlplane checkout on main.
+- Next (user deferred): two fresh missions on main (run-043/044) to earn a clean pair.
+- Next finding DOG-035; next run run-043.
+- WARNINGS: never stack PRs; when a PR is BEHIND, update-branch, wait for CI, merge, confirm by ancestry. In wait loops, never `pgrep -f` a pattern that appears in the loop's own command line.
 - Always export HOWL_FORBID_LOCAL_INFERENCE=1.
 - Older history below.
 

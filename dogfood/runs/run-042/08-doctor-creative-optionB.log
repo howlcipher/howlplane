@@ -1,0 +1,12 @@
+HowlPlane creative preflight: PASS
+9 PASS, 0 WARN, 0 FAIL
+
+PASS  Python interpreter: /home/howlcipher/.local/share/howl/runtimes/howlplane-engine/venv/bin/python (Python 3.14.4)
+PASS  Virtual environment: /home/howlcipher/.local/share/howl/runtimes/howlplane-engine/venv
+PASS  HowlDream CLI: /home/howlcipher/.local/bin/howldream (0.4.4)
+PASS  HowlWriter CLI: /home/howlcipher/.local/bin/howlwriter (howlwriter 0.1.0)
+PASS  HowlCreate CLI: /home/howlcipher/.local/bin/howlcreate (howlcreate 0.2.0)
+PASS  Remote provider configuration: remote.json parses; remote command claude (HowlWriter re-validates it before its call)
+PASS  HOWL_FORBID_LOCAL_INFERENCE: Local inference is forbidden
+PASS  Local model configuration: None detected
+PASS  Workspace permissions: /run/media/system/tallgeese/dev/dogfood-missions/run-042 is writable
