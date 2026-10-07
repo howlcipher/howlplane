@@ -2,7 +2,7 @@
 
 ## CURRENT — read this first (updated 2026-10-07, follow-ups)
 - Tranche 2 STOPPED at the user's request after run-042 (not PASS). See FINAL_REPORT.md.
-- All engine fixes DOG-026..033 are merged on howlplane main; DOG-032 resolved with option B (#160). DOG-034 (hook guard) PR pending at time of writing; howl#15 (DOG-031) merged.
+- All engine fixes DOG-026..033 are merged on howlplane main; DOG-032 resolved with option B (#160). DOG-034 (hook guard) merged #161; howl#15 (DOG-031) merged. No open PRs besides this records PR.
 - Installed `howl` rebuilt from howl main c9d37d5 (`howl update` reported up to date because the howl repo has no releases); the previous binary is ~/.local/bin/howl.prev.
 - HowlPlane engine runtime is back to its installer state (creative workaround packages removed); the creative pipeline now uses each component's own CLI.
 - LIVE ENGINE: howlplane checkout on main.

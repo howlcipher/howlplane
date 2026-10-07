@@ -641,7 +641,7 @@ test_creative_pipeline: review section with findings and withheld items; no sect
 howlplane dogfood/DOG-033-creative-review-visibility 4d3a214 (first push rejected by the pre-push SlopsLint clone ceiling, my duplicated test helper; deduplicated). PR #158.
 
 ## DOG-034 — HowlPlane's own commits run git hooks that agents could plant mid-task
-Status: FIXED (pending merge)
+Status: FIXED (merged #161, cafca95; policy proven by real-git tests, no live campaign run since)
 Severity: P1 (security: same class as DOG-028)
 Discovered in: follow-up to DOG-028 (tranche 1 open item), policy chosen with the user on 2026-10-07
 Owning component: HowlPlane git integration (factory/marathon commits)
@@ -653,4 +653,4 @@ Keep the user's hooks; refuse to commit when the hook setup changed after the ta
 ### Tests
 tests/test_git_hook_change_guard.py on a real repo with a bare origin: user hook still runs; new hook, changed hook and hooksPath redirect each block the commit with the planted hook unrun and HEAD unmoved. Git integration, marathon, crash recovery, acceptance canary modules unchanged (96 pass).
 ### Commit
-howlplane dogfood/DOG-034-hook-change-guard 8bbceb0.
+howlplane dogfood/DOG-034-hook-change-guard 8bbceb0, PR #161, merged cafca95 (pre-push 2351 passed; CI green).
