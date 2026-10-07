@@ -376,7 +376,7 @@ def test_redacting_a_secret_bearing_failure_keeps_the_manifest_valid(tmp_path, m
     path = persist(doc)
     module.save(path, doc, doc["lease"]["token"])
     stored = json.loads(path.read_text())
-    assert stored["attempts"][-1]["error"] == "engine failure token=<redacted>"
+    assert stored["attempts"][-1]["error"] == "engine failure token=[REDACTED]"
     assert stored["attempts"][-1]["next"] == "kept"
 
 
