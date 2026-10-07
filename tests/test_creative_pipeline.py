@@ -1,6 +1,8 @@
 """`howlplane creative`: native Dream -> Writer -> Create orchestration (hermetic fakes)."""
 
 import json
+import sys
+import os
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,17 @@ def fake_env(tmp_path, monkeypatch):
     counters = tmp_path / "counters"
     counters.mkdir()
     monkeypatch.setenv("PYTHONPATH", str(FAKES))
+    # The pipeline runs each component's console script from PATH (DOG-032); these shims stand in
+    # for them, each running its fake module the way the real entry point runs the package.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for command, module in (("howldream", "howldream.cli"), ("howlwriter", "howlwriter"),
+                            ("howlcreate", "howlcreate.cli")):
+        shim = bin_dir / command
+        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" -m {module} "$@"\n')
+        shim.chmod(0o755)
+    # Only the shims and system tools: a test must never reach a real installed component.
+    monkeypatch.setenv("PATH", os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"]))
     monkeypatch.setenv("FAKE_COUNTER_DIR", str(counters))
     monkeypatch.delenv("FAKE_FAIL_STAGE", raising=False)
     monkeypatch.delenv("FAKE_REVIEW_ITEM", raising=False)
@@ -175,3 +188,15 @@ def test_completed_run_names_copy_that_needs_review(tmp_path, fake_env, monkeypa
 def test_fully_verified_run_prints_no_review_section(tmp_path, fake_env, capsys):
     assert run_cli(tmp_path) == 0
     assert "Review required" not in capsys.readouterr().out
+
+
+def test_components_run_as_their_own_clis(tmp_path, fake_env):
+    """DOG-032: stages run each component's console script, not `python -m` in HowlPlane's interpreter."""
+    (tmp_path / "bin" / "howlcreate").unlink()
+    state = CreativeRun(tmp_path / "run", inputs(tmp_path)).execute()
+
+    assert state["status"] == "FAILED" and state["failed_stage"] == "create_develop"
+    assert "howlcreate is not on PATH" in state["stages"]["create_develop"]["error"]
+    writer = state["stages"]["writer_write"]
+    assert writer["commands"][0][0] == "howlwriter"
+    assert writer["executables"]["howlwriter"] == str(tmp_path / "bin" / "howlwriter")

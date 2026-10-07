@@ -357,7 +357,8 @@ howlplane creative run --run-dir runs/c1 --objective "..." \
 howlplane creative resume --run-dir runs/c1                        # continue from the failed stage
 ```
 
-Plane runs each component through its own CLI and passes only each component's
+Plane runs each component through its own CLI (`howldream`, `howlwriter` and `howlcreate`
+on PATH, each in the environment that installed it) and passes only each component's
 own contracts: a `howl.candidate/v1`, then a `howlwriter.copy_package/v1`, then a
 `howl.development_result/v1`, then a sandbox manifest. Nothing in between is
 handwritten. Every stage persists to the run directory.

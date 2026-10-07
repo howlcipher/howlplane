@@ -1332,7 +1332,6 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     doctor_scope.add_argument("--creative", action="store_true",
                               help="Preflight the Dream -> Writer -> Create pipeline (PASS/WARN/FAIL)")
     p_doctor.add_argument("--command-config", help="With --creative: remote provider profile to validate")
-    p_doctor.add_argument("--repos-root", help="With --creative: directory holding local Howl checkouts")
     p_doctor.add_argument("--workspace", help="With --creative: workspace to check for write access")
     p_doctor.add_argument("--live", action="store_true", help="Run a short read-only smoke test of each worker")
     _add_workspace_trust_argument(p_doctor)

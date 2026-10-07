@@ -65,10 +65,9 @@ class CreativeRun:
     """One persisted Dream -> Writer -> Create run."""
 
     def __init__(self, run_dir: Path, inputs: Optional[Dict[str, Any]] = None,
-                 python: Optional[str] = None, env: Optional[Dict[str, str]] = None):
+                 env: Optional[Dict[str, str]] = None):
         self.run_dir = run_dir.expanduser().resolve()
         self.state_path = self.run_dir / "creative-run.json"
-        self.python = python or sys.executable
         if self.state_path.exists():
             self.state = _load(self.state_path)
             if inputs and inputs != self.state["inputs"]:
@@ -115,19 +114,27 @@ class CreativeRun:
         self._save()
 
     # -- component invocation ---------------------------------------------
-    def _component(self, stage: str, module: str, args: List[str], *,
+    def _component(self, stage: str, command: str, args: List[str], *,
                    stdout_to: Optional[Path] = None) -> subprocess.CompletedProcess:
-        argv = [self.python, "-m", module, *args]
+        # Each component runs as its own CLI, in the environment that installed it. Running
+        # `python -m` inside HowlPlane's interpreter required all three components and their
+        # provider-core pin to be co-installed there, which no installer provides (DOG-032).
+        executable = shutil.which(command, path=self.env.get("PATH"))
+        if executable is None:
+            raise StageFailed(stage, f"{command} is not on PATH; install it (see `howlplane doctor --creative`)")
         record = self.state["stages"].setdefault(stage, {})
-        record.setdefault("commands", []).append([Path(self.python).name, "-m", module, *args])
+        record.setdefault("commands", []).append([command, *args])
+        record["executables"] = {**record.get("executables", {}), command: executable}
         self._save()
         try:
-            result = subprocess.run(argv, capture_output=True, text=True, env=self.env,
+            result = subprocess.run([executable, *args], capture_output=True, text=True, env=self.env,
                                     cwd=self.run_dir, timeout=STAGE_TIMEOUT_SECONDS, check=False)
         except subprocess.TimeoutExpired:
-            raise StageFailed(stage, f"{module} timed out after {STAGE_TIMEOUT_SECONDS}s") from None
+            raise StageFailed(stage, f"{command} timed out after {STAGE_TIMEOUT_SECONDS}s") from None
+        except OSError as error:
+            raise StageFailed(stage, f"{command} could not start: {error}") from None
         if result.returncode != 0:
-            raise StageFailed(stage, f"{module} exited {result.returncode}", {
+            raise StageFailed(stage, f"{command} exited {result.returncode}", {
                 "exit_code": result.returncode, "stderr_tail": result.stderr[-STDERR_TAIL:]})
         if stdout_to is not None:
             stdout_to.write_text(result.stdout, encoding="utf-8")
@@ -143,8 +150,7 @@ class CreativeRun:
             command_config=config, workspace=self.run_dir, env=self.env))
         out = self.path("preflight", "doctor.json")
         out.write_text(json.dumps(report, indent=2), encoding="utf-8")
-        blocking = [c for c in report["checks"] if c["status"] == creative_doctor.FAIL
-                    and not c["id"].startswith("cli.")]
+        blocking = [c for c in report["checks"] if c["status"] == creative_doctor.FAIL]
         if blocking:
             raise StageFailed("preflight", "creative doctor reported FAIL", {
                 "failures": [f"{c['label']}: {c['detail']}" for c in blocking]})
@@ -172,16 +178,16 @@ class CreativeRun:
         elif kind == "run":
             run_dir = Path(source["path"])
             unit = inputs.get("candidate_id") or self._select_unit(_load(run_dir / "discovery.json"))
-            self._component("dream", "howldream.cli", ["export", str(run_dir), "--candidate-id", unit],
+            self._component("dream", "howldream", ["export", str(run_dir), "--candidate-id", unit],
                             stdout_to=candidate)
             detail["selected"] = unit
         elif kind == "external":
             discovery = self.path("dream", "external-discovery.json")
-            self._component("dream", "howldream.cli", [
+            self._component("dream", "howldream", [
                 "cluster", "--external", source["path"], "--rank", "objective_fit",
                 "--out", str(discovery)])
             unit = self._select_unit(_load(discovery))
-            self._component("dream", "howldream.cli", ["export", str(discovery), "--candidate-id", unit],
+            self._component("dream", "howldream", ["export", str(discovery), "--candidate-id", unit],
                             stdout_to=candidate)
             detail["selected"] = unit
         elif kind == "explore":
@@ -197,14 +203,14 @@ class CreativeRun:
                            "forbid_local_inference": True},
             }, indent=2), encoding="utf-8")
             runs = self.path("dream", "runs", ".keep").parent
-            result = self._component("dream", "howldream.cli", [
+            result = self._component("dream", "howldream", [
                 "explore", str(request), "--output", str(runs),
                 "--command-config", inputs["command_config"], "--allow-remote"])
             exploration = json.loads(result.stdout)
             run_dir = runs / exploration["exploration_id"]
             self.path("dream", "exploration-result.json").write_text(result.stdout, encoding="utf-8")
             unit = self._select_unit(_load(run_dir / "discovery.json"))
-            self._component("dream", "howldream.cli", ["export", str(run_dir), "--candidate-id", unit],
+            self._component("dream", "howldream", ["export", str(run_dir), "--candidate-id", unit],
                             stdout_to=candidate)
             detail.update(selected=unit, dream_run=str(run_dir))
         else:
@@ -249,7 +255,7 @@ class CreativeRun:
                 "--from-dream", str(self.path("dream", "candidate.json")), "--output", str(out)]
         if mode == "develop":
             args += ["--provider", "command", "--command-config", inputs["command_config"]]
-        self._component("create_develop", "howlcreate.cli", args)
+        self._component("create_develop", "howlcreate", args)
         development = _load(out)
         self._complete("create_develop", [out], create_development_id=development["development_id"],
                        mode=mode)
@@ -259,7 +265,7 @@ class CreativeRun:
         if not sandbox:
             self._complete("materialize", [], skipped=True)
             return
-        self._component("materialize", "howlcreate.cli", [
+        self._component("materialize", "howlcreate", [
             "materialize", "--input", str(self.path("create", "development.json")),
             "--output-dir", sandbox])
         manifest = Path(sandbox).expanduser().resolve() / "create-artifact-manifest.json"
