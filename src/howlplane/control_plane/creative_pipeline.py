@@ -233,8 +233,13 @@ class CreativeRun:
                 error.detail["writer_failure"] = _load(failure).get("failure")
             raise
         package = _load(out)
+        # Proposals Writer's fidelity check could not verify; the report must name them (DOG-033).
+        review = [{"item_id": p.get("item_id"), "factual_status": p.get("factual_status"),
+                   "findings": [f.get("message") for f in (p.get("fidelity") or {}).get("findings", [])
+                                if f.get("message")]}
+                  for p in package.get("proposals", []) if p.get("factual_status") != "FACTUALLY_PRESERVED"]
         self._complete("writer_write", [out], writer_proposal_id=package["writer_proposal_id"],
-                       factual_status=package["factual_status"])
+                       factual_status=package["factual_status"], review_required=review)
 
     def stage_create_develop(self) -> None:
         inputs = self.state["inputs"]
@@ -258,8 +263,12 @@ class CreativeRun:
             "materialize", "--input", str(self.path("create", "development.json")),
             "--output-dir", sandbox])
         manifest = Path(sandbox).expanduser().resolve() / "create-artifact-manifest.json"
+        # Create keeps the current copy for proposals it may not use; say which (DOG-033).
+        copy = manifest.parent / "copy.json"
+        withheld = [item.get("item_id") for item in (_load(copy).get("items", []) if copy.exists() else [])
+                    if item.get("usable") is False]
         self._complete("materialize", [manifest], sandbox=str(manifest.parent),
-                       materialization_id=_load(manifest)["materialization_id"])
+                       materialization_id=_load(manifest)["materialization_id"], withheld_items=withheld)
 
     def stage_audit(self) -> None:
         out = self.path("contribution-audit.json")
@@ -414,6 +423,19 @@ def _report(state: Dict[str, Any], as_json: bool) -> int:
                     print(f"    {record.get('error')}")
                     for line in record.get("failures", []):
                         print(f"    - {line}")
+        # A COMPLETED run can still hold copy Writer could not verify, which Create then left
+        # as the original text; without this the page silently missed part of the request (DOG-033).
+        review = (state["stages"].get("writer_write") or {}).get("review_required") or []
+        withheld = (state["stages"].get("materialize") or {}).get("withheld_items") or []
+        if review or withheld:
+            print(f"Review required: {len(review)} copy item(s) could not be verified against the evidence.")
+            for item in review:
+                print(f"  {item['item_id']}: {item['factual_status']}")
+                for finding in item.get("findings", []):
+                    print(f"    - {finding}")
+            if withheld:
+                print(f"  The materialized page keeps the original copy for: {', '.join(withheld)}.")
+            print("  Review those proposals and findings in writer/copy-package.json before publishing the page.")
     return 0 if state["status"] == "COMPLETED" else 1
 
 
