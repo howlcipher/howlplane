@@ -26,6 +26,10 @@ elif args[0] == "materialize":
     out = Path(opt("--output-dir"))
     out.mkdir(parents=True, exist_ok=True)
     (out / "index.html").write_text("<!doctype html>")
+    if os.environ.get("FAKE_REVIEW_ITEM"):
+        (out / "copy.json").write_text(json.dumps({"items": [
+            {"item_id": "hero", "usable": True},
+            {"item_id": os.environ["FAKE_REVIEW_ITEM"], "usable": False}]}))
     (out / "create-artifact-manifest.json").write_text(json.dumps({
         "materialization_id": "mat-fake", "create_run_id": "dev-fake",
         "source_writer_ids": ["wp-000000000001"],
