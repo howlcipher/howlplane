@@ -1,0 +1,69 @@
+HOWL ORCHESTRATION REPORT
+Session: c94268e0140541e79c17ec4f2168e75b
+Goal: invoicegen currently reads its settings straight from `process.env` in several places. We want to deploy it for multiple clients, and environment variables alone are getting unwieldy. Please refactor configuration handling:
+
+1. Move all configuration loading into a single module so the rest of the code receives a plain config object instead of reading `process.env` directly.
+2. Support a JSON config file. Use the file given by a new `--config PATH` option; when that option is absent, use `.invoicegen.json` in the current working directory if it exists. Keys: `company`, `currency`, `taxRate`, `outDir`.
+3. Precedence, highest first: environment variables, then the config file, then built-in defaults. A relative `outDir` in a config file is resolved relative to that file's directory.
+4. Validate the final configuration: `taxRate` must be a number from 0 to 1, `currency` must be three uppercase letters, and `company` must be a non-empty string. Invalid configuration, an unreadable or malformed `--config` file, or an unknown key in the file must exit with code 2 and a message naming the problem, before any output is written. (A missing auto-discovered `.invoicegen.json` is not an error.)
+
+Compatibility: users who configure only through the existing environment variables must see exactly the same output and behaviour as today, including the current defaults. Keep the existing tests passing, add tests for the new behaviour (precedence, discovery, relative outDir, each validation error), and update the README.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 5
+Reroutes: 0
+Repository head: c03d40d7285f222c6c63e454c971aaaf1f4a9ea9
+Repository status: M README.md
+ M src/cli.js
+ M src/render.js
+ M templates/footer.txt
+ M test/cli.test.js
+?? notes/todo.md
+?? src/config.js
+?? test/config.test.js
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["npm", "test"], "exit_code": 1, "output": " missing explicit file\n  ---\n  duration_ms: 0.640515\n  type: 'test'\n  ...\n# Subtest: unreadable explicit file\nok 55 - unreadable explicit file\n  ---\n  duration_ms: 0.515139\n  type: 'test'\n  ...\n# Subtest: valid taxRate endpoints\nok 56 - valid taxRate endpoints\n  ---\n  duration_ms: 0.768845\n  type: 'test'\n  ...\n# Subtest: money avoids float drift\nok 57 - money avoids float drift\n  ---\n  duration_ms: 2.884114\n  type: 'test'\n  ...\n# Subtest: defaults\nok 58 - defaults\n  ---\n  duration_ms: 2.473882\n  type: 'test'\n  ...\n# Subtest: env overrides\nok 59 - env overrides\n  ---\n  duration_ms: 1.335511\n  type: 'test'\n  ...\n1..59\n# tests 59\n# suites 0\n# pass 58\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 6167.967014\nnpm warn cli npm v12.0.2 does not support Node.js v22.22.1. This version of npm supports the following node versions: `^22.22.2 || ^24.15.0 || >=26.0.0`. You can find the latest version at https://nodejs.org/.\nnpm notice run invoicegen@1.3.0 test\nnpm notice run node --test\n"}, {"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["npm", "test"], "rework_round": 0, "exit_code": 1, "output": "# Subtest: CLI rejects invalid outDir before any output\nnot ok 18 - CLI rejects invalid outDir before any output\n  ---\n  duration_ms: 163.878138\n  type: 'test'\n  location: '/run/media/system/tallgeese/dev/dogfood-missions/run-032/invoicegen/test/cli.test.js:103:51'\n  failureType: 'testCodeFailure'\n  error: |-\n    Expected values to be strictly equal:\n    \n    0 !== 2\n    \n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected: 2\n  actual: 0\n  operator: 'strictEqual'\n  stack: |-\n    TestContext.<anonymous> (file:///run/media/system/tallgeese/dev/dogfood-missions/run-032/invoicegen/test/cli.test.js:109:10)\n    Test.runInAsyncScope (node:async_hooks:214:14)\n    Test.run (node:internal/test_runner/test:1047:25)\n    Test.processPendingSubtests (node:internal/test_runner/test:744:18)\n    Test.postRun (node:internal/test_runner/test:1173:19)\n    Test.run (node:internal/test_runner/test:1101:12)\n    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)\n[...]\n  ...\n# Subtest: malformed discovered file fails before invoice read\nok 21 - malformed discovered file fails before invoice read\n  ---\n  duration_ms: 167.355612\n  type: 'test'\n  ...\n# Subtest: CLI rejects env INVOICE_TAX_RATE=abc\nok 22 - CLI rejects env INVOICE_TAX_RATE=abc\n  ---\n  duration_ms: 156.815458\n  type: 'test'\n  ...\n# Subtest: CLI rejects env INVOICE_TAX_RATE=-0.1\n[... output trimmed by HowlPlane; tail follows ...]\n\n  ...\n# Subtest: env taxRate abc\nok 50 - env taxRate abc\n  ---\n  duration_ms: 0.409479\n  type: 'test'\n  ...\n# Subtest: env taxRate Infinity\nok 51 - env taxRate Infinity\n  ---\n  duration_ms: 0.40457\n  type: 'test'\n  ...\n# Subtest: malformed discovered file\nok 52 - malformed discovered file\n  ---\n  duration_ms: 0.804852\n  type: 'test'\n  ...\n# Subtest: malformed explicit file\nok 53 - malformed explicit file\n  ---\n  duration_ms: 0.569921\n  type: 'test'\n  ...\n# Subtest: missing explicit file\nok 54 - missing explicit file\n  ---\n  duration_ms: 0.613724\n  type: 'test'\n  ...\n# Subtest: unreadable explicit file\nok 55 - unreadable explicit file\n  ---\n  duration_ms: 0.545655\n  type: 'test'\n  ...\n# Subtest: valid taxRate endpoints\nok 56 - valid taxRate endpoints\n  ---\n  duration_ms: 0.740201\n  type: 'test'\n  ...\n# Subtest: money avoids float drift\nok 57 - money avoids float drift\n  ---\n  duration_ms: 2.607589\n  type: 'test'\n  ...\n# Subtest: defaults\nok 58 - defaults\n  ---\n  duration_ms: 2.281387\n  type: 'test'\n  ...\n# Subtest: env overrides\nok 59 - env overrides\n  ---\n  duration_ms: 1.272471\n  type: 'test'\n  ...\n1..59\n# tests 59\n# suites 0\n# pass 58\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 6220.988148\nnpm warn cli npm v12.0.2 does not support Node.js v22.22.1. This version of npm supports the following node versions: `^22.22.2 || ^24.15.0 || >=26.0.0`. You can find the latest version at https://nodejs.org/.\nnpm notice run invoicegen@1.3.0 test\nnpm notice run node --test\n"}, {"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["npm", "test"], "rework_round": 1, "exit_code": 0, "output": "  ...\n# Subtest: malformed discovered file fails before invoice read\nok 22 - malformed discovered file fails before invoice read\n  ---\n  duration_ms: 167.890675\n  type: 'test'\n  ...\n# Subtest: CLI rejects env INVOICE_TAX_RATE=abc\nok 23 - CLI rejects env INVOICE_TAX_RATE=abc\n  ---\n  duration_ms: 152.726389\n  type: 'test'\n  ...\n# Subtest: CLI rejects env INVOICE_TAX_RATE=-0.1\n[... output trimmed by HowlPlane; tail follows ...]\nlformed explicit file\n  ---\n  duration_ms: 0.586672\n  type: 'test'\n  ...\n# Subtest: missing explicit file\nok 55 - missing explicit file\n  ---\n  duration_ms: 0.730774\n  type: 'test'\n  ...\n# Subtest: unreadable explicit file\nok 56 - unreadable explicit file\n  ---\n  duration_ms: 0.698142\n  type: 'test'\n  ...\n# Subtest: valid taxRate endpoints\nok 57 - valid taxRate endpoints\n  ---\n  duration_ms: 1.021771\n  type: 'test'\n  ...\n# Subtest: valid env overrides invalid file values for every key\nok 58 - valid env overrides invalid file values for every key\n  ---\n  duration_ms: 1.636326\n  type: 'test'\n  ...\n# Subtest: empty file outDir prints to stdout and overrides no directory default\nok 59 - empty file outDir prints to stdout and overrides no directory default\n  ---\n  duration_ms: 0.740712\n  type: 'test'\n  ...\n# Subtest: money avoids float drift\nok 60 - money avoids float drift\n  ---\n  duration_ms: 2.606019\n  type: 'test'\n  ...\n# Subtest: defaults\nok 61 - defaults\n  ---\n  duration_ms: 2.376858\n  type: 'test'\n  ...\n# Subtest: env overrides\nok 62 - env overrides\n  ---\n  duration_ms: 1.289814\n  type: 'test'\n  ...\n1..62\n# tests 62\n# suites 0\n# pass 62\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 6337.50283\nnpm warn cli npm v12.0.2 does not support Node.js v22.22.1. This version of npm supports the following node versions: `^22.22.2 || ^24.15.0 || >=26.0.0`. You can find the latest version at https://nodejs.org/.\nnpm notice run invoicegen@1.3.0 test\nnpm notice run node --test\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: npm test (derived from the project's discovered test command)
+Rework rounds: 1 of 2
+Failures: []
+Review notes from Claude (review, CLEAN):
+  No blocking findings. I read the diff by hand, because no shell was available in this role. The harness reported `npm test` passing (62 pass, 0 fail) and `git diff --check` clean.
+  
+  **Checked and found correct**
+  - **Single env reader:** `process.env` appears only at `src/config.js:6`. `render` defaults to `loadConfig()`, so the existing render tests keep working. The CLI passes the config in explicitly.
+  - **Precedence:** env beats file beats defaults, per key (`src/config.js:32-38`). An empty env value counts as unset.
+  - **Config file selection:**
+    - `--config` takes priority over discovery.
+    - Discovery looks for `.invoicegen.json` in the cwd.
+    - Only a missing discovered file is exempt from errors (`config.js:13`). A missing `--config` file, a malformed file, a non-object file and an unknown key all raise `ConfigError`.
+  - **Relative `outDir`:** a relative file `outDir` resolves against the config file's directory (`config.js:51-53`). An env `outDir` is not rebased.
+  - **Validation and exit code:**
+    - `taxRate` must be a finite number from 0 to 1. A string from the file is rejected, and a non-numeric env value becomes NaN and is rejected.
+    - `currency` must match `/^[A-Z]{3}$/`, which also rejects a trailing newline.
+    - `company` must be a non-empty string after trimming.
+    - `ConfigError` is caught in `cli.js:33-40` and returns 2 before the invoice read, `render`, `mkdirSync` or `writeFileSync`. Nothing reaches stdout in that case.
+  - **CLI arguments:** a missing or repeated `--config` value, an unknown flag and a wrong positional count all give exit 2. `-h` and `--help` give 0. An unreadable invoice still gives exit 1.
+  - **Tests:**
+    - `test/config.test.js` covers defaults, env mapping, empty env, precedence, discovery, relative and absolute `outDir`, every validation class, and the malformed discovered file.
+    - `test/cli.test.js` adds a byte-identical check against a literal expected string, `--config` in either position, discovery via the spawn cwd, and exit 2 with nothing written for each failure class. It also covers the `--config`-without-value case and a file `outDir` landing next to the config file.
+  - **README:** the Configuration section and usage line are accurate. The env variable table is kept. It also notes the empty-value rule, the stricter validation for env-only users, and the malformed discovered file.
+  
+  **NON-BLOCKING**
+  - I could not diff against `HEAD` to confirm that the three original CLI tests and the three render tests are unmodified. The first three CLI tests look intact.
+  - I could not confirm that the original source gave the same defaults and byte-identical env-only output. The README defaults and the literal expected string look consistent with each other. The literal's provenance is claimed in a code comment only.
+  - A whitespace-only `INVOICE_TAX_RATE` converts to 0 and passes validation.
+  - A positional argument beginning with `-` is now a usage error. This is a minor change in behaviour.
+  - A directory named `.invoicegen.json` in the cwd gives a "cannot read" exit 2. This is consistent with the stated rule, but the README does not mention it.
+  - Rejecting a `--config` value that starts with `-` is a reasonable choice, but the README does not document it.
+  - The README sentence on `taxRate` (line 45) has awkward line wrapping.
+  
+  **Files changed:** `src/config.js` (new), `src/render.js`, `src/cli.js`, `test/config.test.js` (new), `test/cli.test.js`, `README.md`.
+  
+  I did not run any tests myself. Completion looks accurate against the plan's acceptance criteria.
+  
+  AUDIT_STATUS: CLEAN

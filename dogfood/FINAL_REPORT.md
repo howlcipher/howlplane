@@ -195,3 +195,67 @@ Housekeeping: 73 pytest-leaked worktrees removed from ~/.local/share/howlplane/w
 
 ## Post-merge (campaign 4)
 PR #151 merged as e74e460; main engine source is identical to 5a806e3, so the Addendum 5 PASS applies to main.
+
+# Adaptive Dogfood Tranche 1 (2026-10-04)
+
+## Result
+ADAPTIVE DOGFOOD TRANCHE: PASS
+
+## Engine
+SHA: 175b57a (howlplane `dogfood/DOG-027-review-diff-evidence` = main 41a1621 + DOG-026 744bc4a + DOG-027/028 175b57a). PRs #153 (DOG-026) and #154 (DOG-027/028, stacked), not merged.
+
+## Runs
+| Run | Engine | Mission | Result |
+| --- | --- | --- | --- |
+| 030 | 41a1621 | Go, existing: logsum time window + JSON output | CLEAN |
+| 031 | 41a1621 | Python, existing: HTTP/SQLite service, 3 symptom-only bugs + automatic DB upgrade | CLEAN |
+| 032 | 41a1621 | Node, existing with uncommitted user WIP: config refactor | HANDOFF -> DOG-026 |
+| 033 | 744bc4a | 032 rerun, identical start | CLEAN (DOG-026 path not triggered) |
+| 032 resume | 744bc4a | `howl orchestrate resume` after engine upgrade | COMPLETE via 1 verification rework round (DOG-026 live) |
+| 034 | 175b57a | Python, existing: characterization tests only, source frozen | CLEAN (15/15 mutants killed) |
+| 035 | 175b57a | Rust, greenfield: ini2json | CLEAN (19/19 operator oracle cases) |
+| 036 | 175b57a | Household baseline fixture | CLEAN 1/2 |
+| 037 | 175b57a | Household baseline fixture | CLEAN 2/2 |
+| 038 | 175b57a | TARGETED experiment: fsmonitor hook in target repo | 0 HowlPlane-invoked hooks (DOG-028 live) |
+
+## Missions Exercised
+Existing-code feature (Go), symptom-driven bug investigation with concurrency and legacy-data upgrade (Python HTTP), refactor and configuration layering on a dirty working tree (Node), test-only characterization with a frozen source (Python), greenfield parser and file transformation (Rust), and the baseline fixture.
+
+## New Capability Coverage
+Four languages (Go, Python, JavaScript, Rust); existing-code modification; bug repair; REST/HTTP; concurrency; on-disk data upgrade; refactor; configuration; uncommitted user WIP preserved byte-for-byte (twice); test-only work; file transformation; resume after an engine upgrade. Verification-command discovery worked for go test, npm test, cargo test and plan-named unittest.
+
+## Findings
+Total: 3 (DOG-026..028). P0: 0. P1: 2 (DOG-026 workflow blocker; DOG-028 security). P2: 1 (DOG-027). P3: 0. Observation: OBS-030-1, no public cleanup for factory-prepared worktrees (32 dirs, 32 MB).
+
+## Resolved
+- DOG-026: a failed verification now drives the bounded rework loop with failure-first evidence; cannot-run and timeout cases are reported, not raised; the report and inspect say what blocked. Verified live by resume.
+- DOG-027: review and acceptance receive HowlPlane's own session diff, with the user's pre-existing WIP named and excluded. Verified live (run-034 reviewer scope check).
+- DOG-028: HowlPlane git calls disable core.fsmonitor, diff.external and textconv. Verified live (run-038).
+
+## Remaining Known Limitations
+- DOG-023 (Claude-implemented convergence) is still routed around by AUTO preferring Codex for implementation; not re-tested this tranche.
+- Git hooks (`.git/hooks`, core.hooksPath) still run on HowlPlane's own commits (git_integration); needs a design decision.
+- Read-only reviewers still cannot run tests themselves; they rely on harness evidence (by design).
+- OBS-030-1 factory worktree cleanup.
+
+## Repositories Changed
+howlplane only (engine branches above; campaign records on `dogfood/adaptive-tranche-1`).
+
+## Commits / PRs
+744bc4a (DOG-026, PR #153), 175b57a (DOG-027/028, PR #154, stacked). Records: dogfood/adaptive-tranche-1. All pushed; every engine push passed the full pre-push suite (2321, 2327).
+
+## Regression Evidence
+Baseline fixture clean twice on the final engine (036, 037); final two adaptive missions clean on the final engine (034, 035); no internal-state edits, bypasses or manual completion in any run.
+
+## What Is Now Proven
+On 175b57a, a user can hand Howl realistic requests in four languages, on existing or empty repositories, including symptom-only bug reports, refactors over uncommitted work, and frozen-source test tasks, and get independently verified results through `howl orchestrate`. A failing test after implementation is now recovered by Howl itself.
+
+## What Is NOT Proven
+Long or multi-hour tasks; tasks needing network services or external credentials; non-AUTO routing (Claude implementing); providers failing mid-session this tranche; other ecosystem components (HowlDream/Create/Writer/Proof/Relay) in a composed workflow; Windows/macOS hosts.
+
+## Recommended Next Dogfood Frontier
+1. Merge #153 and #154, then re-confirm on main (src should equal 175b57a).
+2. A multi-step task large enough to hit execution budgets or need decomposition.
+3. A provider failure injected mid-implementation (resume and reroute under the new rework paths).
+4. An ecosystem handoff the docs actually promise (for example HowlWriter for a documentation-heavy deliverable).
+5. Decide the git-hooks policy for HowlPlane's own commits.

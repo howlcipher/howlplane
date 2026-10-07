@@ -50,3 +50,19 @@
 - 2026-10-04 DOG-025 fixed 5a806e3 (pushed). run-028 (5a806e3): COMPLETE, verified: CLEAN RUN 1/2. Starting run-029.
 - 2026-10-04 run-029 (5a806e3) COMPLETE, verified: CLEAN RUN 2/2. DOGFOOD RESULT: PASS (run-028, run-029). FINAL_REPORT Addendum 5.
 - 2026-10-04 PR #151 merged (e74e460); main src == 5a806e3; PASS holds on main; howlframe fast-forwarded; all agents READY.
+
+## Adaptive tranche 1 (2026-10-04)
+- Resume check: main 41a1621, `git diff 5a806e3 41a1621 -- src pyproject.toml` empty -> baseline PASS (028/029) holds; no baseline rerun. All 12 ecosystem repos clean and current. Records branch dogfood/adaptive-tranche-1. MISSION_COVERAGE.md created.
+- run-030 (41a1621) Mission A, existing Go project logsum (+since/until, -format json): COMPLETE in 4.5 min, Claude plan/review, Codex impl, first-pass CLEAN; independently verified (byte-identical default output vs pre-change binary, cross-offset windows, README JSON example exact). CLEAN. No findings; observation OBS-030-1 (no public cleanup for factory worktrees).
+- run-031 (41a1621) Mission B, existing Python HTTP/SQLite service, 3 symptom-only bug reports + automatic DB upgrade: started.
+- run-031 (41a1621): COMPLETE 5.0 min, first-pass CLEAN; verified (legacy DB upgraded in place, 100-way concurrent POST all 201/unique, exact tags, stable newest-first paging). CLEAN.
+- run-032 (41a1621) Mission C, Node invoicegen config refactor with uncommitted user WIP: HANDOFF REQUIRED; `npm test` 1/59 failed and the session stopped with no rework, output truncated, Failures: []. User WIP preserved (sha256). DOG-026 filed (P1).
+- DOG-026 fixed 744bc4a (failed verification -> bounded rework; failure-first excerpts; run_verification guards OSError/timeout; Blocked by + Next in report/inspect). Pushed, pre-push 2321 passed. Live engine switched to the branch. run-033 (same mission, identical start) started.
+- run-033 (744bc4a): COMPLETE 8.5 min, CLEAN; verification passed first time (DOG-026 not exercised). Resume of run-032's paused session on 744bc4a: verification failed -> REWORK round 1 -> fixed -> COMPLETE. DOG-026 verified live.
+- Resume review notes: reviewer had no shell, could not diff vs HEAD -> DOG-027. Building its test exposed DOG-028 (HowlPlane's git status/diff run core.fsmonitor/textconv/diff.external from .git/config). Fixed both in 175b57a (stacked), pushed, pre-push 2327 passed. Live engine -> 175b57a.
+- run-034 (175b57a) Mission D, test-only characterization of legacy shopcalc/pricing.py (must stay unchanged): started.
+- run-034 (175b57a) test-only characterization: COMPLETE 5.8 min, CLEAN; pricing.py untouched, 91 tests, 15/15 mutants killed. DOG-027 verified live (reviewer confirmed scope from HowlPlane's diff).
+- run-035 (175b57a) greenfield Rust ini2json: COMPLETE 6.6 min, CLEAN; 19/19 operator oracle cases. Final adaptive pair clean on 175b57a. Next: household baseline fixture x2 on 175b57a (engine changed since the last baseline PASS), as run-036/run-037.
+- run-036, run-037 (175b57a) household baseline fixture: both COMPLETE, verified CLEAN -> baseline restored on the new engine.
+- run-038 TARGETED (DOG-028): fsmonitor logging hook in the target repo; 4 calls from Codex's sandbox, 0 from HowlPlane. DOG-028 verified live.
+- PRs opened: #153 (DOG-026), #154 (DOG-027/028, stacked). ADAPTIVE DOGFOOD TRANCHE 1: PASS. Live engine checkout returned to main.

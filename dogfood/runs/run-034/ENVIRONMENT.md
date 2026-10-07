@@ -1,0 +1,2 @@
+- Engine: howlplane dogfood/DOG-027-review-diff-evidence 175b57a. HOWL_FORBID_LOCAL_INFERENCE=1.
+- Target: dogfood-missions/run-034/shopcalc, base ffd7bb4; pricing.py sha256 in dogfood-missions/run-034/pricing.sha256.

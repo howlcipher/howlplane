@@ -1,0 +1,50 @@
+HOWL ORCHESTRATION REPORT
+Session: 7848d3210b704ce382f46d1d31926d6a
+Goal: In this existing Go project (logsum, a Common Log Format access-log summarizer), add time-window filtering and JSON output.
+
+1. Add `-since` and `-until` flags that restrict the summary to requests inside a time window. Both accept RFC 3339 timestamps (for example `2000-10-10T21:00:00Z` or `2000-10-11T02:15:00+02:00`). `-since` is inclusive and `-until` is exclusive. Log lines carry their own UTC offsets, so compare instants, not wall-clock text. Either flag may be used alone.
+2. Add a `-format` flag accepting `text` (the default, the current report) and `json`. The JSON report must contain the request count, byte total, malformed count, per-status counts, and the top paths in the same order as the text report, and must be valid JSON.
+
+Constraints:
+- With no new flags, output must stay byte-for-byte identical to today's output.
+- Malformed lines are still counted as malformed whether or not a window is given; well-formed lines outside the window are excluded, not counted as malformed.
+- Invalid values (an unparseable timestamp, `-since` later than `-until`, an unknown format) must exit with code 2 and a clear message on stderr, consistent with the existing usage errors.
+- Keep the existing tests passing and add tests for the new behaviour, including edge cases.
+- Update README.md so it accurately documents the new flags and the JSON output.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: de86f10767c56fabf54e50a750c00e314bc7c944
+Repository status: M README.md
+ M cmd/logsum/main.go
+ M internal/parse/parse.go
+ M internal/report/report.go
+?? cmd/logsum/options_test.go
+?? internal/parse/window_test.go
+?? internal/report/json_test.go
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["go", "test", "./..."], "exit_code": 0, "output": "ok  \texample.com/logsum/cmd/logsum\t0.010s\nok  \texample.com/logsum/internal/parse\t0.008s\nok  \texample.com/logsum/internal/report\t0.008s\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: go test ./... (derived from the project's discovered test command)
+Failures: []
+Review notes from Claude (review, CLEAN):
+  No blocking findings. I read the diff and tests with Read only; I did not run anything myself, so test results rest on the harness evidence (`go test ./...` and `git diff --check` both exit 0).
+  
+  Checked against the acceptance criteria:
+  - **Default output:** `WriteText` is unchanged. `TestDefaultGolden` pins the byte-for-byte text output, and `main_test.go` is untouched.
+  - **Window semantics:** `parse.Filter` uses `!Before(Since)` for the inclusive bound and `Before(Until)` for the exclusive bound, so it compares instants. `cmd/logsum/options_test.go` and `internal/parse/window_test.go` cover the boundary cases, including `+02:00` against `Z`, equal bounds, and each flag used alone.
+  - **Malformed lines:** filtering runs only on parsed entries, so `malformed` is unaffected. The window test cases assert `malformed: 1`, including the cases that exclude everything.
+  - **JSON schema:** `WriteJSON` emits a numerically sorted `status` array and `top_paths` from `TopPaths(top)`. Both arrays are built with `make`, so they serialize as `[]`, never `null`. Tests cover `-top 0`, an empty summary, a write failure and the trailing newline.
+  - **Usage errors:** every case exits 2 before the input is read. The test passes a reader that panics if read, with and without a file argument. Cases covered: bad `-since`, bad `-until`, empty strings, a missing offset, lowercase `t`/`z`, since after until, and `-format xml`. Each checks empty stdout and a stderr message containing the flag name.
+  - **README:** the usage line, flag docs, offset and fractional-second notes, malformed semantics, exit codes and the JSON example all match the code. I checked the example against `testdata/access.log`: 5 requests, 3478 bytes, 1 malformed, statuses 200/401/404, and top paths in the right order.
+  
+  Non-blocking:
+  - `cmd/logsum/main.go:77-89` carries a second filtering pass so an explicit `0001-01-01T00:00:00Z` bound is honored, since `Window` treats a zero time as unset. It is correct and tested (`TestExplicitZeroSince`, the "zero until" case). It is a bit convoluted, and `Window` could track set-ness itself.
+  - `-top` greater than the number of distinct paths is not tested in `main`. `report` covers it with `top=5`.
+  
+  AUDIT_STATUS: CLEAN

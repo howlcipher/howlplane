@@ -1,0 +1,22 @@
+# (name, args, input, expected_exit, expected_json_or_stderr_substring)
+CASES = [
+ ("basic", [], "a = 1\n[s]\nb: two\n", 0, {"a": "1", "s": {"b": "two"}}),
+ ("order", [], "z=1\na=2\n[m]\nk=v\n[b]\nk=v\n", 0, {"z": "1", "a": "2", "m": {"k": "v"}, "b": {"k": "v"}}),
+ ("dotted", [], "[server.tls]\ncert = c.pem\n[server]\nport=80\n", 0, {"server": {"tls": {"cert": "c.pem"}, "port": "80"}}),
+ ("comments", [], "; c\n# c\na = x ; trailing\nb = y # t\nc = u;not\n", 0, {"a": "x", "b": "y", "c": "u;not"}),
+ ("quoted", [], 'a = "x ; y # z  "\nb = "q\\"q\\\\n\\n\\t"\n', 0, {"a": "x ; y # z  ", "b": 'q"q\\n\n\t'}),
+ ("typed", ["--typed"], 'a=true\nb=false\nc=42\nd=-3.5\ne="7"\nf=1e3\ng=yes\n', 0, None),
+ ("untyped", [], "a=true\nc=42\n", 0, {"a": "true", "c": "42"}),
+ ("dup_last", [], "a=1\na=2\n", 0, {"a": "2"}),
+ ("dup_strict", ["--strict"], "a=1\na=2\n", 1, "line 2"),
+ ("dupsec_strict", ["--strict"], "[s]\na=1\n[s]\nb=2\n", 1, "line 3"),
+ ("clash_strict", ["--strict"], "[server]\ntls=x\n[server.tls]\na=1\n", 1, "line"),
+ ("unterminated", [], 'a = "oops\n', 1, "line 1"),
+ ("noeq", [], "a=1\njustwords\n", 1, "line 2"),
+ ("emptykey", [], " = v\n", 1, "line 1"),
+ ("emptysec", [], "[]\n", 1, "line 1"),
+ ("unicode", [], "name = Zoë 日本\nctl = \"a\\tb\"\n", 0, {"name": "Zoë 日本", "ctl": "a\tb"}),
+ ("empty", [], "", 0, {}),
+ ("emptyval", [], "a =\n", 0, {"a": ""}),
+ ("crlf", [], "a = 1\r\n[s]\r\nb = 2\r\n", 0, {"a": "1", "s": {"b": "2"}}),
+]

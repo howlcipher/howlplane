@@ -1,0 +1,53 @@
+HOWL ORCHESTRATION REPORT
+Session: 9a6cd1caec43430e942873d09b8e6230
+Goal: Design and build a small but real command-line application for managing recurring household tasks. The application must allow a user to: add a task; list tasks; mark a task complete; record when it was completed; identify tasks that are due again; persist data locally; include automated tests; include concise usage documentation. Select the implementation approach through the normal Howl workflow rather than pre-deciding the design. Deliver a working application demonstrable through its command line.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: cf092c7bc9d82279f050dc1189895fc6abc59e9c
+Repository status: ?? .gitignore
+?? README.md
+?? household_tasks/__init__.py
+?? household_tasks/__main__.py
+?? household_tasks/cli.py
+?? household_tasks/model.py
+?? household_tasks/store.py
+?? tests/__init__.py
+?? tests/test_cli.py
+?? tests/test_model.py
+?? tests/test_store.py
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."], "rework_round": 0, "exit_code": 0, "output": "....................\n----------------------------------------------------------------------\nRan 20 tests in 0.350s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests -t . (named by the plan (VERIFY_COMMAND))
+Failures: []
+Review notes from Claude (review, CLEAN):
+  The review found no blocking problems. I read `cli.py`, `model.py`, `store.py`, the README and the test names. I did not read the test bodies, and I could not run anything in this role. I relied on the harness evidence: `git diff --check` exited 0 and all 20 tests passed.
+  
+  **Acceptance criteria**
+  - **Add, list, done, due, remove:** all are implemented and match the approved design.
+  - **Never-completed tasks:** these fall due on creation plus interval, as decided in planning.
+  - **Completion dates:** `done` defaults to today. `--date` is accepted for backdated completions. Future dates, dates before creation and unknown ids return exit 1, and the save only happens after validation, so the file is unchanged.
+  - **Persistence and data path:** the path order is `HOUSEHOLD_TASKS_FILE`, then `--file`, then the default under `~/.local/share`. The README documents this, and a test uses separate-process runs.
+  - **Corrupt files:** a corrupt or schema-invalid file raises an error and is never overwritten. Writes go to a temp file and are replaced atomically, with the temp file cleaned up on failure.
+  - **Tests:** the 20 tests cover model boundaries, store behaviour, and the CLI flow, including persistence, environment overrides, write failures, id non-reuse and a subprocess run. They use temp files.
+  - **README:** it covers install/run, each command, the due rule, the data file location and how to run the tests. The demo sequence and its described outcomes are consistent with the code.
+  
+  **Non-blocking notes**
+  - `list --all` is a no-op alias, and the README says so.
+  - `--every` accepts `7d` but not weeks, which matches the plan.
+  - Negative ids such as `done -1` hit argparse and exit 2. This is only a cosmetic edge.
+  - The stray `task.due_date` statements in `cli.py` rely on the property raising for overflow. They work but are a little obscure.
+  
+  **Files changed:** all new, `.gitignore`, `README.md`, `household_tasks/{__init__,__main__,cli,model,store}.py`, `tests/{__init__,test_cli,test_model,test_store}.py`. There is no `pyproject.toml`, which the plan marked optional. Nothing was committed.
+  
+  **Tests run:** none by me. The harness ran `python3 -m unittest discover -s tests -t .` and got 20 tests OK.
+  
+  **Remaining risks:** concurrent writers are unsupported, which the README states. Time zones depend on the local date, and the `--today` override covers testing.
+  
+  AUDIT_STATUS: CLEAN
