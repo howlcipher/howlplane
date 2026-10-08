@@ -694,9 +694,9 @@ Repository: howlplane
 ### Actual
 AGY was assigned review (`agy -p ... --mode plan`). It ran the project's probe CLI (523 network requests) and overwrote tracked research files. HowlPlane detected READ_ONLY_ROLE_MUTATED_REPOSITORY and ended the session BLOCKED, not resumable, discarding Codex's verified implementation. AGY's `plan` mode makes no read-only guarantee; the other CLIs enforce read-only through sandbox, tool allowlist or mode.
 ### Resolution
-READ_ONLY_UNENFORCED = {agy}: AUTO routing skips AGY for planning, review and acceptance with a stated reason; an explicitly chosen AGY orchestrator still plans and accepts (explicit override) but never reviews. The mutation check stays as a backstop.
+READ_ONLY_UNENFORCED = {agy}: AUTO routing skips AGY for planning, review and acceptance with a stated reason; an explicitly chosen AGY orchestrator still plans and accepts (explicit override) but never reviews. A repository change in any of those roles, including a failed or timed-out planning attempt, or a review finding or acceptance rejection that also writes, sets READ_ONLY_ROLE_MUTATED_REPOSITORY and ends the session BLOCKED and not resumable. It is not sent back for rework.
 ### Tests
-tests/test_orchestration_role_containment.py: AGY never gets a read-only role in AUTO routing, and a session whose only non-implementer is AGY ends AUDIT BLOCKED with the reason; with Cursor available the audit runs and completes; explicit AGY orchestrator plans and accepts but never reviews. Two role-scoped-capacity tests re-expressed through `remediation`.
+tests/test_orchestration_role_containment.py: AGY never gets a read-only role in AUTO routing, including configured planning, review, and acceptance fallbacks, acceptance takeover, and resume of an older AUTO session that selected AGY; a session whose only non-implementer is AGY ends AUDIT BLOCKED with the reason; with Cursor available the audit runs and completes; an explicit AGY orchestrator plans and accepts but never reviews. A write during planning, review, or acceptance blocks the session and refuses resume, including a planning failure or timeout, and a review finding or acceptance rejection that also writes; a planning failure that does not write stays resumable. Two role-scoped-capacity tests re-expressed through `remediation`.
 
 ## DOG-038 — No way to let an orchestrate worker fetch public data
 Status: FIX IN REVIEW (branch dogfood/DOG-037-038-readonly-network)
@@ -709,4 +709,4 @@ Codex implementation runs `--sandbox workspace-write`, whose network is off: `st
 ### Resolution
 `--worker-network` (new session or resume) sets `worker_network` on the session; implementation and remediation tasks carry it, and Codex adds `-c sandbox_workspace_write.network_access=true`. Verified directly: the same Codex prompt fails DNS without the setting and resolves with it. Read-only roles never receive it.
 ### Tests
-tests/test_orchestration_role_containment.py: flag parse and default off; only mutating roles receive the metadata, on and off; Codex argv carries the setting only for a networked mutating task.
+tests/test_orchestration_role_containment.py: flag parse and default off; only mutating roles receive the metadata, on and off, including after resume; Codex argv carries the setting only for networked mutating tasks, and AGY, Cursor, Claude, Gemini, and Devin argv do not gain network configuration.

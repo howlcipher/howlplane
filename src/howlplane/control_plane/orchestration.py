@@ -1602,14 +1602,17 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                     assignment["state"] = "REVOKED"
                     assignment["failure"] = "NO_REPOSITORY_CHANGE"
                     no_change_detail = " (no repository delta detected)"
-            if stage in {"review", "acceptance"} and before != after:
+            if stage in READ_ONLY_ROLES and before != after:
+                # Planning is read-only too. An explicit AGY planner can still be
+                # selected, and its CLI does not enforce the role (DOG-037).
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "READ_ONLY_ROLE_MUTATED_REPOSITORY"
-            if result.success and stage == "review" and not result.stdout.strip().endswith("AUDIT_STATUS: CLEAN"):
+            mutated = assignment["failure"] == "READ_ONLY_ROLE_MUTATED_REPOSITORY"
+            if result.success and stage == "review" and not mutated and not result.stdout.strip().endswith("AUDIT_STATUS: CLEAN"):
                 assignment["state"] = "REVOKED"
                 # An empty reply is a provider fault, not a finding (DOG-003).
                 assignment["failure"] = "AUDIT_FINDINGS_OR_UNCONFIRMED" if result.stdout.strip() else "AUDIT_NO_VERDICT"
-            if result.success and stage == "acceptance" and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
+            if result.success and stage == "acceptance" and not mutated and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
             grant_gap = (permission_grant_gap(result, stage, before != after)
@@ -1714,7 +1717,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 # the updated eligible candidate list, not a stale intermediate.
                 prev_reroute = (agent, assignment["failure"])
             checkpoint(doc, path, token, repo)
-            if stage in {"review", "acceptance"} and before != after:
+            if stage in READ_ONLY_ROLES and before != after:
                 doc["status"] = "BLOCKED"
                 doc["audit"] = "AUDIT BLOCKED: read-only role changed the repository"
                 checkpoint(doc, path, token, repo)
@@ -2068,8 +2071,8 @@ def add_parser(subparsers: Any, common_parser: Any) -> None:
                         help=f"Seconds the verification command may run (default {VERIFY_TIMEOUT_SECONDS}, "
                              f"max {MAX_VERIFY_TIMEOUT_SECONDS}); also accepted on resume")
     parser.add_argument("--worker-network", action="store_true",
-                        help="Let implementation and remediation workers reach the network (Codex sandbox network "
-                             "access); read-only roles never get it. Also accepted on resume")
+                        help="Enable Codex sandbox network access for implementation and remediation; other CLIs "
+                             "keep their own network policies. Read-only roles never get it. Also accepted on resume")
     parser.add_argument("--execution-budget", action="append", metavar="ROLE=SECONDS",
                         help=f"Per-assignment deadline for a role, or SECONDS for every role (default "
                              f"{DEFAULT_EXECUTION_BUDGET_SECONDS}, max {MAX_EXECUTION_BUDGET_SECONDS}; repeatable). "
