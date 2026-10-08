@@ -2,8 +2,10 @@
 
 `howlplane orchestrate "Goal"` starts a session in the current Git worktree. `howl orchestrate` forwards to the same command. With an interactive terminal and no goal, the command asks eight questions. With a goal, defaults are Auto orchestrator, installed agents on AUTO, BALANCED routing, AUTO models, AUTO REROUTE, and PLAN + EXECUTE + INDEPENDENT AUDIT.
 
+These are alternative invocations; resume requires an unfinished session in the chosen repository.
+
 ```bash
-howlplane orchestrate "Update the parser" --repo /path/to/repo --orchestrator codex --claude-code RESERVED --strategy BALANCED --verify go test ./...
+howlplane orchestrate "Update the parser" --repo /path/to/repo --orchestrator codex --claude-code RESERVED --strategy BALANCED --verify "go test ./..."
 howlplane orchestrate "Update the parser" --heartbeat 25
 howlplane orchestrate inspect --repo /path/to/repo --json
 howlplane orchestrate resume --repo /path/to/repo
@@ -54,7 +56,28 @@ Only the session orchestrator accepts, with one exception: if the orchestrator i
 
 **Workers know they are inside the workflow.** Every role is told it runs inside a HowlPlane session that itself performs planning, routing, review, and acceptance, and not to run `howl`/`howlplane` or read or copy HowlPlane state. The successful plan is kept (last 6000 characters, redacted) and given to implementation as the plan to follow and to review and acceptance as the workflow's decision record. Without this, an implementer re-ran `howlplane route` and copied the session manifest, lease token included, into the user's repository, and reviewers kept asking for workflow evidence (DOG-025).
 
-**Verification command.** Without `--verify`, HowlPlane uses the repository's own test command as project discovery finds it (for example `bash scripts/test.sh`), runs it after each implementation, and reports `Verification command: ... (derived from the project's discovered test command)`. If discovery finds nothing, HowlPlane uses the test command the plan named on its `VERIFY_COMMAND:` line (for example `python3 -m unittest discover -s tests` in a new repository) and reports `(named by the plan (VERIFY_COMMAND))`, so reviewers still receive test evidence (DOG-019). If neither exists, a session that needs validation still stops and asks for an explicit `--verify`. Quote a command that has its own options, `--verify "python3 -m pytest -q"`: HowlPlane splits one quoted command like a shell would and runs it without a shell. Unquoted, argparse reads `-m` as an orchestrate option and the command fails with a quoting hint (DOG-035). A dash-free command can stay unquoted (`--verify go test ./...`).
+**Verification command.** Without `--verify`, HowlPlane uses the repository's own test command as project discovery finds it (for example `bash scripts/test.sh`), runs it after each implementation, and reports `Verification command: ... (derived from the project's discovered test command)`. If discovery finds nothing, HowlPlane uses the test command the plan named on its `VERIFY_COMMAND:` line (for example `python3 -m unittest discover -s tests` in a new repository) and reports `(named by the plan (VERIFY_COMMAND))`, so reviewers still receive test evidence (DOG-019). If neither exists, a session that needs validation still stops and asks for an explicit `--verify`.
+
+Quote a CLI verification command that has its own options:
+`--verify "python3 -m pytest -q"` or `--verify="python3 -m pytest -q"`.
+For new sessions and `resume`, a single value is split using POSIX shell
+quoting rules, then executed as argv without a shell. There is no variable
+expansion, wildcard expansion, piping, or redirection. Empty commands and
+unbalanced quotes produce an `INVALID_VERIFICATION_COMMAND` error.
+A dash-free command can stay unquoted (`--verify go test ./...`); multiple
+values remain literal argv. Unquoted flags can be consumed as orchestrate
+options; unknown flags such as `-m` exit 2 with a quoting hint (DOG-035).
+
+An existing executable supplied as a single value is preserved literally,
+including spaces in its path. Relative paths with a directory component are
+checked against `--repo`; bare executable names are checked on `PATH`.
+For a path that does not exist yet, or for a path followed by arguments,
+preserve inner quotes: `--verify "'/opt/my tests/run.sh'"` or
+`--verify "'/opt/my tests/run.sh' --fast"`. This also avoids ambiguity when a
+single value could name an existing executable or describe a command.
+Factory queue JSON uses literal argv arrays throughout, including retries:
+`"verify": ["python3", "-m", "pytest", "-q"]` or
+`"verify": ["/opt/my tests/run.sh"]`. Queue arrays are never shell-split.
 
 ### Session lifecycle and resumability
 

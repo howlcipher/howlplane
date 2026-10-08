@@ -520,15 +520,30 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def verification_command(value: Any) -> list[str] | None:
-    """`--verify` as argv. A single quoted command is shell-split, so its flags survive argparse (DOG-035)."""
+def verification_command(value: Any, repo: Path | None = None, *, literal: bool = False) -> list[str] | None:
+    """Normalize CLI command text, preserving Factory argv and existing executables."""
     if not value:
         return None
     command = list(value)
-    if len(command) == 1 and any(char.isspace() for char in command[0]):
-        command = shlex.split(command[0])
-    if not command:
-        raise ValueError("--verify needs a command")
+    if literal:
+        return command
+    try:
+        if len(command) == 1:
+            # The outer shell removes quotes around both a command string and a
+            # path with spaces. An existing executable takes precedence.
+            token = command[0]
+            paths = [Path(token)] if os.path.dirname(token) else [Path(entry) / token for entry in os.get_exec_path()]
+            executables = [(repo or Path.cwd()) / path for path in paths]
+            if not any(os.path.isfile(path) and os.access(path, os.X_OK) for path in executables):
+                command = shlex.split(token)
+        if not command or not command[0]:
+            raise ValueError("needs a command")
+    except ValueError as exc:
+        raise OperatorFailure(OperatorError(
+            "INVALID_VERIFICATION_COMMAND", f"--verify {exc}",
+            "A single CLI command is parsed using shell quoting rules.",
+            'Supply a non-empty command with balanced quotes, for example --verify "python3 -m pytest -q"',
+        )) from exc
     return command
 
 
@@ -1052,6 +1067,7 @@ def question(label: str, default: str) -> str:
 
 
 def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
+    verify = verification_command(args.verify, repo, literal=getattr(args, "verify_is_argv", False))
     interactive = sys.stdin.isatty() and not args.input
     goal = args.input or (question("1. Goal", "") if interactive else "")
     if not goal:
@@ -1116,7 +1132,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         "failover": failover, "policy": policy, "status": "PLANNED", "stage": "planning",
         "model_states": model_states, "known_models": {}, "attempts": [], "tests": [], "reroutes": [],
         "execution_budget": budget, "timed_out_assignments": [], "workspace_trust_policy": resolved_policy,
-        "verify_command": verification_command(args.verify),
+        "verify_command": verify,
         "repository_evidence": snapshot, "base_dirty": dirty_paths(Path(snapshot["root"])),
         "lease": {"token": token, "pid": os.getpid(), "renewed_at": time.time()},
     }
@@ -1905,6 +1921,7 @@ def command(args: argparse.Namespace) -> int:
         if operation == "resume":
             if not active:
                 raise ValueError("No unfinished session")
+            verify = verification_command(args.verify, repo, literal=getattr(args, "verify_is_argv", False))
             doc = active[0]
             try:
                 migrations = normalize_session(doc)
@@ -1953,7 +1970,7 @@ def command(args: argparse.Namespace) -> int:
             if getattr(args, "strategy", None):
                 doc["strategy"] = args.strategy
             if getattr(args, "verify", None):
-                doc["verify_command"] = verification_command(args.verify)
+                doc["verify_command"] = verify
             path = path_for(root, doc["id"])
             secure_write(path, doc)
             if doc["policy"] == "PLAN ONLY" and doc.get("reconciliation", {}).get("needs_validation"):

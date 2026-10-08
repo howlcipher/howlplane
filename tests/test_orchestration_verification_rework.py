@@ -131,9 +131,11 @@ def parsed_verify(*argv):
     return build_parser().parse_args(["orchestrate", "Fix the README", *argv]).verify
 
 
-def test_quoted_verification_command_keeps_its_options_and_runs_split(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("equals", [False, True])
+def test_quoted_verification_command_keeps_its_options_and_runs_split(tmp_path, monkeypatch, capsys, equals):
     """DOG-035: `--verify python3 -m unittest` (howl's documented example) died in argparse on `-m`."""
-    quoted = parsed_verify("--verify", "sh -c 'grep -q FIXED README'")
+    command = "sh -c 'grep -q FIXED README'"
+    quoted = parsed_verify(f"--verify={command}") if equals else parsed_verify("--verify", command)
     assert quoted == ["sh -c 'grep -q FIXED README'"]
     repo, args, implementations = session(tmp_path, monkeypatch, lambda repo: quoted, fixed_on_attempt=2)
 
@@ -148,16 +150,115 @@ def test_quoted_verification_command_keeps_its_options_and_runs_split(tmp_path, 
     (None, None),
     (["pytest"], ["pytest"]),
     (["bash", "scripts/test.sh"], ["bash", "scripts/test.sh"]),
+    (["go", "test", "./..."], ["go", "test", "./..."]),
+    (["go test ./..."], ["go", "test", "./..."]),
+    (["/not created/my tests/run.sh"], ["/not", "created/my", "tests/run.sh"]),
+    (["'pytest'"], ["pytest"]),
     (["python3 -m pytest -q"], ["python3", "-m", "pytest", "-q"]),
+    (["'/not created/my tests/run.sh'"], ["/not created/my tests/run.sh"]),
     (["'/opt/my tests/run.sh' --fast"], ["/opt/my tests/run.sh", "--fast"]),
+    (["echo '$HOME' '*.py' '|' '>'"], ["echo", "$HOME", "*.py", "|", ">"]),
+    (["echo " + "x" * 300], ["echo", "x" * 300]),
 ])
 def test_verification_command_splits_only_a_single_quoted_command(value, expected):
     assert module.verification_command(value) == expected
 
 
-def test_verification_command_rejects_a_blank_command():
-    with pytest.raises(ValueError, match="--verify needs a command"):
-        module.verification_command(["   "])
+@pytest.mark.parametrize("command", ["", "   ", "''", "'' --fast"])
+def test_verification_command_rejects_a_blank_command(command):
+    with pytest.raises(module.OperatorFailure, match="--verify needs a command"):
+        module.verification_command([command])
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_cli_preserves_existing_executable_path_with_spaces(tmp_path, monkeypatch, capsys, relative):
+    def verify(repo):
+        script = repo / "my tests" / "run.sh"
+        script.parent.mkdir()
+        script.write_text("#!/bin/sh\ngrep -q FIXED README\n")
+        script.chmod(0o755)
+        return parsed_verify("--verify", "./my tests/run.sh" if relative else str(script))
+
+    repo, args, _ = session(tmp_path, monkeypatch, verify, fixed_on_attempt=1)
+    assert module.command(args) == 0
+    assert "Status: COMPLETE" in capsys.readouterr().out
+
+
+def test_cli_preserves_executable_name_with_spaces_on_relative_path(tmp_path, monkeypatch):
+    script = tmp_path / "my runner"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", ".")
+    assert module.verification_command(["my runner"], tmp_path) == ["my runner"]
+
+
+def test_resume_replaces_verification_with_quoted_command(tmp_path, monkeypatch, capsys):
+    repo, args, _ = session(tmp_path, monkeypatch, failing_check)
+    assert module.command(args) == 2
+    capsys.readouterr()
+    # check.sh still requires FIXED. Only the replacement command accepts REPAIRED.
+    (repo / "README").write_text("REPAIRED by the user\n")
+    from howlplane.control_plane.cli import build_parser
+
+    resumed = build_parser().parse_args([
+        "orchestrate", "resume", "--repo", str(repo),
+        "--verify=sh -c 'grep -q REPAIRED README'",
+    ])
+    assert module.command(resumed) == 0
+    assert "Status: COMPLETE" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("operation", ["Goal", "resume"])
+@pytest.mark.parametrize("command", ["python3 -m 'x", "'pytest"])
+def test_malformed_verify_has_clean_cli_error(tmp_path, monkeypatch, capsys, operation, command):
+    from howlplane.control_plane.cli import main
+    from tests.test_orchestration_capability_recovery import persist
+
+    repo, args, _ = session(tmp_path, monkeypatch, lambda repo: None)
+    if operation == "resume":
+        path = persist(module.setup(args, repo))
+        before = path.read_bytes()
+    assert main(["orchestrate", operation, "--repo", str(repo), "--verify", command]) != 0
+    err = capsys.readouterr().err
+    assert "--verify" in err and "No closing quotation" in err
+    assert "Traceback" not in err
+    assert "INVALID_VERIFICATION_COMMAND" in err
+    if operation == "resume":
+        assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("verify", [["/not created/my tests/run.sh"], ["python3", "-m", "pytest", "-q"]])
+@pytest.mark.parametrize("resume", [False, True])
+def test_factory_queue_keeps_verification_argv_literal(tmp_path, monkeypatch, verify, resume):
+    from tests.test_factory_task_queue import task, write_queue
+    from tests.test_orchestration_capability_recovery import persist
+    from howlplane.control_plane.factory.task_queue import load_queue
+
+    repo, args, _ = session(tmp_path, monkeypatch, lambda repo: None)
+    path = write_queue(tmp_path, [task("A", repo, verify=verify)])
+    [queued] = load_queue(path, repo)
+    if resume:
+        persist(module.setup(args, repo))
+    observed = []
+
+    def run(doc, path, repo, progress):
+        observed.append(doc["verify_command"])
+        return 0
+
+    monkeypatch.setattr(module, "run", run)
+    assert module.command(queued.launch_args(quiet=True, no_progress=True, heartbeat=30, resume=resume)) == 0
+    assert observed == [verify]
+
+
+def test_other_subcommand_unknown_verify_gets_no_hint(capsys):
+    from howlplane.control_plane.cli import main
+
+    with pytest.raises(SystemExit) as stop:
+        main(["status", "--verify=python3 -m pytest"])
+    assert stop.value.code == 2
+    err = capsys.readouterr().err
+    assert "unrecognized arguments" in err
+    assert "quote a verification command" not in err
 
 
 def test_unquoted_verification_options_fail_with_a_quoting_hint(capsys):

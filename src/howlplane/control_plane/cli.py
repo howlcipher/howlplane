@@ -2606,7 +2606,7 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
     parsed_args, unknown = parser.parse_known_args(args)
     if unknown:
         message = f"unrecognized arguments: {' '.join(unknown)}"
-        if any(arg == "--verify" or arg.startswith("--verify=") for arg in args):
+        if parsed_args.subcommand == "orchestrate" and parsed_args.verify is not None:
             # argparse reads a verification command's own flags as options (DOG-035).
             message += '; quote a verification command that has options, for example --verify "python3 -m pytest -q"'
         parser.error(message)
