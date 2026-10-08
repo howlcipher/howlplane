@@ -658,7 +658,7 @@ tests/test_git_hook_change_guard.py on a real repo with a bare origin: user hook
 howlplane dogfood/DOG-034-hook-change-guard 8bbceb0, PR #161, merged cafca95 (pre-push 2351 passed; CI green).
 
 ## DOG-035 — `orchestrate --verify` rejects any verification command that has options
-Status: FIX IN REVIEW (branch dogfood/DOG-035-verify-argv)
+Status: FIXED (merged #164, f39cf18; HowlPlane review session 889142d7 COMPLETE, audit CLEAN; post-merge public proof recorded in howl-cubs-dogfood)
 Severity: P1 (documented first-run path unusable; no workaround is documented)
 Discovered in: howl-cubs-dogfood mission R001 (github.com/howlcipher/howl-cubs-dogfood, workflow-evidence/R001/plane/CUBS-P-001-repro.txt), 2026-10-08
 Owning component: HowlPlane orchestrate CLI parser; docs in howl README
@@ -673,7 +673,7 @@ Exit 2 before any session: `howlplane: error: unrecognized arguments: -m unittes
 `tests/test_orchestration_verification_rework.py`: real verification and rework through both CLI value forms; quoted resume override; literal Factory argv; absolute and repository-relative executable paths containing spaces; inner quoting, dash-free argv, blank commands and malformed quotes; unknown-option errors with and without the quoting hint. New regressions reproduced path corruption, malformed-input handling gaps, and the unrelated-subcommand hint before correction. Existing rework tests retain their intended failure and recovery contracts.
 
 ## DOG-036 — The verification command's 300-second limit is fixed and undocumented
-Status: FIX IN REVIEW (branch dogfood/DOG-035-verify-argv, with DOG-035)
+Status: FIXED (merged #164, f39cf18; HowlPlane review session 889142d7 COMPLETE, audit CLEAN; post-merge public proof recorded in howl-cubs-dogfood)
 Severity: P2 (capability gap with a hidden limit; blocks acceptance for repositories with long required gates)
 Discovered in: howl-cubs-dogfood mission R001, HowlPlane review session 1426222b on the DOG-035 fix, 2026-10-08
 Owning component: HowlPlane orchestration verification
@@ -684,3 +684,29 @@ Repository: howlplane
 `--verify-timeout SECONDS` (1 to 3600, refused outside the range) on a new session or `resume`, stored as `verify_timeout_seconds`; default unchanged; the overrun message names the option; ORCHESTRATE.md documents it.
 ### Tests
 tests/test_orchestration_verification_rework.py: a 2 s command times out under a 1 s limit (exit 124, message names the option), then `resume --verify-timeout 10` re-runs the same check on the same tree and completes; out-of-range values refused; CLI parse and default.
+
+## DOG-037 — AGY's read-only roles were not read-only; one write discarded the whole session
+Status: FIX IN REVIEW (branch dogfood/DOG-037-038-readonly-network)
+Severity: P1 (permission boundary; loss of verified work)
+Discovered in: howl-cubs-dogfood mission R001, S1 session b3e9d287 on cubs-edge-lab, 2026-10-08
+Owning component: HowlPlane orchestration routing (AGY backend)
+Repository: howlplane
+### Actual
+AGY was assigned review (`agy -p ... --mode plan`). It ran the project's probe CLI (523 network requests) and overwrote tracked research files. HowlPlane detected READ_ONLY_ROLE_MUTATED_REPOSITORY and ended the session BLOCKED, not resumable, discarding Codex's verified implementation. AGY's `plan` mode makes no read-only guarantee; the other CLIs enforce read-only through sandbox, tool allowlist or mode.
+### Resolution
+READ_ONLY_UNENFORCED = {agy}: AUTO routing skips AGY for planning, review and acceptance with a stated reason; an explicitly chosen AGY orchestrator still plans and accepts (explicit override) but never reviews. A repository change in any of those roles, including a failed or timed-out planning attempt, or a review finding or acceptance rejection that also writes, sets READ_ONLY_ROLE_MUTATED_REPOSITORY and ends the session BLOCKED and not resumable. It is not sent back for rework.
+### Tests
+tests/test_orchestration_role_containment.py: AGY never gets a read-only role in AUTO routing, including configured planning, review, and acceptance fallbacks, acceptance takeover, and resume of an older AUTO session that selected AGY; a session whose only non-implementer is AGY ends AUDIT BLOCKED with the reason; with Cursor available the audit runs and completes; an explicit AGY orchestrator plans and accepts but never reviews. A write during planning, review, or acceptance blocks the session and refuses resume, including a planning failure or timeout, and a review finding or acceptance rejection that also writes; a planning failure that does not write stays resumable. Two role-scoped-capacity tests re-expressed through `remediation`.
+
+## DOG-038 — No way to let an orchestrate worker fetch public data
+Status: FIX IN REVIEW (branch dogfood/DOG-037-038-readonly-network)
+Severity: P2 (capability gap for research and data-acquisition goals)
+Discovered in: howl-cubs-dogfood mission R001, S1 session b3e9d287, 2026-10-08
+Owning component: HowlPlane orchestration / Codex backend
+Repository: howlplane
+### Actual
+Codex implementation runs `--sandbox workspace-write`, whose network is off: `statsapi.mlb.com` failed DNS inside the worker while the host resolved it. No option granted network, so a goal that must fetch public data could not run; the implementer honestly reported "live probe not run".
+### Resolution
+`--worker-network` (new session or resume) sets `worker_network` on the session; implementation and remediation tasks carry it, and Codex adds `-c sandbox_workspace_write.network_access=true`. Verified directly: the same Codex prompt fails DNS without the setting and resolves with it. Read-only roles never receive it.
+### Tests
+tests/test_orchestration_role_containment.py: flag parse and default off; only mutating roles receive the metadata, on and off, including after resume; Codex argv carries the setting only for networked mutating tasks, and AGY, Cursor, Claude, Gemini, and Devin argv do not gain network configuration.

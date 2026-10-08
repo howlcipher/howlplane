@@ -40,6 +40,13 @@ SCHEMA_VERSION = 3
 AGENTS = ("claude_code", "codex", "cursor", "agy", "devin_cli")
 # AUTO's first choice for mutating roles when the user named no orchestrator (DOG-023).
 IMPLEMENTATION_PREFERENCE = "codex"
+READ_ONLY_ROLES = frozenset({"planning", "review", "acceptance"})
+# Agents whose CLI does not enforce read-only operation in those roles. AGY's `--mode plan`
+# makes no read-only guarantee: as a reviewer it ran the project's CLI, used the network, and
+# rewrote tracked research files, which ended the session BLOCKED (DOG-037). Codex reviews run in
+# its read-only sandbox, Claude gets only Read/Grep/Glob, Cursor uses plan/ask, Devin `auto`
+# auto-approves read-only tools only.
+READ_ONLY_UNENFORCED = frozenset({"agy"})
 ROLES = ("planning", "implementation", "review", "acceptance")
 AGENT_STATES = {"AVAILABLE", "DEGRADED", "UNAVAILABLE", "RESERVED"}
 UNAVAILABLE_FAILURES = {"MISSING_EXECUTABLE", "AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE"}
@@ -961,6 +968,10 @@ def capability_skip_reason(doc: dict[str, Any], agent: str, role: str) -> str | 
     # agent is not consent to burn another call on capacity it just exhausted.
     if role in state["capacity"]:
         return capacity_reason(state["capacity"][role])
+    if role in READ_ONLY_ROLES and agent in READ_ONLY_UNENFORCED:
+        if role != "review" and doc.get("requested_orchestrator") == agent:
+            return "explicit override"
+        return "its CLI does not enforce read-only operation"
     if state["capabilities"]["unattended_execution"] is not False:
         return None
     if doc.get("requested_orchestrator") == agent:
@@ -1144,6 +1155,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         "model_states": model_states, "known_models": {}, "attempts": [], "tests": [], "reroutes": [],
         "execution_budget": budget, "timed_out_assignments": [], "workspace_trust_policy": resolved_policy,
         "verify_command": verify, "verify_timeout_seconds": verify_timeout,
+        "worker_network": bool(getattr(args, "worker_network", False)),
         "repository_evidence": snapshot, "base_dirty": dirty_paths(Path(snapshot["root"])),
         "lease": {"token": token, "pid": os.getpid(), "renewed_at": time.time()},
     }
@@ -1311,6 +1323,9 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
     if model != "UNKNOWN":
         instructions += f" Use model {model} if the CLI supports selecting it; report actual model identity."
     task = TaskSpec(task_id=doc["id"], repository=str(repo), objective=doc["goal"], constraints=doc["constraints"])
+    if is_mutating_role(role) and doc.get("worker_network"):
+        # Opt-in for goals that must fetch public data; read-only roles never get it (DOG-038).
+        task.metadata["worker_network"] = True
     if is_mutating_role(role) and implementation_verify_command(doc):
         # A bounded shell (Claude) is granted this command alongside any it discovers (DOG-018).
         task.metadata["verification_commands"] = [implementation_verify_command(doc)]
@@ -1587,14 +1602,17 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                     assignment["state"] = "REVOKED"
                     assignment["failure"] = "NO_REPOSITORY_CHANGE"
                     no_change_detail = " (no repository delta detected)"
-            if stage in {"review", "acceptance"} and before != after:
+            if stage in READ_ONLY_ROLES and before != after:
+                # Planning is read-only too. An explicit AGY planner can still be
+                # selected, and its CLI does not enforce the role (DOG-037).
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "READ_ONLY_ROLE_MUTATED_REPOSITORY"
-            if result.success and stage == "review" and not result.stdout.strip().endswith("AUDIT_STATUS: CLEAN"):
+            mutated = assignment["failure"] == "READ_ONLY_ROLE_MUTATED_REPOSITORY"
+            if result.success and stage == "review" and not mutated and not result.stdout.strip().endswith("AUDIT_STATUS: CLEAN"):
                 assignment["state"] = "REVOKED"
                 # An empty reply is a provider fault, not a finding (DOG-003).
                 assignment["failure"] = "AUDIT_FINDINGS_OR_UNCONFIRMED" if result.stdout.strip() else "AUDIT_NO_VERDICT"
-            if result.success and stage == "acceptance" and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
+            if result.success and stage == "acceptance" and not mutated and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
             grant_gap = (permission_grant_gap(result, stage, before != after)
@@ -1699,7 +1717,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                 # the updated eligible candidate list, not a stale intermediate.
                 prev_reroute = (agent, assignment["failure"])
             checkpoint(doc, path, token, repo)
-            if stage in {"review", "acceptance"} and before != after:
+            if stage in READ_ONLY_ROLES and before != after:
                 doc["status"] = "BLOCKED"
                 doc["audit"] = "AUDIT BLOCKED: read-only role changed the repository"
                 checkpoint(doc, path, token, repo)
@@ -1986,6 +2004,8 @@ def command(args: argparse.Namespace) -> int:
                 doc["verify_command"] = verify
             if verify_timeout is not None:
                 doc["verify_timeout_seconds"] = verify_timeout
+            if getattr(args, "worker_network", False):
+                doc["worker_network"] = True
             path = path_for(root, doc["id"])
             secure_write(path, doc)
             if doc["policy"] == "PLAN ONLY" and doc.get("reconciliation", {}).get("needs_validation"):
@@ -2050,6 +2070,9 @@ def add_parser(subparsers: Any, common_parser: Any) -> None:
     parser.add_argument("--verify-timeout", type=int, metavar="SECONDS",
                         help=f"Seconds the verification command may run (default {VERIFY_TIMEOUT_SECONDS}, "
                              f"max {MAX_VERIFY_TIMEOUT_SECONDS}); also accepted on resume")
+    parser.add_argument("--worker-network", action="store_true",
+                        help="Enable Codex sandbox network access for implementation and remediation; other CLIs "
+                             "keep their own network policies. Read-only roles never get it. Also accepted on resume")
     parser.add_argument("--execution-budget", action="append", metavar="ROLE=SECONDS",
                         help=f"Per-assignment deadline for a role, or SECONDS for every role (default "
                              f"{DEFAULT_EXECUTION_BUDGET_SECONDS}, max {MAX_EXECUTION_BUDGET_SECONDS}; repeatable). "

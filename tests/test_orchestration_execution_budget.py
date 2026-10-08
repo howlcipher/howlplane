@@ -134,8 +134,7 @@ def test_agy_derived_print_timeout_keeps_agy_capacity_and_eligibility(tmp_path, 
     assert module.timed_out(doc, "implementation", "agy", "m1")
     assert ("agy", "m1") not in module.candidates(doc, "implementation")
     assert ("agy", "m2") in module.candidates(doc, "implementation")
-    doc["implementer"] = "codex"
-    assert ("agy", "m1") in module.candidates(doc, "review")
+    assert ("agy", "m1") in module.candidates(doc, "remediation")
     # Nothing reached provider capacity evidence either.
     assert not agent_readiness.load_cache().get("agy", {}).get("limits")
     stderr = capsys.readouterr().err
