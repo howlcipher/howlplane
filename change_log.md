@@ -23,6 +23,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `orchestrate --verify-timeout SECONDS` (DOG-036). The verification command's limit was a fixed, undocumented 300 seconds, so a required gate that takes longer (HowlPlane's own full suite takes about 456 seconds) could never pass inside a session, and acceptance kept rejecting for missing full-gate evidence. The default stays 300; 1 to 3600 is accepted on a new session or `resume`; the timeout message names the option. Tests: `test_orchestration_verification_rework.py`.
+
 - `orchestrate --verify` supports quoted verification commands with options (DOG-035), including `--verify="python3 -m pytest -q"`, for new sessions and resume. Single CLI values use POSIX shell splitting, with existing executable paths preserved literally; inner quotes preserve paths with spaces that do not exist yet. Malformed quoting and empty commands report `INVALID_VERIFICATION_COMMAND`. Factory queue arrays remain literal argv, including retries. Dash-free multi-word commands remain supported. Unknown flags on an orchestrate invocation with `--verify` produce a quoting hint; other subcommands keep the usual unknown-argument error. Commands execute without a shell. Contract coverage in `test_orchestration_verification_rework.py` includes real verification and rework, resume, Factory argv, executable paths with spaces, malformed input, and both CLI value forms.
 
 - `HowlDreamRunner.promote_candidate_to_howlcreate` calls `scaffold_candidate` explicitly. It previously reached the same scaffold through HowlCreate's deprecated provider-less `develop_candidate` fallback, which only emitted a warning.

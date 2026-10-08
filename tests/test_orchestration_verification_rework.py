@@ -274,3 +274,37 @@ def test_unquoted_verification_options_fail_with_a_quoting_hint(capsys):
     with pytest.raises(SystemExit):
         main(["orchestrate", "Goal", "--no-such-flag"])
     assert "quote a verification command" not in capsys.readouterr().err
+
+
+def test_verification_timeout_is_configurable_on_start_and_resume(tmp_path, monkeypatch, capsys):
+    """CUBS-P-004: a fixed 300 s limit made a 456 s required gate unreachable in any session."""
+    repo, args, implementations = session(tmp_path, monkeypatch, lambda repo: ["sleep", "2"])
+    args.verify_timeout = 1
+
+    assert module.command(args) == 2
+    out, _ = capsys.readouterr()
+    assert "`sleep 2` exited 124" in out
+    assert "stopped the command after 1s (raise it with --verify-timeout)" in out
+
+    # Resuming with a longer limit re-runs the same check on the same tree and finishes.
+    assert module.command(arguments(repo, input="resume", orchestrator=None, verify_timeout=10)) == 0
+    assert "Status: COMPLETE" in capsys.readouterr().out
+    assert len(implementations) == 1 + module.MAX_REWORK_ROUNDS
+
+
+@pytest.mark.parametrize("value", [0, -5, module.MAX_VERIFY_TIMEOUT_SECONDS + 1])
+def test_verification_timeout_out_of_range_is_refused_not_clamped(value):
+    with pytest.raises(ValueError, match="--verify-timeout must be between 1 and"):
+        module.verification_timeout(value)
+
+
+def test_verification_timeout_parses_and_defaults_to_the_module_limit():
+    assert parsed_verify_timeout("--verify-timeout", "1200") == 1200
+    assert parsed_verify_timeout() is None
+    assert module.verification_timeout(None) is None
+
+
+def parsed_verify_timeout(*argv):
+    from howlplane.control_plane.cli import build_parser
+
+    return build_parser().parse_args(["orchestrate", "Goal", *argv]).verify_timeout

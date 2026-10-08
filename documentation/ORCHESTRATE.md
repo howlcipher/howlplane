@@ -79,6 +79,13 @@ Factory queue JSON uses literal argv arrays throughout, including retries:
 `"verify": ["python3", "-m", "pytest", "-q"]` or
 `"verify": ["/opt/my tests/run.sh"]`. Queue arrays are never shell-split.
 
+The verification command gets 300 seconds by default. A longer required gate,
+such as a full regression suite, needs `--verify-timeout SECONDS` (1 to 3600,
+refused rather than clamped outside that range), on a new session or on
+`resume`. A command that overruns is stopped, recorded as exit 124, and treated
+as a failed verification (DOG-036). This limit is separate from the per-role
+`--execution-budget`.
+
 ### Session lifecycle and resumability
 
 Orchestration sessions classify states into distinct lifecycle categories:

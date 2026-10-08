@@ -157,6 +157,7 @@ VERDICT_EXCERPT_CHARS = 4000
 # before a long summary, so a plain tail dropped the only evidence of what failed (DOG-026).
 TEST_OUTPUT_CHARS = 3000
 VERIFY_TIMEOUT_SECONDS = 300
+MAX_VERIFY_TIMEOUT_SECONDS = 3600
 _FAILURE_LINE = re.compile(r"^\s*not ok\b|\bFAIL(?:ED|URE|S)?\b|\b\w*(?:Error|Exception)\b|\bTraceback\b|\bpanic(?:ked)?\b"
                            r"|\berror\b|\bfailed\b", re.IGNORECASE)
 # The plan is the Howl workflow's design decision; implementers follow it and reviewers judge against it (DOG-025).
@@ -1066,8 +1067,18 @@ def question(label: str, default: str) -> str:
     return answer or default
 
 
+def verification_timeout(value: Any) -> int | None:
+    """`--verify-timeout`: seconds HowlPlane lets the verification command run (CUBS-P-004). Refused, never clamped."""
+    if value is None:
+        return None
+    if not 1 <= int(value) <= MAX_VERIFY_TIMEOUT_SECONDS:
+        raise ValueError(f"--verify-timeout must be between 1 and {MAX_VERIFY_TIMEOUT_SECONDS} seconds, got {value}")
+    return int(value)
+
+
 def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     verify = verification_command(args.verify, repo, literal=getattr(args, "verify_is_argv", False))
+    verify_timeout = verification_timeout(getattr(args, "verify_timeout", None))
     interactive = sys.stdin.isatty() and not args.input
     goal = args.input or (question("1. Goal", "") if interactive else "")
     if not goal:
@@ -1132,7 +1143,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         "failover": failover, "policy": policy, "status": "PLANNED", "stage": "planning",
         "model_states": model_states, "known_models": {}, "attempts": [], "tests": [], "reroutes": [],
         "execution_budget": budget, "timed_out_assignments": [], "workspace_trust_policy": resolved_policy,
-        "verify_command": verify,
+        "verify_command": verify, "verify_timeout_seconds": verify_timeout,
         "repository_evidence": snapshot, "base_dirty": dirty_paths(Path(snapshot["root"])),
         "lease": {"token": token, "pid": os.getpid(), "renewed_at": time.time()},
     }
@@ -1369,13 +1380,14 @@ def run_verification(doc: dict[str, Any], repo: Path) -> dict[str, Any]:
     """
     command = doc["verify_command"]
     record: dict[str, Any] = {"command": command, "rework_round": doc.get("rework_rounds", 0)}
+    timeout = doc.get("verify_timeout_seconds") or VERIFY_TIMEOUT_SECONDS
     try:
-        verified = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=VERIFY_TIMEOUT_SECONDS)
+        verified = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         partial = "".join(part.decode(errors="replace") if isinstance(part, bytes) else part
                           for part in (exc.stdout, exc.stderr) if part)
         record.update(exit_code=124, timed_out=True, output=test_output_excerpt(
-            f"{partial}\nHowlPlane stopped the command after {VERIFY_TIMEOUT_SECONDS}s."))
+            f"{partial}\nHowlPlane stopped the command after {timeout}s (raise it with --verify-timeout)."))
     except OSError as exc:
         record.update(exit_code=127, not_runnable=True, output=redact(f"HowlPlane could not run the command: {exc}"))
     else:
@@ -1922,6 +1934,7 @@ def command(args: argparse.Namespace) -> int:
             if not active:
                 raise ValueError("No unfinished session")
             verify = verification_command(args.verify, repo, literal=getattr(args, "verify_is_argv", False))
+            verify_timeout = verification_timeout(getattr(args, "verify_timeout", None))
             doc = active[0]
             try:
                 migrations = normalize_session(doc)
@@ -1971,6 +1984,8 @@ def command(args: argparse.Namespace) -> int:
                 doc["strategy"] = args.strategy
             if getattr(args, "verify", None):
                 doc["verify_command"] = verify
+            if verify_timeout is not None:
+                doc["verify_timeout_seconds"] = verify_timeout
             path = path_for(root, doc["id"])
             secure_write(path, doc)
             if doc["policy"] == "PLAN ONLY" and doc.get("reconciliation", {}).get("needs_validation"):
@@ -2032,6 +2047,9 @@ def add_parser(subparsers: Any, common_parser: Any) -> None:
     parser.add_argument("--verify", nargs="+",
                         help='Explicit verification command. Quote a command that has options: '
                              '--verify "python3 -m pytest -q"')
+    parser.add_argument("--verify-timeout", type=int, metavar="SECONDS",
+                        help=f"Seconds the verification command may run (default {VERIFY_TIMEOUT_SECONDS}, "
+                             f"max {MAX_VERIFY_TIMEOUT_SECONDS}); also accepted on resume")
     parser.add_argument("--execution-budget", action="append", metavar="ROLE=SECONDS",
                         help=f"Per-assignment deadline for a role, or SECONDS for every role (default "
                              f"{DEFAULT_EXECUTION_BUDGET_SECONDS}, max {MAX_EXECUTION_BUDGET_SECONDS}; repeatable). "
