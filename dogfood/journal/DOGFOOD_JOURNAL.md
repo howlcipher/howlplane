@@ -76,3 +76,9 @@
 - 2026-10-07: tranche 2 STOPPED at the user's request. Engine checkout returned to main.
 - 2026-10-07 user: "push and merge everything". Merged #157, #156 (after update-branch + CI), howl#15. DOG-033 first push failed the pre-push SlopsLint clone ceiling (my duplicated test helper); deduplicated, pushed 4d3a214, PR #158.
 - 2026-10-07 follow-ups (user): (1) `howl update` -> "up to date" (no howl releases); rebuilt howl from main c9d37d5 and installed it, old binary kept as howl.prev; doctor HEALTHY. (3) DOG-032 option B implemented, verified live (preflight 9/9, pipeline 7/7 via component CLIs), merged #160. (5) Workaround packages removed from the engine runtime. (4) Hook policy: DOG-034 guard implemented (user hooks kept; hooks changed mid-task block the commit).
+
+## Clean pair on main (2026-10-08)
+- Preconditions: howlplane checkout on main bb7ba21 == origin/main, clean; howl doctor HEALTHY; 5 agents READY; no open PRs in howlplane or howl. Records branch dogfood/clean-pair-20261008.
+- run-043 (bb7ba21) existing Python pingbot, credential-heavy request + uncommitted WIP: COMPLETE 5.1 min, review CLEAN first pass; 21 tests, 26/26 probes; goal byte-identical, no redaction markers; WIP sha256 intact; reviewer scoped by HowlPlane's diff and quoted token-shaped literals unmasked. CLEAN 1/2.
+- run-044 (bb7ba21) existing TypeScript relnotes, git integration: COMPLETE 8.8 min, review CLEAN first pass; 16 tests, 29/29 probes (two probe iterations failed on my own fixture, fixed). CLEAN 2/2.
+- Clean pair on main bb7ba21. No new finding. DOG-026 rework and DOG-034 did not fire.

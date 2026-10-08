@@ -303,3 +303,27 @@ Merged at the user's request: howlplane #157 (DOG-029), #156 (DOG-027/028/030), 
 1. Run two fresh missions on main (now carrying DOG-026..033) to earn a clean pair.
 2. Decide DOG-032 (A: installer owns creative components; B: HowlPlane runs each component's own console script).
 3. Decide the git-hooks policy for HowlPlane's own commits (from tranche 1).
+
+## Addendum: Clean pair on main (2026-10-08)
+
+### Result
+CLEAN PAIR: run-043 and run-044, consecutive, both on howlplane main bb7ba21 (carries DOG-026..034), public CLI only (`howl factory prepare --yes`, `howl orchestrate`), HOWL_FORBID_LOCAL_INFERENCE=1, normal AUTO routing, no `--verify`. No new finding; no internal state touched; no output hand-fixed.
+
+| Run | Mission | Result |
+| --- | --- | --- |
+| 043 | Existing Python CLI (pingbot): API token auth, config `=` truncation bug, secret masking, exit code 3 on 401/403; request full of credential wording; uncommitted user WIP present | COMPLETE 5.1 min, review CLEAN first pass; 21 tests, 26/26 independent probes; CLEAN |
+| 044 | Existing TypeScript CLI (relnotes): read history from git (range, merges, breaking changes, errors), integration tests on real repos | COMPLETE 8.8 min, review CLEAN first pass; 16 tests, 29/29 independent probes; CLEAN |
+
+### What is proven (on main bb7ba21)
+- DOG-029: a goal containing `Authorization: Bearer <token>`, `PINGBOT_API_TOKEN=<your-token>==`, "the token itself" reaches the report verbatim (byte-identical, 0 redaction markers); review notes unaltered.
+- DOG-027/030: reviewers judge HowlPlane's unredacted diff: run-043's reviewer quoted token-shaped literals as written and scoped the change by the diff, correctly excluding the user's pre-existing WIP; run-044's reviewer confirmed the untouched test file from the diff.
+- Uncommitted user WIP (a modified tracked file the CLI imports plus an untracked file) survives byte-identical (sha256), with nothing committed or stashed and no Howl state left in the repo.
+- New coverage: TypeScript (strict tsc, ESM) and an integration task (git as an external system); MISSION_COVERAGE.md now has every capability checked.
+- Both deliverables met every requirement, including error paths, boundaries, shell and option injection safety (044), and README accuracy.
+
+### What is NOT proven
+- DOG-026's verification-rework path on main: verification passed first time in both runs (it was proven live on its branch in run-032's resume).
+- DOG-034's hook guard in a live campaign: orchestrate does not commit; only real-git tests cover it.
+- Statistical reliability: two runs, both first-pass CLEAN with the same routing (Claude plan/review/acceptance, Codex implementation). Other pools, provider failures mid-session, multi-hour tasks and the creative pipeline were not exercised.
+- Reviewer depth: both reviews took about 25 s and relied on HowlPlane's test evidence ("I did not run anything myself"); my independent probes found nothing they missed, but that is evidence about these two runs only.
+

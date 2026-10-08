@@ -1,0 +1,61 @@
+HOWL ORCHESTRATION REPORT
+Session: 8914e9173a7a407dbf1c56b7041aad1f
+Goal: Our webhook provider is switching on authentication next month, so pingbot needs to send an API token, and we have to be careful the token never leaks into terminal output or CI logs.
+
+1. Token support. Add a new setting `PINGBOT_API_TOKEN`, read from the config file or the environment like the other keys (the environment still wins). When it is set, every webhook request carries the header `Authorization: Bearer <token>`. When it is not set, requests are exactly as they are today (no Authorization header).
+2. Config file bug. Values that themselves contain `=` are cut off at the first `=` today, so a base64 token such as the one in `PINGBOT_API_TOKEN=<your-token>==` loses its padding. A line splits on the first `=` only; everything after it is the value. Keep the existing behaviour for comments, blank lines, whitespace around keys and values, and the "expected KEY=value" error.
+3. Masking. The token itself must never be printed. `show-config` prints secret values masked: a key counts as secret when its name contains TOKEN, SECRET, PASSWORD or KEY (case-insensitive), and its value is shown as `****` followed by the last 4 characters when the value is at least 12 characters long, otherwise just `****`. Non-secret lines such as `PINGBOT_TIMEOUT=10` stay exactly as they are now, and an unset token is not listed at all. `send --verbose` must show the header as `Authorization: Bearer ****` instead of the real value.
+4. Rejected token. When the webhook answers HTTP 401 or 403, `send` exits with code 3 and prints `pingbot: authentication failed (HTTP 401): check PINGBOT_API_TOKEN` (with the actual status code) to stderr. Other HTTP errors keep exit code 1 and their current message. No error message may contain the token.
+
+Keep everything else working as it does now: existing tests must keep passing unchanged, and the payload, the other settings and their precedence must not change. Add tests for each point above (including a token containing `=`, a short token, and a check that the token does not appear in any output), and update the README: document `PINGBOT_API_TOKEN`, the masking rule and exit code 3, and say that the token should go in the environment or in a config file only you can read, never in the repository.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: 5169bf2e45e9f02c3f8dd69767ed3533d00f18dc
+Repository status: M README.md
+ M pingbot/cli.py
+ M pingbot/client.py
+ M pingbot/config.py
+ M pingbot/templates.py
+ M tests/test_pingbot.py
+?? notes/release-checklist.md
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"], "rework_round": 0, "exit_code": 0, "output": "test_config_error_exit_code (test_pingbot.CliTests.test_config_error_exit_code) ... ok\ntest_http_error (test_pingbot.CliTests.test_http_error) ... ok\ntest_send_posts_json (test_pingbot.CliTests.test_send_posts_json) ... ok\ntest_send_without_url (test_pingbot.CliTests.test_send_without_url) ... ok\ntest_show_config (test_pingbot.CliTests.test_show_config) ... ok\ntest_verbose_prints_request (test_pingbot.CliTests.test_verbose_prints_request) ... ok\ntest_environment_overrides_file (test_pingbot.ConfigTests.test_environment_overrides_file) ... ok\ntest_invalid_timeout (test_pingbot.ConfigTests.test_invalid_timeout) ... ok\ntest_missing_file (test_pingbot.ConfigTests.test_missing_file) ... ok\ntest_parse_rejects_line_without_equals (test_pingbot.ConfigTests.test_parse_rejects_line_without_equals) ... ok\ntest_parse_skips_comments_and_blank_lines (test_pingbot.ConfigTests.test_parse_skips_comments_and_blank_lines) ... ok\ntest_authorization_masking_is_case_insensitive (test_pingbot.TokenTests.test_authorization_masking_is_case_insensitive) ... ok\ntest_empty_token_is_unset_and_overrides_file (test_pingbot.TokenTests.test_empty_token_is_unset_and_overrides_file) ... ok\ntest_file_token_and_environment_precedence (test_pingbot.TokenTests.test_file_token_and_environment_precedence) ... ok\ntest_invalid_token_characters_do_not_leak (test_pingbot.TokenTests.test_invalid_token_characters_do_not_leak) ... ok\ntest_network_error_redacts_token (test_pingbot.TokenTests.test_network_error_redacts_token) ... ok\ntest_parser_preserves_equals_and_whitespace_rules (test_pingbot.TokenTests.test_parser_preserves_equals_and_whitespace_rules) ... ok\ntest_request_preserves_payload_and_other_headers (test_pingbot.TokenTests.test_request_preserves_payload_and_other_headers) ... ok\ntest_secret_key_detection_for_file_keys (test_pingbot.TokenTests.test_secret_key_detection_for_file_keys) ... ok\ntest_send_outputs_and_http_errors_never_leak_token (test_pingbot.TokenTests.test_send_outputs_and_http_errors_never_leak_token) ... ok\ntest_show_config_masking_boundaries (test_pingbot.TokenTests.test_show_config_masking_boundaries) ... ok\n\n----------------------------------------------------------------------\nRan 21 tests in 0.217s\n\nOK\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: python3 -m unittest discover -s tests -v (named by the plan (VERIFY_COMMAND))
+Failures: []
+Review notes from Claude (review, CLEAN):
+  No blocking findings. The diff matches the approach decision and all four goal points. I read `config.py` and the full new test file. The rest comes from the diff and the harness evidence, which shows 21 tests passing and a clean `git diff --check`. I did not run anything myself.
+  
+  **Checked against the acceptance criteria**
+  - **1. No-token behaviour:** `build_request` adds the header only when the token is truthy. `load_config` drops an empty token, so `show-config` doesn't list it. `test_request_preserves_payload_and_other_headers` compares the headers and payload against a no-token baseline.
+  - **2. Token and precedence:** the token is read from the environment or the file, and the environment wins. It is added as `Bearer <token>`. `test_file_token_and_environment_precedence` covers the file token, the environment override and the sent header.
+  - **3. `=` in values:** `split("=", 1)` keeps `abc123==` intact. The tests cover `K = a=b = c`, the "expected KEY=value" error and the missing-key error.
+  - **4. Masking:** `mask_value` uses `>= 12`, and `test_show_config_masking_boundaries` checks 11 and 12 characters. `show-config` masks secret keys that come only from the file, including `MONKEY`, as the spec allows. `PINGBOT_TIMEOUT=10` is unchanged.
+  - **5. No token in output:**
+    - **Invalid characters:** the `ConfigError` text is fixed and never contains the token. The test sweeps control characters, DEL and non-ASCII, and `send` makes no request in those cases.
+    - **Verbose output:** it shows `Authorization: Bearer ****`, and matching is case-insensitive.
+    - **HTTP errors:** messages use only the status code. The response body is never read.
+    - **Network errors:** the `URLError` reason is redacted. This goes beyond the spec and is tested.
+  - **6. 401 and 403:** both give exit code 3 and the exact message. A 500 still gives exit code 1 with "webhook returned HTTP 500".
+  - **7. README:** it has the settings row, a Secrets section (masking rule, `Bearer ****`, `=` in values, `chmod 600`, never in the repository) and exit code 3, and code 1 now says "other HTTP error".
+  - **8. Scope:** the diff touches only `README.md`, `cli.py`, `client.py`, `config.py` and the tests. `templates.py` and `notes/` are not in it, and nothing was committed.
+  
+  **NON-BLOCKING**
+  1. `README.md` gained an unrequested line, "Set `PINGBOT_URL` in your environment to your webhook URL before running". It is accurate but out of scope.
+  2. `test_invalid_token_characters_do_not_leak` has a non-ASCII branch, so a legitimate non-ASCII token is now rejected. This follows the leak-guard design.
+  3. `exc.close()` in `send` is an unrequested resource-hygiene addition. It is harmless and the tests cover it.
+  4. The spec's list of tests for the invalid-character check is slightly narrower than what was written. The extra coverage is fine.
+  
+  **Files changed:** `README.md`, `pingbot/cli.py`, `pingbot/client.py`, `pingbot/config.py`, `tests/test_pingbot.py`.
+  
+  **Tests run:** the harness ran `python3 -m unittest discover -s tests -v`: 21 tests, OK.
+  
+  **Remaining risks:** substring-based secret detection masks keys like `MONKEY`, as the spec says. A webhook echoing the token in a response body is out of scope because the body is never printed.
+  
+  AUDIT_STATUS: CLEAN
