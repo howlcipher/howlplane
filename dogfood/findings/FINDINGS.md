@@ -656,3 +656,18 @@ Keep the user's hooks; refuse to commit when the hook setup changed after the ta
 tests/test_git_hook_change_guard.py on a real repo with a bare origin: user hook still runs; new hook, changed hook and hooksPath redirect each block the commit with the planted hook unrun and HEAD unmoved. Git integration, marathon, crash recovery, acceptance canary modules unchanged (96 pass).
 ### Commit
 howlplane dogfood/DOG-034-hook-change-guard 8bbceb0, PR #161, merged cafca95 (pre-push 2351 passed; CI green).
+
+## DOG-035 — `orchestrate --verify` rejects any verification command that has options
+Status: FIX IN REVIEW (branch dogfood/DOG-035-verify-argv)
+Severity: P1 (documented first-run path unusable; no workaround is documented)
+Discovered in: howl-cubs-dogfood mission R001 (github.com/howlcipher/howl-cubs-dogfood, workflow-evidence/R001/plane/CUBS-P-001-repro.txt), 2026-10-08
+Owning component: HowlPlane orchestrate CLI parser; docs in howl README
+Repository: howlplane (parser, ORCHESTRATE.md); howl (README example)
+### Expected
+`howl orchestrate "Add a --version flag" --repo . --verify python3 -m unittest` (howl README.md:160) starts a session verified by that command.
+### Actual
+Exit 2 before any session: `howlplane: error: unrecognized arguments: -m unittest`. `--verify` is `nargs="+"`, so argparse reads the command's own flags as orchestrate options. Same for `--verify python3 -m pytest -q`. Factory queue tasks already bypassed argv for this reason; the CLI did not, and no test parsed a dashed `--verify` through the CLI.
+### Resolution
+`verification_command()` shell-splits a single quoted command (`--verify "python3 -m pytest -q"`) into argv for new sessions, resume and queue tasks; dash-free multi-word commands are unchanged; the command still runs without a shell. An unquoted command with options still fails (argparse cannot know where it ends) but `cli.main` now appends a quoting hint. ORCHESTRATE.md documents quoting; howl README example quoted in a companion PR.
+### Tests
+tests/test_orchestration_verification_rework.py: a quoted `sh -c 'grep -q FIXED README'` parsed by the real CLI parser fails the first implementation and passes after one rework round (proves the split command ran); split rules (single, multi, quoted, path with spaces, blank); unquoted options exit 2 with the hint, unrelated unknown flags without it. All 8 fail without the fix.

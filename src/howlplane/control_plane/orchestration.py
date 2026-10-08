@@ -520,6 +520,18 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def verification_command(value: Any) -> list[str] | None:
+    """`--verify` as argv. A single quoted command is shell-split, so its flags survive argparse (DOG-035)."""
+    if not value:
+        return None
+    command = list(value)
+    if len(command) == 1 and any(char.isspace() for char in command[0]):
+        command = shlex.split(command[0])
+    if not command:
+        raise ValueError("--verify needs a command")
+    return command
+
+
 def live_lease(doc: dict[str, Any]) -> bool:
     """True while another process still holds this session's coordinator lease."""
     lease = doc.get("lease") or {}
@@ -1104,7 +1116,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         "failover": failover, "policy": policy, "status": "PLANNED", "stage": "planning",
         "model_states": model_states, "known_models": {}, "attempts": [], "tests": [], "reroutes": [],
         "execution_budget": budget, "timed_out_assignments": [], "workspace_trust_policy": resolved_policy,
-        "verify_command": args.verify,
+        "verify_command": verification_command(args.verify),
         "repository_evidence": snapshot, "base_dirty": dirty_paths(Path(snapshot["root"])),
         "lease": {"token": token, "pid": os.getpid(), "renewed_at": time.time()},
     }
@@ -1941,7 +1953,7 @@ def command(args: argparse.Namespace) -> int:
             if getattr(args, "strategy", None):
                 doc["strategy"] = args.strategy
             if getattr(args, "verify", None):
-                doc["verify_command"] = args.verify
+                doc["verify_command"] = verification_command(args.verify)
             path = path_for(root, doc["id"])
             secure_write(path, doc)
             if doc["policy"] == "PLAN ONLY" and doc.get("reconciliation", {}).get("needs_validation"):
@@ -2000,7 +2012,9 @@ def add_parser(subparsers: Any, common_parser: Any) -> None:
     parser.add_argument("--failover", choices=["AUTO REROUTE", "OFF"])
     parser.add_argument("--policy", choices=["PLAN + EXECUTE + INDEPENDENT AUDIT", "PLAN + EXECUTE", "PLAN ONLY"])
     parser.add_argument("--constraint", action="append", default=[])
-    parser.add_argument("--verify", nargs="+", help="Explicit verification command and arguments")
+    parser.add_argument("--verify", nargs="+",
+                        help='Explicit verification command. Quote a command that has options: '
+                             '--verify "python3 -m pytest -q"')
     parser.add_argument("--execution-budget", action="append", metavar="ROLE=SECONDS",
                         help=f"Per-assignment deadline for a role, or SECONDS for every role (default "
                              f"{DEFAULT_EXECUTION_BUDGET_SECONDS}, max {MAX_EXECUTION_BUDGET_SECONDS}; repeatable). "

@@ -123,3 +123,53 @@ def test_test_output_excerpt_keeps_failures_and_the_summary():
 
     no_failure_lines = "\n".join("ok %d - fine" % i for i in range(600))
     assert module.test_output_excerpt(no_failure_lines).endswith("ok 599 - fine")
+
+
+def parsed_verify(*argv):
+    from howlplane.control_plane.cli import build_parser
+
+    return build_parser().parse_args(["orchestrate", "Fix the README", *argv]).verify
+
+
+def test_quoted_verification_command_keeps_its_options_and_runs_split(tmp_path, monkeypatch, capsys):
+    """DOG-035: `--verify python3 -m unittest` (howl's documented example) died in argparse on `-m`."""
+    quoted = parsed_verify("--verify", "sh -c 'grep -q FIXED README'")
+    assert quoted == ["sh -c 'grep -q FIXED README'"]
+    repo, args, implementations = session(tmp_path, monkeypatch, lambda repo: quoted, fixed_on_attempt=2)
+
+    assert module.command(args) == 0
+    out, err = capsys.readouterr()
+    # The first tree fails the real grep and is reworked; a command run unsplit could not have started at all.
+    assert "Status: COMPLETE" in out and "Rework rounds: 1 of 2" in out
+    assert "`sh -c 'grep -q FIXED README'` on the implemented tree and it exited 1" in implementations[1]["findings"]
+
+
+@pytest.mark.parametrize("value, expected", [
+    (None, None),
+    (["pytest"], ["pytest"]),
+    (["bash", "scripts/test.sh"], ["bash", "scripts/test.sh"]),
+    (["python3 -m pytest -q"], ["python3", "-m", "pytest", "-q"]),
+    (["'/opt/my tests/run.sh' --fast"], ["/opt/my tests/run.sh", "--fast"]),
+])
+def test_verification_command_splits_only_a_single_quoted_command(value, expected):
+    assert module.verification_command(value) == expected
+
+
+def test_verification_command_rejects_a_blank_command():
+    with pytest.raises(ValueError, match="--verify needs a command"):
+        module.verification_command(["   "])
+
+
+def test_unquoted_verification_options_fail_with_a_quoting_hint(capsys):
+    from howlplane.control_plane.cli import main
+
+    with pytest.raises(SystemExit) as stop:
+        main(["orchestrate", "Goal", "--verify", "python3", "-m", "unittest"])
+    assert stop.value.code == 2
+    err = capsys.readouterr().err
+    assert "unrecognized arguments: -m unittest" in err
+    assert 'quote a verification command that has options, for example --verify "python3 -m pytest -q"' in err
+
+    with pytest.raises(SystemExit):
+        main(["orchestrate", "Goal", "--no-such-flag"])
+    assert "quote a verification command" not in capsys.readouterr().err
