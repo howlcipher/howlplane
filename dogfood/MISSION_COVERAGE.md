@@ -20,6 +20,8 @@ Prevents repetitive dogfood. One row per run; adaptive tranches start at run-030
 | 040 | 039 rerun, identical start | Existing | Python | regression | deliverable OK; NOT CLEAN | DOG-030 |
 | 041 | TARGETED: linkcheck concurrency + Ctrl-C mid-implementation + resume | Existing | Go | concurrency, interruption/resume | resume COMPLETE, deliverable OK | no (P3 hint wording) |
 | 042 | creative pipeline: linkcheck landing page (Dream -> Writer -> Create) | Greenfield | ecosystem | cross-component handoff, provenance | COMPLETED; NOT CLEAN | DOG-031, DOG-032, DOG-033 |
+| 043 | pingbot: API token auth, config `=` bug, secret masking, 401/403 exit code; uncommitted user WIP | Existing (dirty tree) | Python | credential-heavy request (redaction, unredacted reviewer diff), WIP preservation, bug fix | CLEAN (1/2 on main bb7ba21) | no |
+| 044 | relnotes: read commit history straight from git (range, merges, breaking changes, errors) | Existing | TypeScript | integration with an external system (git subprocess), robust parsing, integration tests on real repos | CLEAN (2/2 on main bb7ba21) | no |
 
 ## Capability matrix
 
@@ -38,10 +40,12 @@ Prevents repetitive dogfood. One row per run; adaptive tranches start at run-030
 - [x] test-only task (034)
 - [x] documentation-sensitive task (030)
 - [x] error-recovery (032 resume after engine upgrade)
-- [ ] integration task
+- [x] integration task (044: git as an external system, real-repo integration tests)
 - [x] non-Python language (030: Go)
 - [x] dirty working tree / uncommitted user WIP (032/033)
 - [x] greenfield non-Python (035: Rust)
 - [x] interruption / resume (041)
 - [x] ecosystem integration (042: HowlDream -> HowlWriter -> HowlCreate)
 - [x] large cross-cutting change (039/040)
+- [x] TypeScript (044)
+- [x] credential-heavy request text (039/040, 043)

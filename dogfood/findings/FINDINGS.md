@@ -564,7 +564,7 @@ howlplane dogfood/DOG-029-redaction-prose 8e5b2ab (based on main 068e3d7, not st
 run-040 (same mission, identical start, local integration a911cc9): the live session manifest goal was byte-identical to the mission text (no redaction markers); the report showed 1 [REDACTED], which was DOG-030 (below), not the goal.
 
 ## DOG-030 — Reviewers were shown a redacted diff: text that is not in the repository
-Status: FIXED (merged via #156; not re-run live after the fix)
+Status: RESOLVED (merged via #156; verified live in run-043)
 Severity: P2 (reviewers judge distorted evidence; risk of false findings and needless rework)
 Discovered in: run-040 review notes ("The README example uses `API_TOKEN='[REDACTED]'` as a placeholder")
 Owning component: HowlPlane orchestration, session_diff_evidence (DOG-027 code)
@@ -579,6 +579,8 @@ The diff is no longer redacted. Residual risk recorded: plan and verdict excerpt
 test_orchestration_review_diff_evidence::test_reviewers_see_the_repository_text_not_a_redacted_version (fails on the old line).
 ### Commit
 howlplane dogfood/DOG-027-review-diff-evidence (PR #156), 540ca27 on top of 175b57a, PUSHED (pre-push 2328 passed).
+### Regression verification
+run-043 (main bb7ba21, a change full of `PINGBOT_API_TOKEN=...` lines): the reviewer quoted the diff's token-shaped literals as written (`abc123==`, `K = a=b = c`) and raised no finding about placeholder or masked text. DOG-029 also held again: goal byte-identical, no markers in the report.
 
 ## DOG-031 — `howl doctor` reports HEALTHY while a developer-profile runtime lacks a dependency its checkout declares
 Status: RESOLVED (verified through the public CLI on the real installation)

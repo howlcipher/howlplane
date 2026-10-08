@@ -1,14 +1,14 @@
 # Howl Dogfood Handoff
 
-## CURRENT — read this first (updated 2026-10-07, follow-ups)
-- Tranche 2 STOPPED at the user's request after run-042 (not PASS). See FINAL_REPORT.md.
-- All engine fixes DOG-026..033 are merged on howlplane main; DOG-032 resolved with option B (#160). DOG-034 (hook guard) merged #161; howl#15 (DOG-031) merged. No open PRs besides this records PR.
-- Installed `howl` rebuilt from howl main c9d37d5 (`howl update` reported up to date because the howl repo has no releases); the previous binary is ~/.local/bin/howl.prev.
-- HowlPlane engine runtime is back to its installer state (creative workaround packages removed); the creative pipeline now uses each component's own CLI.
-- LIVE ENGINE: howlplane checkout on main.
-- Next (user deferred): two fresh missions on main (run-043/044) to earn a clean pair.
-- Next finding DOG-035; next run run-043.
-- WARNINGS: never stack PRs; when a PR is BEHIND, update-branch, wait for CI, merge, confirm by ancestry. In wait loops, never `pgrep -f` a pattern that appears in the loop's own command line.
+## CURRENT — read this first (updated 2026-10-08, clean pair on main)
+- Status: CLEAN PAIR ON MAIN. run-043 + run-044 are two consecutive clean runs on howlplane main bb7ba21 (DOG-026..034 merged). See FINAL_REPORT.md "Clean pair on main".
+- No open finding. No open code PRs. Records branch dogfood/clean-pair-20261008 (records PR only).
+- Installed `howl` built from howl main c9d37d5; previous binary ~/.local/bin/howl.prev.
+- LIVE ENGINE: howlplane checkout on main bb7ba21 (editable install). Never switch its branch; use worktrees for repairs.
+- Next finding DOG-035; next run run-045.
+- Resume: if howlplane src changes after bb7ba21, run two fresh missions chosen by MISSION_COVERAGE.md before re-asserting the clean pair.
+- Not yet observed live on main: DOG-026's rework path (fires only if verification fails) and DOG-034's hook guard (only factory campaigns commit).
+- WARNINGS: never stack PRs; when a PR is BEHIND, update-branch, wait for CI, merge, confirm by ancestry. In wait loops, never `pgrep -f` a pattern that appears in the loop's own command line. Orchestrate progress goes to stderr, the report to stdout.
 - Always export HOWL_FORBID_LOCAL_INFERENCE=1.
 - Older history below.
 

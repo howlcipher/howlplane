@@ -1,0 +1,1 @@
+HOWL_FORBID_LOCAL_INFERENCE=1 howl orchestrate "$(cat MISSION.md)" --repo /run/media/system/tallgeese/dev/dogfood-missions/run-043/pingbot  (engine bb7ba21)

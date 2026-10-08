@@ -1,0 +1,3 @@
+- Engine: howlplane main bb7ba21 (unchanged since run-043). howl from howl main c9d37d5. Node v22.22.1, npm 12.0.2 (warns it does not support this Node version; install and run work), TypeScript 5.9.3 in node_modules, git 2.53.0.
+- HOWL_FORBID_LOCAL_INFERENCE=1. howl doctor HEALTHY; agents doctor: 5 workers READY.
+- Target: dogfood-missions/run-044/relnotes, HEAD 1a1b8ec, clean tree; node_modules/ and dist/ present but ignored.

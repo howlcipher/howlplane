@@ -1,0 +1,61 @@
+HOWL ORCHESTRATION REPORT
+Session: a1136123d60c4964bf7561a628b48183
+Goal: Today relnotes only reads commit subjects from a text file that people produce by hand with `git log`. That step keeps going wrong (wrong range, merge commits included, missing commits), so we want relnotes to read the history straight from a git repository.
+
+1. New input mode: `relnotes --repo PATH --from REF [--to REF] --version VERSION`. It lists the commits reachable from `--to` (default `HEAD`) but not from `--from`, the same set as `git log FROM..TO`, oldest first, and renders them like file input. `--from` is required in this mode. `--input` and `--repo` cannot be combined (usage error), and exactly one of them is required.
+2. Merge commits are skipped. Each entry gets the commit's 7-character short hash in parentheses at the end, e.g. `- handle tabs (1a2b3c4)`. File input stays exactly as it is now, without hashes.
+3. Breaking changes: a commit whose type ends with `!` (e.g. `feat!: drop node 18`) or whose message body has a line starting with `BREAKING CHANGE:` is listed in a new first section, "Breaking changes", instead of its normal section. Apply the `!` rule to file input as well, which only has subjects.
+4. Errors exit with code 2 and a one-line message on stderr: a path that is not a git repository, a `--from` or `--to` ref that does not exist (name the ref in the message), and git not being installed. A valid range with no commits prints the usual `No changes.` and exits 0.
+5. Commit subjects and bodies can contain any characters, including `|`, tabs, quotes and non-ASCII text; none of that may break parsing. Do not run git through a shell.
+
+Add integration tests that create real temporary git repositories (with their own committer identity and dates, so they do not depend on the machine's git config) and cover: a normal range, the default `--to`, merge commits, both breaking-change forms, the errors in point 4, an empty range, and an awkward subject. Keep the existing tests passing unchanged. Update the README with the new mode, the section order and the error cases. `npm test` must pass.
+Status: COMPLETE
+Resumable: no
+Orchestrator: claude_code
+Implementer: codex
+Policy: PLAN + EXECUTE + INDEPENDENT AUDIT
+Constraints: none
+Assignments: 4
+Reroutes: 0
+Repository head: 1a1b8ece49fc2564e57570a61d2d9abdca933270
+Repository status: M README.md
+ M src/cli.ts
+ M src/notes.ts
+?? src/git.ts
+?? test/repo.test.ts
+Tests: [{"command": "git diff --check", "exit_code": 0, "output": ""}, {"command": ["npm", "test"], "rework_round": 0, "exit_code": 0, "output": "[... earlier output trimmed by HowlPlane ...]\nder markdown\nok 3 - render markdown\n  ---\n  duration_ms: 0.409049\n  type: 'test'\n  ...\n# Subtest: cli reads subjects from a file\nok 4 - cli reads subjects from a file\n  ---\n  duration_ms: 2.980268\n  type: 'test'\n  ...\n# Subtest: cli usage errors exit 2\nok 5 - cli usage errors exit 2\n  ---\n  duration_ms: 1.350451\n  type: 'test'\n  ...\n# Subtest: repo range excludes the base and ancestors, orders commits, and uses seven-character hashes\nok 6 - repo range excludes the base and ancestors, orders commits, and uses seven-character hashes\n  ---\n  duration_ms: 194.551881\n  type: 'test'\n  ...\n# Subtest: --to defaults to HEAD and an explicit earlier --to limits the range\nok 7 - --to defaults to HEAD and an explicit earlier --to limits the range\n  ---\n  duration_ms: 216.563955\n  type: 'test'\n  ...\n# Subtest: merge commits are skipped while commits on both parents remain\nok 8 - merge commits are skipped while commits on both parents remain\n  ---\n  duration_ms: 179.53034\n  type: 'test'\n  ...\n# Subtest: both breaking forms precede normal sections, including scoped and unknown types\nok 9 - both breaking forms precede normal sections, including scoped and unknown types\n  ---\n  duration_ms: 167.405303\n  type: 'test'\n  ...\n# Subtest: file input routes bang subjects to breaking changes without hashes\nok 10 - file input routes bang subjects to breaking changes without hashes\n  ---\n  duration_ms: 1.122423\n  type: 'test'\n  ...\n# Subtest: awkward subjects and bodies preserve delimiters and Unicode\nok 11 - awkward subjects and bodies preserve delimiters and Unicode\n  ---\n  duration_ms: 111.786954\n  type: 'test'\n  ...\n# Subtest: empty ranges succeed with the usual No changes output\nok 12 - empty ranges succeed with the usual No changes output\n  ---\n  duration_ms: 73.997768\n  type: 'test'\n  ...\n# Subtest: non-repositories and nonexistent paths have single-line errors\nok 13 - non-repositories and nonexistent paths have single-line errors\n  ---\n  duration_ms: 20.912596\n  type: 'test'\n  ...\n# Subtest: unknown from and to refs are named, including option-like refs\nok 14 - unknown from and to refs are named, including option-like refs\n  ---\n  duration_ms: 123.357248\n  type: 'test'\n  ...\n# Subtest: missing git exits 2 with one line on stderr\nok 15 - missing git exits 2 with one line on stderr\n  ---\n  duration_ms: 62.379133\n  type: 'test'\n  ...\n# Subtest: invalid input-mode combinations and missing required arguments are usage errors\nok 16 - invalid input-mode combinations and missing required arguments are usage errors\n  ---\n  duration_ms: 53.79094\n  type: 'test'\n  ...\n1..16\n# tests 16\n# suites 0\n# pass 16\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1482.025598\nnpm warn cli npm v12.0.2 does not support Node.js v22.22.1. This version of npm supports the following node versions: `^22.22.2 || ^24.15.0 || >=26.0.0`. You can find the latest version at https://nodejs.org/.\nnpm notice run relnotes@0.3.0 test\nnpm notice run tsc -p . && node --test \"dist/test/**/*.test.js\"\n"}]
+Independent audit: CLEAN
+Recovery: {}
+Verification command: npm test (derived from the project's discovered test command)
+Failures: []
+Review notes from Claude (review, CLEAN):
+  No blocking findings. I couldn't run anything in this role, so this rests on reading `src/git.ts`, `src/cli.ts`, `src/notes.ts`, `test/repo.test.ts` and the README diff, plus the `npm test` result HowlPlane supplied (16 of 16 pass, `tsc` clean).
+  
+  **Files changed:** `README.md`, `src/cli.ts`, `src/notes.ts`, new `src/git.ts`, new `test/repo.test.ts`. `test/notes.test.ts` is untouched.
+  
+  **Goal points checked against the code**
+  - **Range and mode validation:** `readCommits` resolves both refs to commits, then runs `git log --no-merges --reverse -z <from>..<to>`, which is the same set as `git log FROM..TO`. `cli.ts` enforces the required `--version`, exactly one of `--input` or `--repo`, `--from` required with `--repo`, and `--from` or `--to` only with `--repo`. Each failure exits 2 with usage text.
+  - **Hashes and merges:** merges are skipped. Hashes are `%H` sliced to 7 characters, and only repo-mode entries get them, so file input has none.
+  - **Breaking changes:** `!` before the colon in the subject, or a body line starting `BREAKING CHANGE:`, sends a commit to the new first section. `!` is applied to file input too. The test covers the footer rule's boundaries (an indented or mid-line marker does not count).
+  - **Errors:**
+    - Git is run through `execFileSync` with an argv array, never a shell, and refs are guarded by `--end-of-options`.
+    - A non-repo or missing path gives `not a git repository: PATH`.
+    - A bad ref gives `unknown ref: REF`.
+    - A missing git executable (`ENOENT`) gives `git is not installed`.
+    - Messages are single-line, and an empty range prints `No changes.` and exits 0.
+  - **Parsing:** `-z` with a NUL-separated hash, subject and body means `|`, tabs, quotes and non-ASCII text can't break parsing. The awkward-subject test covers this.
+  - **Tests:** they use real temporary repos with their own identity, dates and a null global config. They cover every case on the required list and add extras: option-like refs, newline refs, and `--from` or `--to` with `--input`.
+  - **README:** it matches the behaviour, including section order, error messages, usage conflicts and the `git log > commits.txt` workflow.
+  
+  **NON-BLOCKING**
+  1. The tests write commit messages with `-F <file>` into the repo directory rather than `commit -F -` with `input:`, as the plan said. This is harmless: the file stays untracked, no shell is involved, and the commits are `--allow-empty`.
+  2. A subject of exactly `feat!:` with no description fails the `CONVENTIONAL` regex but matches the breaking regex. It would be listed under Breaking changes with the raw text `feat!:`.
+  3. A commit with an empty subject is skipped even if its body has `BREAKING CHANGE:`. The plan accepted this.
+  4. In repo mode, an unexpected non-`GitError` exception would print `cannot read undefined: ...`. This is unlikely, since `readCommits` wraps every git failure in `GitError`.
+  5. `--end-of-options` needs git 2.24 or newer. The README states the requirement.
+  
+  **Remaining risks:** the git-missing test changes `PATH` for the whole test process. It is restored in `finally`, and `node --test` runs each file in its own process.
+  
+  **Completion status:** the implementation meets the goal and the acceptance criteria.
+  
+  AUDIT_STATUS: CLEAN
