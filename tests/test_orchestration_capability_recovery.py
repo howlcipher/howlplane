@@ -212,8 +212,10 @@ def test_candidates_are_recomputed_after_hard_failure_including_configured_fallb
     options = module.candidates(doc, "implementation")
     assert all(agent != "agy" for agent, _ in options)
     assert options[0] == ("codex", "m1")
-    # Capacity is role-scoped: AGY stays eligible for independent review.
-    assert any(agent == "agy" for agent, _ in module.candidates(doc, "review"))
+    # Capacity is role-scoped: AGY stays eligible for its other roles. It never reviews, because
+    # its CLI does not enforce read-only operation (DOG-037), not because of this failure.
+    assert any(agent == "agy" for agent, _ in module.candidates(doc, "remediation"))
+    assert module.capability_skip_reason(doc, "agy", "review") == "its CLI does not enforce read-only operation"
 
 
 def test_session_limit_exhausts_role_and_model(tmp_path, monkeypatch):

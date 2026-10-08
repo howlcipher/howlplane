@@ -948,12 +948,14 @@ class CodexBackend(SubprocessAgentBackend):
             # Review roles keep the default read-only sandbox.
             if r and (r.endswith("-reviewer") or r in ("review", "planning", "acceptance") or r.startswith("writing:")):
                 return ["codex", "exec", "--skip-git-repo-check", p]
+            network = ["-c", "sandbox_workspace_write.network_access=true"] if (getattr(t, "metadata", None) or {}).get("worker_network") else []
             return [
                 "codex",
                 "exec",
                 "--skip-git-repo-check",
                 "--sandbox",
                 "workspace-write",
+                *network,
                 p,
             ]
         super().__init__("codex", "codex", _codex_cmd)
