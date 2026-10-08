@@ -2603,7 +2603,13 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
         print("--color must be one of: auto, always, never", file=sys.stderr)
         return 2
     parser = build_parser(program_name=program_name)
-    parsed_args = parser.parse_args(args)
+    parsed_args, unknown = parser.parse_known_args(args)
+    if unknown:
+        message = f"unrecognized arguments: {' '.join(unknown)}"
+        if parsed_args.subcommand == "orchestrate" and parsed_args.verify is not None:
+            # argparse reads a verification command's own flags as options (DOG-035).
+            message += '; quote a verification command that has options, for example --verify "python3 -m pytest -q"'
+        parser.error(message)
 
     if not parsed_args.subcommand:
         if program_name != "howlplane":

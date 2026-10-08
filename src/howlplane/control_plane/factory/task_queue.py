@@ -180,6 +180,7 @@ def _task(raw: Any, position: int, base: Path, default_repo: Path, parser: argpa
     args.input = goal.strip()
     args.constraint = _strings(raw.get("constraints", []), f"{label} constraints")
     args.verify = _strings(raw["verify"], f"{label} verify") if raw.get("verify") is not None else None
+    args.verify_is_argv = True  # JSON arrays are literal argv, including a single path with spaces.
     args.retain_report = True  # the session report is the evidence the ledger points at
     args.separate = False
     args.json = False

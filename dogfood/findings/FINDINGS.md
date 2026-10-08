@@ -656,3 +656,31 @@ Keep the user's hooks; refuse to commit when the hook setup changed after the ta
 tests/test_git_hook_change_guard.py on a real repo with a bare origin: user hook still runs; new hook, changed hook and hooksPath redirect each block the commit with the planted hook unrun and HEAD unmoved. Git integration, marathon, crash recovery, acceptance canary modules unchanged (96 pass).
 ### Commit
 howlplane dogfood/DOG-034-hook-change-guard 8bbceb0, PR #161, merged cafca95 (pre-push 2351 passed; CI green).
+
+## DOG-035 — `orchestrate --verify` rejects any verification command that has options
+Status: FIX IN REVIEW (branch dogfood/DOG-035-verify-argv)
+Severity: P1 (documented first-run path unusable; no workaround is documented)
+Discovered in: howl-cubs-dogfood mission R001 (github.com/howlcipher/howl-cubs-dogfood, workflow-evidence/R001/plane/CUBS-P-001-repro.txt), 2026-10-08
+Owning component: HowlPlane orchestrate CLI parser; docs in howl README
+Repository: howlplane (parser, ORCHESTRATE.md); howl (README example)
+### Expected
+`howl orchestrate "Add a --version flag" --repo . --verify python3 -m unittest` (howl README.md:160) starts a session verified by that command.
+### Actual
+Exit 2 before any session: `howlplane: error: unrecognized arguments: -m unittest`. `--verify` is `nargs="+"`, so argparse reads the command's own flags as orchestrate options. Same for `--verify python3 -m pytest -q`. Factory queue tasks already bypassed argv for this reason; the CLI did not, and no test parsed a dashed `--verify` through the CLI.
+### Resolution
+`verification_command()` parses a single CLI value using POSIX shell quoting for new sessions and resume, including `--verify "python3 -m pytest -q"` and the `--verify=...` form. Existing executable paths remain literal, including spaces; inner quotes preserve paths that do not exist yet. Multiple CLI values and Factory queue arrays remain literal argv, including queue retries. Empty CLI commands and malformed quoting report `INVALID_VERIFICATION_COMMAND`; execution uses no shell. Unquoted flags can collide with orchestrate options; unknown flags such as `-m` exit 2 with a quoting hint restricted to orchestrate invocations using `--verify`. ORCHESTRATE.md documents these rules. The external howl README example needs the quoted form; this checkout does not establish its update status.
+### Tests
+`tests/test_orchestration_verification_rework.py`: real verification and rework through both CLI value forms; quoted resume override; literal Factory argv; absolute and repository-relative executable paths containing spaces; inner quoting, dash-free argv, blank commands and malformed quotes; unknown-option errors with and without the quoting hint. New regressions reproduced path corruption, malformed-input handling gaps, and the unrelated-subcommand hint before correction. Existing rework tests retain their intended failure and recovery contracts.
+
+## DOG-036 — The verification command's 300-second limit is fixed and undocumented
+Status: FIX IN REVIEW (branch dogfood/DOG-035-verify-argv, with DOG-035)
+Severity: P2 (capability gap with a hidden limit; blocks acceptance for repositories with long required gates)
+Discovered in: howl-cubs-dogfood mission R001, HowlPlane review session 1426222b on the DOG-035 fix, 2026-10-08
+Owning component: HowlPlane orchestration verification
+Repository: howlplane
+### Actual
+`VERIFY_TIMEOUT_SECONDS = 300` was not configurable or documented. HowlPlane's own full suite takes about 456 s; acceptance applied documentation/TESTING.md and rejected twice for missing full-gate evidence; implementers that ran the suite hit the 600 s execution budget and read-only roles may not run git-invoking tests, so no session configuration could produce the evidence.
+### Resolution
+`--verify-timeout SECONDS` (1 to 3600, refused outside the range) on a new session or `resume`, stored as `verify_timeout_seconds`; default unchanged; the overrun message names the option; ORCHESTRATE.md documents it.
+### Tests
+tests/test_orchestration_verification_rework.py: a 2 s command times out under a 1 s limit (exit 124, message names the option), then `resume --verify-timeout 10` re-runs the same check on the same tree and completes; out-of-range values refused; CLI parse and default.
