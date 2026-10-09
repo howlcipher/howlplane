@@ -917,6 +917,11 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
                 if command
             }
         )
+        unnamed_denials = sum(
+            1
+            for entry in denials
+            if isinstance(entry, dict) and not _denied_command(entry)
+        )
 
         if not denied_tools and _reports_permission_block(text):
             # The CLI did not populate `permission_denials`, but the agent
@@ -929,6 +934,8 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
             result.metadata["denied_tools"] = denied_tools
             if denied_commands:
                 result.metadata["denied_commands"] = denied_commands
+            if unnamed_denials:
+                result.metadata["unnamed_denials"] = unnamed_denials
             if result.success:
                 result.success = False
                 # Name the command when one is known: "Bash" alone does not say

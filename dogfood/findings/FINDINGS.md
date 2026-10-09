@@ -686,7 +686,7 @@ Repository: howlplane
 tests/test_orchestration_verification_rework.py: a 2 s command times out under a 1 s limit (exit 124, message names the option), then `resume --verify-timeout 10` re-runs the same check on the same tree and completes; out-of-range values refused; CLI parse and default.
 
 ## DOG-037 — AGY's read-only roles were not read-only; one write discarded the whole session
-Status: FIX IN REVIEW (branch dogfood/DOG-037-038-readonly-network)
+Status: FIXED (merged; see the status note at the end of this file)
 Severity: P1 (permission boundary; loss of verified work)
 Discovered in: howl-cubs-dogfood mission R001, S1 session b3e9d287 on cubs-edge-lab, 2026-10-08
 Owning component: HowlPlane orchestration routing (AGY backend)
@@ -699,7 +699,7 @@ READ_ONLY_UNENFORCED = {agy}: AUTO routing skips AGY for planning, review and ac
 tests/test_orchestration_role_containment.py: AGY never gets a read-only role in AUTO routing, including configured planning, review, and acceptance fallbacks, acceptance takeover, and resume of an older AUTO session that selected AGY; a session whose only non-implementer is AGY ends AUDIT BLOCKED with the reason; with Cursor available the audit runs and completes; an explicit AGY orchestrator plans and accepts but never reviews. A write during planning, review, or acceptance blocks the session and refuses resume, including a planning failure or timeout, and a review finding or acceptance rejection that also writes; a planning failure that does not write stays resumable. Two role-scoped-capacity tests re-expressed through `remediation`.
 
 ## DOG-038 — No way to let an orchestrate worker fetch public data
-Status: FIX IN REVIEW (branch dogfood/DOG-037-038-readonly-network)
+Status: FIXED (merged; see the status note at the end of this file)
 Severity: P2 (capability gap for research and data-acquisition goals)
 Discovered in: howl-cubs-dogfood mission R001, S1 session b3e9d287, 2026-10-08
 Owning component: HowlPlane orchestration / Codex backend
@@ -712,7 +712,7 @@ Codex implementation runs `--sandbox workspace-write`, whose network is off: `st
 tests/test_orchestration_role_containment.py: flag parse and default off; only mutating roles receive the metadata, on and off, including after resume; Codex argv carries the setting only for networked mutating tasks, and AGY, Cursor, Claude, Gemini, and Devin argv do not gain network configuration.
 
 ## DOG-039 — A Codex usage limit was recorded as "not authenticated"
-Status: FIX IN REVIEW (branch dogfood/CUBS-P-007-usage-limit-classification)
+Status: FIXED (merged; see the status note at the end of this file)
 Severity: P2 (wrong capacity evidence persisted across sessions; wrong recovery advice)
 Discovered in: howl-cubs-dogfood mission R001, S1 rerun 6713a592 on cubs-edge-lab, 2026-10-08
 Owning component: HowlPlane provider failure classification (synthesis/provider_pool.py)
@@ -723,3 +723,61 @@ Codex ended with `ERROR: You've hit your usage limit. Upgrade to Pro (...) or tr
 Anchored SESSION_LIMIT pattern for Codex's usage-limit stop line (trailing upsell and reset text allowed); fallback auth markers use "401 unauthorized" instead of the bare word. Real anchored auth stop lines ("Unauthorized", "error: not authenticated", "Login required") are unchanged.
 ### Tests
 tests/test_usage_limit_classification.py: Codex usage limit after a transcript containing the rules prose classifies SESSION_LIMIT (both apostrophes); rules prose alone is not authentication; five real auth stop lines still classify as authentication; the readiness cache records an expiring SESSION_LIMIT limit and no auth=false. 4 of 9 fail without the fix (the 5 preservation tests pass both ways).
+
+## DOG-042 — A declared IMPLEMENTATION_STATUS: INCOMPLETE was recorded as success
+Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
+Severity: P2 (false success; wasted review and rework rounds)
+Discovered in: howl-cubs-dogfood R001, session 43b8a9e6 on cubs-edge-lab, 2026-10-09
+Owning component: HowlPlane orchestration
+Repository: howlplane
+### Actual
+Codex ended three implementation attempts with "IMPLEMENTATION_STATUS: INCOMPLETE" and its reason (no authorization to fetch data). Each was recorded SUCCEEDED, verified and reviewed; review found the missing work each time, and the session ended AUDIT BLOCKED after both rework rounds.
+### Resolution
+A status line declaring INCOMPLETE in a mutating role makes the attempt REVOKED with IMPLEMENTATION_INCOMPLETE (a role failure): partial changes kept, the stated reason stored as the verdict excerpt and printed in the report, the next implementer continues; the session hands off when none remains. Implementers are told to use the status rather than present partial work as finished. Only a status line counts, not the phrase quoted in prose.
+### Tests
+tests/test_orchestration_declared_status.py: reroute and completion by the next implementer before any review; handoff with the printed reason when all declare INCOMPLETE; status-line recognition including the bold form Codex used and prose that only mentions the phrase. All fail without the fix.
+
+## DOG-041 — Acceptance cited a superseded planner VERIFY_COMMAND as the session's command
+Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
+Severity: P3 (misleading review context; contributed to rejections)
+Discovered in: howl-cubs-dogfood R001, review session 1426222b, 2026-10-08
+Owning component: HowlPlane orchestration prompts
+Repository: howlplane
+### Actual
+The planner's VERIFY_COMMAND named a nonexistent tests/test_task_queue.py. The explicit --verify superseded it and was the command actually run, but the plan excerpt given to review and acceptance still contained the line; two acceptors reported "the supplied verification command names nonexistent tests/test_task_queue.py".
+### Resolution
+verification_command_note(): when an explicit --verify differs from the planned command, review and acceptance instructions state which command verifies the session and that the planned one was superseded and not run.
+### Tests
+tests/test_orchestration_declared_status.py: the note reaches both review and acceptance prompts; no note when there is no explicit command, no planned command, or they are equal. The positive case fails without the fix.
+
+## DOG-043 — Correctable orchestrate refusals were reported as suspected HowlPlane bugs
+Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
+Severity: P3 (misleading UX; wrong recovery advice)
+Discovered in: howl-cubs-dogfood R001 (`--separate` on a worktree with an unfinished session), 2026-10-09
+Owning component: HowlPlane orchestrate CLI / presentation
+Repository: howlplane
+### Actual
+Documented refusals raised plain ValueError, which the presentation layer reports as "Something unexpected failed ... likely a HowlPlane bug or an unhandled condition (ValueError) ... INTERNAL_ERROR" with a saved traceback. Reproduced for `--separate` on the same worktree, `resume` with no unfinished session, and `--verify-timeout 0`; 22 such raise sites in orchestration.py.
+### Resolution
+OrchestrateRequestError (a ValueError subclass) for the 22 user-correctable refusals, with optional next step and command; explain() renders it as ORCHESTRATE_REQUEST_REFUSED ("nothing was changed"). Internal failures (git inspection, coordinator lease race) keep their existing handling.
+### Tests
+tests/test_orchestration_declared_status.py: three refusals through command() map to the operator error; `--separate` on the same worktree names `git worktree add`; internal errors are not relabelled. All fail without the fix.
+
+## DOG-040 — A refused test command marked a proven agent interactive-only everywhere
+Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
+Severity: P2 (false capability evidence persisted across repositories)
+Discovered in: howl-cubs-dogfood R001, review session 1426222b (existing-WIP validation), 2026-10-08
+Owning component: HowlPlane orchestration routing / readiness evidence
+Repository: howlplane
+### Actual
+Claude, validating existing work (which correctly changes nothing), ran `python3 -m pytest <tests>`; the granted command was the dash-free `pytest <tests>`. The refusal was EXECUTION_PERMISSION_REQUIRED with no repository change, so DOG-018's grant-gap rule (which required edits) did not apply, and the readiness cache marked Claude interactive-only for every repository (`agents doctor`: NEEDS ACTION) until a live doctor recovery.
+### Resolution
+permission_grant_gap() no longer requires edits: a refusal whose only denied tool is Bash, with named commands, in a mutating role is a session-scoped grant gap (role excluded for the session, PERMISSION line, readiness cache untouched). Edit-tool refusals and unnamed denials still mark interactive-only. A session's "unattended verified" capability was considered as the condition instead and rejected: any successful assignment, including read-only planning, sets it.
+### Tests
+tests/test_orchestration_capability_recovery.py: grant-gap rules (implementation and remediation Bash-only; Edit/Write refusals and unnamed denials excluded; read-only roles excluded); end-to-end, a no-edit refused test command keeps Claude ready across sessions; an Edit-tool denial still marks interactive-only. The DOG-018 test that required edits was revised with this evidence. 7 tests fail without the fix.
+
+### Follow-up review
+A mixed denial envelope can contain a named Bash command and an unnamed Bash refusal. Both must be retained as evidence: because the unnamed refusal does not establish a missing grant, the mixed case is interactive-only, not a grant gap. The denial parser records the unnamed count and grant-gap classification rejects mixed evidence. The session-only grant-gap exclusion can still cost one attempt per session for an agent that consistently refuses unattended execution; this is documented in `documentation/ORCHESTRATE.md`.
+
+## DOG-037, DOG-038, DOG-039 — status
+Merged: #165 (28511b4) for DOG-037/038 and #166 (af9f40a) for DOG-039, each with a HowlPlane review session and post-merge public proof recorded in howl-cubs-dogfood R001. Status: FIXED.

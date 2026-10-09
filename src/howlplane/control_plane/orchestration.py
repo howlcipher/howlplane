@@ -79,8 +79,14 @@ ROLE_FAILURES = {
     "EXECUTION_PERMISSION_REQUIRED", "ENGINEERING_FAILURE", "NO_REPOSITORY_CHANGE", "MALFORMED_OUTPUT",
     "CAPABILITY_FAILURE", "POLICY_FAILURE", "VERIFICATION_FAILURE", "PROVIDER_STALLED",
     "READ_ONLY_ROLE_MUTATED_REPOSITORY", "AUDIT_FINDINGS_OR_UNCONFIRMED", "AUDIT_NO_VERDICT",
-    "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
+    "ACCEPTANCE_REJECTED_OR_UNCONFIRMED", "IMPLEMENTATION_INCOMPLETE",
 }
+# An implementer that says it could not finish has not implemented the goal, whatever it changed (DOG-042).
+IMPLEMENTATION_INCOMPLETE_LINE = re.compile(
+    r"^[ \t]*(?:\*\*)?IMPLEMENTATION_STATUS:\s*INCOMPLETE\b(?:\.)?(?:\*\*)?"
+    r"(?:[ \t]*(?:[-:—][ \t]*|[ \t]+).*)?$",
+    re.IGNORECASE | re.MULTILINE,
+)
 REQUIRED_KEYS = ("id", "created_at", "goal", "orchestrator", "strategy", "failover", "policy", "stage", "status",
                  "agents", "attempts", "lease", "repository_evidence")
 BINARIES = {"claude_code": "claude", "codex": "codex", "cursor": "agent", "agy": "agy", "devin_cli": "devin"}
@@ -260,7 +266,7 @@ class SessionProgress:
         # Commands first: a progress line is cut at 160 characters, and the explanation used to push them out (DOG-020).
         for command in commands:
             self._write("PERMISSION", f"{name} refused (not granted): {command}")
-        self._write("PERMISSION", f"{name} changed files but needed commands HowlPlane did not grant; excluded from "
+        self._write("PERMISSION", f"{name} needed commands HowlPlane did not grant; excluded from "
                                   f"{role} for this session only, still ready for later sessions (extra_allowed_bash)")
 
     def role_excluded(self, agent: str, role: str, entry: dict[str, Any]) -> None:
@@ -524,6 +530,20 @@ def active_sessions(root: Path, repo: Path, include_terminal: bool = False) -> l
     return sorted(sessions, key=lambda item: str(item.get("created_at", "")), reverse=True)
 
 
+
+class OrchestrateRequestError(ValueError):
+    """A request the user can correct: invalid arguments or a conflict with session state (DOG-043).
+
+    Reported as an operator error with a next step, never as a suspected HowlPlane bug. A ValueError
+    subclass, so callers that already catch ValueError are unaffected.
+    """
+
+    def __init__(self, message: str, next_action: str | None = None, command: str | None = None):
+        super().__init__(message)
+        self.next_action = next_action
+        self.command = command
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -580,14 +600,14 @@ def supersede(root: Path, session_id: str, reason: str, replaced_by: str) -> dic
     with locked(root):
         path = path_for(root, session_id)
         if not path.exists():
-            raise ValueError(f"Session {session_id} does not exist")
+            raise OrchestrateRequestError(f"Session {session_id} does not exist")
         doc = safe_load_json(path)
         if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
-            raise ValueError(f"Session {session_id} is not an orchestration session")
+            raise OrchestrateRequestError(f"Session {session_id} is not an orchestration session")
         if not is_resumable(doc):
-            raise ValueError(f"Session {session_id} is {doc.get('status')}, not resumable; nothing to supersede")
+            raise OrchestrateRequestError(f"Session {session_id} is {doc.get('status')}, not resumable; nothing to supersede")
         if live_lease(doc):
-            raise ValueError(f"Session {session_id} has a live coordinator lease")
+            raise OrchestrateRequestError(f"Session {session_id} has a live coordinator lease")
         doc["superseded"] = {"at": now(), "reason": reason, "replaced_by": replaced_by,
                              "previous_status": doc.get("status"), "previous_stage": doc.get("stage")}
         doc["status"] = SUPERSEDED
@@ -802,17 +822,21 @@ def record_capability_success(doc: dict[str, Any], agent: str) -> None:
                                   "evidence_time": now(), "scope": "session"})
 
 
-def permission_grant_gap(result: Any, stage: str, changed: bool) -> list[str]:
-    """Commands HowlPlane never granted, when they alone stopped a worker that was mutating the repository.
+def permission_grant_gap(result: Any, stage: str) -> list[str]:
+    """Commands HowlPlane never granted, when they alone stopped a worker in a mutating role.
 
-    A worker that changed files unattended and was then refused only a Bash command
-    outside its derived profile (typically a greenfield test run, before any project
-    command exists to derive) has proven unattended mutation. The gap is HowlPlane's
-    grant, not the agent's capability (DOG-018). Returns [] when that is not the case.
+    A refusal of named Bash commands outside the derived profile (a greenfield test run, or
+    re-running an existing test suite to validate work in progress) shows HowlPlane's grant
+    was missing; it says nothing about whether the agent edits unattended. DOG-018 required
+    the worker to have changed files first, but validating existing work correctly changes
+    nothing, and a refused `python3 -m pytest` then marked a proven Claude interactive-only
+    in every repository (DOG-040). An edit tool refusal, or a denial that names no command,
+    is still capability evidence. Returns [] when this is not a pure grant gap.
     """
     metadata = getattr(result, "metadata", None) or {}
     commands = [str(command) for command in metadata.get("denied_commands") or []]
-    if not (changed and is_mutating_role(stage) and commands and metadata.get("denied_tools") == ["Bash"]):
+    if not (is_mutating_role(stage) and commands and metadata.get("denied_tools") == ["Bash"]
+            and not metadata.get("unnamed_denials")):
         return []
     return commands
 
@@ -866,9 +890,9 @@ def validate_execution_budget(budget: dict[str, Any]) -> dict[str, int]:
     checked = {}
     for role, seconds in budget.items():
         if role not in ROLES:
-            raise ValueError(f"Unknown execution budget role {role!r}")
+            raise OrchestrateRequestError(f"Unknown execution budget role {role!r}")
         if isinstance(seconds, bool) or not isinstance(seconds, int) or not 1 <= seconds <= MAX_EXECUTION_BUDGET_SECONDS:
-            raise ValueError(f"Execution budget for {role} must be 1..{MAX_EXECUTION_BUDGET_SECONDS} seconds")
+            raise OrchestrateRequestError(f"Execution budget for {role} must be 1..{MAX_EXECUTION_BUDGET_SECONDS} seconds")
         checked[role] = seconds
     return checked
 
@@ -879,7 +903,7 @@ def parse_execution_budget(values: list[str] | None) -> dict[str, int]:
     for value in values or []:
         role, _, seconds = value.rpartition("=")
         if not seconds.strip().isdigit():
-            raise ValueError("Expected --execution-budget role=seconds or seconds")
+            raise OrchestrateRequestError("Expected --execution-budget role=seconds or seconds")
         for target in ([role.strip()] if role else ROLES):
             parsed[target] = int(seconds)
     return validate_execution_budget(parsed)
@@ -896,7 +920,7 @@ def parse_role_model_triples(value: str) -> list[tuple[str, str, str]]:
     for item in value.split(","):
         parts = item.strip().split(":", 2)
         if len(parts) != 3 or parts[0] not in ROLES or parts[1] not in AGENTS:
-            raise ValueError("Expected role:agent:model")
+            raise OrchestrateRequestError("Expected role:agent:model")
         result.append((parts[0], parts[1], parts[2]))
     return result
 
@@ -1083,7 +1107,7 @@ def verification_timeout(value: Any) -> int | None:
     if value is None:
         return None
     if not 1 <= int(value) <= MAX_VERIFY_TIMEOUT_SECONDS:
-        raise ValueError(f"--verify-timeout must be between 1 and {MAX_VERIFY_TIMEOUT_SECONDS} seconds, got {value}")
+        raise OrchestrateRequestError(f"--verify-timeout must be between 1 and {MAX_VERIFY_TIMEOUT_SECONDS} seconds, got {value}")
     return int(value)
 
 
@@ -1093,7 +1117,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     interactive = sys.stdin.isatty() and not args.input
     goal = args.input or (question("1. Goal", "") if interactive else "")
     if not goal:
-        raise ValueError("A goal is required")
+        raise OrchestrateRequestError("A goal is required")
     lead = args.orchestrator or (question("2. Orchestrator (AUTO/agent)", "AUTO") if interactive else "AUTO")
     availability_text = question("3. Agent availability (AUTO or agent=RESERVED,...)", "AUTO") if interactive else "AUTO"
     availability = {agent: "AUTO" for agent in AGENTS}
@@ -1101,7 +1125,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         for item in availability_text.split(","):
             pair = item.strip().split("=", 1)
             if len(pair) != 2 or pair[0] not in AGENTS:
-                raise ValueError("Expected agent=RESERVED or agent=UNAVAILABLE")
+                raise OrchestrateRequestError("Expected agent=RESERVED or agent=UNAVAILABLE")
             availability[pair[0]] = pair[1].upper()
     for agent in AGENTS:
         option = getattr(args, agent)
@@ -1113,13 +1137,13 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     failover = args.failover or (question("7. Failover (AUTO REROUTE/OFF)", "AUTO REROUTE") if interactive else "AUTO REROUTE")
     policy = args.policy or (question("8. Execution policy", "PLAN + EXECUTE + INDEPENDENT AUDIT") if interactive else "PLAN + EXECUTE + INDEPENDENT AUDIT")
     if lead != "AUTO" and lead not in AGENTS:
-        raise ValueError("Unsupported orchestrator")
+        raise OrchestrateRequestError("Unsupported orchestrator")
     if strategy not in {"BALANCED", "ECONOMY", "QUALITY"} or failover not in {"AUTO REROUTE", "OFF"}:
-        raise ValueError("Unsupported strategy or failover policy")
+        raise OrchestrateRequestError("Unsupported strategy or failover policy")
     if policy not in {"PLAN + EXECUTE + INDEPENDENT AUDIT", "PLAN ONLY", "PLAN + EXECUTE"}:
-        raise ValueError("Unsupported execution policy")
+        raise OrchestrateRequestError("Unsupported execution policy")
     if any(value.upper() not in {"AUTO", "RESERVED", "UNAVAILABLE"} for value in availability.values()):
-        raise ValueError("Unsupported agent availability")
+        raise OrchestrateRequestError("Unsupported agent availability")
     role_models: dict[str, dict[str, str]] = {}
     for role, agent, model in parse_role_model_triples(model_text):
         role_models.setdefault(role, {})[agent] = model
@@ -1142,7 +1166,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
             "Pick another agent, use AUTO, or refresh the evidence for this agent.",
             f"howlplane agents doctor --live --repo {repo}"))
     if lead != "AUTO" and (agents[lead].get("workspace_trust") or {}).get("effective_state") == workspace_trust.TRUST_REQUIRED:
-        raise ValueError(f"Selected orchestrator {AGENT_NAMES.get(lead, lead)} does not trust {snapshot['root']} yet "
+        raise OrchestrateRequestError(f"Selected orchestrator {AGENT_NAMES.get(lead, lead)} does not trust {snapshot['root']} yet "
                          f"(workspace trust policy {resolved_policy['policy']}); prepare it with `howlplane factory prepare` "
                          "or choose `--workspace-trust bypass`")
     return {
@@ -1159,6 +1183,19 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         "repository_evidence": snapshot, "base_dirty": dirty_paths(Path(snapshot["root"])),
         "lease": {"token": token, "pid": os.getpid(), "renewed_at": time.time()},
     }
+
+
+def verification_command_note(doc: dict[str, Any]) -> str:
+    """Say which command verifies the session when an explicit --verify superseded the plan's (DOG-041).
+
+    The plan excerpt still carries its VERIFY_COMMAND line; two acceptors read it as the session's
+    verification command and rejected the work for naming a file that did not exist.
+    """
+    explicit, planned = doc.get("verify_command"), doc.get("planned_verify_command")
+    if not explicit or not planned or list(explicit) == list(planned):
+        return ""
+    return (f" The session's verification command is `{shlex.join(explicit)}`, set explicitly by the user; the plan's "
+            f"VERIFY_COMMAND `{shlex.join(planned)}` was superseded and HowlPlane did not run it.\n")
 
 
 def audit_evidence_for_acceptance(doc: dict[str, Any]) -> str:
@@ -1265,6 +1302,7 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
     if plan and role in {"review", "acceptance"}:
         instructions += ("HowlPlane's planning stage made this approach decision; it is the workflow evidence, so judge the "
                          "work against it and do not require workflow artifacts in the repository:\n" + plan + "\n")
+        instructions += verification_command_note(doc)
     if role == "review":
         instructions += ("Independently inspect the current diff and falsify correctness. Do not edit files. "
                          + REVIEW_VERDICT_CONTRACT + verification_evidence_for_review(doc) + session_diff_evidence(doc, repo))
@@ -1279,6 +1317,8 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         if plan:
             instructions += ("HowlPlane's planning stage produced this plan; follow it unless the repository shows it is "
                              "wrong, and say where you departed from it:\n" + plan + "\n")
+        instructions += ("If you cannot complete the goal, say so: end with IMPLEMENTATION_STATUS: INCOMPLETE and the "
+                         "reason, and do not present partial work as finished. ")
         instructions += ("Implement the goal and run relevant local tests. Inspect existing partial changes first. Before "
                          "finishing, check that every behavior your documentation promises holds for all inputs it "
                          "covers, error cases included, and that its examples run in the order shown.")
@@ -1602,6 +1642,14 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                     assignment["state"] = "REVOKED"
                     assignment["failure"] = "NO_REPOSITORY_CHANGE"
                     no_change_detail = " (no repository delta detected)"
+            if (result.success and is_mutating_role(stage)
+                    and IMPLEMENTATION_INCOMPLETE_LINE.search(result.stdout or "")):
+                # Recorded as SUCCEEDED, a declared INCOMPLETE went to review three times before a
+                # reviewer rediscovered it (DOG-042). Keep the partial changes and the stated reason.
+                assignment.update({"state": "REVOKED", "failure": "IMPLEMENTATION_INCOMPLETE",
+                                   "partial_changes": before != after,
+                                   "verdict_excerpt": redact((result.stdout or "").strip()[-VERDICT_EXCERPT_CHARS:])})
+                no_change_detail = " (the implementer reported it could not finish; partial changes kept)"
             if stage in READ_ONLY_ROLES and before != after:
                 # Planning is read-only too. An explicit AGY planner can still be
                 # selected, and its CLI does not enforce the role (DOG-037).
@@ -1615,7 +1663,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             if result.success and stage == "acceptance" and not mutated and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
-            grant_gap = (permission_grant_gap(result, stage, before != after)
+            grant_gap = (permission_grant_gap(result, stage)
                          if assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED" else [])
             if grant_gap:
                 assignment["denied_commands"] = [redact(command) for command in grant_gap]
@@ -1881,7 +1929,8 @@ def report(doc: dict[str, Any]) -> int:
               "Changing the repository lets the same session be judged again. If the verdict is not actionable, run\n"
               f"  howlplane orchestrate discard --repo {doc['repository']}\nand start a new session.")
     for attempt in doc["attempts"]:
-        if attempt.get("failure") in {"AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"} and attempt.get("verdict_excerpt"):
+        if attempt.get("failure") in {"AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
+                                      "IMPLEMENTATION_INCOMPLETE"} and attempt.get("verdict_excerpt"):
             # A verdict from an earlier round was sent back for rework and the result judged again; unlabelled,
             # a COMPLETE report read as if its "blocking finding remains" were still open (DOG-022).
             round_number = attempt.get("rework_round", 0)
@@ -1919,7 +1968,7 @@ def command(args: argparse.Namespace) -> int:
             elif choice in {"resume", "inspect", "discard"}:
                 operation = choice
             else:
-                raise ValueError("Unknown session action")
+                raise OrchestrateRequestError("Unknown session action")
         if operation == "inspect":
             sessions = active_sessions(root, repo, include_terminal=True)
             for s in sessions:
@@ -1950,7 +1999,7 @@ def command(args: argparse.Namespace) -> int:
             return 0
         if operation == "resume":
             if not active:
-                raise ValueError("No unfinished session")
+                raise OrchestrateRequestError("No unfinished session", "Start a session with a goal, or inspect earlier ones.", "howlplane orchestrate inspect")
             verify = verification_command(args.verify, repo, literal=getattr(args, "verify_is_argv", False))
             verify_timeout = verification_timeout(getattr(args, "verify_timeout", None))
             doc = active[0]
@@ -1960,7 +2009,7 @@ def command(args: argparse.Namespace) -> int:
                 return invalid_session_report(doc, str(error), repo)
             previous_orchestrator = doc["orchestrator"]
             if live_lease(doc):
-                raise ValueError("Session has a live coordinator lease")
+                raise OrchestrateRequestError("Session has a live coordinator lease")
             doc["lease"] = {"token": uuid.uuid4().hex, "pid": os.getpid(), "renewed_at": time.time()}
             reconcile(doc, repo)
             budget_change = parse_execution_budget(getattr(args, "execution_budget", None))
@@ -2015,8 +2064,12 @@ def command(args: argparse.Namespace) -> int:
         else:
             if active:
                 if args.separate:
-                    raise ValueError("Separate sessions need a distinct Git worktree passed with --repo; overlapping worktree ownership is refused")
-                raise ValueError("Unfinished session exists. Use orchestrate resume, inspect, discard, or a separate Git worktree")
+                    raise OrchestrateRequestError("Separate sessions need a distinct Git worktree passed with --repo; overlapping worktree ownership is refused",
+                                                    "Create another worktree (git worktree add PATH) and pass it with --repo, or resume or discard the unfinished session.",
+                                                    "howlplane orchestrate inspect")
+                raise OrchestrateRequestError("Unfinished session exists. Use orchestrate resume, inspect, discard, or a separate Git worktree",
+                                                "Resume, inspect or discard it, or use a distinct Git worktree with --separate.",
+                                                "howlplane orchestrate inspect")
             doc = setup(args, repo)
             doc["retain_report"] = args.retain_report
             path = path_for(root, doc["id"])
