@@ -427,17 +427,19 @@ def denied_after_edit(name, role, repo, commands=("python3 -m unittest",), tools
     return outcome
 
 
-@pytest.mark.parametrize("stage, changed, tools, commands, expected", [
-    ("implementation", True, ["Bash"], ["python3 -m unittest"], ["python3 -m unittest"]),
-    ("implementation", False, ["Bash"], ["python3 -m unittest"], []),  # no edit: nothing proven
-    ("implementation", True, ["Bash", "Edit"], ["python3 -m unittest"], []),  # an edit tool was refused
-    ("implementation", True, ["Bash"], [], []),  # unnamed denial stays a capability failure
-    ("review", True, ["Bash"], ["python3 -m unittest"], []),
+@pytest.mark.parametrize("stage, tools, commands, expected", [
+    ("implementation", ["Bash"], ["python3 -m unittest"], ["python3 -m unittest"]),
+    ("remediation", ["Bash"], ["python3 -m pytest -q"], ["python3 -m pytest -q"]),
+    ("implementation", ["Bash", "Edit"], ["python3 -m unittest"], []),  # an edit tool was refused
+    ("implementation", ["Write"], ["app.py"], []),
+    ("implementation", ["Bash"], [], []),  # unnamed denial stays a capability failure
+    ("review", ["Bash"], ["python3 -m unittest"], []),
 ])
-def test_permission_grant_gap_requires_edits_and_only_ungranted_bash(stage, changed, tools, commands, expected):
+def test_permission_grant_gap_is_only_ungranted_bash_in_a_mutating_role(stage, tools, commands, expected):
+    """DOG-018, revised by DOG-040: edits are no longer required; edit-tool refusals still count."""
     outcome = result("claude_code", stage, False)
     outcome.metadata = {"denied_tools": tools, "denied_commands": commands}
-    assert module.permission_grant_gap(outcome, stage, changed) == expected
+    assert module.permission_grant_gap(outcome, stage) == expected
 
 
 def test_grant_gap_excludes_the_role_for_the_session_without_marking_interactive_only():
@@ -492,14 +494,14 @@ def test_greenfield_test_run_denial_reroutes_and_keeps_claude_ready_across_sessi
     assert_reroutes_match_assignments(stderr)
 
 
-def test_denial_without_edits_still_marks_interactive_only(tmp_path, monkeypatch, capsys):
-    def denied_without_edit(name, role, repo):
+def test_edit_tool_denial_still_marks_interactive_only(tmp_path, monkeypatch, capsys):
+    def edit_denied(name, role, repo):
         outcome = result(name, role, False, "requires approval")
-        outcome.metadata = {TOOL_PERMISSION_KEY: TOOL_PERMISSION_DENIED, "denied_tools": ["Bash"],
-                            "denied_commands": ["python3 -m unittest"]}
+        outcome.metadata = {TOOL_PERMISSION_KEY: TOOL_PERMISSION_DENIED, "denied_tools": ["Edit"],
+                            "denied_commands": []}
         return outcome
 
-    _, _, outcomes = run_with_claude_implementer(tmp_path, monkeypatch, denied_without_edit)
+    _, _, outcomes = run_with_claude_implementer(tmp_path, monkeypatch, edit_denied)
     assert ("claude_code", "EXECUTION_PERMISSION_REQUIRED") in outcomes
     assert "marked interactive-only for this session" in capsys.readouterr().err
 
@@ -586,3 +588,23 @@ def test_preferred_implementer_falls_back_when_unavailable(tmp_path, monkeypatch
     doc["orchestrator"] = "claude_code"
     module.record_failure(doc, "codex", "implementation", "m1", "ENGINEERING_FAILURE")
     assert module.candidates(doc, "implementation")[0][0] == "claude_code"
+
+
+def test_refused_test_command_without_edits_keeps_claude_ready_across_sessions(tmp_path, monkeypatch, capsys):
+    """DOG-040: a validation run refused only `python3 -m pytest` and Claude was marked interactive-only everywhere."""
+    install_all(tmp_path, monkeypatch, models=("m1",))
+    module.agent_readiness.record_session_outcome("claude_code", "UNKNOWN", None)  # earlier proven unattended run
+
+    def denied_without_edit(name, role, repo):
+        outcome = result(name, role, False, "Required tool permissions were unavailable")
+        outcome.metadata = {TOOL_PERMISSION_KEY: TOOL_PERMISSION_DENIED, "denied_tools": ["Bash"],
+                            "denied_commands": ["python3 -m pytest tests/test_x.py"]}
+        return outcome
+
+    calls, doc, outcomes = run_with_claude_implementer(tmp_path, monkeypatch, denied_without_edit)
+    assert ("claude_code", "EXECUTION_PERMISSION_REQUIRED") not in outcomes
+    assert doc["agents"]["claude_code"]["capacity"]["implementation"]["reason"] == "EXECUTION_PERMISSION_REQUIRED"
+    stderr = capsys.readouterr().err
+    assert "Claude refused (not granted): python3 -m pytest tests/test_x.py" in stderr
+    assert "marked interactive-only" not in stderr
+    assert module.agent_readiness.load_cache()["claude_code"]["unattended"]["value"] is True

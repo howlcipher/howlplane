@@ -262,7 +262,7 @@ class SessionProgress:
         # Commands first: a progress line is cut at 160 characters, and the explanation used to push them out (DOG-020).
         for command in commands:
             self._write("PERMISSION", f"{name} refused (not granted): {command}")
-        self._write("PERMISSION", f"{name} changed files but needed commands HowlPlane did not grant; excluded from "
+        self._write("PERMISSION", f"{name} needed commands HowlPlane did not grant; excluded from "
                                   f"{role} for this session only, still ready for later sessions (extra_allowed_bash)")
 
     def role_excluded(self, agent: str, role: str, entry: dict[str, Any]) -> None:
@@ -818,17 +818,20 @@ def record_capability_success(doc: dict[str, Any], agent: str) -> None:
                                   "evidence_time": now(), "scope": "session"})
 
 
-def permission_grant_gap(result: Any, stage: str, changed: bool) -> list[str]:
-    """Commands HowlPlane never granted, when they alone stopped a worker that was mutating the repository.
+def permission_grant_gap(result: Any, stage: str) -> list[str]:
+    """Commands HowlPlane never granted, when they alone stopped a worker in a mutating role.
 
-    A worker that changed files unattended and was then refused only a Bash command
-    outside its derived profile (typically a greenfield test run, before any project
-    command exists to derive) has proven unattended mutation. The gap is HowlPlane's
-    grant, not the agent's capability (DOG-018). Returns [] when that is not the case.
+    A refusal of named Bash commands outside the derived profile (a greenfield test run, or
+    re-running an existing test suite to validate work in progress) shows HowlPlane's grant
+    was missing; it says nothing about whether the agent edits unattended. DOG-018 required
+    the worker to have changed files first, but validating existing work correctly changes
+    nothing, and a refused `python3 -m pytest` then marked a proven Claude interactive-only
+    in every repository (DOG-040). An edit tool refusal, or a denial that names no command,
+    is still capability evidence. Returns [] when this is not a pure grant gap.
     """
     metadata = getattr(result, "metadata", None) or {}
     commands = [str(command) for command in metadata.get("denied_commands") or []]
-    if not (changed and is_mutating_role(stage) and commands and metadata.get("denied_tools") == ["Bash"]):
+    if not (is_mutating_role(stage) and commands and metadata.get("denied_tools") == ["Bash"]):
         return []
     return commands
 
@@ -1655,7 +1658,7 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
             if result.success and stage == "acceptance" and not mutated and not result.stdout.strip().endswith("ACCEPTANCE_STATUS: ACCEPTED"):
                 assignment["state"] = "REVOKED"
                 assignment["failure"] = "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"
-            grant_gap = (permission_grant_gap(result, stage, before != after)
+            grant_gap = (permission_grant_gap(result, stage)
                          if assignment["failure"] == "EXECUTION_PERMISSION_REQUIRED" else [])
             if grant_gap:
                 assignment["denied_commands"] = [redact(command) for command in grant_gap]

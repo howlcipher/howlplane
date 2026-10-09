@@ -686,7 +686,7 @@ Repository: howlplane
 tests/test_orchestration_verification_rework.py: a 2 s command times out under a 1 s limit (exit 124, message names the option), then `resume --verify-timeout 10` re-runs the same check on the same tree and completes; out-of-range values refused; CLI parse and default.
 
 ## DOG-037 — AGY's read-only roles were not read-only; one write discarded the whole session
-Status: FIX IN REVIEW (branch dogfood/DOG-037-038-readonly-network)
+Status: FIXED (merged; see the status note at the end of this file)
 Severity: P1 (permission boundary; loss of verified work)
 Discovered in: howl-cubs-dogfood mission R001, S1 session b3e9d287 on cubs-edge-lab, 2026-10-08
 Owning component: HowlPlane orchestration routing (AGY backend)
@@ -699,7 +699,7 @@ READ_ONLY_UNENFORCED = {agy}: AUTO routing skips AGY for planning, review and ac
 tests/test_orchestration_role_containment.py: AGY never gets a read-only role in AUTO routing, including configured planning, review, and acceptance fallbacks, acceptance takeover, and resume of an older AUTO session that selected AGY; a session whose only non-implementer is AGY ends AUDIT BLOCKED with the reason; with Cursor available the audit runs and completes; an explicit AGY orchestrator plans and accepts but never reviews. A write during planning, review, or acceptance blocks the session and refuses resume, including a planning failure or timeout, and a review finding or acceptance rejection that also writes; a planning failure that does not write stays resumable. Two role-scoped-capacity tests re-expressed through `remediation`.
 
 ## DOG-038 — No way to let an orchestrate worker fetch public data
-Status: FIX IN REVIEW (branch dogfood/DOG-037-038-readonly-network)
+Status: FIXED (merged; see the status note at the end of this file)
 Severity: P2 (capability gap for research and data-acquisition goals)
 Discovered in: howl-cubs-dogfood mission R001, S1 session b3e9d287, 2026-10-08
 Owning component: HowlPlane orchestration / Codex backend
@@ -712,7 +712,7 @@ Codex implementation runs `--sandbox workspace-write`, whose network is off: `st
 tests/test_orchestration_role_containment.py: flag parse and default off; only mutating roles receive the metadata, on and off, including after resume; Codex argv carries the setting only for networked mutating tasks, and AGY, Cursor, Claude, Gemini, and Devin argv do not gain network configuration.
 
 ## DOG-039 — A Codex usage limit was recorded as "not authenticated"
-Status: FIX IN REVIEW (branch dogfood/CUBS-P-007-usage-limit-classification)
+Status: FIXED (merged; see the status note at the end of this file)
 Severity: P2 (wrong capacity evidence persisted across sessions; wrong recovery advice)
 Discovered in: howl-cubs-dogfood mission R001, S1 rerun 6713a592 on cubs-edge-lab, 2026-10-08
 Owning component: HowlPlane provider failure classification (synthesis/provider_pool.py)
@@ -762,3 +762,19 @@ Documented refusals raised plain ValueError, which the presentation layer report
 OrchestrateRequestError (a ValueError subclass) for the 22 user-correctable refusals, with optional next step and command; explain() renders it as ORCHESTRATE_REQUEST_REFUSED ("nothing was changed"). Internal failures (git inspection, coordinator lease race) keep their existing handling.
 ### Tests
 tests/test_orchestration_declared_status.py: three refusals through command() map to the operator error; `--separate` on the same worktree names `git worktree add`; internal errors are not relabelled. All fail without the fix.
+
+## DOG-040 — A refused test command marked a proven agent interactive-only everywhere
+Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
+Severity: P2 (false capability evidence persisted across repositories)
+Discovered in: howl-cubs-dogfood R001, review session 1426222b (existing-WIP validation), 2026-10-08
+Owning component: HowlPlane orchestration routing / readiness evidence
+Repository: howlplane
+### Actual
+Claude, validating existing work (which correctly changes nothing), ran `python3 -m pytest <tests>`; the granted command was the dash-free `pytest <tests>`. The refusal was EXECUTION_PERMISSION_REQUIRED with no repository change, so DOG-018's grant-gap rule (which required edits) did not apply, and the readiness cache marked Claude interactive-only for every repository (`agents doctor`: NEEDS ACTION) until a live doctor recovery.
+### Resolution
+permission_grant_gap() no longer requires edits: a refusal whose only denied tool is Bash, with named commands, in a mutating role is a session-scoped grant gap (role excluded for the session, PERMISSION line, readiness cache untouched). Edit-tool refusals and unnamed denials still mark interactive-only. A session's "unattended verified" capability was considered as the condition instead and rejected: any successful assignment, including read-only planning, sets it.
+### Tests
+tests/test_orchestration_capability_recovery.py: grant-gap rules (implementation and remediation Bash-only; Edit/Write refusals and unnamed denials excluded; read-only roles excluded); end-to-end, a no-edit refused test command keeps Claude ready across sessions; an Edit-tool denial still marks interactive-only. The DOG-018 test that required edits was revised with this evidence. 7 tests fail without the fix.
+
+## DOG-037, DOG-038, DOG-039 — status
+Merged: #165 (28511b4) for DOG-037/038 and #166 (af9f40a) for DOG-039, each with a HowlPlane review session and post-merge public proof recorded in howl-cubs-dogfood R001. Status: FIXED.
