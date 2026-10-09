@@ -194,6 +194,13 @@ _TERMINAL_HARD_FAILURE_PATTERNS = (
                 r"(?:\s*·\s*resets? .+)?[.!]?",
                 re.IGNORECASE,
             ),
+            # Codex: "ERROR: You've hit your usage limit. Upgrade to Pro (...) or try again
+            # at 8:01 PM." The line carries a vendor upsell and reset time after the stop
+            # sentence; read as auth because the transcript said "unauthorized" (DOG-039).
+            re.compile(
+                r"(?:error:\s*)?you(?:\'|’)ve hit your usage limit\..*",
+                re.IGNORECASE,
+            ),
             re.compile(
                 r"(?:error:\s*)?(?:usage limit reached|session limit(?: reached)?|"
                 r"individual quota reached|quota reached|out of capacity|"
@@ -923,8 +930,11 @@ class ProviderPoolManager:
         )):
             return ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
         if any(marker in combined for marker in (
+            # Not the bare word "unauthorized": rules text such as "prevent unauthorized
+            # commands" is routinely in a transcript and turned a usage limit into an auth
+            # failure (DOG-039). An anchored "Unauthorized" stop line is still caught above.
             "authentication required", "not authenticated", "login required",
-            "unauthorized", "invalid api key",
+            "401 unauthorized", "invalid api key",
         )):
             return ProviderFailureClass.AUTHENTICATION_REQUIRED
         if any(marker in combined for marker in (

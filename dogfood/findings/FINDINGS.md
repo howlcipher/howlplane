@@ -710,3 +710,16 @@ Codex implementation runs `--sandbox workspace-write`, whose network is off: `st
 `--worker-network` (new session or resume) sets `worker_network` on the session; implementation and remediation tasks carry it, and Codex adds `-c sandbox_workspace_write.network_access=true`. Verified directly: the same Codex prompt fails DNS without the setting and resolves with it. Read-only roles never receive it.
 ### Tests
 tests/test_orchestration_role_containment.py: flag parse and default off; only mutating roles receive the metadata, on and off, including after resume; Codex argv carries the setting only for networked mutating tasks, and AGY, Cursor, Claude, Gemini, and Devin argv do not gain network configuration.
+
+## DOG-039 — A Codex usage limit was recorded as "not authenticated"
+Status: FIX IN REVIEW (branch dogfood/CUBS-P-007-usage-limit-classification)
+Severity: P2 (wrong capacity evidence persisted across sessions; wrong recovery advice)
+Discovered in: howl-cubs-dogfood mission R001, S1 rerun 6713a592 on cubs-edge-lab, 2026-10-08
+Owning component: HowlPlane provider failure classification (synthesis/provider_pool.py)
+Repository: howlplane
+### Actual
+Codex ended with `ERROR: You've hit your usage limit. Upgrade to Pro (...) or try again at 8:01 PM.` (codex_error_info usage_limit_exceeded). No anchored terminal pattern knew "usage limit." followed by vendor text; the transcript-wide fallback checks authentication markers before capacity markers and found "unauthorized" ten times in the user's AGENTS.md rules prose. HowlPlane recorded AUTHENTICATION_REQUIRED and the readiness cache said "Codex UNAVAILABLE not authenticated" while `codex login status` reported a login.
+### Resolution
+Anchored SESSION_LIMIT pattern for Codex's usage-limit stop line (trailing upsell and reset text allowed); fallback auth markers use "401 unauthorized" instead of the bare word. Real anchored auth stop lines ("Unauthorized", "error: not authenticated", "Login required") are unchanged.
+### Tests
+tests/test_usage_limit_classification.py: Codex usage limit after a transcript containing the rules prose classifies SESSION_LIMIT (both apostrophes); rules prose alone is not authentication; five real auth stop lines still classify as authentication; the readiness cache records an expiring SESSION_LIMIT limit and no auth=false. 4 of 9 fail without the fix (the 5 preservation tests pass both ways).

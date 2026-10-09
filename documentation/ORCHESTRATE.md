@@ -29,7 +29,7 @@ An `EXECUTION_BUDGET_EXCEEDED` result means only that this assignment did not fi
 | --- | --- | --- |
 | Assignment hit the execution budget (harness kill or AGY's budget-derived print timeout) | Attempt `TIMED_OUT`, with `timeout_source`, `budget_derived`, and `partial_changes` | That exact assignment only |
 | `QUOTA_EXHAUSTED`, `RATE_LIMITED` | Model `EXHAUSTED` | The model that hit it; the agent's other models stay eligible |
-| `SESSION_LIMIT` | Model `EXHAUSTED` and role capacity `EXHAUSTED` | That agent for that role this session |
+| `SESSION_LIMIT` | Model `EXHAUSTED` and role capacity `EXHAUSTED` | That agent for that role this session. Codex's "You've hit your usage limit ... try again at ..." is a session limit, never an authentication failure (DOG-039) |
 | Any limit with an `UNKNOWN` model | Agent `UNAVAILABLE` | The agent this session |
 | `MISSING_EXECUTABLE`, `AUTHENTICATION_REQUIRED`, `PROVIDER_UNAVAILABLE` | Agent `UNAVAILABLE` | The agent this session |
 | `EXECUTION_PERMISSION_REQUIRED` | Unattended execution unavailable (interactive-only) | The agent this session |
