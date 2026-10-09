@@ -77,3 +77,41 @@ def test_when_every_implementer_declares_incomplete_the_session_hands_off_with_t
 ])
 def test_only_a_status_line_counts_as_a_declaration(text, declared):
     assert bool(module.IMPLEMENTATION_INCOMPLETE_LINE.search(text)) is declared
+
+
+def prompts_for(tmp_path, monkeypatch, verify, planned):
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch, models=("m1",))
+    seen = {}
+
+    class Backend:
+        def execute(self, task, repo, role="implementation", prompt_override="", **kwargs):
+            seen[role] = prompt_override
+            return accepted("codex", role)
+
+    monkeypatch.setattr(module.AgentBackendRegistry, "get_backend", lambda agent: Backend())
+    doc = module.setup(arguments(repo, input="Goal", orchestrator="codex", verify=verify, **only("codex")), repo)
+    doc["plan_excerpt"] = "Plan.\nVERIFY_COMMAND: python3 -m pytest tests/test_task_queue.py -q"
+    doc["planned_verify_command"] = planned
+    for role in ("review", "acceptance"):
+        module.execute_assignment(doc, role, "codex", "m1", repo)
+    return seen
+
+
+def test_review_and_acceptance_are_told_an_explicit_verify_superseded_the_plan(tmp_path, monkeypatch):
+    """DOG-041: two acceptors cited the plan's superseded VERIFY_COMMAND as the session's command."""
+    seen = prompts_for(tmp_path, monkeypatch, ["pytest", "tests/test_factory_task_queue.py"],
+                       ["python3", "-m", "pytest", "tests/test_task_queue.py", "-q"])
+    for role in ("review", "acceptance"):
+        assert "The session's verification command is `pytest tests/test_factory_task_queue.py`" in seen[role]
+        assert "`python3 -m pytest tests/test_task_queue.py -q` was superseded and HowlPlane did not run it" in seen[role]
+
+
+@pytest.mark.parametrize("verify, planned", [
+    (None, ["python3", "-m", "pytest", "-q"]),
+    (["python3", "-m", "pytest", "-q"], ["python3", "-m", "pytest", "-q"]),
+    (["pytest"], None),
+])
+def test_no_supersession_note_without_two_different_commands(tmp_path, monkeypatch, verify, planned):
+    seen = prompts_for(tmp_path, monkeypatch, verify, planned)
+    assert all("was superseded" not in text for text in seen.values())

@@ -736,3 +736,16 @@ Codex ended three implementation attempts with "IMPLEMENTATION_STATUS: INCOMPLET
 A status line declaring INCOMPLETE in a mutating role makes the attempt REVOKED with IMPLEMENTATION_INCOMPLETE (a role failure): partial changes kept, the stated reason stored as the verdict excerpt and printed in the report, the next implementer continues; the session hands off when none remains. Implementers are told to use the status rather than present partial work as finished. Only a status line counts, not the phrase quoted in prose.
 ### Tests
 tests/test_orchestration_declared_status.py: reroute and completion by the next implementer before any review; handoff with the printed reason when all declare INCOMPLETE; status-line recognition including the bold form Codex used and prose that only mentions the phrase. All fail without the fix.
+
+## DOG-041 — Acceptance cited a superseded planner VERIFY_COMMAND as the session's command
+Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
+Severity: P3 (misleading review context; contributed to rejections)
+Discovered in: howl-cubs-dogfood R001, review session 1426222b, 2026-10-08
+Owning component: HowlPlane orchestration prompts
+Repository: howlplane
+### Actual
+The planner's VERIFY_COMMAND named a nonexistent tests/test_task_queue.py. The explicit --verify superseded it and was the command actually run, but the plan excerpt given to review and acceptance still contained the line; two acceptors reported "the supplied verification command names nonexistent tests/test_task_queue.py".
+### Resolution
+verification_command_note(): when an explicit --verify differs from the planned command, review and acceptance instructions state which command verifies the session and that the planned one was superseded and not run.
+### Tests
+tests/test_orchestration_declared_status.py: the note reaches both review and acceptance prompts; no note when there is no explicit command, no planned command, or they are equal. The positive case fails without the fix.

@@ -1163,6 +1163,19 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     }
 
 
+def verification_command_note(doc: dict[str, Any]) -> str:
+    """Say which command verifies the session when an explicit --verify superseded the plan's (DOG-041).
+
+    The plan excerpt still carries its VERIFY_COMMAND line; two acceptors read it as the session's
+    verification command and rejected the work for naming a file that did not exist.
+    """
+    explicit, planned = doc.get("verify_command"), doc.get("planned_verify_command")
+    if not explicit or not planned or list(explicit) == list(planned):
+        return ""
+    return (f" The session's verification command is `{shlex.join(explicit)}`, set explicitly by the user; the plan's "
+            f"VERIFY_COMMAND `{shlex.join(planned)}` was superseded and HowlPlane did not run it.\n")
+
+
 def audit_evidence_for_acceptance(doc: dict[str, Any]) -> str:
     """Hand the acceptance worker the independent audit it is told to weigh.
 
@@ -1267,6 +1280,7 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
     if plan and role in {"review", "acceptance"}:
         instructions += ("HowlPlane's planning stage made this approach decision; it is the workflow evidence, so judge the "
                          "work against it and do not require workflow artifacts in the repository:\n" + plan + "\n")
+        instructions += verification_command_note(doc)
     if role == "review":
         instructions += ("Independently inspect the current diff and falsify correctness. Do not edit files. "
                          + REVIEW_VERDICT_CONTRACT + verification_evidence_for_review(doc) + session_diff_evidence(doc, repo))
