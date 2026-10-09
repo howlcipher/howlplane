@@ -723,3 +723,16 @@ Codex ended with `ERROR: You've hit your usage limit. Upgrade to Pro (...) or tr
 Anchored SESSION_LIMIT pattern for Codex's usage-limit stop line (trailing upsell and reset text allowed); fallback auth markers use "401 unauthorized" instead of the bare word. Real anchored auth stop lines ("Unauthorized", "error: not authenticated", "Login required") are unchanged.
 ### Tests
 tests/test_usage_limit_classification.py: Codex usage limit after a transcript containing the rules prose classifies SESSION_LIMIT (both apostrophes); rules prose alone is not authentication; five real auth stop lines still classify as authentication; the readiness cache records an expiring SESSION_LIMIT limit and no auth=false. 4 of 9 fail without the fix (the 5 preservation tests pass both ways).
+
+## DOG-042 — A declared IMPLEMENTATION_STATUS: INCOMPLETE was recorded as success
+Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
+Severity: P2 (false success; wasted review and rework rounds)
+Discovered in: howl-cubs-dogfood R001, session 43b8a9e6 on cubs-edge-lab, 2026-10-09
+Owning component: HowlPlane orchestration
+Repository: howlplane
+### Actual
+Codex ended three implementation attempts with "IMPLEMENTATION_STATUS: INCOMPLETE" and its reason (no authorization to fetch data). Each was recorded SUCCEEDED, verified and reviewed; review found the missing work each time, and the session ended AUDIT BLOCKED after both rework rounds.
+### Resolution
+A status line declaring INCOMPLETE in a mutating role makes the attempt REVOKED with IMPLEMENTATION_INCOMPLETE (a role failure): partial changes kept, the stated reason stored as the verdict excerpt and printed in the report, the next implementer continues; the session hands off when none remains. Implementers are told to use the status rather than present partial work as finished. Only a status line counts, not the phrase quoted in prose.
+### Tests
+tests/test_orchestration_declared_status.py: reroute and completion by the next implementer before any review; handoff with the printed reason when all declare INCOMPLETE; status-line recognition including the bold form Codex used and prose that only mentions the phrase. All fail without the fix.

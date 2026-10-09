@@ -79,8 +79,10 @@ ROLE_FAILURES = {
     "EXECUTION_PERMISSION_REQUIRED", "ENGINEERING_FAILURE", "NO_REPOSITORY_CHANGE", "MALFORMED_OUTPUT",
     "CAPABILITY_FAILURE", "POLICY_FAILURE", "VERIFICATION_FAILURE", "PROVIDER_STALLED",
     "READ_ONLY_ROLE_MUTATED_REPOSITORY", "AUDIT_FINDINGS_OR_UNCONFIRMED", "AUDIT_NO_VERDICT",
-    "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
+    "ACCEPTANCE_REJECTED_OR_UNCONFIRMED", "IMPLEMENTATION_INCOMPLETE",
 }
+# An implementer that says it could not finish has not implemented the goal, whatever it changed (DOG-042).
+IMPLEMENTATION_INCOMPLETE_LINE = re.compile(r"^[\W_]*IMPLEMENTATION_STATUS:\s*INCOMPLETE\b", re.IGNORECASE | re.MULTILINE)
 REQUIRED_KEYS = ("id", "created_at", "goal", "orchestrator", "strategy", "failover", "policy", "stage", "status",
                  "agents", "attempts", "lease", "repository_evidence")
 BINARIES = {"claude_code": "claude", "codex": "codex", "cursor": "agent", "agy": "agy", "devin_cli": "devin"}
@@ -1279,6 +1281,8 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         if plan:
             instructions += ("HowlPlane's planning stage produced this plan; follow it unless the repository shows it is "
                              "wrong, and say where you departed from it:\n" + plan + "\n")
+        instructions += ("If you cannot complete the goal, say so: end with IMPLEMENTATION_STATUS: INCOMPLETE and the "
+                         "reason, and do not present partial work as finished. ")
         instructions += ("Implement the goal and run relevant local tests. Inspect existing partial changes first. Before "
                          "finishing, check that every behavior your documentation promises holds for all inputs it "
                          "covers, error cases included, and that its examples run in the order shown.")
@@ -1602,6 +1606,14 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
                     assignment["state"] = "REVOKED"
                     assignment["failure"] = "NO_REPOSITORY_CHANGE"
                     no_change_detail = " (no repository delta detected)"
+            if (result.success and is_mutating_role(stage)
+                    and IMPLEMENTATION_INCOMPLETE_LINE.search(result.stdout or "")):
+                # Recorded as SUCCEEDED, a declared INCOMPLETE went to review three times before a
+                # reviewer rediscovered it (DOG-042). Keep the partial changes and the stated reason.
+                assignment.update({"state": "REVOKED", "failure": "IMPLEMENTATION_INCOMPLETE",
+                                   "partial_changes": before != after,
+                                   "verdict_excerpt": redact((result.stdout or "").strip()[-VERDICT_EXCERPT_CHARS:])})
+                no_change_detail = " (the implementer reported it could not finish; partial changes kept)"
             if stage in READ_ONLY_ROLES and before != after:
                 # Planning is read-only too. An explicit AGY planner can still be
                 # selected, and its CLI does not enforce the role (DOG-037).
@@ -1881,7 +1893,8 @@ def report(doc: dict[str, Any]) -> int:
               "Changing the repository lets the same session be judged again. If the verdict is not actionable, run\n"
               f"  howlplane orchestrate discard --repo {doc['repository']}\nand start a new session.")
     for attempt in doc["attempts"]:
-        if attempt.get("failure") in {"AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED"} and attempt.get("verdict_excerpt"):
+        if attempt.get("failure") in {"AUDIT_FINDINGS_OR_UNCONFIRMED", "ACCEPTANCE_REJECTED_OR_UNCONFIRMED",
+                                      "IMPLEMENTATION_INCOMPLETE"} and attempt.get("verdict_excerpt"):
             # A verdict from an earlier round was sent back for rework and the result judged again; unlabelled,
             # a COMPLETE report read as if its "blocking finding remains" were still open (DOG-022).
             round_number = attempt.get("rework_round", 0)
