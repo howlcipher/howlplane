@@ -427,18 +427,19 @@ def denied_after_edit(name, role, repo, commands=("python3 -m unittest",), tools
     return outcome
 
 
-@pytest.mark.parametrize("stage, tools, commands, expected", [
-    ("implementation", ["Bash"], ["python3 -m unittest"], ["python3 -m unittest"]),
-    ("remediation", ["Bash"], ["python3 -m pytest -q"], ["python3 -m pytest -q"]),
-    ("implementation", ["Bash", "Edit"], ["python3 -m unittest"], []),  # an edit tool was refused
-    ("implementation", ["Write"], ["app.py"], []),
-    ("implementation", ["Bash"], [], []),  # unnamed denial stays a capability failure
-    ("review", ["Bash"], ["python3 -m unittest"], []),
+@pytest.mark.parametrize("stage, tools, commands, unnamed, expected", [
+    ("implementation", ["Bash"], ["python3 -m unittest"], 0, ["python3 -m unittest"]),
+    ("remediation", ["Bash"], ["python3 -m pytest -q"], 0, ["python3 -m pytest -q"]),
+    ("implementation", ["Bash", "Edit"], ["python3 -m unittest"], 0, []),  # an edit tool was refused
+    ("implementation", ["Write"], ["app.py"], 0, []),
+    ("implementation", ["Bash"], [], 1, []),  # unnamed denial stays a capability failure
+    ("implementation", ["Bash"], ["python3 -m pytest -q"], 1, []),  # mixed named and unnamed denials
+    ("review", ["Bash"], ["python3 -m unittest"], 0, []),
 ])
-def test_permission_grant_gap_is_only_ungranted_bash_in_a_mutating_role(stage, tools, commands, expected):
+def test_permission_grant_gap_is_only_ungranted_bash_in_a_mutating_role(stage, tools, commands, unnamed, expected):
     """DOG-018, revised by DOG-040: edits are no longer required; edit-tool refusals still count."""
     outcome = result("claude_code", stage, False)
-    outcome.metadata = {"denied_tools": tools, "denied_commands": commands}
+    outcome.metadata = {"denied_tools": tools, "denied_commands": commands, "unnamed_denials": unnamed}
     assert module.permission_grant_gap(outcome, stage) == expected
 
 

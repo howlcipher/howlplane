@@ -421,6 +421,23 @@ def test_denial_without_command_detail_still_reports_the_tool(tmp_path):
     assert "Bash" in res.error_message
 
 
+def test_mixed_named_and_unnamed_bash_denials_keep_both_evidence_kinds(tmp_path):
+    backend = ClaudeCodeBackend()
+    envelope = json.dumps({
+        "type": "result",
+        "result": "Blocked.",
+        "permission_denials": [
+            {"tool_name": "Bash", "tool_input": {"command": "python3 -m pytest -q"}},
+            {"tool_name": "Bash"},
+        ],
+    })
+    res = _execute_with_envelope(envelope, tmp_path)
+
+    assert res.metadata["denied_tools"] == ["Bash"]
+    assert res.metadata["denied_commands"] == ["python3 -m pytest -q"]
+    assert res.metadata["unnamed_denials"] == 1
+
+
 def test_permission_denial_is_still_classified_as_permission_required(tmp_path):
     """Richer evidence must not change the failure class or its fail-closed path."""
     res = _execute_with_envelope(

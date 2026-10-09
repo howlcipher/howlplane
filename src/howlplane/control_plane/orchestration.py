@@ -82,7 +82,11 @@ ROLE_FAILURES = {
     "ACCEPTANCE_REJECTED_OR_UNCONFIRMED", "IMPLEMENTATION_INCOMPLETE",
 }
 # An implementer that says it could not finish has not implemented the goal, whatever it changed (DOG-042).
-IMPLEMENTATION_INCOMPLETE_LINE = re.compile(r"^[\W_]*IMPLEMENTATION_STATUS:\s*INCOMPLETE\b", re.IGNORECASE | re.MULTILINE)
+IMPLEMENTATION_INCOMPLETE_LINE = re.compile(
+    r"^[ \t]*(?:\*\*)?IMPLEMENTATION_STATUS:\s*INCOMPLETE\b(?:\.)?(?:\*\*)?"
+    r"(?:[ \t]*(?:[-:—][ \t]*|[ \t]+).*)?$",
+    re.IGNORECASE | re.MULTILINE,
+)
 REQUIRED_KEYS = ("id", "created_at", "goal", "orchestrator", "strategy", "failover", "policy", "stage", "status",
                  "agents", "attempts", "lease", "repository_evidence")
 BINARIES = {"claude_code": "claude", "codex": "codex", "cursor": "agent", "agy": "agy", "devin_cli": "devin"}
@@ -492,7 +496,7 @@ def locked(root: Path):
 
 def path_for(root: Path, session_id: str) -> Path:
     if not re.fullmatch(r"[0-9a-f]{32}", session_id):
-        raise OrchestrateRequestError("Invalid session ID")
+        raise ValueError("Invalid session ID")
     return root / f"{session_id}.json"
 
 
@@ -831,7 +835,8 @@ def permission_grant_gap(result: Any, stage: str) -> list[str]:
     """
     metadata = getattr(result, "metadata", None) or {}
     commands = [str(command) for command in metadata.get("denied_commands") or []]
-    if not (is_mutating_role(stage) and commands and metadata.get("denied_tools") == ["Bash"]):
+    if not (is_mutating_role(stage) and commands and metadata.get("denied_tools") == ["Bash"]
+            and not metadata.get("unnamed_denials")):
         return []
     return commands
 

@@ -776,5 +776,8 @@ permission_grant_gap() no longer requires edits: a refusal whose only denied too
 ### Tests
 tests/test_orchestration_capability_recovery.py: grant-gap rules (implementation and remediation Bash-only; Edit/Write refusals and unnamed denials excluded; read-only roles excluded); end-to-end, a no-edit refused test command keeps Claude ready across sessions; an Edit-tool denial still marks interactive-only. The DOG-018 test that required edits was revised with this evidence. 7 tests fail without the fix.
 
+### Follow-up review
+A mixed denial envelope can contain a named Bash command and an unnamed Bash refusal. Both must be retained as evidence: because the unnamed refusal does not establish a missing grant, the mixed case is interactive-only, not a grant gap. The denial parser records the unnamed count and grant-gap classification rejects mixed evidence. The session-only grant-gap exclusion can still cost one attempt per session for an agent that consistently refuses unattended execution; this is documented in `documentation/ORCHESTRATE.md`.
+
 ## DOG-037, DOG-038, DOG-039 — status
 Merged: #165 (28511b4) for DOG-037/038 and #166 (af9f40a) for DOG-039, each with a HowlPlane review session and post-merge public proof recorded in howl-cubs-dogfood R001. Status: FIXED.

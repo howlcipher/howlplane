@@ -19,18 +19,37 @@ INCOMPLETE = ("**IMPLEMENTATION_STATUS: INCOMPLETE.** I did not fetch the data: 
               "usage restriction and no authorization was given.")
 
 
-def run(tmp_path, monkeypatch, incomplete_agents, **overrides):
+def run(tmp_path, monkeypatch, incomplete_agents, *, rework_first=False, failed_agents=(), unchanged_agents=(), **overrides):
     repo = repository(tmp_path)
     install_all(tmp_path, monkeypatch, models=("m1",))
     assigned = []
+    implementation_calls = 0
+    review_calls = 0
+    rework_seen = []
 
     def execute(doc, role, agent, model, cwd):
+        nonlocal implementation_calls, review_calls
         assigned.append((role, agent))
+        if role == "implementation":
+            implementation_calls += 1
+            rework_seen.append(doc.get("rework"))
+        if role == "review":
+            review_calls += 1
+            if rework_first and review_calls == 1:
+                outcome = accepted(agent, role)
+                outcome.stdout = "AUDIT_STATUS: FINDINGS\n- BLOCKING: add the missing edge case"
+                return outcome
         outcome = accepted(agent, role)
         if role == "implementation":
-            (cwd / "README").write_text(f"partial by {agent}\n" if agent in incomplete_agents else "done\n")
-            if agent in incomplete_agents:
+            is_incomplete = agent in incomplete_agents or (rework_first and implementation_calls == 2)
+            if agent not in unchanged_agents and not (rework_first and implementation_calls == 2):
+                (cwd / "README").write_text(f"partial by {agent}\n" if is_incomplete else "done\n")
+            if is_incomplete:
                 outcome.stdout = "Wrote a skeleton.\n" + INCOMPLETE
+            if agent in failed_agents:
+                outcome.success = False
+                outcome.exit_code = 1
+                outcome.error_message = "provider failed"
         return outcome
 
     monkeypatch.setattr(module, "execute_assignment", execute)
@@ -39,11 +58,11 @@ def run(tmp_path, monkeypatch, incomplete_agents, **overrides):
     values.update(overrides)
     code = module.command(arguments(repo, **values))
     doc = module.active_sessions(module.state_root(), repo, include_terminal=True)[0]
-    return code, assigned, doc
+    return code, assigned, doc, rework_seen
 
 
 def test_declared_incomplete_is_not_success_and_the_next_implementer_continues(tmp_path, monkeypatch, capsys):
-    code, assigned, doc = run(tmp_path, monkeypatch, {"codex"}, **only("codex", "cursor", "claude_code"))
+    code, assigned, doc, _ = run(tmp_path, monkeypatch, {"codex"}, **only("codex", "cursor", "claude_code"))
     out, err = capsys.readouterr()
 
     first = next(a for a in doc["attempts"] if a["stage"] == "implementation")
@@ -59,7 +78,7 @@ def test_declared_incomplete_is_not_success_and_the_next_implementer_continues(t
 
 
 def test_when_every_implementer_declares_incomplete_the_session_hands_off_with_the_reason(tmp_path, monkeypatch, capsys):
-    code, assigned, doc = run(tmp_path, monkeypatch, {"codex", "cursor"}, **only("codex", "cursor"))
+    code, assigned, doc, _ = run(tmp_path, monkeypatch, {"codex", "cursor"}, **only("codex", "cursor"))
     out, _ = capsys.readouterr()
 
     assert ("review", "cursor") not in assigned and ("review", "codex") not in assigned
@@ -68,11 +87,44 @@ def test_when_every_implementer_declares_incomplete_the_session_hands_off_with_t
     assert "no authorization was given" in out
 
 
+def test_incomplete_during_rework_does_not_consume_another_round_and_next_worker_gets_findings(
+    tmp_path, monkeypatch, capsys
+):
+    code, assigned, doc, rework_seen = run(
+        tmp_path, monkeypatch, set(), rework_first=True, **only("codex", "cursor", "claude_code")
+    )
+
+    assert code == 0
+    assert doc["rework_rounds"] == 1
+    assert rework_seen[1]["round"] == 1
+    assert "add the missing edge case" in rework_seen[1]["findings"]
+    implementers = [agent for role, agent in assigned if role == "implementation"]
+    assert len(implementers) >= 3 and implementers[1] != implementers[2]
+    assert any(item["failure"] == "IMPLEMENTATION_INCOMPLETE" for item in doc["attempts"])
+
+
+@pytest.mark.parametrize("failed, unchanged", [(False, True), (True, False)])
+def test_incomplete_classification_overrides_no_change_but_preserves_failed_result(
+    tmp_path, monkeypatch, capsys, failed, unchanged
+):
+    kwargs = {"failed_agents": {"codex"} if failed else (), "unchanged_agents": {"codex"} if unchanged else ()}
+    _, _, doc, _ = run(tmp_path, monkeypatch, {"codex"}, **kwargs, **only("codex", "cursor"))
+    first = next(item for item in doc["attempts"] if item["stage"] == "implementation")
+
+    if failed:
+        assert first["failure"] == "ENGINEERING_FAILURE"
+    else:
+        assert first["failure"] == "IMPLEMENTATION_INCOMPLETE"
+        assert first.get("outcome") != "NO_CHANGE_REQUIRED"
+
+
 @pytest.mark.parametrize("text, declared", [
     ("IMPLEMENTATION_STATUS: INCOMPLETE - blocked", True),
     ("**IMPLEMENTATION_STATUS: INCOMPLETE.** reason", True),
     ("Notes\n  implementation_status: incomplete", True),
     ("The task said to report IMPLEMENTATION_STATUS: INCOMPLETE if blocked; it is complete.", False),
+    ("> IMPLEMENTATION_STATUS: INCOMPLETE", False),
+    ("- IMPLEMENTATION_STATUS: INCOMPLETE", False),
     ("IMPLEMENTATION_STATUS: COMPLETE", False),
 ])
 def test_only_a_status_line_counts_as_a_declaration(text, declared):
