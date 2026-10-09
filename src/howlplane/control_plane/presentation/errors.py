@@ -147,6 +147,15 @@ def explain(exc: BaseException) -> Optional[OperatorError]:
     from howlplane.control_plane.agent_execution import AgentUnavailableError
     from howlplane.control_plane.factory.campaign import CampaignError
 
+    from howlplane.control_plane.orchestration import OrchestrateRequestError
+
+    if isinstance(exc, OrchestrateRequestError):
+        # A refusal the user can correct is not "likely a HowlPlane bug" (DOG-043).
+        return OperatorError("ORCHESTRATE_REQUEST_REFUSED", text,
+                             "The orchestrate request has invalid arguments or conflicts with session state; "
+                             "nothing was changed.",
+                             exc.next_action or "Correct the request and run it again.",
+                             exc.command or "howlplane orchestrate --help")
     if isinstance(exc, cli.TargetRepositoryNotFoundError):
         return OperatorError("NOT_A_GIT_REPOSITORY", text, "HowlPlane operates on a Git repository.",
                              "Run it inside a Git repository, or pass --repo PATH.")

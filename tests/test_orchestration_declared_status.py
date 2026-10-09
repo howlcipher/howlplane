@@ -9,7 +9,7 @@ import pytest
 
 from howlplane.control_plane import orchestration as module
 from tests.test_orchestration import arguments, repository
-from tests.test_orchestration_capability_recovery import accepted, install_all
+from tests.test_orchestration_capability_recovery import accepted, install_all, persist
 from tests.test_orchestration_handoff_recovery import only
 
 
@@ -115,3 +115,46 @@ def test_review_and_acceptance_are_told_an_explicit_verify_superseded_the_plan(t
 def test_no_supersession_note_without_two_different_commands(tmp_path, monkeypatch, verify, planned):
     seen = prompts_for(tmp_path, monkeypatch, verify, planned)
     assert all("was superseded" not in text for text in seen.values())
+
+
+def explained(exc):
+    from howlplane.control_plane.presentation.errors import explain
+    return explain(exc)
+
+
+@pytest.mark.parametrize("overrides, message", [
+    (dict(input="resume"), "No unfinished session"),
+    (dict(input="Goal", verify_timeout=0), "--verify-timeout must be between"),
+    (dict(input="Goal", execution_budget=["bogus=5"]), "Unknown execution budget role"),
+])
+def test_user_correctable_refusals_are_operator_errors_not_suspected_bugs(tmp_path, monkeypatch, overrides, message):
+    """DOG-043: documented refusals printed "likely a HowlPlane bug ... INTERNAL_ERROR"."""
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch, models=("m1",))
+    with pytest.raises(module.OrchestrateRequestError, match=message) as caught:
+        module.command(arguments(repo, **overrides))
+    error = explained(caught.value)
+    assert error.code == "ORCHESTRATE_REQUEST_REFUSED" and message in error.message
+    assert "nothing was changed" in error.why
+
+
+def test_separate_on_the_same_worktree_names_the_remedy(tmp_path, monkeypatch):
+    repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch, models=("m1",))
+    monkeypatch.setattr(module, "execute_assignment", lambda *a: accepted(a[2], a[1]))
+    unfinished = arguments(repo, input="First goal", orchestrator="codex", policy="PLAN ONLY", **only("codex"))
+    doc = module.setup(unfinished, repo)
+    doc["status"] = "HANDOFF REQUIRED"
+    persist(doc)
+
+    with pytest.raises(module.OrchestrateRequestError) as caught:
+        module.command(arguments(repo, input="Second goal", separate=True, **only("codex")))
+    error = explained(caught.value)
+    assert error.code == "ORCHESTRATE_REQUEST_REFUSED"
+    assert "git worktree add" in error.next_action and error.command == "howlplane orchestrate inspect"
+
+
+def test_internal_failures_are_not_relabelled_as_user_errors():
+    assert not isinstance(ValueError("Coordinator lease changed; stale assignment rejected"), module.OrchestrateRequestError)
+    error = explained(ValueError("Git inspection failed: boom"))
+    assert error is None or error.code != "ORCHESTRATE_REQUEST_REFUSED"

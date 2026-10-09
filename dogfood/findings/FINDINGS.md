@@ -749,3 +749,16 @@ The planner's VERIFY_COMMAND named a nonexistent tests/test_task_queue.py. The e
 verification_command_note(): when an explicit --verify differs from the planned command, review and acceptance instructions state which command verifies the session and that the planned one was superseded and not run.
 ### Tests
 tests/test_orchestration_declared_status.py: the note reaches both review and acceptance prompts; no note when there is no explicit command, no planned command, or they are equal. The positive case fails without the fix.
+
+## DOG-043 — Correctable orchestrate refusals were reported as suspected HowlPlane bugs
+Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
+Severity: P3 (misleading UX; wrong recovery advice)
+Discovered in: howl-cubs-dogfood R001 (`--separate` on a worktree with an unfinished session), 2026-10-09
+Owning component: HowlPlane orchestrate CLI / presentation
+Repository: howlplane
+### Actual
+Documented refusals raised plain ValueError, which the presentation layer reports as "Something unexpected failed ... likely a HowlPlane bug or an unhandled condition (ValueError) ... INTERNAL_ERROR" with a saved traceback. Reproduced for `--separate` on the same worktree, `resume` with no unfinished session, and `--verify-timeout 0`; 22 such raise sites in orchestration.py.
+### Resolution
+OrchestrateRequestError (a ValueError subclass) for the 22 user-correctable refusals, with optional next step and command; explain() renders it as ORCHESTRATE_REQUEST_REFUSED ("nothing was changed"). Internal failures (git inspection, coordinator lease race) keep their existing handling.
+### Tests
+tests/test_orchestration_declared_status.py: three refusals through command() map to the operator error; `--separate` on the same worktree names `git worktree add`; internal errors are not relabelled. All fail without the fix.

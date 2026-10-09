@@ -492,7 +492,7 @@ def locked(root: Path):
 
 def path_for(root: Path, session_id: str) -> Path:
     if not re.fullmatch(r"[0-9a-f]{32}", session_id):
-        raise ValueError("Invalid session ID")
+        raise OrchestrateRequestError("Invalid session ID")
     return root / f"{session_id}.json"
 
 
@@ -524,6 +524,20 @@ def active_sessions(root: Path, repo: Path, include_terminal: bool = False) -> l
         if isinstance(doc, dict) and doc.get("schema") == SCHEMA and doc.get("repository") == str(repo) and (include_terminal or is_resumable(doc)):
             sessions.append(doc)
     return sorted(sessions, key=lambda item: str(item.get("created_at", "")), reverse=True)
+
+
+
+class OrchestrateRequestError(ValueError):
+    """A request the user can correct: invalid arguments or a conflict with session state (DOG-043).
+
+    Reported as an operator error with a next step, never as a suspected HowlPlane bug. A ValueError
+    subclass, so callers that already catch ValueError are unaffected.
+    """
+
+    def __init__(self, message: str, next_action: str | None = None, command: str | None = None):
+        super().__init__(message)
+        self.next_action = next_action
+        self.command = command
 
 
 def now() -> str:
@@ -582,14 +596,14 @@ def supersede(root: Path, session_id: str, reason: str, replaced_by: str) -> dic
     with locked(root):
         path = path_for(root, session_id)
         if not path.exists():
-            raise ValueError(f"Session {session_id} does not exist")
+            raise OrchestrateRequestError(f"Session {session_id} does not exist")
         doc = safe_load_json(path)
         if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
-            raise ValueError(f"Session {session_id} is not an orchestration session")
+            raise OrchestrateRequestError(f"Session {session_id} is not an orchestration session")
         if not is_resumable(doc):
-            raise ValueError(f"Session {session_id} is {doc.get('status')}, not resumable; nothing to supersede")
+            raise OrchestrateRequestError(f"Session {session_id} is {doc.get('status')}, not resumable; nothing to supersede")
         if live_lease(doc):
-            raise ValueError(f"Session {session_id} has a live coordinator lease")
+            raise OrchestrateRequestError(f"Session {session_id} has a live coordinator lease")
         doc["superseded"] = {"at": now(), "reason": reason, "replaced_by": replaced_by,
                              "previous_status": doc.get("status"), "previous_stage": doc.get("stage")}
         doc["status"] = SUPERSEDED
@@ -868,9 +882,9 @@ def validate_execution_budget(budget: dict[str, Any]) -> dict[str, int]:
     checked = {}
     for role, seconds in budget.items():
         if role not in ROLES:
-            raise ValueError(f"Unknown execution budget role {role!r}")
+            raise OrchestrateRequestError(f"Unknown execution budget role {role!r}")
         if isinstance(seconds, bool) or not isinstance(seconds, int) or not 1 <= seconds <= MAX_EXECUTION_BUDGET_SECONDS:
-            raise ValueError(f"Execution budget for {role} must be 1..{MAX_EXECUTION_BUDGET_SECONDS} seconds")
+            raise OrchestrateRequestError(f"Execution budget for {role} must be 1..{MAX_EXECUTION_BUDGET_SECONDS} seconds")
         checked[role] = seconds
     return checked
 
@@ -881,7 +895,7 @@ def parse_execution_budget(values: list[str] | None) -> dict[str, int]:
     for value in values or []:
         role, _, seconds = value.rpartition("=")
         if not seconds.strip().isdigit():
-            raise ValueError("Expected --execution-budget role=seconds or seconds")
+            raise OrchestrateRequestError("Expected --execution-budget role=seconds or seconds")
         for target in ([role.strip()] if role else ROLES):
             parsed[target] = int(seconds)
     return validate_execution_budget(parsed)
@@ -898,7 +912,7 @@ def parse_role_model_triples(value: str) -> list[tuple[str, str, str]]:
     for item in value.split(","):
         parts = item.strip().split(":", 2)
         if len(parts) != 3 or parts[0] not in ROLES or parts[1] not in AGENTS:
-            raise ValueError("Expected role:agent:model")
+            raise OrchestrateRequestError("Expected role:agent:model")
         result.append((parts[0], parts[1], parts[2]))
     return result
 
@@ -1085,7 +1099,7 @@ def verification_timeout(value: Any) -> int | None:
     if value is None:
         return None
     if not 1 <= int(value) <= MAX_VERIFY_TIMEOUT_SECONDS:
-        raise ValueError(f"--verify-timeout must be between 1 and {MAX_VERIFY_TIMEOUT_SECONDS} seconds, got {value}")
+        raise OrchestrateRequestError(f"--verify-timeout must be between 1 and {MAX_VERIFY_TIMEOUT_SECONDS} seconds, got {value}")
     return int(value)
 
 
@@ -1095,7 +1109,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     interactive = sys.stdin.isatty() and not args.input
     goal = args.input or (question("1. Goal", "") if interactive else "")
     if not goal:
-        raise ValueError("A goal is required")
+        raise OrchestrateRequestError("A goal is required")
     lead = args.orchestrator or (question("2. Orchestrator (AUTO/agent)", "AUTO") if interactive else "AUTO")
     availability_text = question("3. Agent availability (AUTO or agent=RESERVED,...)", "AUTO") if interactive else "AUTO"
     availability = {agent: "AUTO" for agent in AGENTS}
@@ -1103,7 +1117,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
         for item in availability_text.split(","):
             pair = item.strip().split("=", 1)
             if len(pair) != 2 or pair[0] not in AGENTS:
-                raise ValueError("Expected agent=RESERVED or agent=UNAVAILABLE")
+                raise OrchestrateRequestError("Expected agent=RESERVED or agent=UNAVAILABLE")
             availability[pair[0]] = pair[1].upper()
     for agent in AGENTS:
         option = getattr(args, agent)
@@ -1115,13 +1129,13 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
     failover = args.failover or (question("7. Failover (AUTO REROUTE/OFF)", "AUTO REROUTE") if interactive else "AUTO REROUTE")
     policy = args.policy or (question("8. Execution policy", "PLAN + EXECUTE + INDEPENDENT AUDIT") if interactive else "PLAN + EXECUTE + INDEPENDENT AUDIT")
     if lead != "AUTO" and lead not in AGENTS:
-        raise ValueError("Unsupported orchestrator")
+        raise OrchestrateRequestError("Unsupported orchestrator")
     if strategy not in {"BALANCED", "ECONOMY", "QUALITY"} or failover not in {"AUTO REROUTE", "OFF"}:
-        raise ValueError("Unsupported strategy or failover policy")
+        raise OrchestrateRequestError("Unsupported strategy or failover policy")
     if policy not in {"PLAN + EXECUTE + INDEPENDENT AUDIT", "PLAN ONLY", "PLAN + EXECUTE"}:
-        raise ValueError("Unsupported execution policy")
+        raise OrchestrateRequestError("Unsupported execution policy")
     if any(value.upper() not in {"AUTO", "RESERVED", "UNAVAILABLE"} for value in availability.values()):
-        raise ValueError("Unsupported agent availability")
+        raise OrchestrateRequestError("Unsupported agent availability")
     role_models: dict[str, dict[str, str]] = {}
     for role, agent, model in parse_role_model_triples(model_text):
         role_models.setdefault(role, {})[agent] = model
@@ -1144,7 +1158,7 @@ def setup(args: argparse.Namespace, repo: Path) -> dict[str, Any]:
             "Pick another agent, use AUTO, or refresh the evidence for this agent.",
             f"howlplane agents doctor --live --repo {repo}"))
     if lead != "AUTO" and (agents[lead].get("workspace_trust") or {}).get("effective_state") == workspace_trust.TRUST_REQUIRED:
-        raise ValueError(f"Selected orchestrator {AGENT_NAMES.get(lead, lead)} does not trust {snapshot['root']} yet "
+        raise OrchestrateRequestError(f"Selected orchestrator {AGENT_NAMES.get(lead, lead)} does not trust {snapshot['root']} yet "
                          f"(workspace trust policy {resolved_policy['policy']}); prepare it with `howlplane factory prepare` "
                          "or choose `--workspace-trust bypass`")
     return {
@@ -1946,7 +1960,7 @@ def command(args: argparse.Namespace) -> int:
             elif choice in {"resume", "inspect", "discard"}:
                 operation = choice
             else:
-                raise ValueError("Unknown session action")
+                raise OrchestrateRequestError("Unknown session action")
         if operation == "inspect":
             sessions = active_sessions(root, repo, include_terminal=True)
             for s in sessions:
@@ -1977,7 +1991,7 @@ def command(args: argparse.Namespace) -> int:
             return 0
         if operation == "resume":
             if not active:
-                raise ValueError("No unfinished session")
+                raise OrchestrateRequestError("No unfinished session", "Start a session with a goal, or inspect earlier ones.", "howlplane orchestrate inspect")
             verify = verification_command(args.verify, repo, literal=getattr(args, "verify_is_argv", False))
             verify_timeout = verification_timeout(getattr(args, "verify_timeout", None))
             doc = active[0]
@@ -1987,7 +2001,7 @@ def command(args: argparse.Namespace) -> int:
                 return invalid_session_report(doc, str(error), repo)
             previous_orchestrator = doc["orchestrator"]
             if live_lease(doc):
-                raise ValueError("Session has a live coordinator lease")
+                raise OrchestrateRequestError("Session has a live coordinator lease")
             doc["lease"] = {"token": uuid.uuid4().hex, "pid": os.getpid(), "renewed_at": time.time()}
             reconcile(doc, repo)
             budget_change = parse_execution_budget(getattr(args, "execution_budget", None))
@@ -2042,8 +2056,12 @@ def command(args: argparse.Namespace) -> int:
         else:
             if active:
                 if args.separate:
-                    raise ValueError("Separate sessions need a distinct Git worktree passed with --repo; overlapping worktree ownership is refused")
-                raise ValueError("Unfinished session exists. Use orchestrate resume, inspect, discard, or a separate Git worktree")
+                    raise OrchestrateRequestError("Separate sessions need a distinct Git worktree passed with --repo; overlapping worktree ownership is refused",
+                                                    "Create another worktree (git worktree add PATH) and pass it with --repo, or resume or discard the unfinished session.",
+                                                    "howlplane orchestrate inspect")
+                raise OrchestrateRequestError("Unfinished session exists. Use orchestrate resume, inspect, discard, or a separate Git worktree",
+                                                "Resume, inspect or discard it, or use a distinct Git worktree with --separate.",
+                                                "howlplane orchestrate inspect")
             doc = setup(args, repo)
             doc["retain_report"] = args.retain_report
             path = path_for(root, doc["id"])
