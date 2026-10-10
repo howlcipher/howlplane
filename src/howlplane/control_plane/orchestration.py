@@ -1232,21 +1232,31 @@ REVIEW_VERDICT_CONTRACT = (
     "AUDIT_STATUS: FINDINGS if any BLOCKING finding remains; otherwise end with exactly AUDIT_STATUS: CLEAN.")
 
 
-def verification_evidence_for_review(doc: dict[str, Any]) -> str:
-    """Give the reviewer the checks HowlPlane itself ran on the current tree.
+def verification_evidence_for_review(doc: dict[str, Any], *, acceptance: bool = False) -> str:
+    """Give read-only roles the checks HowlPlane itself ran on the current tree.
 
     Read-only reviewers often have no shell, so without this they report the
     test gate as unproven (DOG-014). `doc["tests"]` is cleared whenever the
-    repository changes outside the session, and every review directly follows
-    a verification, so the latest result per command describes this tree.
+    repository changes outside the session. Review and acceptance are reached
+    only after implementation verification on the same tree; rework returns to
+    implementation and verifies again before either role can run. Acceptance
+    asks explicitly for the no-run case because absence otherwise looks omitted.
     """
     latest: dict[str, dict[str, Any]] = {}
     for item in doc.get("tests", []):
         command = item["command"] if isinstance(item["command"], str) else " ".join(item["command"])
         latest[command] = item
-    if not latest:
+    if not latest and not acceptance:
         return ""
+    verification_commands = [command for command in latest if command != "git diff --check"]
+    if not verification_commands:
+        diff_check = " The repository diff check ran; it is not a test command." if "git diff --check" in latest else ""
+        return (" HowlPlane harness evidence: no verification command ran on the current tree."
+                + diff_check + "\n")
     lines = [" HowlPlane itself ran these checks on the current tree (harness evidence, not implementer claims):"]
+    verify_command = doc.get("verify_command")
+    if acceptance and verify_command:
+        lines.append(f"\nThe session's configured verification command is `{shlex.join(verify_command)}`.")
     for command, item in latest.items():
         lines.append(f"\n--- `{command}` exit {item['exit_code']} ---\n{item.get('output', '').strip()[-600:]}")
     return "".join(lines) + "\n--- end of verification evidence ---"
@@ -1308,7 +1318,9 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
                          + REVIEW_VERDICT_CONTRACT + verification_evidence_for_review(doc) + session_diff_evidence(doc, repo))
     elif role == "acceptance":
         instructions += "As session orchestrator, inspect implementation, tests, and independent audit. Do not edit files. End with exactly ACCEPTANCE_STATUS: ACCEPTED only if evidence supports the goal; otherwise end with ACCEPTANCE_STATUS: REJECTED."
-        instructions += audit_evidence_for_acceptance(doc) + session_diff_evidence(doc, repo)
+        instructions += (audit_evidence_for_acceptance(doc)
+                         + verification_evidence_for_review(doc, acceptance=True)
+                         + session_diff_evidence(doc, repo))
         if (doc.get("rework") or {}).get("source") == "acceptance":
             instructions += (f" An earlier acceptance check rejected the work and the implementer was sent back to address it "
                              f"(rework round {doc['rework']['round']}). Judge the current repository, and check whether "
