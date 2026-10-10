@@ -92,6 +92,7 @@ def test_r004_explicit_verify_pass_is_in_acceptance_prompt(tmp_path, monkeypatch
 
 def test_reconciliation_clears_results_before_acceptance(tmp_path, monkeypatch):
     repo = repository(tmp_path)
+    install_all(tmp_path, monkeypatch, models=("m1",))
     doc = module.setup(arguments(repo, input="Goal", orchestrator="codex", **only("codex")), repo)
     doc["tests"] = [{"command": "pytest -q", "exit_code": 0, "output": "stale pass"}]
     doc["repository_evidence"] = {"root": str(repo), "head": "stale", "status": ""}
