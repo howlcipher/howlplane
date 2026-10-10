@@ -750,6 +750,21 @@ verification_command_note(): when an explicit --verify differs from the planned 
 ### Tests
 tests/test_orchestration_declared_status.py: the note reaches both review and acceptance prompts; no note when there is no explicit command, no planned command, or they are equal. The positive case fails without the fix.
 
+## DOG-044 — Acceptance did not receive HowlPlane verification evidence
+Status: FIX IN REVIEW (branch dogfood/R004-dog044)
+Severity: P2 (passing work was rejected for missing test evidence, consuming both rework rounds)
+Discovered in: howl-cubs-dogfood R004, session 8814b377
+Owning component: HowlPlane orchestration
+Repository: howlplane
+### Actual
+The configured validation passed three times, but the read-only Claude acceptor rejected the work because the prompt did not show that HowlPlane had run the verification command. Both rework rounds were spent on a passing tree and the session ended HANDOFF REQUIRED.
+### Root cause
+`execute_assignment()` included `verification_evidence_for_review(doc)` in review instructions but acceptance received only audit verdicts and the session diff. The harness results in `doc["tests"]` were therefore invisible to acceptance.
+### Resolution
+Acceptance now receives the same latest-per-command harness evidence as review, labelled as HowlPlane evidence with command, exit code and output tail. It explicitly says when no verification command ran and distinguishes a diff check from test verification. Reconciliation clears results when the tree changes, and implementation verification precedes acceptance.
+### Tests
+`tests/test_orchestration_acceptance_verification_evidence.py`: passing and failing results, no verification, diff-check-only, latest result per command, review output parity, reconciliation freshness, and the R004 command path with explicit `--verify true`. The contract and R004 regression tests fail without the fix.
+
 ## DOG-043 — Correctable orchestrate refusals were reported as suspected HowlPlane bugs
 Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
 Severity: P3 (misleading UX; wrong recovery advice)
