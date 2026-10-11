@@ -725,7 +725,7 @@ Anchored SESSION_LIMIT pattern for Codex's usage-limit stop line (trailing upsel
 tests/test_usage_limit_classification.py: Codex usage limit after a transcript containing the rules prose classifies SESSION_LIMIT (both apostrophes); rules prose alone is not authentication; five real auth stop lines still classify as authentication; the readiness cache records an expiring SESSION_LIMIT limit and no auth=false. 4 of 9 fail without the fix (the 5 preservation tests pass both ways).
 
 ## DOG-042 — A declared IMPLEMENTATION_STATUS: INCOMPLETE was recorded as success
-Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
+Status: FIXED (merged #167, 99d3aa4; HowlPlane review session on af9f40a with make test-full COMPLETE, audit CLEAN; proven by contract tests, not observed live; proof recorded in howl-cubs-dogfood runs/R002/FINAL-ASSESSMENT.md)
 Severity: P2 (false success; wasted review and rework rounds)
 Discovered in: howl-cubs-dogfood R001, session 43b8a9e6 on cubs-edge-lab, 2026-10-09
 Owning component: HowlPlane orchestration
@@ -738,7 +738,7 @@ A status line declaring INCOMPLETE in a mutating role makes the attempt REVOKED 
 tests/test_orchestration_declared_status.py: reroute and completion by the next implementer before any review; handoff with the printed reason when all declare INCOMPLETE; status-line recognition including the bold form Codex used and prose that only mentions the phrase. All fail without the fix.
 
 ## DOG-041 — Acceptance cited a superseded planner VERIFY_COMMAND as the session's command
-Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
+Status: FIXED (merged #167, 99d3aa4; HowlPlane review session on af9f40a with make test-full COMPLETE, audit CLEAN; proven by contract tests; proof recorded in howl-cubs-dogfood runs/R002/FINAL-ASSESSMENT.md)
 Severity: P3 (misleading review context; contributed to rejections)
 Discovered in: howl-cubs-dogfood R001, review session 1426222b, 2026-10-08
 Owning component: HowlPlane orchestration prompts
@@ -751,7 +751,7 @@ verification_command_note(): when an explicit --verify differs from the planned 
 tests/test_orchestration_declared_status.py: the note reaches both review and acceptance prompts; no note when there is no explicit command, no planned command, or they are equal. The positive case fails without the fix.
 
 ## DOG-044 — Acceptance did not receive HowlPlane verification evidence
-Status: FIX IN REVIEW (branch dogfood/R004-dog044)
+Status: FIXED (merged #168, 5253f3f; made by session 03d1d55e, CI-only test made hermetic in 2eba9dc by session d516f2a9; live proof in cubs-edge-lab session fa728fa1, where the acceptor cited the harness verification and accepted; recorded in howl-cubs-dogfood runs/R004/FINAL-ASSESSMENT.md)
 Severity: P2 (passing work was rejected for missing test evidence, consuming both rework rounds)
 Discovered in: howl-cubs-dogfood R004, session 8814b377
 Owning component: HowlPlane orchestration
@@ -766,7 +766,7 @@ Acceptance now receives the same latest-per-command harness evidence as review, 
 `tests/test_orchestration_acceptance_verification_evidence.py`: passing and failing results, no verification, diff-check-only, latest result per command, review output parity, reconciliation freshness, and the R004 command path with explicit `--verify true`. The contract and R004 regression tests fail without the fix.
 
 ## DOG-043 — Correctable orchestrate refusals were reported as suspected HowlPlane bugs
-Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
+Status: FIXED (merged #167, 99d3aa4; HowlPlane review session on af9f40a with make test-full COMPLETE, audit CLEAN; live proof on the merged CLI; recorded in howl-cubs-dogfood runs/R002/FINAL-ASSESSMENT.md)
 Severity: P3 (misleading UX; wrong recovery advice)
 Discovered in: howl-cubs-dogfood R001 (`--separate` on a worktree with an unfinished session), 2026-10-09
 Owning component: HowlPlane orchestrate CLI / presentation
@@ -779,7 +779,7 @@ OrchestrateRequestError (a ValueError subclass) for the 22 user-correctable refu
 tests/test_orchestration_declared_status.py: three refusals through command() map to the operator error; `--separate` on the same worktree names `git worktree add`; internal errors are not relabelled. All fail without the fix.
 
 ## DOG-040 — A refused test command marked a proven agent interactive-only everywhere
-Status: FIX IN REVIEW (branch dogfood/R002-orchestration-fixes)
+Status: FIXED (merged #167, 99d3aa4; HowlPlane review session on af9f40a with make test-full COMPLETE, audit CLEAN; live proof in session 55b942cf; recorded in howl-cubs-dogfood runs/R002/FINAL-ASSESSMENT.md)
 Severity: P2 (false capability evidence persisted across repositories)
 Discovered in: howl-cubs-dogfood R001, review session 1426222b (existing-WIP validation), 2026-10-08
 Owning component: HowlPlane orchestration routing / readiness evidence
