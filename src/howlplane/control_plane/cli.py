@@ -1226,17 +1226,20 @@ class _FriendlyArgumentParser(argparse.ArgumentParser):
 
 
 def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
+    # Root defaults must use separate actions: argparse shares inherited actions.
+    # Descendants suppress absent values so explicit ancestor options survive.
     common_parser = argparse.ArgumentParser(add_help=False)
-    common_parser.add_argument(
-        "--control-plane-dir",
-        "-C",
-        help="Explicit path to HowlPlane control plane repository",
-    )
-    common_parser.add_argument(
-        "--repo",
-        "-R",
-        help="Target Git repository directory (defaults to current working directory discovery)",
-    )
+    root_common_parser = argparse.ArgumentParser(add_help=False)
+    for option_parser, default in ((common_parser, argparse.SUPPRESS),
+                                   (root_common_parser, None)):
+        option_parser.add_argument(
+            "--control-plane-dir", "-C", default=default,
+            help="Explicit path to HowlPlane control plane repository",
+        )
+        option_parser.add_argument(
+            "--repo", "-R", default=default,
+            help="Target Git repository directory (defaults to current working directory discovery)",
+        )
 
     task_base_parser = argparse.ArgumentParser(add_help=False)
     task_base_parser.add_argument("objective", help="Task objective or description")
@@ -1249,7 +1252,7 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
         prog=program_name,
         description="Deterministic Multi-Agent Engineering Control Plane CLI\n\n" + _TOP_LEVEL_QUICKSTART,
         formatter_class=_grouped_help_formatter(_TOP_LEVEL_HELP_GROUPS, "Advanced engineering"),
-        parents=[common_parser],
+        parents=[root_common_parser],
     )
     parser.add_argument(
         "--version",
@@ -1352,7 +1355,7 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_agents_doctor.add_argument("--refresh", action="store_true", help="Ignore cached evidence and probe again")
     p_agents_doctor.add_argument("--smoke-timeout", type=int, default=agent_readiness.DEFAULT_SMOKE_TIMEOUT_SECONDS,
                                  metavar="SECONDS", help="Per-agent limit for the --live smoke (default: 60)")
-    p_agents_doctor.add_argument("--repo", metavar="PATH",
+    p_agents_doctor.add_argument("--repo", metavar="PATH", default=argparse.SUPPRESS,
                                  help="Also report workspace readiness (trust) for this directory; "
                                       "with --live the read-only smoke runs there")
     _add_workspace_trust_argument(p_agents_doctor)

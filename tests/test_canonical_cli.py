@@ -113,3 +113,97 @@ def test_cli_dispatches_cleanly(monkeypatch):
     res = cli.main(["status", "--repo", "."])
     assert res == 0
     assert invoked == ["status"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("option,attribute", [
+    ("--repo", "repo"), ("-R", "repo"),
+    ("--control-plane-dir", "control_plane_dir"), ("-C", "control_plane_dir"),
+])
+@pytest.mark.parametrize("depth", [0, 1, 2])
+def test_factory_common_options_survive_command_depth(option, attribute, depth):
+    argv = ["factory", "status"]
+    argv[depth:depth] = [option, "/explicit path"]
+    assert getattr(cli.build_parser().parse_args(argv), attribute) == "/explicit path"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("argv", [[], ["status"], ["factory", "status"],
+                                  ["agents", "doctor"]])
+def test_omitted_common_options_keep_none(argv):
+    parsed = cli.build_parser().parse_args(argv)
+    assert parsed.repo is None
+    assert parsed.control_plane_dir is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("option,alias,attribute", [
+    ("--repo", "-R", "repo"),
+    ("--control-plane-dir", "-C", "control_plane_dir"),
+])
+@pytest.mark.parametrize("argv", [
+    ["--repo", "first", "factory", "-R", "second", "status"],
+    ["factory", "--repo", "first", "status", "-R", "second"],
+    ["--repo", "first", "--repo", "second", "factory", "status"],
+])
+def test_later_explicit_repo_wins(argv, option, alias, attribute):
+    argv = [option if token == "--repo" else alias if token == "-R" else token
+            for token in argv]
+    assert getattr(cli.build_parser().parse_args(argv), attribute) == "second"
+
+
+@pytest.mark.unit
+def test_common_options_override_independently():
+    parsed = cli.build_parser().parse_args([
+        "-R", "first", "-C", "first-cp", "factory", "-R", "second",
+        "status", "-C", "second-cp",
+    ])
+    assert (parsed.repo, parsed.control_plane_dir) == ("second", "second-cp")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("argv,expected", [
+    (["--repo", "parent", "agents", "doctor"], "parent"),
+    (["agents", "--repo", "parent", "doctor"], "parent"),
+    (["agents", "--repo", "parent", "doctor", "--repo", "leaf"], "leaf"),
+])
+def test_agents_doctor_repo_preservation(argv, expected):
+    assert cli.build_parser().parse_args(argv).repo == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("option", ["--repo", "-R", "--control-plane-dir", "-C"])
+@pytest.mark.parametrize("depth", [0, 1, 2])
+def test_common_options_require_a_value(option, depth):
+    argv = ["factory", "status"][:depth] + [option]
+    with pytest.raises(SystemExit) as error:
+        cli.build_parser().parse_args(argv)
+    assert error.value.code == 2
+
+
+@pytest.mark.contract
+@pytest.mark.parametrize("explicit", [True, False])
+def test_factory_dispatch_from_home_preserves_discovery_inputs(tmp_path, monkeypatch, explicit):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.chdir(home)
+    monkeypatch.setenv("HOME", str(home))
+    selected = []
+    monkeypatch.setattr(cli, "find_git_repo_root", lambda path: selected.append(path) or tmp_path / "repo")
+    monkeypatch.setattr(cli, "find_control_plane_root", lambda path: selected.append(path) or tmp_path / "cp")
+
+    def handler(args):
+        assert cli._resolve_repo(args) == tmp_path / "repo"
+        assert cli.find_control_plane_root(args.control_plane_dir) == tmp_path / "cp"
+        return 0
+
+    monkeypatch.setitem(cli.HANDLERS, "factory", handler)
+    from howlplane.control_plane import workspace_trust
+    monkeypatch.setattr(workspace_trust, "set_cli_policy", lambda policy: None)
+    monkeypatch.setattr(workspace_trust, "resolve_policy", lambda: None)
+    argv = ["factory"]
+    if explicit:
+        argv += ["--repo", str(tmp_path / "repo"), "--control-plane-dir", str(tmp_path / "cp")]
+    argv += ["status"]
+    assert cli.main(argv) == 0
+    assert selected == ([str(tmp_path / "repo"), str(tmp_path / "cp")] if explicit else [None, None])
