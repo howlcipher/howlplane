@@ -442,6 +442,21 @@ The `howlplane` launcher locates the HowlPlane control plane using the following
 4. `~/.config/howlplane/config.toml` (canonical) -> `~/.config/ai-control-plane/config.toml` -> `~/.config/ai/config.toml`
 5. Self repository root detection
 
+`--repo PATH` (`-R PATH`) and `--control-plane-dir PATH` (`-C PATH`)
+may precede the command or follow a command that lists them in its help.
+For Factory commands, both also work between `factory` and its action, or
+following the action. For example, these select the same repository:
+
+```bash
+howlplane --repo /path/to/repo factory status
+howlplane factory --repo /path/to/repo status
+howlplane factory status --repo /path/to/repo
+```
+
+The last explicit occurrence of each option wins independently. Omitted options
+retain existing repository and control plane discovery; an omitted child option
+never clears an explicit parent value. Each option requires a path value.
+
 ---
 
 ## Documentation Index
