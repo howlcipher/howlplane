@@ -1,5 +1,8 @@
 name: Run Tests
 
+env:
+  HOWL_FORBID_LOCAL_INFERENCE: '1'
+
 on:
   push:
     branches: [main]

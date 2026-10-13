@@ -38,7 +38,9 @@ def install(args):
         "StartLimitIntervalSec=300", "StartLimitBurst=5", "",
         "[Service]", "Type=simple",
         "WorkingDirectory=" + str(checkout).replace('%', '%%'),
-        "Environment=" + unit_quote("PYTHONPATH=" + str(checkout)),
+        "Environment=" + unit_quote(
+            "PYTHONPATH=" + os.pathsep.join([str(checkout / "src"), str(checkout)])
+        ),
         "Environment=" + unit_quote("PATH=" + args.worker_path),
         "Environment=PYTHONUNBUFFERED=1",
         "ExecStart=:" + " ".join(unit_quote(arg) for arg in command),

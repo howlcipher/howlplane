@@ -140,6 +140,11 @@ sequence is `documentation/journals/2026-09-29_team_howlplane_backlog.md`
 
 ### Advanced persistent Linux user service
 
+Generated user units include both the checkout's `src` directory and checkout
+root in `PYTHONPATH`. A source checkout does not require an editable package
+installation for module discovery. Runtime dependencies must still be installed
+in the selected Python environment; rendering a unit does not start a service.
+
 `factory status` reports the persisted supervisor state without treating an
 active dispatch as a process restart. Startup still reconciles interrupted work.
 
