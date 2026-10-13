@@ -2462,7 +2462,8 @@ def cmd_local(args: argparse.Namespace) -> int:
             _print_local_report(args, report)
             return 1
         try:
-            _subprocess.run(  # nosec B602 - fixed official install command, no shell interpolation of user input
+            # fixed official install command, no shell interpolation of user input
+            _subprocess.run(
                 ["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"],
                 check=True, timeout=600,
             )

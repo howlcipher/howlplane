@@ -354,7 +354,8 @@ def check(agent: str, workspace: str | Path) -> dict[str, Any]:
 def _run(argv: list[str], cwd: Path, timeout: float = PROBE_TIMEOUT_SECONDS) -> tuple[int, str]:
     try:
         completed = subprocess.run(argv, cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                                   stdin=subprocess.DEVNULL)  # nosec B603 - fixed vendor argv, no shell
+                                   # fixed vendor argv, no shell
+                                   stdin=subprocess.DEVNULL)  # nosec B603
     except subprocess.TimeoutExpired:
         return -1, "probe timed out"
     except OSError as exc:
@@ -409,7 +410,8 @@ def _git_common_dir(path: Path) -> Path | None:
     try:
         completed = subprocess.run(["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
                                    capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL,
-                                   check=False)  # nosec B603 B607 - fixed argv, no shell
+                                   # fixed argv, no shell
+                                   check=False)  # nosec B603,B607
     except (OSError, subprocess.TimeoutExpired):
         return None
     return Path(completed.stdout.strip()).resolve() if completed.returncode == 0 and completed.stdout.strip() else None
@@ -492,7 +494,8 @@ def prepare_cursor(path: Path, runner: Callable[[list[str], Path], tuple[int, st
 
 def _restore_terminal() -> None:
     if sys.stdin.isatty():
-        subprocess.run(["stty", "sane"], check=False, stdin=sys.stdin)  # nosec B603 B607 - fixed argv
+        # fixed argv
+        subprocess.run(["stty", "sane"], check=False, stdin=sys.stdin)  # nosec B603,B607
 
 
 def prepare_operator_prompt(agent: str, path: Path, argv: list[str],

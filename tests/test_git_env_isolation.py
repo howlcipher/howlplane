@@ -20,7 +20,8 @@ what these tests prove is the helper's own safety, not conftest's.
 
 import hashlib
 import os
-import subprocess  # nosec B404 - deterministic pytest re-invocation
+# deterministic pytest re-invocation
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
@@ -179,7 +180,8 @@ def test_suite_passes_under_a_hook_shaped_environment(tmp_path):
     env["GIT_DIR"] = str(decoy / ".git")
     env["GIT_WORK_TREE"] = str(decoy)
 
-    result = subprocess.run(  # nosec B603 - fixed argv, no shell
+    # fixed argv, no shell
+    result = subprocess.run(  # nosec B603
         [sys.executable, "-m", "pytest", "tests/test_git_baseline.py", "-q", "-p", "no:cacheprovider"],
         cwd=str(REPO_ROOT),
         capture_output=True,
