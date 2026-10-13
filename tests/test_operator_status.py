@@ -127,3 +127,20 @@ def test_broken_pipe_is_quiet_not_an_internal_error(monkeypatch, capsys, tmp_pat
     assert cli.main(["logs"]) == 141
     assert "INTERNAL_ERROR" not in capsys.readouterr().err
     assert not list(tmp_path.iterdir())
+
+
+def test_unreadable_artifacts_take_priority_without_erasing_owner_state():
+    from howlplane.control_plane.presentation.operator import derive_operator_status
+
+    status = {
+        "state": "waiting_for_authority",
+        "unreadable_artifacts": [{"path": "work_items/broken.json", "error": "ValueError"}],
+        "proposals_awaiting_authority": [{"proposal_id": "P-1", "disposition": "pending"}],
+    }
+    result = derive_operator_status(status)
+    assert result.label == "ATTENTION"
+    assert result.reason_code.value == "FACTORY_FAILURE"
+    assert result.state == "waiting_for_authority"
+    assert any("proposal P-1" in item for item in result.blockers)
+    assert any("broken.json" in item for item in result.blockers)
+    assert result.recovery == "manual"

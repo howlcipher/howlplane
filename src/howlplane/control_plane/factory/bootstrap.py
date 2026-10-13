@@ -91,8 +91,8 @@ class BootstrapRun(DataClassSerializationMixin):
 
 
 class BootstrapRunStore(DurableObjectStore):
-    def __init__(self, base_dir: Union[str, Path]):
-        super().__init__(base_dir, factory=BootstrapRun.from_dict, dedup_field=None, id_attr="proposal_id")
+    def __init__(self, base_dir: Union[str, Path], *, read_only: bool = False):
+        super().__init__(base_dir, factory=BootstrapRun.from_dict, dedup_field=None, id_attr="proposal_id", read_only=read_only)
 
 
 def _now() -> str:

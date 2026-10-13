@@ -221,6 +221,19 @@ def derive_operator_status(status: Mapping[str, Any], now: Optional[datetime] = 
     failure = _classified_failure(status)
     not_configured = status.get("authority") == "not configured"
 
+    if status.get("unreadable_artifacts"):
+        common["blockers"] = blockers + [
+            f"Unreadable artifact: {item['path']} ({item['error']}); preserved unchanged"
+            for item in status["unreadable_artifacts"]
+        ]
+        return OperatorStatus(
+            label="ATTENTION", severity=Severity.ERROR,
+            summary="Some Factory artifacts are unreadable; originals are preserved.",
+            reason_code=ReasonCode.FACTORY_FAILURE, recovery="manual",
+            next_action=OperatorAction("Inspect the unreadable artifacts listed above."),
+            **common,
+        )
+
     if _owner_items(status) or state == SupervisorState.WAITING_FOR_AUTHORITY.value:
         if not_configured and not _owner_items(status):
             return OperatorStatus(
