@@ -59,6 +59,23 @@ bound to a stable, live PR head SHA before it can authorize a merge.
 An expired Claude OAuth session is recorded as `AUTHENTICATION_REQUIRED` in
 durable provider capacity state. Routing can consider another eligible worker;
 authentication repair remains an operator action.
+
+For an interrupted orchestration session, explicit resume provider choices apply
+before selecting a new orchestrator:
+
+```bash
+howlplane orchestrate resume --repo /path/to/project \
+  --orchestrator claude_code --codex UNAVAILABLE --claude-code AUTO
+```
+
+`UNAVAILABLE` excludes a provider and `RESERVED` holds it out. Explicit `AUTO`
+refreshes that provider's installed CLI, cached readiness and workspace trust
+without invoking it. Fresh negative readiness and session capability, capacity,
+model and timeout exclusions remain binding. Omitted provider options preserve
+the recorded availability. An unavailable explicitly selected orchestrator fails
+actionably before dispatch; `--orchestrator AUTO` returns selection to routing
+while retaining the selected lead until an actual takeover. A recorded rejection
+still prevents shopping for another acceptance verdict.
 AGY's explicit print-timeout diagnostic is treated as incomplete work even
 when its process exits zero. Partial changes must pass the existing timeout
 candidate verification or failover path before they can advance.
@@ -472,3 +489,6 @@ never clears an explicit parent value. Each option requires a path value.
 - [Localizations & Languages](documentation/languages/README_en_US.md)
 - [Change Log](change_log.md)
 - [2026-09-29 remote snapshot follow-ons](documentation/journals/2026-09-29_team_howlplane_backlog.md)
+
+Validation maintenance separates existing Bandit annotation reasons from rule IDs
+and removes obsolete suppressions. It changes no runtime behavior or trust policy.

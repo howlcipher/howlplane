@@ -133,7 +133,8 @@ def _run_live_probe(env_value):
         if env_value is not None:
             env["HOWLPLANE_LIVE_PROVIDERS"] = env_value
         env["PYTHONPATH"] = str(REPO_ROOT)
-        return subprocess.run(  # nosec B603 - fixed interpreter and argv.
+        # fixed interpreter and argv.
+        return subprocess.run(  # nosec B603
             [sys.executable, "-m", "pytest", "-p", "no:cacheprovider",
              str(probe_dir.relative_to(REPO_ROOT))],
             cwd=REPO_ROOT, env=env, capture_output=True, text=True,

@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Fixed
+
+- UX-009A: orchestration resume now applies explicit provider availability before
+  selecting the requested orchestrator. `UNAVAILABLE` is honored; explicit `AUTO`
+  refreshes cached inventory without clearing session hard failures, model limits,
+  role capacity or timeout history. Unavailable explicit leads fail before dispatch;
+  omitted options retain recorded availability. No provider acceptance is inferred
+  from recovery routing.
+
 ### Added
 
 - Native creative pipeline (Run 5 dogfood findings). `howlplane doctor --creative [--json] [--command-config F] [--repos-root D] [--workspace D]` (`creative_doctor.py`, schema `howlplane.doctor.creative/v1`) is a read-only PASS/WARN/FAIL preflight for the Dream -> Writer -> Create pipeline. It checks:
@@ -1014,3 +1023,7 @@ missing optional CLI into generic unavailability.
 * Created `src/core/brain.py` to allow offline CLI searching of the entire knowledge base.
 * Added `.agents/rules/epistemic_skepticism.md` to enforce rigorous multi-source cross-checking.
 * Built `.agents/rules/documentation_enforcement.md` to guarantee the AI always updates the changelog and README prior to any git push.
+
+- Fix existing malformed Bandit comment annotations and remove obsolete rule
+  suppressions so the configured lint gate runs without warnings; runtime ASTs
+  and existing applicable suppression IDs are preserved.

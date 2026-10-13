@@ -322,7 +322,8 @@ def _default_ollama_binary_present() -> bool:
 def _default_ollama_service_health(host: str = OLLAMA_DEFAULT_HOST, timeout: float = 2.0) -> bool:
     try:
         req = urllib.request.Request(f"{host}/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - fixed local Ollama endpoint
+        # fixed local Ollama endpoint
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             return 200 <= resp.status < 300
     except Exception:
         return False
@@ -334,7 +335,8 @@ def _default_ollama_model_installed(
     """Returns True/False if determinable, or None if the service could not be queried."""
     try:
         req = urllib.request.Request(f"{host}/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - fixed local Ollama endpoint
+        # fixed local Ollama endpoint
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             data = json.loads(resp.read().decode("utf-8"))
     except Exception:
         return None
@@ -1169,7 +1171,8 @@ class OllamaLocalBackend(AgentBackend):
             f"{self.host}/api/generate", data=data,
             headers={"Content-Type": "application/json"}, method="POST",
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - fixed local Ollama endpoint
+        # fixed local Ollama endpoint
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             return json.loads(resp.read().decode("utf-8"))
 
     def execute(

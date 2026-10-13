@@ -5,7 +5,7 @@ import subprocess
 
 def main():
     # `git rev-parse --git-path` is correct in worktrees and from any cwd.
-    hook_dir = subprocess.run(  # nosec B603 B607
+    hook_dir = subprocess.run(
         ["git", "rev-parse", "--git-path", "hooks"],
         check=True, capture_output=True, text=True,
     ).stdout.strip()

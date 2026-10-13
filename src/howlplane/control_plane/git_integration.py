@@ -173,7 +173,8 @@ def run_git(repo_root: Union[str, Path], args: List[str], timeout: int = 60) -> 
 
 def run_gh(repo_root: Union[str, Path], args: List[str], timeout: int = 120) -> subprocess.CompletedProcess:
     """Executes a `gh` CLI command deterministically without shell=True."""
-    return subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+    # fixed argv, no shell
+    return subprocess.run(  # nosec B603
         ["gh"] + args,
         capture_output=True,
         text=True,

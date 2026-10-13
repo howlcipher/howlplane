@@ -13,7 +13,8 @@ import argparse
 import ast
 import functools
 import re
-import subprocess  # nosec B404 - fixed Git and Python commands below.
+# fixed Git and Python commands below.
+import subprocess  # nosec B404
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,7 +66,8 @@ class Selection:
 
 def run_git(*args: str) -> str:
     """Run a fixed-argument Git command at the repository root."""
-    result = subprocess.run(  # nosec B603 B607 - fixed executable and argv.
+    # fixed executable and argv.
+    result = subprocess.run(  # nosec B603,B607
         ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=True
     )
     return result.stdout
@@ -454,7 +456,8 @@ def main() -> int:
     pytest_args = ["tests/"] if selection.fallback_reason else list(selection.selected)
     if not pytest_args:
         return 1 if args.strict and selection.uncovered else 0
-    rc = subprocess.call(  # nosec B603 - executable and paths are controlled here.
+    # executable and paths are controlled here.
+    rc = subprocess.call(  # nosec B603
         [sys.executable, "-m", "pytest", "-v", *pytest_args], cwd=REPO_ROOT
     )
     if rc == 0 and args.strict and selection.uncovered:

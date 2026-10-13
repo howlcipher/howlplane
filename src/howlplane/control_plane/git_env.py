@@ -40,7 +40,8 @@ identity.
 """
 
 import os
-import subprocess  # nosec B404 - deterministic git invocation without a shell
+# deterministic git invocation without a shell
+import subprocess  # nosec B404
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Tuple, Union
 
@@ -116,7 +117,8 @@ def run_git_in_repo(
     Passing `cwd=` or `git -C` alone is not sufficient, because an inherited
     `GIT_DIR` overrides both.
     """
-    return subprocess.run(  # nosec B603 B607 - fixed argv, no shell
+    # fixed argv, no shell
+    return subprocess.run(  # nosec B603
         ["git", "-C", str(repo_root)] + guarded_git_args(args),
         capture_output=True,
         text=True,

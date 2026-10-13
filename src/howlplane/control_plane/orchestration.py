@@ -1967,6 +1967,69 @@ def invalid_session_report(doc: Any, reason: str, repo: Path) -> int:
     return 2
 
 
+def resume_provider_options(doc: dict[str, Any], args: argparse.Namespace, repo: Path) -> None:
+    """Apply explicit resume choices without erasing session failure evidence."""
+    options = {agent: getattr(args, agent, None) for agent in AGENTS}
+    if any(option == "AUTO" for option in options.values()):
+        refreshed = inventory({agent: "AUTO" if option == "AUTO" else "RESERVED"
+                               for agent, option in options.items()},
+                              repo, session_trust_policy(doc))
+    else:
+        refreshed = {}
+    for agent, option in options.items():
+        if option is None:
+            continue
+        previous = agent_record(doc, agent)
+        if option in {"RESERVED", "UNAVAILABLE"}:
+            previous["state"] = option
+            continue
+        current = refreshed[agent]
+        current["capacity"] = previous["capacity"]
+        if previous["capabilities"].get("scope") == "session":
+            if previous["capabilities"]["unattended_execution"] is False:
+                current["capabilities"] = previous["capabilities"]
+                if current["state"] == "AVAILABLE":
+                    current["state"] = "DEGRADED"
+            elif current["capabilities"]["unattended_execution"] is None:
+                current["capabilities"] = previous["capabilities"]
+        if previous.get("workspace_trust", {}).get("source") == "orchestrate session":
+            current["workspace_trust"] = previous["workspace_trust"]
+        unavailable_failure = False
+        for attempt in doc["attempts"]:
+            if attempt["agent"] != agent:
+                continue
+            if attempt.get("failure") in UNAVAILABLE_FAILURES:
+                unavailable_failure = True
+            elif attempt.get("state") == "SUCCEEDED":
+                unavailable_failure = False
+        if unavailable_failure or doc["model_states"].get(f"{agent}:UNKNOWN") == "EXHAUSTED":
+            current["state"] = "UNAVAILABLE"
+        doc["agents"][agent] = current
+        for limit in current["readiness"]["model_limits"]:
+            doc["model_states"][f"{agent}:{limit.rsplit(':', 1)[0]}"] = "EXHAUSTED"
+    requested = getattr(args, "orchestrator", None)
+    if requested is None:
+        return
+    if requested != "AUTO":
+        record = agent_record(doc, requested)
+        if (record["state"] not in {"AVAILABLE", "DEGRADED"}
+                or record["capabilities"]["unattended_execution"] is False
+                or workspace_trust_block(doc, requested)):
+            reason = (workspace_trust_block(doc, requested) or record.get("unavailable_reason")
+                      or record["capabilities"].get("reason") or record["state"])
+            raise OperatorFailure(OperatorError(
+                "ORCHESTRATOR_UNAVAILABLE", f"The selected orchestrator {requested} is not available ({reason}).",
+                "Resume options were applied, but readiness or session evidence prevents dispatch.",
+                "Pick another agent, use AUTO, or refresh the evidence for this agent.",
+                f"howlplane agents doctor --live --repo {repo}"))
+    doc["requested_orchestrator"] = requested
+    if requested != "AUTO":
+        doc["selected_orchestrator"] = requested
+        doc["orchestrator"] = requested
+    # AUTO permits ordinary routing while keeping the actual selected lead until
+    # takeover. Erasing it at acceptance would discard verdict/recovery context.
+
+
 def command(args: argparse.Namespace) -> int:
     repo = Path(args.repo or os.getcwd()).resolve()
     root = state_root()
@@ -2042,20 +2105,7 @@ def command(args: argparse.Namespace) -> int:
                     {"from": (doc.get("workspace_trust_policy") or {}).get("policy"), "to": resolved_policy["policy"],
                      "at": now()})
             doc["workspace_trust_policy"] = resolved_policy
-            requested_orchestrator = getattr(args, "orchestrator", None)
-            if requested_orchestrator and requested_orchestrator != "AUTO" and doc["agents"].get(requested_orchestrator, {}).get("state") in {"AVAILABLE", "DEGRADED"}:
-                doc["requested_orchestrator"] = requested_orchestrator
-                doc["selected_orchestrator"] = requested_orchestrator
-                doc["orchestrator"] = requested_orchestrator
-            for agent in AGENTS:
-                opt = getattr(args, agent, None)
-                if opt:
-                    current_state = doc["agents"].get(agent, {}).get("state")
-                    if opt == "RESERVED":
-                        doc["agents"][agent]["state"] = "RESERVED"
-                    elif opt in {"AVAILABLE", "AUTO"} and current_state == "RESERVED":
-                        installed = shutil.which(BINARIES[agent]) is not None
-                        doc["agents"][agent]["state"] = "AVAILABLE" if installed else "UNAVAILABLE"
+            resume_provider_options(doc, args, repo)
             if getattr(args, "models", None):
                 for role, agent, model in parse_role_model_triples(args.models):
                     doc["role_models"].setdefault(role, {})[agent] = model
