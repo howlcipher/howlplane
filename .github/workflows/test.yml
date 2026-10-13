@@ -53,7 +53,8 @@ jobs:
       - name: Install pinned HowlFrame binary
         run: |
           mkdir -p "$HOME/.local/bin"
-          git clone --depth 1 https://github.com/howlcipher/howlframe.git /tmp/howlframe
+          git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
+          git -C /tmp/howlframe checkout --detach 7631ce5d4008534ef681f35c3436922507d3f441
           cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Run fast deterministic suite
@@ -91,7 +92,8 @@ jobs:
       - name: Install pinned HowlFrame binary
         run: |
           mkdir -p "$HOME/.local/bin"
-          git clone --depth 1 https://github.com/howlcipher/howlframe.git /tmp/howlframe
+          git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
+          git -C /tmp/howlframe checkout --detach 7631ce5d4008534ef681f35c3436922507d3f441
           cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       # `shell: bash` is load-bearing: it runs the step under `bash -eo pipefail`.
@@ -142,7 +144,8 @@ jobs:
       - name: Install pinned HowlFrame binary
         run: |
           mkdir -p "$HOME/.local/bin"
-          git clone --depth 1 https://github.com/howlcipher/howlframe.git /tmp/howlframe
+          git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
+          git -C /tmp/howlframe checkout --detach 7631ce5d4008534ef681f35c3436922507d3f441
           cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       # `live` tests are deselected by tests/conftest.py unless

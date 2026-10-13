@@ -492,3 +492,10 @@ never clears an explicit parent value. Each option requires a path value.
 
 Validation maintenance separates existing Bandit annotation reasons from rule IDs
 and removes obsolete suppressions. It changes no runtime behavior or trust policy.
+
+The generated-application CI suites compile and execute against HowlFrame source
+`7631ce5d4008534ef681f35c3436922507d3f441`. Fast, full and nightly jobs use
+that same immutable commit. A moving sibling default branch is not a runtime
+compatibility guarantee: the newer sibling revision observed in CI fails
+generated notes/todo acceptance. The source pin records the tested contract; it does not establish
+compatibility with newer Frame commits or identify a published release by version.

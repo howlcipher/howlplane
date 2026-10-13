@@ -1027,3 +1027,7 @@ missing optional CLI into generic unavailability.
 - Fix existing malformed Bandit comment annotations and remove obsolete rule
   suppressions so the configured lint gate runs without warnings; runtime ASTs
   and existing applicable suppression IDs are preserved.
+
+- Pin all generated-application CI jobs to the tested HowlFrame7631 source
+  contract instead of fetching a moving default branch. Preserve failing upstream
+  compatibility evidence and document newer-runtime acceptance limitations.
