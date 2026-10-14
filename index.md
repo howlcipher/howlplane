@@ -140,6 +140,11 @@ sequence is `documentation/journals/2026-09-29_team_howlplane_backlog.md`
 
 ### Advanced persistent Linux user service
 
+Generated user units include both the checkout's `src` directory and checkout
+root in `PYTHONPATH`. A source checkout does not require an editable package
+installation for module discovery. Runtime dependencies must still be installed
+in the selected Python environment; rendering a unit does not start a service.
+
 Default `factory status` and the everyday status surface do not initialize state
 directories or records, quarantine corrupt artifacts, or persist derived process
 states. Unreadable artifacts remain unchanged and are reported diagnostically.

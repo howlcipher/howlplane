@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+- Generated Factory user units find the current `src/howlplane` package without
+  relying on an ambient editable installation. Regression checks disable site
+  packages and cover checkout paths with spaces. No service is installed or started.
+
 - HOWL-E2E-UX-001 EXT-003: status observers use read-only durable stores and
   nonpersisting process projections. Missing directories/records stay absent;
   corrupt artifacts retain bytes and names; observation does not reconcile
