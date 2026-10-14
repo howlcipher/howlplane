@@ -140,6 +140,12 @@ sequence is `documentation/journals/2026-09-29_team_howlplane_backlog.md`
 
 ### Advanced persistent Linux user service
 
+Default `factory status` and the everyday status surface do not initialize state
+directories or records, quarantine corrupt artifacts, or persist derived process
+states. Unreadable artifacts remain unchanged and are reported diagnostically.
+Missing or malformed state has no inferred creation timestamp. Explicit
+`--publish` and `--arm-periodic` retain their documented snapshot/marker writes.
+
 `factory status` reports the persisted supervisor state without treating an
 active dispatch as a process restart. Startup still reconciles interrupted work.
 

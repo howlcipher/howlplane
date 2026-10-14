@@ -17,6 +17,9 @@ concurrency:
   group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  HOWL_FORBID_LOCAL_INFERENCE: "1"
+
 jobs:
   fast-python:
     name: Fast Python (${{ matrix.python-version }})

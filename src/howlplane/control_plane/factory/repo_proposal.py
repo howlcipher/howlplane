@@ -237,12 +237,13 @@ def contract_fingerprint(proposal: "RepoProposal") -> str:
 class RepoProposalStore(DurableObjectStore):
     """Durable store for repository proposals keyed by proposal_id."""
 
-    def __init__(self, base_dir: Union[str, Path]):
+    def __init__(self, base_dir: Union[str, Path], *, read_only: bool = False):
         super().__init__(
             base_dir,
             factory=RepoProposal.from_dict,
             dedup_field=None,
             id_attr="proposal_id",
+            read_only=read_only,
         )
 
     def propose(
@@ -276,5 +277,5 @@ class RepoProposalStore(DurableObjectStore):
         self.save_object(proposal)
         return proposal
 
-    def list_awaiting_authority(self) -> List[RepoProposal]:
-        return [p for p in self.list_all() if p.state == ProposalState.AWAITING_AUTHORITY]
+    def list_awaiting_authority(self, *, on_corrupt=None) -> List[RepoProposal]:
+        return [p for p in self.list_all(on_corrupt=on_corrupt) if p.state == ProposalState.AWAITING_AUTHORITY]

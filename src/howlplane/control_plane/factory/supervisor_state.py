@@ -287,19 +287,23 @@ class SupervisorStateRecord(DataClassSerializationMixin):
 class SupervisorStateStore(DurableObjectStore):
     """Atomic store for the singleton supervisor state record."""
 
-    def __init__(self, base_dir: Union[str, Path]):
+    def __init__(self, base_dir: Union[str, Path], *, read_only: bool = False):
         super().__init__(
             base_dir,
             factory=SupervisorStateRecord.from_dict,
             dedup_field=None,
             id_attr=None,
+            read_only=read_only,
         )
 
     def load(self, *, reconcile_restart: bool = True) -> SupervisorStateRecord:
         """Load validated state; observers can opt out of startup reconciliation."""
         if not self.exists(SUPERVISOR_STATE_ID):
-            record = SupervisorStateRecord(created_at=_utc_now_iso())
-            self.save(record)
+            record = SupervisorStateRecord(
+                created_at=None if self.read_only else _utc_now_iso()
+            )
+            if not self.read_only:
+                self.save(record)
             return record
         try:
             data = safe_load_json(self._path(SUPERVISOR_STATE_ID))
@@ -323,14 +327,13 @@ class SupervisorStateStore(DurableObjectStore):
                 f"Unknown supervisor state: {record.state!r}"
             )
 
-        if reconcile_restart:
+        if reconcile_restart and not self.read_only:
             record.reconcile_on_load()
         return record
 
-    @staticmethod
-    def _malformed_record(reason: str) -> SupervisorStateRecord:
+    def _malformed_record(self, reason: str) -> SupervisorStateRecord:
         return SupervisorStateRecord(
-            created_at=_utc_now_iso(),
+            created_at=None if self.read_only else _utc_now_iso(),
             state=_plain(SupervisorState.STOPPED),
             stopped_reason="malformed_state",
             last_error=reason,

@@ -94,3 +94,33 @@ def test_malformed_state_loads_fail_closed(tmp_path, contents, expected_substrin
     assert record.state == SupervisorState.STOPPED
     assert record.stopped_reason == "malformed_state"
     assert expected_substring in (record.last_error or "").lower()
+
+
+def test_read_only_load_neither_initializes_nor_reconciles(tmp_path):
+    path = tmp_path / "observer"
+    observer = SupervisorStateStore(path, read_only=True)
+    assert observer.load().created_at is None
+    assert not path.exists()
+    writer = SupervisorStateStore(path)
+    record = writer.load()
+    record.state = "dispatching"
+    record.current_work_item_id = "WI-live"
+    writer.save(record)
+    original = (path / "factory_supervisor.json").read_bytes()
+    observed = observer.load()
+    assert observed.state == "dispatching"
+    assert observed.failure_count == 0
+    assert (path / "factory_supervisor.json").read_bytes() == original
+    with pytest.raises(PermissionError):
+        observer.save(observed)
+
+
+def test_read_only_malformed_state_has_no_inferred_creation_time(tmp_path):
+    path = tmp_path / "observer"
+    path.mkdir()
+    (path / "factory_supervisor.json").write_bytes(b"{broken")
+    record = SupervisorStateStore(path, read_only=True).load()
+    assert record.state == "stopped"
+    assert record.stopped_reason == "malformed_state"
+    assert record.created_at is None
+    assert (path / "factory_supervisor.json").read_bytes() == b"{broken"

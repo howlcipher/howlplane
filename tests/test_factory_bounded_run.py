@@ -705,3 +705,17 @@ def test_continuous_running_campaign_reports_running(tmp_path):
     )
     assert process_status(campaign) == "running"
 
+
+@pytest.mark.parametrize("state, expected", [
+    (SupervisorState.STOPPED, "stopped"),
+    (SupervisorState.DISPATCHING, "stale"),
+])
+def test_observer_derives_process_status_without_persisting(tmp_path, state, expected):
+    campaign = _setup_campaign_and_process(
+        tmp_path, campaign_id="observer", supervisor_state=state,
+    )
+    path = campaign.state_dir / "campaign" / "process.json"
+    original = (path.read_bytes(), path.stat().st_mtime_ns)
+    assert process_status(campaign, persist=False) == expected
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == original
+    assert load_process(campaign).status == "running"

@@ -1,5 +1,7 @@
 import logging
 
+import pytest
+
 from howlplane.control_plane.durable_store import DurableObjectStore
 
 
@@ -29,3 +31,25 @@ def test_list_all_skips_factory_failures(tmp_path):
     store.save("nok", {"z": 1})
     assert store.list_all() == [1]
     assert list(tmp_path.glob("nok.json.corrupt-*"))
+
+
+def test_read_only_store_blocks_writes_and_preserves_corruption(tmp_path):
+    from howlplane.control_plane.durable_store import DurableObjectStore
+
+    path = tmp_path / "observer"
+    reader = DurableObjectStore(path, lambda data: data, read_only=True)
+    assert reader.list_all() == []
+    assert not path.exists()
+    with pytest.raises(PermissionError):
+        reader.save("one", {"value": 1})
+    assert not path.exists()
+    path.mkdir()
+    broken = path / "broken.json"
+    broken.write_bytes(b"{broken")
+    before = broken.stat().st_mtime_ns
+    assert reader.list_all() == []
+    assert list(path.iterdir()) == [broken]
+    assert broken.read_bytes() == b"{broken"
+    assert broken.stat().st_mtime_ns == before
+    with pytest.raises(PermissionError):
+        reader.quarantine(broken)

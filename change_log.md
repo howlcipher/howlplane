@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+- HOWL-E2E-UX-001 EXT-003: status observers use read-only durable stores and
+  nonpersisting process projections. Missing directories/records stay absent;
+  corrupt artifacts retain bytes and names; observation does not reconcile
+  restart state or invent creation timestamps. Explicit writers keep existing
+  initialization and quarantine behavior. Verification jobs forbid local inference.
+
 - UX-009A: orchestration resume now applies explicit provider availability before
   selecting the requested orchestrator. `UNAVAILABLE` is honored; explicit `AUTO`
   refreshes cached inventory without clearing session hard failures, model limits,

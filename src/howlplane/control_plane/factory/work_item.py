@@ -296,12 +296,13 @@ class WorkItem(SafeArtifactSerializationMixin):
 class WorkItemStore(DurableObjectStore):
     """Durable store for work items, keyed by work_item_id."""
 
-    def __init__(self, base_dir: Union[str, Path]):
+    def __init__(self, base_dir: Union[str, Path], *, read_only: bool = False):
         super().__init__(
             base_dir,
             factory=WorkItem.from_dict,
             dedup_field=None,
             id_attr="work_item_id",
+            read_only=read_only,
         )
 
     def find_by_fingerprint(self, fingerprint: str) -> Optional[WorkItem]:

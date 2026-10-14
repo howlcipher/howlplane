@@ -80,7 +80,9 @@ def _bootstrap_ready(proposal_store: Any, state_dir: Any) -> List[Dict[str, str]
     from howlplane.control_plane.factory.repo_proposal import ProposalState
     if state_dir is None:
         return []
-    runs = BootstrapRunStore(Path(state_dir).resolve() / "bootstrap_runs")
+    runs = BootstrapRunStore(
+        Path(state_dir).resolve() / "bootstrap_runs", read_only=True
+    )
     ready = []
     for p in proposal_store.list_all():
         if p.state != ProposalState.ACCEPTED.value:
@@ -120,18 +122,32 @@ def collect_factory_status(args: argparse.Namespace):
     campaign = _cli()._resolve_factory_campaign(args)
     if campaign is None:
         campaign = campaign_from_state_dir(args.state_dir)
-    store = _cli()._factory_state_store(args)
+    store = _cli()._factory_state_store(args, read_only=True)
     record = store.load(reconcile_restart=False)
-    work_store = WorkItemStore(Path(args.state_dir).resolve() / "work_items")
-    proposal_store = RepoProposalStore(Path(args.state_dir).resolve() / "repo_proposals")
+    work_store = WorkItemStore(Path(args.state_dir).resolve() / "work_items", read_only=True)
+    proposal_store = RepoProposalStore(Path(args.state_dir).resolve() / "repo_proposals", read_only=True)
+    unreadable = []
+
+    def report_corrupt(category, path, moved, error):
+        diagnostic = {
+            "path": f"{category}/{path.name}",
+            "error": type(error).__name__,
+        }
+        if diagnostic not in unreadable:
+            unreadable.append(diagnostic)
+
     parked = [
         {"work_item_id": i.work_item_id, "state": i.state, "blocker": i.admission_blocked_reason, "title": i.title}
-        for i in work_store.list_all()
+        for i in work_store.list_all(
+            on_corrupt=lambda path, moved, error: report_corrupt("work_items", path, moved, error)
+        )
         if i.state in (WorkItemState.AWAITING_OWNER, WorkItemState.BLOCKED, WorkItemState.DEFERRED)
     ]
     proposals = [
         {"proposal_id": p.proposal_id, "repository_name": p.repository_name, "disposition": p.disposition}
-        for p in proposal_store.list_awaiting_authority()
+        for p in proposal_store.list_awaiting_authority(
+            on_corrupt=lambda path, moved, error: report_corrupt("repo_proposals", path, moved, error)
+        )
     ]
     status = {
         "supervisor_id": record.supervisor_id,
@@ -167,6 +183,7 @@ def collect_factory_status(args: argparse.Namespace):
         "bounded_run_stop_reason": getattr(record, "bounded_run_stop_reason", None),
         "bounded_dispatched_ids": list(getattr(record, "bounded_dispatched_ids", [])),
         "parked_items": parked,
+        "unreadable_artifacts": unreadable,
         "proposals_awaiting_authority": proposals,
         "consecutive_capped_ticks": getattr(record, "consecutive_capped_ticks", 0),
         "alerts": list(getattr(record, "alerts", [])),
@@ -195,7 +212,7 @@ def collect_factory_status(args: argparse.Namespace):
             "project": campaign.repository.remote or campaign.repository.root.name,
             "worktree": str(campaign.target_dir),
             "authority": display_authority or "not configured",
-            "process": process_status(campaign),
+            "process": process_status(campaign, persist=False),
         })
     from howlplane.control_plane.factory.status_publish import publish_cli_status
     published = publish_cli_status(status, args)
@@ -275,6 +292,11 @@ def cmd_factory_status(args: argparse.Namespace) -> int:
             print("Active alerts:")
             for a in alerts[-5:]:
                 print(f"  - [{a.get('type')}] {a.get('message')}")
+    if getattr(args, "verbose", False) and not getattr(args, "json", False):
+        if status.get("unreadable_artifacts"):
+            print("ATTENTION: Unreadable artifacts (preserved unchanged):")
+            for item in status["unreadable_artifacts"]:
+                print(f"  - {item['path']}: {item['error']}")
     if published is not None:
         stream = sys.stderr if getattr(args, "json", False) else sys.stdout
         print(f"Published redacted status: {published}", file=stream)
@@ -472,7 +494,7 @@ def cmd_factory_doctor(args: argparse.Namespace) -> int:
         print(f"Campaign: {campaign.repository.campaign_id}")
         print(f"Worktree: {target_state}")
         print(f"State directory: {campaign.state_dir}")
-        print(f"Process: {process_status(campaign)}")
+        print(f"Process: {process_status(campaign, persist=False)}")
         print(f"Backend: {'systemd user service' if _systemd_available() else 'portable detached process'}")
         print()
         _cli()._print_worker_table(report)

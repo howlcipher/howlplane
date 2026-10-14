@@ -478,3 +478,78 @@ def test_build_factory_supervisor_preserves_corrupt_state_and_run_fails(tmp_path
     copies = list((state / "supervisor").glob("factory_supervisor.json.corrupt-*"))
     assert len(copies) == 1
     assert copies[0].read_text(encoding="utf-8") == "{not json"
+
+
+@pytest.mark.parametrize("flags", [[], ["--verbose"], ["--json"]])
+def test_status_does_not_initialize_absent_metadata(tmp_path, capsys, flags):
+    state = tmp_path / "absent"
+    assert main(["factory", "status", "--state-dir", str(state)] + flags) == 0
+    output = capsys.readouterr().out
+    assert not state.exists()
+    if "--json" in flags:
+        assert json.loads(output)["created_at"] is None
+
+
+@pytest.mark.parametrize("flags", [[], ["--verbose"], ["--json"]])
+def test_status_preserves_corrupt_objects_without_quarantine(tmp_path, capsys, flags):
+    state = tmp_path / "state"
+    store = SupervisorStateStore(state / "supervisor")
+    store.load()
+    for directory in ["work_items", "repo_proposals"]:
+        path = state / directory / "broken.json"
+        path.parent.mkdir()
+        path.write_bytes(b"{broken")
+    before = {
+        path.relative_to(state): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in state.rglob("*") if path.is_file()
+    }
+    assert main(["factory", "status", "--state-dir", str(state)] + flags) == 0
+    output = capsys.readouterr().out
+    assert "ATTENTION" in output
+    assert "work_items/broken.json" in output
+    assert "repo_proposals/broken.json" in output
+    if "--json" in flags:
+        observed = json.loads(output)
+        assert len(observed["unreadable_artifacts"]) == 2
+        assert observed["operator"]["reason_code"] == "FACTORY_FAILURE"
+    after = {
+        path.relative_to(state): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in state.rglob("*") if path.is_file()
+    }
+    assert after == before
+    assert not (state / "bootstrap_runs").exists()
+
+
+def test_malformed_status_publish_preserves_state_and_unknown_creation_time(tmp_path, capsys):
+    state = tmp_path / "state"
+    path = state / "supervisor" / "factory_supervisor.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"{broken")
+    snapshot = tmp_path / "public" / "remote-snapshot.json"
+    before = sorted(item.relative_to(state).as_posix() for item in state.rglob("*"))
+    assert main([
+        "factory", "status", "--state-dir", str(state), "--json", "--publish",
+        "--publish-path", str(snapshot),
+    ]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["created_at"] is None
+    assert status["stopped_reason"] == "malformed_state"
+    assert snapshot.is_file()
+    assert path.read_bytes() == b"{broken"
+    assert sorted(item.relative_to(state).as_posix() for item in state.rglob("*")) == before
+
+
+def test_status_reports_symlinked_corrupt_store_without_writes(tmp_path, capsys):
+    state = tmp_path / "state"
+    state.mkdir()
+    external = tmp_path / "external"
+    external.mkdir()
+    broken = external / "broken.json"
+    broken.write_bytes(b"{broken")
+    (state / "work_items").symlink_to(external, target_is_directory=True)
+    assert main(["factory", "status", "--state-dir", str(state), "--json"]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["unreadable_artifacts"][0]["path"] == "work_items/broken.json"
+    assert status["operator"]["label"] == "ATTENTION"
+    assert list(external.iterdir()) == [broken]
+    assert sorted(p.name for p in state.iterdir()) == ["work_items"]
