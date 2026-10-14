@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import signal
+import shlex
 import subprocess
 import sys
 import time
@@ -60,6 +61,35 @@ def test_unit_render_preserves_literal_paths_and_refuses_overwrite(tmp_path):
     with pytest.raises(ValueError, match="different"):
         install(args)
     assert output.read_text() == "owner customization\n"
+
+
+@pytest.mark.parametrize("checkout_name", ["controller", "controller with spaces"])
+def test_generated_unit_finds_source_without_editable_install(tmp_path, checkout_name):
+    from scripts.install_factory_service import install
+
+    checkout = tmp_path / checkout_name
+    package = checkout / "src/howlplane/control_plane"
+    package.mkdir(parents=True)
+    (package / "cli.py").write_text("# Isolated source fixture\n")
+    target = tmp_path / "target"
+    (target / ".git").mkdir(parents=True)
+    output = tmp_path / "candidate.service"
+    install(argparse.Namespace(
+        checkout=checkout, python=Path(sys.executable), state_dir=tmp_path / "state",
+        target_repo=target, output=output, worker_path="/usr/bin:/bin",
+    ))
+    setting = next(line for line in output.read_text().splitlines()
+                   if line.startswith('Environment="PYTHONPATH='))
+    python_path = shlex.split(setting[len("Environment="):])[0].split("=", 1)[1]
+    result = subprocess.run(
+        [sys.executable, "-S", "-c",
+         "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec(sys.argv[1]) else 1)",
+         "howlplane.control_plane.cli"],
+        cwd=tmp_path, env={**os.environ, "PYTHONPATH": python_path},
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "state").exists()
 
 
 def test_service_rejects_controller_as_target_and_control_characters(tmp_path):
