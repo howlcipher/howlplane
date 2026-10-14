@@ -80,7 +80,7 @@ def _active(campaign: FactoryCampaign, record: FactoryProcessRecord) -> bool:
     return is_process_record_active(asdict(record))
 
 
-def process_status(campaign: FactoryCampaign) -> str:
+def process_status(campaign: FactoryCampaign, *, persist: bool = True) -> str:
     record = load_process(campaign)
     if record is None:
         return "absent"
@@ -97,7 +97,9 @@ def process_status(campaign: FactoryCampaign) -> str:
                 SupervisorState,
                 SupervisorStateStore,
             )
-            supervisor_record = SupervisorStateStore(supervisor_dir).load(reconcile_restart=False)
+            supervisor_record = SupervisorStateStore(supervisor_dir, read_only=not persist).load(
+                reconcile_restart=False
+            )
         except Exception:
             supervisor_record = None
 
@@ -106,13 +108,15 @@ def process_status(campaign: FactoryCampaign) -> str:
         if supervisor_record.state == SupervisorState.STOPPED:
             if record.status != "stopped":
                 record.status = "stopped"
-                _save_process(campaign, record)
+                if persist:
+                    _save_process(campaign, record)
             return "stopped"
 
     if record.status in ("running", "stale"):
         if record.status != "stale":
             record.status = "stale"
-            _save_process(campaign, record)
+            if persist:
+                _save_process(campaign, record)
         return "stale"
     return record.status
 

@@ -50,6 +50,8 @@ class DurableObjectStore:
         factory: Callable[[Dict[str, Any]], T],
         dedup_field: Optional[str] = None,
         id_attr: Optional[str] = None,
+        *,
+        read_only: bool = False,
     ):
         """
         `id_attr` names the attribute holding an object's own identifier. When
@@ -57,10 +59,16 @@ class DurableObjectStore:
         what lets a subclass be a declaration rather than a reimplementation.
         """
         self.base_dir = Path(base_dir).resolve()
-        self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.read_only = read_only
+        if not read_only:
+            self.base_dir.mkdir(parents=True, exist_ok=True)
         self._factory = factory
         self._dedup_field = dedup_field
         self._id_attr = id_attr
+
+    def _require_writable(self) -> None:
+        if self.read_only:
+            raise PermissionError("Writes are disabled for this read-only store.")
 
     def _path(self, obj_id: str) -> Path:
         if not isinstance(obj_id, str) or not _SAFE_OBJECT_ID.fullmatch(obj_id):
@@ -70,6 +78,7 @@ class DurableObjectStore:
         return self.base_dir / f"{obj_id}{self._filename_suffix}"
 
     def save(self, obj_id: str, data: Dict[str, Any]) -> Path:
+        self._require_writable()
         target = self._path(obj_id)
         if target.is_file() and self._dedup_field:
             try:
@@ -93,6 +102,7 @@ class DurableObjectStore:
         `save(object)` convenience that shadows the two-argument base, so
         dispatching through `self` would call the wrapper that called us.
         """
+        self._require_writable()
         if not self._id_attr:
             raise ArtifactIdentityError(
                 "save_object requires the store to declare id_attr."
@@ -108,6 +118,7 @@ class DurableObjectStore:
 
     def quarantine(self, path: Path) -> Optional[Path]:
         """Rename an unreadable file to `<name>.corrupt-<utc ts>`; never deletes."""
+        self._require_writable()
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         target = path.with_name(f"{path.name}.corrupt-{stamp}")
         try:
@@ -131,8 +142,11 @@ class DurableObjectStore:
             try:
                 objects.append(self._factory(safe_load_json(p)))
             except Exception as exc:
-                moved = self.quarantine(p)
-                logger.warning("skipping unreadable store file %s (quarantined as %s): %s", p, moved, exc)
+                moved = None if self.read_only else self.quarantine(p)
+                logger.warning(
+                    "skipping unreadable store file %s (%s): %s",
+                    p, "preserved unchanged" if self.read_only else f"quarantined as {moved}", exc,
+                )
                 if on_corrupt is not None:
                     try:
                         on_corrupt(p, moved, exc)

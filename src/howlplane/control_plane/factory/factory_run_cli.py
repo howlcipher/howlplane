@@ -378,10 +378,12 @@ def cmd_factory_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _factory_state_store(args: argparse.Namespace):
+def _factory_state_store(args: argparse.Namespace, *, read_only: bool = False):
     from pathlib import Path
     from howlplane.control_plane.factory.supervisor_state import SupervisorStateStore
-    return SupervisorStateStore(Path(args.state_dir).resolve() / "supervisor")
+    return SupervisorStateStore(
+        Path(args.state_dir).resolve() / "supervisor", read_only=read_only
+    )
 
 
 def _factory_workspace(args: argparse.Namespace) -> Optional[str]:

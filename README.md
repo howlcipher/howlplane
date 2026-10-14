@@ -145,6 +145,12 @@ root in `PYTHONPATH`. A source checkout does not require an editable package
 installation for module discovery. Runtime dependencies must still be installed
 in the selected Python environment; rendering a unit does not start a service.
 
+Default `factory status` and the everyday status surface do not initialize state
+directories or records, quarantine corrupt artifacts, or persist derived process
+states. Unreadable artifacts remain unchanged and are reported diagnostically.
+Missing or malformed state has no inferred creation timestamp. Explicit
+`--publish` and `--arm-periodic` retain their documented snapshot/marker writes.
+
 `factory status` reports the persisted supervisor state without treating an
 active dispatch as a process restart. Startup still reconciles interrupted work.
 
