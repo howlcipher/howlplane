@@ -45,6 +45,24 @@ def binding(tmp_path):
     return contract, queue, workspace
 
 
+@pytest.fixture
+def unit_args(binding, tmp_path):
+    import argparse
+    import sys
+    contract, queue, workspace = binding
+    target = tmp_path / 'target'
+    (target / '.git').mkdir(parents=True)
+    checkout = tmp_path / 'controller'
+    package = checkout / 'src/howlplane/control_plane'
+    package.mkdir(parents=True)
+    (package / 'cli.py').write_text('# isolated source fixture')
+    return argparse.Namespace(
+        checkout=checkout, python=Path(sys.executable), state_dir=workspace,
+        target_repo=target, output=tmp_path / 'candidate.service',
+        worker_path='/usr/bin:/bin', queue_file=queue, mission_contract=contract,
+    )
+
+
 def test_read_consumes_lineage_limits_attempts_and_decisions_without_writes(binding):
     contract, queue, workspace = binding
     before = {p.name: p.read_bytes() for p in workspace.iterdir()}
@@ -168,23 +186,11 @@ def test_read_only_dry_run_reports_real_campaign_not_zero_native_history(binding
     assert {p.name: p.read_bytes() for p in workspace.iterdir()} == before
 
 
-def test_service_uses_finite_queue_shared_mission_and_no_inference(binding, tmp_path):
-    import argparse
-    import sys
+def test_empty_native_queue_is_not_installable_as_productive_supervision(unit_args):
     from scripts.install_factory_service import install
-    contract, queue, workspace = binding
-    target = tmp_path / 'target'
-    (target / '.git').mkdir(parents=True)
-    checkout = tmp_path / 'controller'
-    (checkout / 'src/howlplane/control_plane').mkdir(parents=True)
-    (checkout / 'src/howlplane/control_plane/cli.py').write_text('# source fixture')
-    # Empty native queues are not silently reported as productive supervision.
-    args = argparse.Namespace(checkout=checkout, python=Path(sys.executable), state_dir=workspace,
-                              target_repo=target, output=tmp_path / 'candidate.service',
-                              worker_path='/usr/bin:/bin', queue_file=queue, mission_contract=contract)
     with pytest.raises(ValueError, match='exactly match'):
-        install(args)
-    assert not args.output.exists()
+        install(unit_args)
+    assert not unit_args.output.exists()
 
 
 def native_task(binding, repo):
@@ -223,22 +229,11 @@ def test_native_session_completion_and_repeated_invocation_do_not_recount(bindin
     assert (workspace / 'state.json').read_bytes() == before
 
 
-def test_reviewed_finite_unit_preserves_native_session_retry_protocol(binding, tmp_path):
-    import argparse
-    import sys
+def test_reviewed_finite_unit_preserves_native_session_retry_protocol(binding, unit_args):
     from scripts.install_factory_service import install
-    contract, queue, workspace = binding
-    target = tmp_path / 'target'
-    (target / '.git').mkdir(parents=True)
-    checkout = tmp_path / 'controller'
-    (checkout / 'src/howlplane/control_plane').mkdir(parents=True)
-    (checkout / 'src/howlplane/control_plane/cli.py').write_text('# source fixture')
-    native_task(binding, target)
-    output = tmp_path / 'finite.service'
-    install(argparse.Namespace(checkout=checkout, python=Path(sys.executable), state_dir=workspace,
-                               target_repo=target, output=output, worker_path='/usr/bin:/bin',
-                               queue_file=queue, mission_contract=contract))
-    unit = output.read_text()
+    native_task(binding, unit_args.target_repo)
+    install(unit_args)
+    unit = unit_args.output.read_text()
     assert '"factory" "queue"' in unit and '"--mission-contract"' in unit
     assert '"--retry" "remaining"' in unit and '"--max-tasks" "1"' in unit
     assert '--resume-stopped' not in unit and 'Environment=HOWL_FORBID_LOCAL_INFERENCE=1' in unit
@@ -423,34 +418,24 @@ def test_different_tasks_share_cumulative_applicable_limits(binding, limit):
     assert ('root-cause' if limit == 'root' else 'cycle') in mission.admit('second', records)
 
 
-def test_service_runtime_default_repository_matches_validated_target(binding, tmp_path):
-    import argparse
+def test_service_runtime_default_repository_matches_validated_target(binding, unit_args):
     import shlex
-    import sys
     from scripts.install_factory_service import install
     from howlplane.control_plane import cli
     from howlplane.control_plane.factory.task_queue import load_queue
-    contract, queue, workspace = binding
-    target = tmp_path / 'target'
-    (target / '.git').mkdir(parents=True)
-    checkout = tmp_path / 'controller'
-    (checkout / 'src/howlplane/control_plane').mkdir(parents=True)
-    (checkout / 'src/howlplane/control_plane/cli.py').write_text('# source fixture')
-    native_task(binding, target)
+    contract, queue, _ = binding
+    native_task(binding, unit_args.target_repo)
     native = json.loads(queue.read_text())
     del native['tasks'][0]['repo']
     write_json(queue, native)
     data = json.loads(contract.read_text())
     data['queue_sha256'] = hashlib.sha256(queue.read_bytes()).hexdigest()
     write_json(contract, data)
-    output = tmp_path / 'finite.service'
-    install(argparse.Namespace(checkout=checkout, python=Path(sys.executable), state_dir=workspace,
-                               target_repo=target, output=output, worker_path='/usr/bin:/bin',
-                               queue_file=queue, mission_contract=contract))
+    install(unit_args)
     command = shlex.split(next(
-        line.removeprefix('ExecStart=:') for line in output.read_text().splitlines()
+        line.removeprefix('ExecStart=:') for line in unit_args.output.read_text().splitlines()
         if line.startswith('ExecStart=:')
     ))
-    args = cli.build_parser().parse_args(command[3:])
-    assert args.repo == str(target)
-    assert load_queue(queue, Path(args.repo))[0].repo == target.resolve()
+    runtime = cli.build_parser().parse_args(command[3:])
+    assert runtime.repo == str(unit_args.target_repo)
+    assert load_queue(queue, Path(runtime.repo))[0].repo == unit_args.target_repo.resolve()

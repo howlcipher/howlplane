@@ -1048,3 +1048,5 @@ missing optional CLI into generic unavailability.
 * Refuse changed source/queue bindings, alternate retry ledgers, duplicate canonical aliases and direct continuous Factory adoption of external mission state. Verification tasks require their own resumable acceptance checkpoint and exact recorded artifact Git state.
 * Add `orchestrate resume --verification-only`: rerun explicit tests and acceptance without reopening completed implementation, including when acceptance rejects the result.
 * Render a bounded native-queue service with the inference ban and non-restarting configuration/mission-boundary failures. Installation, live provider recovery and default-branch availability require separate verification.
+
+* Consolidate repeated service-rendering test setup into one fixture, preserving the existing duplication ceiling and all boundary assertions.
