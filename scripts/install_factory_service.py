@@ -30,6 +30,26 @@ def install(args):
         raise ValueError("Python must be an executable absolute path")
     command = [str(python), "-m", "howlplane.control_plane.cli", "factory", "run",
                "--state-dir", str(state), "--target-repo", str(target), "--resume-stopped"]
+    queue_file = getattr(args, "queue_file", None)
+    mission_contract = getattr(args, "mission_contract", None)
+    if bool(queue_file) != bool(mission_contract):
+        raise ValueError("finite mission service requires both --queue-file and --mission-contract")
+    if mission_contract:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+        from howlplane.control_plane.factory.mission_binding import MissionBinding
+        from howlplane.control_plane.factory.task_queue import load_queue
+        binding = MissionBinding.load(Path(mission_contract), Path(queue_file))
+        if binding.workspace != state:
+            raise ValueError("mission workspace must equal service --state-dir")
+        tasks = load_queue(Path(queue_file).resolve(), target, document=binding.queue_document)
+        if not tasks or set(t.id for t in tasks) != set(binding.contract["tasks"]):
+            raise ValueError("finite service tasks must exactly match the pinned mission mapping")
+        command = [str(python), "-m", "howlplane.control_plane.cli", "factory", "queue",
+                   str(Path(queue_file).resolve()), "--repo", str(target),
+                   "--mission-contract", str(Path(mission_contract).resolve()),
+                   "--max-tasks", str(len(tasks)), "--stop-on-failure", "--json"]
+        for task in tasks:
+            command.extend(["--retry", task.id])
     # WorkingDirectory is a path directive, not an Exec argument list: quotes
     # are literal there and turn an absolute path into an invalid relative one.
     unit_quote(checkout)
@@ -43,8 +63,10 @@ def install(args):
         ),
         "Environment=" + unit_quote("PATH=" + args.worker_path),
         "Environment=PYTHONUNBUFFERED=1",
+        "Environment=HOWL_FORBID_LOCAL_INFERENCE=1",
         "ExecStart=:" + " ".join(unit_quote(arg) for arg in command),
-        "Restart=on-failure", "RestartSec=30", "KillMode=mixed",
+        "Restart=on-failure", "RestartPreventExitStatus=1 78" if mission_contract else "RestartPreventExitStatus=",
+        "RestartSec=30", "KillMode=mixed",
         "TimeoutStopSec=300", "UMask=0077",
         "StandardOutput=journal", "StandardError=journal",
         "SyslogIdentifier=howlplane-factory",
@@ -68,6 +90,8 @@ def main():
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--target-repo", type=Path, required=True)
+    parser.add_argument("--queue-file", type=Path, help="Finite existing-mission native queue")
+    parser.add_argument("--mission-contract", type=Path, help="Reviewed pinned mission binding")
     config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
     parser.add_argument("--output", type=Path,
                         default=config / "systemd/user/howlplane-factory.service")

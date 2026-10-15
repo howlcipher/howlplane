@@ -189,9 +189,10 @@ def _task(raw: Any, position: int, base: Path, default_repo: Path, parser: argpa
                      _fingerprint(raw, resolved), args)
 
 
-def load_queue(path: Path, default_repo: Path) -> list[QueueTask]:
+def load_queue(path: Path, default_repo: Path, *, document: dict[str, Any] | None = None) -> list[QueueTask]:
     """Validate the whole queue before anything runs; one bad entry rejects it all."""
-    document = safe_load_json(path)
+    if document is None:
+        document = safe_load_json(path)
     if not isinstance(document, dict) or document.get("schema") != QUEUE_SCHEMA:
         raise ValueError(f"Queue must be a JSON object with schema {QUEUE_SCHEMA}")
     if not isinstance(document.get("tasks"), list):
@@ -465,21 +466,50 @@ class QueueFactory:
     """Select, launch, record, continue. Finite by construction: one dispatch per task per run."""
 
     def __init__(self, tasks: list[QueueTask], ledger: Ledger, launcher: Launcher | None = None,
-                 retry: set[str] | None = None, stream: TextIO | None = None) -> None:
+                 retry: set[str] | None = None, stream: TextIO | None = None,
+                 mission: Any = None) -> None:
         self.tasks = tasks
         self.ledger = ledger
         self.launcher = launcher or orchestration.command
         self.retry = retry or set()
         self.stream = stream or sys.stderr
         self.run_id = os.urandom(8).hex()
+        self.mission = mission
 
     def _say(self, label: str, message: str) -> None:
         self.stream.write(f"FACTORY {label:<9} {orchestration.redact(message)}\n")
         self.stream.flush()
 
+    def _mission_reason(self, dispatch: Dispatch) -> str | None:
+        if self.mission is None:
+            return None
+        reason = self.mission.admit(dispatch.task.id, self.ledger.records)
+        if reason:
+            return reason
+        mapping = self.mission.contract["tasks"][dispatch.task.id]
+        if mapping["purpose"] == "verification":
+            session = _load_session(dispatch.session_id) if dispatch.session_id else None
+            if dispatch.action != "resume" or dispatch.supersede or not session or session.get("stage") != "acceptance":
+                return "verification requires this task's unfinished acceptance session; fresh engineering is forbidden"
+            expected = mapping.get("artifact_fingerprint")
+            if not expected or orchestration.fingerprint(orchestration.evidence(dispatch.task.repo)) != expected:
+                return "accepted artifact Git state differs from the pinned checkpoint"
+        return None
+
     def plan(self) -> dict[str, Any]:
         """What a run would do next. Reads only: no session, ledger, or queue changes."""
-        choice, skipped = next_task(self.tasks, self.ledger, self.retry, set())
+        attempted: set[str] = set()
+        skipped: dict[str, str] = {}
+        while True:
+            choice, reasons = next_task(self.tasks, self.ledger, self.retry, attempted)
+            skipped.update(reasons)
+            if choice is None:
+                break
+            reason = self._mission_reason(choice)
+            if not reason:
+                break
+            skipped[choice.task.id] = reason
+            attempted.add(choice.task.id)
         return {"next": choice.task.id if choice else None, "dispatch": choice.describe() if choice else None,
                 "skipped": skipped}
 
@@ -498,6 +528,11 @@ class QueueFactory:
                     break
                 task = dispatch.task
                 attempted.add(task.id)
+                reason = self._mission_reason(dispatch)
+                if reason:
+                    blocked[task.id] = reason
+                    continue
+                verification_only = bool(self.mission and self.mission.contract["tasks"][task.id]["purpose"] == "verification")
                 self._say("SELECT", f"{task.id}: {task.goal}")
                 try:
                     superseded.extend(self._supersede(dispatch))
@@ -511,6 +546,8 @@ class QueueFactory:
                 else:
                     self._say("START", f"{task.id} revision {task.revision}")
                 args = task.launch_args(quiet, no_progress, heartbeat, resume=dispatch.action == "resume")
+                if verification_only:
+                    args.verification_only = True
                 outcome = self._launch(dispatch, args)
                 results.append(outcome)
                 session = f" (session {outcome['session_id']})" if outcome["session_id"] else ""
@@ -550,6 +587,12 @@ class QueueFactory:
                    "run_id": self.run_id, "repo": str(task.repo)}
         if dispatch.session_id:
             started["session_id"] = dispatch.session_id
+        if self.mission:
+            mapping = self.mission.contract["tasks"][task.id]
+            started.update(mission_id=self.mission.contract["mission_id"],
+                           canonical_queue_id=mapping["queue_id"], purpose=mapping["purpose"],
+                           root_cause=mapping.get("root_cause"), secondary_workflow=mapping.get("secondary_workflow"),
+                           mission_contract_sha256=self.mission.contract_digest)
         self.ledger.append(started)
         error = None
         try:
@@ -589,14 +632,33 @@ def _describe(dispatch: dict[str, Any]) -> str:
 
 
 def command(args: argparse.Namespace, launcher: Launcher | None = None) -> int:
+    from howlplane.control_plane.factory.mission_binding import MissionBinding
+    contract = getattr(args, "mission_contract", None)
+    mission = MissionBinding.load(Path(contract), Path(args.queue_file)) if contract else None
+    # Acquire before even loading mutable native ledger/session state. A competing
+    # owner must observe an error and must never write a contention checkpoint.
+    if mission:
+        if getattr(args, "ledger", None) and Path(args.ledger).resolve() != mission.ledger_path:
+            raise ValueError("mission native ledger is pinned; changing it would reset retries")
+        args.ledger = str(mission.ledger_path)
+    ownership = mission.exclusive() if mission and not args.dry_run else contextlib.nullcontext()
+    with ownership:
+        if mission:
+            os.environ["HOWL_FORBID_LOCAL_INFERENCE"] = "1"
+        return _command(args, launcher, mission)
+
+
+def _command(args: argparse.Namespace, launcher: Launcher | None, mission: Any) -> int:
     queue = Path(args.queue_file).resolve()
-    tasks = load_queue(queue, Path(getattr(args, "repo", None) or os.getcwd()).resolve())
+    tasks = load_queue(queue, Path(getattr(args, "repo", None) or os.getcwd()).resolve(),
+                       document=mission.queue_document if mission else None)
     ledger = Ledger(Path(args.ledger).resolve() if getattr(args, "ledger", None) else ledger_path(queue))
-    factory = QueueFactory(tasks, ledger, launcher=launcher, retry=set(getattr(args, "retry", None) or []))
+    factory = QueueFactory(tasks, ledger, launcher=launcher, retry=set(getattr(args, "retry", None) or []), mission=mission)
+    mission_info = {"mission": mission.projection()} if mission else {}
     if args.dry_run:
         plan = factory.plan()
         if args.json:
-            print(json.dumps({"queue": str(queue), "ledger": str(ledger.path), **plan}, indent=2))
+            print(json.dumps({"queue": str(queue), "ledger": str(ledger.path), **mission_info, **plan}, indent=2))
         else:
             print(f"Queue: {queue}\nLedger: {ledger.path}\nNext task: {plan['next'] or 'none'}")
             if plan["dispatch"]:
@@ -610,7 +672,7 @@ def command(args: argparse.Namespace, launcher: Launcher | None = None) -> int:
         summary = factory.run(max_tasks=args.max_tasks, stop_on_failure=args.stop_on_failure,
                               quiet=args.quiet, no_progress=args.no_progress, heartbeat=args.heartbeat)
     if args.json:
-        print(json.dumps({"queue": str(queue), "ledger": str(ledger.path), **summary}, indent=2))
+        print(json.dumps({"queue": str(queue), "ledger": str(ledger.path), **mission_info, **summary}, indent=2))
     else:
         print("HOWL FACTORY REPORT")
         print(f"Queue: {queue}\nLedger: {ledger.path}\nRun: {summary['run_id']}")
@@ -623,6 +685,8 @@ def command(args: argparse.Namespace, launcher: Launcher | None = None) -> int:
         for task_id, reason in summary["skipped"].items():
             print(f"  {task_id}: not run; {reason}")
         print(f"Stopped: {summary['stop_reason']}")
+    if mission and summary["blocked"]:
+        return 78  # configuration/mission boundary: service must not restart
     statuses = [result["status"] for result in summary["results"]]
     if INTERRUPTED in statuses:
         return 130
