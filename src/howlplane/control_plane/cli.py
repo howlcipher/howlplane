@@ -1789,6 +1789,7 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_queue.add_argument("queue_file", help="Path to task queue JSON file")
     p_queue.add_argument("--dry-run", action="store_true", help="Report planned execution without launching")
     p_queue.add_argument("--ledger", help="Explicit path to factory queue ledger file")
+    p_queue.add_argument("--mission-contract", help="Pinned existing-mission binding; shares controller ownership and preserves cumulative limits")
     p_queue.add_argument("--retry", action="append", default=[], help="Retry a previously failed or interrupted task ID (repeatable)")
     p_queue.add_argument("--max-tasks", type=_positive_int, default=None, help="Stop after dispatching this many tasks")
     p_queue.add_argument("--stop-on-failure", action="store_true", help="Stop after any task failure")

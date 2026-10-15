@@ -1041,3 +1041,10 @@ missing optional CLI into generic unavailability.
 - Pin all generated-application CI jobs to the tested HowlFrame7631 source
   contract instead of fetching a moving default branch. Preserve failing upstream
   compatibility evidence and document newer-runtime acceptance limitations.
+
+## Existing mission queue binding
+
+* Add a read-only pinned mission projection and host controller flock around the existing finite Factory queue, preserving accepted identities, cumulative attempt history and reserved engineering slots.
+* Refuse changed source/queue bindings, alternate retry ledgers, duplicate canonical aliases and direct continuous Factory adoption of external mission state. Verification tasks require their own resumable acceptance checkpoint and exact recorded artifact Git state.
+* Add `orchestrate resume --verification-only`: rerun explicit tests and acceptance without reopening completed implementation, including when acceptance rejects the result.
+* Render a bounded native-queue service with the inference ban and non-restarting configuration/mission-boundary failures. Installation, live provider recovery and default-branch availability require separate verification.

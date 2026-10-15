@@ -511,6 +511,17 @@ def cmd_factory_doctor(args: argparse.Namespace) -> int:
 def cmd_factory(args: argparse.Namespace) -> int:
     try:
         action = getattr(args, "factory_action", None)
+        state_dir = getattr(args, "state_dir", None)
+        if state_dir and action in {"run", "run-once", "start", "resume", "bootstrap", "canary", "stop"}:
+            from pathlib import Path
+            from howlplane.control_plane.atomic_io import safe_load_json
+            source = Path(state_dir).resolve() / "state.json"
+            if source.is_file():
+                existing = safe_load_json(source)
+                if isinstance(existing, dict) and "mission" in existing and "budget" in existing:
+                    raise ValueError("Existing mission state requires factory queue --mission-contract; "
+                                     "continuous Factory cannot adopt or override its ownership and limits")
+
         if action == "run-once":
             return _cli().cmd_factory_run_once(args)
         if action == "run":

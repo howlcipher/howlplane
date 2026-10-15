@@ -510,3 +510,14 @@ that same immutable commit. A moving sibling default branch is not a runtime
 compatibility guarantee: the newer sibling revision observed in CI fails
 generated notes/todo acceptance. The source pin records the tested contract; it does not establish
 compatibility with newer Frame commits or identify a published release by version.
+
+### Bind a finite queue to an existing mission
+
+`howlplane factory queue QUEUE.json --mission-contract BINDING.json --dry-run --json`
+reads a pinned external mission and reports its accepted lineage, cumulative limits,
+canonical queue, existing attempts, cycles and pending owner decisions. It grants no
+authority and never rewrites these records. Continuous `factory run` refuses external
+mission state; use the finite queue to retain existing session ownership and recovery.
+See [mission binding](documentation/FACTORY_QUEUE.md#existing-mission-binding) for the
+contract and deployment gates. A dry run or a rendered service unit proves neither
+completed work nor automatic recovery.

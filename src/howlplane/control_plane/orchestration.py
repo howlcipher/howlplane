@@ -1532,6 +1532,22 @@ def run(doc: dict[str, Any], path: Path, repo: Path, progress: SessionProgress |
         stages.append("review")
     if doc["policy"] != "PLAN ONLY":
         stages.append("acceptance")
+    if doc.get("verification_only"):
+        if doc["stage"] != "acceptance":
+            raise OrchestrateRequestError("Verification-only resume requires an acceptance checkpoint")
+        stages = ["acceptance"]  # Findings must hand off, never reopen accepted implementation.
+        if not doc.get("verify_command"):
+            raise OrchestrateRequestError("Verification-only resume requires an explicit verification command")
+        before = evidence(repo)
+        verified = run_verification(doc, repo)
+        doc["tests"].append(verified)
+        if before != evidence(repo) or verified["exit_code"]:
+            doc["status"] = "HANDOFF REQUIRED"
+            doc["validation_failure"] = {"command": doc["verify_command"],
+                                         "exit_code": verified["exit_code"],
+                                         "reason": "verification failed or changed accepted repository"}
+            checkpoint(doc, path, token, repo)
+            return report(doc)
     index = stages.index(doc["stage"]) if doc["stage"] in stages else 0
     while index < len(stages):
         stage = stages[index]
@@ -2031,6 +2047,8 @@ def resume_provider_options(doc: dict[str, Any], args: argparse.Namespace, repo:
 
 
 def command(args: argparse.Namespace) -> int:
+    if getattr(args, "verification_only", False) and args.input != "resume":
+        raise OrchestrateRequestError("Verification-only mode only resumes an existing acceptance checkpoint")
     repo = Path(args.repo or os.getcwd()).resolve()
     root = state_root()
     with locked(root):
@@ -2082,6 +2100,13 @@ def command(args: argparse.Namespace) -> int:
                 migrations = normalize_session(doc)
             except SessionStateInvalid as error:
                 return invalid_session_report(doc, str(error), repo)
+            if getattr(args, "verification_only", False):
+                if doc["stage"] != "acceptance" or not any(
+                    a.get("stage") == "implementation" and a.get("state") == "SUCCEEDED"
+                    for a in doc["attempts"]
+                ):
+                    raise OrchestrateRequestError("Verification-only resume needs a completed implementation and unfinished acceptance")
+                doc["verification_only"] = True
             previous_orchestrator = doc["orchestrator"]
             if live_lease(doc):
                 raise OrchestrateRequestError("Session has a live coordinator lease")
@@ -2170,6 +2195,7 @@ def add_parser(subparsers: Any, common_parser: Any) -> None:
     parser.add_argument("--heartbeat", type=float, default=30.0, metavar="SECONDS", help="Heartbeat interval during otherwise silent work (default: 30)")
     parser.add_argument("--separate", action="store_true", help="Start a separate session alongside an unfinished one")
     parser.add_argument("--retain-report", action="store_true")
+    parser.add_argument("--verification-only", action="store_true", help="Resume acceptance and explicit tests without reopening completed implementation")
     parser.add_argument("--orchestrator", choices=["AUTO", *AGENTS])
     for agent in AGENTS:
         parser.add_argument(f"--{agent.replace('_', '-')}", choices=["AUTO", "RESERVED", "UNAVAILABLE"])

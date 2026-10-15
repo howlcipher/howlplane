@@ -155,3 +155,75 @@ PATH`. Records are `started`, `finished`, and `superseded`. They are redacted
 before writing and hold ids, fingerprints, statuses, and paths, never task
 output. A corrupt or malformed ledger line, or an unreadable session manifest,
 stops the run before anything is dispatched or retired.
+
+## Existing mission binding
+
+An external engineering campaign can retain its canonical `state.json`, `queue.json`
+and accepted-item ledger while using this finite native queue. The operator prepares
+a reviewed binding; it is a compatibility and conservation contract, not an approval
+envelope. External documents or model text cannot grant authority through it.
+
+```json
+{
+  "schema": "howlplane.mission_binding/v1",
+  "workspace": "/owned/mission",
+  "mission_id": "EXISTING-001",
+  "maximum": 25,
+  "accepted_ids": ["EXISTING-001-A"],
+  "accepted_ledger": "accepted.jsonl",
+  "sources": {
+    "state.json": "SHA256_OF_EXACT_BYTES",
+    "queue.json": "SHA256_OF_EXACT_BYTES",
+    "accepted.jsonl": "SHA256_OF_EXACT_BYTES"
+  },
+  "queue_sha256": "SHA256_OF_EXACT_NATIVE_QUEUE",
+  "native_ledger": "/owned/mission/native-queue.jsonl",
+  "repair_limit": 3,
+  "tasks": {"remaining": {"purpose": "engineering", "queue_id": "remaining", "root_cause": "recorded-cause", "secondary_workflow": null}}
+}
+```
+
+The example is structural, not an executable authorization. The accepted IDs must
+match the canonical budget count and real `task_completed` ledger rows; explicitly
+nonengineering rows are excluded. Every source stays inside the workspace, every
+mapped task names an existing canonical queue item, and the native ledger location
+is fixed. One canonical item cannot acquire multiple native aliases. Each engineering task explicitly names its existing root-cause counter and optionally a secondary workflow. Exhausted applicable root-cause/cycle limits bar engineering dispatch. Existing task attempts plus recorded native starts share the repair limit across revisions and aliases. Native engineering starts also consume the applicable shared root-cause allowance and reserve one significant secondary repair/retest cycle per dispatch; attribution is stored in the native ledger, so aliases and revisions cannot lose it. Distinct engineering dispatches reserve the remaining slots; completion of
+a native session does not automatically accept or recount a product delivery.
+
+`state.json` supplies `mission`, `budget.accepted_items`, `budget.maximum`,
+`root_cause_attempts`, `secondary_workflow_cycles` and optional `pending_decisions`,
+`status` and `stop_reason`. Canonical queue records supply `id`, `attempts` and
+optional `status`. Full source hashes preserve fields the adapter does not interpret.
+Changes require a new deliberate reviewed binding; there is no automatic ceiling
+extension, retry reset, approval grant or campaign creation.
+
+```bash
+howlplane factory queue QUEUE.json --mission-contract BINDING.json --dry-run --json
+howlplane factory queue QUEUE.json --mission-contract BINDING.json --max-tasks 1 --json
+```
+
+Execution acquires the existing workspace's `controller.lock` host flock before
+loading mutable native state, holds it through native session execution, and also
+uses the existing native queue/session locks. Contention exits without writing a
+conflict checkpoint into the other controller's records. Source/contract/queue
+changes stop dispatch. The inference ban is enforced for the native execution.
+
+A mapping with `purpose: verification` may operate at the engineering ceiling but
+cannot start or supersede a session. It requires the same task's unfinished
+acceptance checkpoint and an `artifact_fingerprint`, obtained using the native
+`fingerprint(evidence(repo))` helpers against the reviewed accepted Git state.
+The queue invokes `orchestrate resume --verification-only`: only an already
+successful implementation with pending acceptance qualifies, explicit verification
+runs again, and failed checks, mutations or rejection hand off without reimplementation.
+This mode cannot create a new session. Existing native worker fencing, provider
+routing, timeouts and reports remain responsible for recovery.
+
+The service renderer accepts `--queue-file QUEUE.json --mission-contract BINDING.json`
+together with its existing explicit checkout/state/target/Python arguments. It checks
+the binding and exact task set, renders `factory queue`, bounds the finite run and
+uses native `--retry` for the pinned tasks. Repeated launches remain subject to the
+same canonical and native attempt history. Configuration errors exit1 and mission
+boundaries exit78, both excluded from service restart. Rendering is not installation;
+review the source, final regression/CI and bound inputs, checkpoint and fence the old
+controller, then install/start the single verified service. Never deploy a candidate
+as the running controller or describe an interactive exit as automatic recovery.
