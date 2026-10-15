@@ -2605,6 +2605,8 @@ Heroku and any 12 factor app design.</p>
         means that the value from <code>model_config['env_file']</code> should be used. You can also pass
         <code>None</code> to indicate that environment variables should not be loaded from an env file.
     _env_file_encoding: The env file encoding, e.g. <code>'latin-1'</code>. Defaults to <code>None</code>.
+    _env_file_depth: The number of parent directories of the current working directory to
+        search for the env file if it is not found there. Defaults to <code>0</code> (no search).
     _env_ignore_empty: Ignore environment variables where the value is an empty string. Default to <code>False</code>.
     _env_nested_delimiter: The nested env values delimiter. Defaults to <code>None</code>.
     _env_nested_max_split: The nested env values maximum nesting. Defaults to <code>None</code>, which means no limit.
