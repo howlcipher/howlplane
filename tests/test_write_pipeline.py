@@ -23,6 +23,7 @@ with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps({"argv": argv, "stdin_tty": os.isatty(0), "stdin_data": stdin_data,
                           "env_provider": os.environ.get("HOWLWRITER_PROVIDER"),
                           "env_review": os.environ.get("HOWLWRITER_REVIEW_PROVIDER"),
+                          "env_local_model": os.environ.get("HOWLWRITER_LOCAL_MODEL"),
                           "forbid_local": os.environ.get("HOWL_FORBID_LOCAL_INFERENCE")}) + "\n")
 if argv == ["--version"]:
     print("howlwriter 0.1.0")
@@ -34,6 +35,8 @@ head = argv[:argv.index("--")] if "--" in argv else argv
 if "--owner-confirmed" in head or "--allow-remote" in head:
     sys.exit(97)  # an owner-only flag reached HowlWriter as an option
 code = int(os.environ.get("FAKE_WRITE_EXIT", "0"))
+if code == 3 and "writer" in head:
+    sys.stderr.write("warning: the draft cites 1 work(s) that are not in the sources: Smith, 2024\n")
 if code in (2, 4):
     sys.stderr.write("error: owner decision needed; run `howlwriter project authorize-remote demo`\n")
     sys.exit(code)
@@ -90,7 +93,7 @@ def test_compose_runs_every_stage_and_credits_howlwriter(tmp_path, fake_writer):
     assert [record["stages"][s]["status"] for s in ("preflight", "write", "check", "audit")] == ["COMPLETED"] * 4
     out = str(tmp_path / "run" / "write" / "output.md")
     assert writing_call(fake_writer)["argv"] == [
-        "--provider", "local", "--local-model", "qwen2.5:7b-instruct", "writer", "--out", out,
+        "--provider", "local", "--local-model", "qwen2.5:7b-instruct", "writer", "--fail-if-blocked", "--out", out,
         "--target-words", "200", "--", "A short note on backups"]
     assert record["stages"]["check"]["lint_findings"] == 1
     # Unlike `creative`, a write run must not forbid the local model it was asked to use.
@@ -99,6 +102,8 @@ def test_compose_runs_every_stage_and_credits_howlwriter(tmp_path, fake_writer):
     assert [(c["component"], c["operation"]) for c in audit["contributions"]] == [
         ("howlwriter", "GENERATED"), ("howlwriter", "CHECKED"), ("howlplane", "ORCHESTRATED")]
     assert audit["contributions"][0]["provider"] == "local"
+    assert audit["contributions"][0]["local_model"] == "qwen2.5:7b-instruct"
+    assert audit["contributions"][0]["ready"] is True and "citations" in audit["contributions"][0]["validation"]
     assert audit["owner_decisions_relayed"] == []
 
 
@@ -166,10 +171,31 @@ def test_owner_only_flags_are_refused_before_howlwriter_runs(tmp_path, fake_writ
 def test_howlwriter_cannot_prompt_or_inherit_an_unrecorded_model(tmp_path, fake_writer, monkeypatch):
     monkeypatch.setenv("HOWLWRITER_PROVIDER", "claude")
     monkeypatch.setenv("HOWLWRITER_REVIEW_PROVIDER", "agy")
+    monkeypatch.setenv("HOWLWRITER_LOCAL_MODEL", "qwen2.5:7b-instruct")
     assert run_cli(tmp_path, "--prompt", "Notes", "--provider", "local") == 0
     for call in fake_writer():
         assert call["stdin_tty"] is False and call["stdin_data"] == ""
-        assert call["env_provider"] is None and call["env_review"] is None
+        assert call["env_provider"] is None and call["env_review"] is None and call["env_local_model"] is None
+    # A local model named only in the environment is recorded and passed as a flag.
+    assert state(tmp_path)["inputs"]["local_model"] == "qwen2.5:7b-instruct"
+    assert writing_call(fake_writer)["argv"][:4] == ["--provider", "local", "--local-model", "qwen2.5:7b-instruct"]
+
+
+def test_an_environment_local_model_is_ignored_when_no_step_is_local(tmp_path, fake_writer, monkeypatch):
+    monkeypatch.setenv("HOWLWRITER_LOCAL_MODEL", "qwen2.5:7b-instruct")
+    assert run_cli(tmp_path, "--prompt", "Notes", "--provider", "codex") == 0
+    assert state(tmp_path)["inputs"]["local_model"] is None
+    assert "--local-model" not in writing_call(fake_writer)["argv"]
+
+
+def test_compose_that_cites_unsupplied_work_is_saved_and_exits_3(tmp_path, fake_writer, monkeypatch, capsys):
+    monkeypatch.setenv("FAKE_WRITE_EXIT", "3")
+    assert run_cli(tmp_path, "--prompt", "Notes", "--provider", "local") == 3
+    write = state(tmp_path)["stages"]["write"]
+    assert state(tmp_path)["status"] == "NOT_READY" and write["ready"] is False
+    assert "Smith, 2024" in write["not_ready_reason"]
+    out = capsys.readouterr().out
+    assert "check did not pass:" in out and "Smith, 2024" in out
 
 
 def test_humanize_rewrites_the_input_file(tmp_path, fake_writer):
@@ -180,6 +206,9 @@ def test_humanize_rewrites_the_input_file(tmp_path, fake_writer):
     assert argv[:3] == ["--provider", "agy", "humanize"]
     assert "--voice=plain" in argv and argv[-2:] == ["--", str(source.resolve())]
     assert state(tmp_path)["inputs"]["operation"] == "humanize"
+    # Nothing checks a rewrite, so the run completes without claiming the text is ready.
+    write = state(tmp_path)["stages"]["write"]
+    assert state(tmp_path)["status"] == "COMPLETED" and write["ready"] is None and write["validation"] is None
 
 
 def test_claude_inside_a_claude_code_session_needs_allow_nested(tmp_path, fake_writer, monkeypatch):

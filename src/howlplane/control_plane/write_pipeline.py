@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -55,8 +56,12 @@ RUN_EXIT = {"COMPLETED": 0, "FAILED": 1, "NEEDS_INPUT": EXIT_NEEDS_INPUT, "NOT_R
 
 #: Decisions only the owner makes; Plane must never put them on HowlWriter's command line.
 OWNER_ONLY_FLAGS = ("--owner-confirmed", "--allow-remote")
-#: Choices HowlWriter would otherwise read from the environment, unrecorded.
-INHERITED_CHOICES = ("HOWLWRITER_PROVIDER", "HOWLWRITER_REVIEW_PROVIDER")
+#: Choices HowlWriter would otherwise read from the environment, unrecorded. A local model
+#: named in the environment is taken into the run's inputs instead (see _inputs_from_args).
+INHERITED_CHOICES = ("HOWLWRITER_PROVIDER", "HOWLWRITER_REVIEW_PROVIDER", "HOWLWRITER_LOCAL_MODEL")
+#: What HowlWriter checked before a draft counts as ready; humanize has no such check.
+VALIDATION = {"project-draft": "HowlWriter project validation (verdict READY_FOR_HUMAN_REVIEW)",
+              "compose": "HowlWriter specificity check (citations and exact identifiers are in the sources or prompt)"}
 
 
 class WriteRun(StagedRun):
@@ -72,7 +77,7 @@ class WriteRun(StagedRun):
         return {k: v for k, v in env.items() if k not in INHERITED_CHOICES}
 
     def _final_status(self) -> str:
-        return "COMPLETED" if self.state["stages"]["write"].get("ready", True) else "NOT_READY"
+        return "NOT_READY" if self.state["stages"]["write"].get("ready") is False else "COMPLETED"
 
     # -- HowlWriter invocation ---------------------------------------------
     def _howlwriter(self, stage: str, args: List[str], *,
@@ -135,7 +140,7 @@ class WriteRun(StagedRun):
         operation = inputs["operation"]
         out = self.path("write", "output.md")
         if operation == "compose":
-            args = [*self._model_flags(), "writer", "--out", str(out)]
+            args = [*self._model_flags(), "writer", "--fail-if-blocked", "--out", str(out)]
             if inputs.get("target_words"):
                 args += ["--target-words", str(inputs["target_words"])]
             # After `--` the prompt is the positional argument, whatever it starts with.
@@ -164,7 +169,11 @@ class WriteRun(StagedRun):
             validation = ((_load(report).get("provenance") or {}).get("validation") or {})
             extra.update(verdict=validation.get("verdict"), issue_counts=validation.get("issue_counts"),
                          draft_path=_load(report).get("path"))
-        extra["ready"] = result.returncode == 0
+        # Ready only means something where HowlWriter checked the text; otherwise it is unknown.
+        extra["validation"] = VALIDATION.get(operation)
+        extra["ready"] = result.returncode == 0 if extra["validation"] else None
+        if result.returncode == EXIT_NOT_READY and result.stderr.strip():
+            extra["not_ready_reason"] = result.stderr[-STDERR_TAIL:].strip()
         if not out.exists():
             raise StageFailed("write", "howlwriter reported success but wrote no output")
         self._complete("write", outputs, **extra)
@@ -194,7 +203,7 @@ def write_audit(run: WriteRun) -> Dict[str, Any]:
         {"component": "howlwriter", "operation": operation, "subject": "write/output.md",
          "sha256": _sha256(output), "provider": inputs["provider"],
          "review_provider": inputs.get("review_provider"), "local_model": inputs.get("local_model"),
-         "verdict": write.get("verdict"), "ready": write.get("ready"),
+         "verdict": write.get("verdict"), "ready": write.get("ready"), "validation": write.get("validation"),
          "evidence": "write/result.json#provenance" if inputs["operation"] == "project-draft"
          else "write-run.json#stages.write"},
         {"component": "howlwriter", "operation": "CHECKED", "subject": "check/lint.json",
@@ -256,7 +265,9 @@ def _inputs_from_args(args: argparse.Namespace) -> Dict[str, Any]:
         "prompt": args.prompt,
         "provider": args.provider,
         "review_provider": args.review_provider,
-        "local_model": args.local_model,
+        # A model named only in the environment is recorded, then removed from the child's environment.
+        "local_model": args.local_model or (os.environ.get("HOWLWRITER_LOCAL_MODEL", "").strip() or None
+                                            if "local" in (args.provider, args.review_provider) else None),
         "project": args.project,
         "input": source,
         "voice": args.voice,
@@ -293,7 +304,10 @@ def _report(state: Dict[str, Any], as_json: bool) -> int:
         if write.get("verdict"):
             print(f"HowlWriter verdict: {write['verdict']}")
         if state["status"] == "NOT_READY":
-            print("The draft is saved but HowlWriter's validation did not pass; review write/result.json.")
+            print("The draft is saved but HowlWriter's check did not pass"
+                  + ("; review write/result.json." if write.get("verdict") else ":"))
+            for line in (write.get("not_ready_reason") or "").splitlines()[-6:]:
+                print(f"    | {line}")
     if state["status"] in _NEXT_STEP:
         print(_NEXT_STEP[state["status"]])
         print(f"  howlplane write resume --run-dir {state.get('run_dir', '<run-dir>')}")
