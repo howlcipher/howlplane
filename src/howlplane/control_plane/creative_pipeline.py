@@ -22,17 +22,14 @@ the run directory and the sandbox the operator names (which Create guards).
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
-import hashlib
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 from typing import Any, Dict, List, Optional
 
-from howlplane.control_plane.atomic_io import atomic_write_json
+from howlplane.control_plane.staged_run import StageFailed, StagedRun, load as _load
 
 STATE_SCHEMA = "howlplane.creative_run/v1"
 AUDIT_SCHEMA = "howlplane.creative_contribution_audit/v1"
@@ -42,76 +39,21 @@ STAGE_TIMEOUT_SECONDS = 900
 STDERR_TAIL = 1200
 
 
-class StageFailed(RuntimeError):
-    def __init__(self, stage: str, message: str, detail: Optional[Dict[str, Any]] = None):
-        super().__init__(f"{stage}: {message}")
-        self.stage = stage
-        self.detail = detail or {}
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _load(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-class CreativeRun:
+class CreativeRun(StagedRun):
     """One persisted Dream -> Writer -> Create run."""
 
-    def __init__(self, run_dir: Path, inputs: Optional[Dict[str, Any]] = None,
-                 env: Optional[Dict[str, str]] = None):
-        self.run_dir = run_dir.expanduser().resolve()
-        self.state_path = self.run_dir / "creative-run.json"
-        if self.state_path.exists():
-            self.state = _load(self.state_path)
-            if inputs and inputs != self.state["inputs"]:
-                raise ValueError("run directory already holds a run with different inputs; use resume")
-        else:
-            if inputs is None:
-                raise ValueError(f"no creative run found in {self.run_dir}")
-            self.run_dir.mkdir(parents=True, exist_ok=True)
-            self.state = {
-                "schema": STATE_SCHEMA,
-                "run_id": "crt-" + hashlib.sha256(
-                    (str(self.run_dir) + _now()).encode()).hexdigest()[:12],
-                "created_at": _now(),
-                "inputs": inputs,
-                "stages": {},
-                "status": "PENDING",
-            }
-            self._save()
-        base_env = dict(os.environ if env is None else env)
+    KIND = "creative"
+    STATE_FILE = "creative-run.json"
+    STATE_SCHEMA = STATE_SCHEMA
+    RUN_ID_PREFIX = "crt"
+    STAGES = STAGES
+
+    def _child_env(self, env: Dict[str, str]) -> Dict[str, str]:
         # Every child component inherits the restrictive inference policy.
-        base_env["HOWL_FORBID_LOCAL_INFERENCE"] = "1"
-        self.env = base_env
+        return {**env, "HOWL_FORBID_LOCAL_INFERENCE": "1"}
 
-    # -- persistence -------------------------------------------------------
-    def _save(self) -> None:
-        atomic_write_json(self.state_path, self.state)
-
-    def path(self, *parts: str) -> Path:
-        target = self.run_dir.joinpath(*parts)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        return target
-
-    def _stage_done(self, stage: str) -> bool:
-        record = self.state["stages"].get(stage)
-        if not record or record.get("status") != "COMPLETED":
-            return False
-        return all(Path(o["path"]).exists() and _sha256(Path(o["path"])) == o["sha256"]
-                   for o in record.get("outputs", []))
-
-    def _complete(self, stage: str, outputs: List[Path], **extra: Any) -> None:
-        record = self.state["stages"].setdefault(stage, {})
-        record.update(status="COMPLETED", finished_at=_now(),
-                      outputs=[{"path": str(p), "sha256": _sha256(p)} for p in outputs], **extra)
-        self._save()
+    def _skip(self, stage: str) -> bool:
+        return stage == "preflight" and bool(self.state["inputs"].get("skip_doctor"))
 
     # -- component invocation ---------------------------------------------
     def _component(self, stage: str, command: str, args: List[str], *,
@@ -280,36 +222,6 @@ class CreativeRun:
         out = self.path("contribution-audit.json")
         out.write_text(json.dumps(contribution_audit(self), indent=2), encoding="utf-8")
         self._complete("audit", [out])
-
-    # -- driver ------------------------------------------------------------
-    def execute(self) -> Dict[str, Any]:
-        self.state["status"] = "RUNNING"
-        self._save()
-        for stage in STAGES:
-            if self._stage_done(stage):
-                continue
-            if stage == "preflight" and self.state["inputs"].get("skip_doctor"):
-                self._complete("preflight", [], skipped=True)
-                continue
-            self.state["stages"][stage] = {"status": "RUNNING", "started_at": _now()}
-            self._save()
-            try:
-                getattr(self, f"stage_{stage}")()
-            except StageFailed as error:
-                self.state["stages"][stage].update(status="FAILED", finished_at=_now(),
-                                                   error=str(error), **error.detail)
-                self.state.update(status="FAILED", failed_stage=stage)
-                self._save()
-                return self.state
-            except (OSError, ValueError, KeyError) as error:
-                self.state["stages"][stage].update(status="FAILED", finished_at=_now(),
-                                                   error=f"{type(error).__name__}: {error}")
-                self.state.update(status="FAILED", failed_stage=stage)
-                self._save()
-                return self.state
-        self.state.update(status="COMPLETED", failed_stage=None, completed_at=_now())
-        self._save()
-        return self.state
 
 
 def contribution_audit(run: CreativeRun) -> Dict[str, Any]:

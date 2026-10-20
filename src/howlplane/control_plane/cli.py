@@ -1190,7 +1190,7 @@ _TOP_LEVEL_HELP_GROUPS = [
     ("Everyday", ["setup", "start", "status", "logs", "stop", "approve", "reject", "doctor"]),
     ("Governance and recovery", ["resume", "cancel", "unlock", "tia", "config"]),
     ("Diagnostics and inspection", ["agents", "providers", "route", "trace", "explore", "metrics", "report"]),
-    ("Creative pipeline", ["creative"]),
+    ("Writing and creative pipelines", ["write", "creative"]),
     ("Factory internals", ["factory"]),
 ]
 
@@ -1340,8 +1340,9 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     _add_workspace_trust_argument(p_doctor)
     p_doctor.add_argument("--json", action="store_true", help="Output versioned JSON")
 
-    from howlplane.control_plane import creative_pipeline
+    from howlplane.control_plane import creative_pipeline, write_pipeline
     creative_pipeline.add_parser(subparsers, common_parser)
+    write_pipeline.add_parser(subparsers, common_parser)
 
     # agents
     p_agents = subparsers.add_parser("agents", parents=[common_parser], help="Inspect supported agent CLIs")
@@ -2588,6 +2589,7 @@ HANDLERS = {
     "explore": cmd_explore,
     "trace": cmd_trace,
     "creative": lambda args: __import__("howlplane.control_plane.creative_pipeline", fromlist=["command"]).command(args),
+    "write": lambda args: __import__("howlplane.control_plane.write_pipeline", fromlist=["command"]).command(args),
 }
 
 ACTIONS = HANDLERS
