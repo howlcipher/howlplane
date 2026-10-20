@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.15-slim
 
 # git is required by the control plane (baseline capture and verification).
 RUN apt-get update \
