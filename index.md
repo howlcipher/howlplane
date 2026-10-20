@@ -412,10 +412,12 @@ Plane hands the prompt to the `howlwriter` CLI on PATH and records each stage
 (preflight, write, check, audit) in the run directory. The operation follows the
 inputs (`--project` drafts that project, `--input` humanizes a file, otherwise
 compose) unless `--operation` names one. `--provider` is required and is the only
-model choice HowlWriter sees.
+model choice HowlWriter sees; a local model comes from `--local-model` or
+`HOWLWRITER_LOCAL_MODEL` and is recorded either way.
 
-The exit code is HowlWriter's: 0 ready, 3 saved but not ready (HowlWriter's
-validation did not pass), 4 waiting for a decision only the owner makes, 2 a
+The exit code is HowlWriter's: 0 ready, 3 saved but not ready (a project draft's
+validation did not pass, or a composed draft cites a work or names an exact
+identifier that nothing given to the model supports), 4 waiting for a decision only the owner makes, 2 a
 missing choice or a remote model the project is not authorized for. Plane never
 makes those decisions for the owner. Inside a Claude Code session `--provider
 claude` needs `--allow-nested`, because it would start a second session on the

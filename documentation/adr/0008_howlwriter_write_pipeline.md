@@ -49,7 +49,9 @@ pattern as `creative_pipeline.py`:
   run record names every model, and HowlWriter can never wait on a question that
   nobody sees.
 - `check` runs HowlWriter's deterministic `lint --json`; `write-audit.json`
-  credits HowlWriter with the text and HowlPlane with orchestration only.
+  credits HowlWriter with the text and HowlPlane with orchestration only, and
+  names the check behind `ready`. A humanized file has no such check, so its
+  `ready` is null rather than true.
 
 ## Consequences
 
@@ -66,7 +68,8 @@ pattern as `creative_pipeline.py`:
 - **Egress.** What leaves the machine is exactly what HowlWriter itself sends to
   the model named by `--provider`; `local` sends nothing. See `data_flows.md`.
 - **Coupling.** HowlPlane depends on HowlWriter's documented CLI contract (global
-  `--provider`, `writer`, `project draft --json --fail-if-blocked`, `humanize`,
+  `--provider`, `--local-model`, `writer --fail-if-blocked`,
+`project draft --json --fail-if-blocked`, `humanize`,
   `lint --json`, exit codes 2/3/4). A change there must update this pipeline and
   its tests.
 
