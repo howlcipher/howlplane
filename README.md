@@ -398,6 +398,31 @@ remote Dream exploration.
 
 ---
 
+## Writing with HowlWriter (`howlplane write`)
+
+```bash
+howlplane write run --run-dir runs/w1 --prompt "A short note on backups" --provider local
+howlplane write run --run-dir runs/w2 --project lab02 --prompt "Discuss the results" --provider codex
+howlplane write run --run-dir runs/w3 --input draft.md --provider local --voice plain   # humanize
+howlplane write resume --run-dir runs/w2                          # after the owner acts
+howlplane write status --run-dir runs/w2 --json
+```
+
+Plane hands the prompt to the `howlwriter` CLI on PATH and records each stage
+(preflight, write, check, audit) in the run directory. The operation follows the
+inputs (`--project` drafts that project, `--input` humanizes a file, otherwise
+compose) unless `--operation` names one. `--provider` is required and is the only
+model choice HowlWriter sees.
+
+The exit code is HowlWriter's: 0 ready, 3 saved but not ready (HowlWriter's
+validation did not pass), 4 waiting for a decision only the owner makes, 2 a
+missing choice or a remote model the project is not authorized for. Plane never
+makes those decisions for the owner. Inside a Claude Code session `--provider
+claude` needs `--allow-nested`, because it would start a second session on the
+same account. See `documentation/adr/0008_howlwriter_write_pipeline.md`.
+
+---
+
 ## HowlFrame Architectural Relationship & Dogfooding Position
 
 HowlPlane serves as a **primary real-world dogfooding consumer** of the [HowlFrame](https://github.com/howlcipher/howlframe) toolchain:

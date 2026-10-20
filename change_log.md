@@ -24,6 +24,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `howlplane write {run,resume,status}` (`write_pipeline.py`, schemas `howlplane.write_run/v1` and `howlplane.write_audit/v1`) hands a writing prompt to the `howlwriter` CLI as a governed, resumable run: compose, `project draft`, or humanize, chosen from the inputs, then HowlWriter's deterministic `lint` check and an audit. HowlWriter's exit codes are kept (3 not ready, 4 awaiting the owner, 2 needs input) and `write resume` retries the blocked stage. Plane never relays `--owner-confirmed` or `--allow-remote`, passes the prompt so it cannot become an option, runs HowlWriter with stdin closed and without inherited model choices, and refuses `--provider claude` inside a Claude Code session unless `--allow-nested`. Authorized by the §1.1.2 carve-out in `documentation/CONTROL_PLANE.md` (ADR 0008).
+
 - Native creative pipeline (Run 5 dogfood findings). `howlplane doctor --creative [--json] [--command-config F] [--repos-root D] [--workspace D]` (`creative_doctor.py`, schema `howlplane.doctor.creative/v1`) is a read-only PASS/WARN/FAIL preflight for the Dream -> Writer -> Create pipeline. It checks:
   - interpreter and venv staleness (missing `pyvenv.cfg` home, minor-version mismatch, patch drift)
   - installed versions and commits of howl-provider-core, howldream, howlwriter and howlcreate

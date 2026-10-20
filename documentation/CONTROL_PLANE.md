@@ -58,6 +58,37 @@ not suspend it.
 
 See `documentation/adr/0006_persistent_factory_supervisor.md`.
 
+### 1.1.2 Named Carve-Out: HowlWriter as a Governed Tool
+
+The freeze stands unchanged except for the one capability named here: a
+governed command, `howlplane write`, that hands a writing prompt to HowlWriter's
+own CLI and records the run. Real operational usage exposed the defects the
+freeze asks for. The evidence, measured from a real-assignment HowlWriter
+dogfood run on 2026-10-16 to 2026-10-19:
+
+| Evidence | Measurement | Defect class |
+| :--- | :--- | :--- |
+| Writing commands started through HowlPlane | **0 of 15** recorded commands; all were run by hand | Severe usability |
+| Drafts whose exit code hid a failed verdict | **2 of 2** model drafts exited 0 with verdict BLOCKED | Verification |
+| Commands covered by `howlplane creative` | **0 of 15** | Verification |
+
+**Scope of the carve-out.** One command family, `howlplane write
+{run,resume,status}`, that runs the `howlwriter` CLI as a subprocess, persists
+each stage to an explicit run directory, maps HowlWriter's documented exit codes
+to run states, and audits who wrote what.
+
+**What the carve-out does not license.** It grants no new authority mechanism and
+relays no owner decision: HowlPlane never passes HowlWriter's `--owner-confirmed`
+or `--allow-remote`. It does not license importing HowlWriter, an MCP surface,
+model-chosen operations, or any change to `AuthorityProfile`,
+`AuthorityEnvelope`, `HumanBoundaryGate` or `NEVER_DELEGATABLE_BOUNDARIES`.
+
+**Standing obligation.** As in §1.1.1, every pull request landing under this
+carve-out must cite the operational evidence that motivates it. The carve-out
+narrows the freeze; it does not suspend it.
+
+See `documentation/adr/0008_howlwriter_write_pipeline.md`.
+
 ### 1.2 Maintenance Priority Triage
 Future control-plane issues and maintenance requests are classified strictly into:
 
