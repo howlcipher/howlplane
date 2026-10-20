@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Fixed
 
+- `howlplane write` fixes from its first runs against a real local model: a local
+  model named only in `HOWLWRITER_LOCAL_MODEL` is now recorded in the run and the
+  audit (it was `null`) and passed as `--local-model`; compose passes
+  `writer --fail-if-blocked`, so a draft that cites an unsupplied work or invents
+  an exact identifier is saved as NOT_READY (exit 3) with HowlWriter's reason; and
+  the audit names the check behind `ready`, which is null for humanize instead of
+  true.
+
 - Generated Factory user units find the current `src/howlplane` package without
   relying on an ambient editable installation. Regression checks disable site
   packages and cover checkout paths with spaces. No service is installed or started.
