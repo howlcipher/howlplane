@@ -1498,6 +1498,9 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_appr.add_argument("--proposal", help="Repository proposal awaiting authority to approve (instead of a task ID)")
     p_appr.add_argument("--state-dir", help="Factory state directory holding the work item or proposal")
     p_appr.add_argument("--reason", help="Optional human reason for approval")
+    p_appr.add_argument("--owner-confirmed", action="store_true",
+                        help="Relay an approval the owner gave, also approving the HowlChangeOps decision "
+                             "without a terminal; never pass it on your own judgment")
     p_appr.add_argument("--ledger-file", help="Ledger file path")
     p_appr.add_argument("--json", action="store_true", help="Output JSON result")
 

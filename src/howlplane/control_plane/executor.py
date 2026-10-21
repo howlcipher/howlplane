@@ -315,19 +315,38 @@ class HowlChangeOpsExecutor(AuthorityExecutor):
         decision_id: str,
         repo_path: Union[str, Path],
         task_run_dir: Union[str, Path],
+        owner_confirmed: bool = False,
+        approver: Optional[str] = None,
     ) -> Tuple[bool, Optional[str]]:
         """
-        Invokes `howlchangeops approve <decision_id>` to generate HMAC approval signature.
+        Relays an owner's approval to `howlchangeops approve <decision_id> --owner-confirmed`.
+
+        Approval is the owner's decision (HowlChangeOps issue #13, issues.md #20):
+        HowlPlane relays it only when a person approved in HowlPlane
+        (owner_confirmed). Otherwise nothing is sent and the owner is told to
+        run `howlchangeops approve` at a terminal.
         """
         bin_path = self.get_binary_path()
         if not bin_path:
             return False, "HowlChangeOps binary not found"
-
+        if not owner_confirmed:
+            return False, (
+                f"OWNER_CONFIRMATION_REQUIRED: HowlChangeOps decision {decision_id} needs the owner's approval; "
+                f"run `howlchangeops approve {decision_id}` at a terminal"
+            )
         unsupported = self._json_unsupported("approve")
         if unsupported:
             return False, unsupported
+        if not component_bin.offers(self.descriptor(), ["approve"], "--owner-confirmed"):
+            return False, (
+                f"HowlChangeOps at {bin_path} cannot record an owner-relayed approval; "
+                f"update it with `howl update howlchangeops`"
+            )
+        args = ["approve", decision_id, "--owner-confirmed"]
+        if approver:
+            args += ["--approver", approver]
         try:
-            envelope, res = self._run(["approve", decision_id], Path(repo_path).resolve(), timeout=30)
+            envelope, res = self._run(args, Path(repo_path).resolve(), timeout=30)
         except Exception as e:
             return False, str(e)
         if envelope is None:
@@ -336,6 +355,10 @@ class HowlChangeOpsExecutor(AuthorityExecutor):
             return True, f"Decision {decision_id} approved ({(envelope.get('data') or {}).get('approval_id')})"
         error = envelope.get("error") or {}
         return False, f"{error.get('code', envelope['status'])}: {error.get('message', '')}".strip()
+
+    def has_approval(self, decision_id: str, repo_path: Union[str, Path]) -> bool:
+        """Whether HowlChangeOps holds an approval file for decision_id (it verifies the signature on execute)."""
+        return (Path(repo_path).resolve() / ".howlchangeops" / "approvals" / f"{decision_id}.json").is_file()
 
     def execute(
         self,

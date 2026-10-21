@@ -42,7 +42,8 @@ ENV = [
 #: Every command HowlPlane runs of another component, with the flags it passes.
 CONSUMES: List[Dict[str, Any]] = [
     {"component": "howlchangeops", "command": ["evaluate"], "flags": ["--json"], "min_version": "0.2.0"},
-    {"component": "howlchangeops", "command": ["approve"], "flags": ["--json"], "min_version": "0.2.0"},
+    {"component": "howlchangeops", "command": ["approve"], "flags": ["--json", "--owner-confirmed", "--approver"],
+     "min_version": "0.2.0"},
     {"component": "howlchangeops", "command": ["execute"], "flags": ["--json"], "min_version": "0.2.0"},
     {"component": "howlframe", "command": ["run"], "flags": ["--max-instructions"]},
     {"component": "howlframe", "command": ["build"], "flags": ["-o"]},

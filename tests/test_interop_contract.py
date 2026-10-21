@@ -19,7 +19,8 @@ from howlplane.control_plane.proposed_action import ProposedAction
 
 DESCRIPTOR = {
     "schema": "howl.interop/v1", "component": "howlchangeops", "version": "0.2.0", "exit_codes": {"0": "ok"},
-    "commands": [{"path": [c], "flags": ["--json"], "json": True} for c in ("evaluate", "approve", "execute")],
+    "commands": [{"path": [c], "flags": ["--json"], "json": True} for c in ("evaluate", "execute")]
+    + [{"path": ["approve"], "flags": ["--json", "--owner-confirmed", "--approver"], "json": True}],
 }
 
 
@@ -100,15 +101,24 @@ def test_a_changeops_without_json_is_told_to_update_and_never_parsed(tmp_path, r
     assert executor.version() == "unknown"
 
 
-def test_approve_and_key_errors(tmp_path, repo):
+def test_approve_relays_only_an_owner_decision(tmp_path, repo):
     script = fake_changeops(tmp_path, {"approve": (0, _envelope("approve", "ok", {"approval_id": "app-1"}))})
-    ok, message = HowlChangeOpsExecutor(script).approve("decision-abc", repo, repo / "run")
+    executor = HowlChangeOpsExecutor(script)
+    ok, message = executor.approve("decision-abc", repo, repo / "run")
+    assert not ok and message.startswith("OWNER_CONFIRMATION_REQUIRED")
+    assert "howlchangeops approve decision-abc" in message
+    assert not any(c.startswith("approve") for c in calls(script)) if Path(f"{script}.calls").exists() else True
+
+    ok, message = executor.approve("decision-abc", repo, repo / "run", owner_confirmed=True, approver="alice")
     assert ok and "app-1" in message
-    script = fake_changeops(tmp_path / "k", {"approve": (1, _envelope("approve", "blocked", None, {
+    assert calls(script)[-1] == "approve decision-abc --owner-confirmed --approver alice --json"
+
+
+def test_approve_key_errors_are_reported(tmp_path, repo):
+    script = fake_changeops(tmp_path, {"approve": (1, _envelope("approve", "blocked", None, {
         "code": "APPROVAL_KEY_MISSING", "message": "DENIED: HOWLCHANGEOPS_APPROVAL_KEY_FILE not set"}))})
-    ok, message = HowlChangeOpsExecutor(script).approve("decision-abc", repo, repo / "run")
-    # human_boundary treats a missing key as fatal by looking for "key" / "not set".
-    assert not ok and "key" in message.lower() and "not set" in message
+    ok, message = HowlChangeOpsExecutor(script).approve("decision-abc", repo, repo / "run", owner_confirmed=True)
+    assert not ok and message.startswith("APPROVAL_KEY_MISSING")
 
 
 def test_execute_maps_stale_evidence_and_success(tmp_path, repo):
