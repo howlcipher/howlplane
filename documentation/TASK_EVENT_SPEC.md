@@ -53,6 +53,12 @@ resumable regardless of which provider executed it:
 - a **run result** records the final outcome,
 - a **failure taxonomy** classifies why a run did not succeed, shared between
   the run result and provider failure-classification logic,
+> **Superseded handoff.** No HowlPlane code writes `ai.handoff/v1`. The
+> ecosystem's handoff between AI workers is HowlForge's
+> `howlforge.checkpoint/v1` bundle, which HowlRelay reads; the schema stays so
+> existing examples and `internal/runtime` keep validating (`docs/INTEROP.md`
+> in howlcipher/howl, "Handoff documents").
+
 - a **handoff** captures enough structured state that an interrupted or
   provider-switched run can be resumed without re-deriving context.
 

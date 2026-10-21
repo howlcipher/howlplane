@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Security
+
+- HowlPlane no longer signs the HowlChangeOps approval it waits for (issues.md #20).
+  `howlplane approve` relays the owner's decision to `howlchangeops approve
+  --owner-confirmed --approver <user>` only when it ran at a terminal or was given
+  `--owner-confirmed`; otherwise it tells the owner to run `howlchangeops approve`.
+  Bounded execution never calls `approve`: without an approval it stops with the
+  exact commands to run and the task stays resumable.
+
 ### Changed
 
 - Exit status 2 now means only that a decision is waiting on a person (issues.md #21).

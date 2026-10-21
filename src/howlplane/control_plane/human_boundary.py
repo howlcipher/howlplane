@@ -750,9 +750,15 @@ class HumanLifecycleManager:
         reason: Optional[str] = None,
         operator_source: str = "cli",
         ledger: Optional[EvidenceLedger] = None,
+        owner_confirmed: bool = False,
+        approver: Optional[str] = None,
     ) -> HumanDecisionRecord:
         """
         Records an explicit human approval for a task awaiting authorization.
+
+        The HowlChangeOps decision is approved too only when owner_confirmed: a
+        person approved at a terminal (or passed --owner-confirmed). Otherwise
+        the owner approves it with `howlchangeops approve` before resuming.
         Enforces idempotency, fail-closed contradictory checks, repository state binding,
         and links authorization to HowlChangeOps when applicable.
         """
@@ -790,8 +796,10 @@ class HumanLifecycleManager:
             try:
                 from howlplane.control_plane.executor import HowlChangeOpsExecutor
                 executor = HowlChangeOpsExecutor()
-                if executor.is_available():
-                    executor.approve(changeops_dec_id, target_repo, run_dir)
+                if executor.is_available() and owner_confirmed:
+                    executor.approve(
+                        changeops_dec_id, target_repo, run_dir, owner_confirmed=True, approver=approver
+                    )
             except Exception:
                 pass
 
@@ -1321,11 +1329,15 @@ class HumanLifecycleManager:
                                         f"Prior native execution for decision '{decision_id}' failed: {q_msg}."
                                     )
 
-                                # Submit approval linkage
-                                app_ok, app_msg = executor.approve(decision_id, target_repo, run_dir)
-                                if not app_ok and "already approved" not in (app_msg or "").lower():
-                                    if "key" in (app_msg or "").lower() or "not set" in (app_msg or "").lower():
-                                        raise ExecutionFailedError(f"Bounded execution authorization failed: {app_msg}")
+                                # The owner approves the HowlChangeOps decision; HowlPlane
+                                # never signs it on its own (issues.md #20).
+                                has_approval = getattr(executor, "has_approval", None)
+                                if has_approval is not None and not has_approval(decision_id, target_repo):
+                                    raise ExecutionFailedError(
+                                        f"HowlChangeOps decision '{decision_id}' is not approved yet. The owner approves it "
+                                        f"with `howlchangeops approve {decision_id}` at a terminal (or `howlplane approve "
+                                        f"{task_id}` at a terminal), then runs `howlplane resume {task_id}`."
+                                    )
 
                                 # Execute bounded action
                                 exec_res = executor.execute(decision_id, target_repo, run_dir, action, task_id)
