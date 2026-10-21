@@ -112,6 +112,13 @@ include = ["howlplane", "howlplane.*"]
 
 [tool.setuptools.package-data]
 "howlplane.control_plane.reasoning" = ["builtin_strategies.yaml"]
+# Copies of the repository files other components' edges need, for wheel
+# installs (see howlplane/control_plane/resources.py).
+"howlplane.control_plane" = [
+    "data/schemas/*.json",
+    "data/contracts/howlinstinct/*.json",
+    "data/integrations/howlframe/*.hfbc",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

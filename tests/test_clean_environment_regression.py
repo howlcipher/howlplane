@@ -13,6 +13,8 @@ Regression test suite proving clean-environment portability:
 
 import json
 import os
+import shutil
+import site
 from pathlib import Path
 import subprocess
 import sys
@@ -179,6 +181,16 @@ def test_real_compiler_integration_tests_fail_closed_without_real_compiler(tmp_p
     env.pop("HOWLFRAME_BIN", None)
     env["PATH"] = str(filtered_dir)
     env["PYTHONPATH"] = str(repo_root)
+    # A clean machine also has no Howl-managed release and no ~/.local/bin
+    # copy, both of which component_bin.resolve finds after PATH. Keep Go's
+    # caches where they are so hiding HOME does not force a cold build.
+    for name in ("GOCACHE", "GOMODCACHE", "GOPATH"):
+        if name not in env and shutil.which("go"):
+            env[name] = subprocess.run(["go", "env", name], capture_output=True, text=True).stdout.strip()
+    # Hiding HOME must not hide a user-site pytest (pip install --user).
+    env.setdefault("PYTHONUSERBASE", site.getuserbase())
+    env["HOME"] = str(tmp_path / "clean_home")
+    env["XDG_DATA_HOME"] = str(tmp_path / "clean_data")
 
     result = subprocess.run(
         [

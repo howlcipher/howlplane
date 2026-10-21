@@ -373,6 +373,25 @@ HowlPlane provides mechanically enforced runtime egress governance configured vi
 
 HowlPlane is designed to operate seamlessly across any codebase on your machine (Go, Python, TypeScript, Rust, C++, etc.). The control plane provides orchestration rules, reviewer roles, and verification schemas, while the target repository provides local truth: manifest configurations, local skills, and test/build commands.
 
+### Talking to other Howl components
+
+HowlPlane runs the other components as processes and reads their JSON, under the
+[Howl interop contract](https://github.com/howlcipher/howl/blob/main/docs/INTEROP.md).
+`howlplane interop --json` lists every command and flag, the exit codes, and every
+command HowlPlane runs elsewhere (HowlChangeOps `evaluate|approve|execute --json`,
+HowlFrame `run`/`build`, HowlInstinct `decide --json`, HowlDream, HowlCreate and
+HowlWriter); `howl doctor` checks those against the installed versions. Each
+component is found through `HOWL<NAME>_BIN`, then `PATH`, then the Howl-managed
+release, then `~/.local/bin`.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | ok |
+| 1 | error (`howlplane.error/v1` on stderr with `--json`) |
+| 2 | awaiting a human decision; also a usage or input error (see issues.md #21) |
+| 3 | blocked by a boundary or readiness gate |
+| 4 | `write`: an owner-only decision HowlPlane will not relay |
+
 ---
 
 ## Native Creative Pipeline (HowlDream -> HowlWriter -> HowlCreate)

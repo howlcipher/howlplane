@@ -1420,6 +1420,11 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_prep.add_argument("--run-dir", help="Task run directory path")
 
     # reconcile
+    p_interop = subparsers.add_parser(
+        "interop", help="Print the howl.interop/v1 descriptor other Howl components check"
+    )
+    p_interop.add_argument("--json", action="store_true", help="JSON output (the default)")
+
     p_rec = subparsers.add_parser("reconcile", parents=[common_parser], help="Reconcile multi-agent review findings")
     p_rec.add_argument("--findings-file", required=True, help="YAML/JSON findings file")
     p_rec.add_argument("--output", "-o", help="Save markdown report to path")
@@ -2590,7 +2595,15 @@ HANDLERS = {
     "trace": cmd_trace,
     "creative": lambda args: __import__("howlplane.control_plane.creative_pipeline", fromlist=["command"]).command(args),
     "write": lambda args: __import__("howlplane.control_plane.write_pipeline", fromlist=["command"]).command(args),
+    "interop": lambda args: cmd_interop(args),
 }
+
+
+def cmd_interop(args: argparse.Namespace) -> int:
+    """Print the howl.interop/v1 descriptor (commands, flags, exit codes, and what HowlPlane runs)."""
+    from howlplane.control_plane.interop_descriptor import describe
+    print(json.dumps(describe(build_parser()), indent=2))
+    return 0
 
 ACTIONS = HANDLERS
 

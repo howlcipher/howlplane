@@ -245,6 +245,9 @@ def test_inconsistent_inputs_are_rejected_before_anything_runs(tmp_path, fake_wr
 
 def test_missing_howlwriter_fails_with_an_install_hint(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    # Nor in a real Howl install or ~/.local/bin (component_bin looks there after PATH).
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.delenv("CLAUDECODE", raising=False)
     assert run_cli(tmp_path, "--prompt", "x", "--provider", "local") == 1
     record = state(tmp_path)

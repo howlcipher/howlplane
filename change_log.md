@@ -3,6 +3,36 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Interop
+
+- HowlPlane follows the Howl interop contract (`docs/INTEROP.md` in howlcipher/howl).
+  `howlplane interop --json` prints the `howl.interop/v1` descriptor: every command
+  and flag from the live parser (plus the Go launcher's `project validate`), the exit
+  codes, and every command HowlPlane runs of another component with the flags it
+  passes, which `howl doctor` checks against the installed producers.
+- HowlChangeOps is driven through `evaluate|approve|execute --json` and its
+  `howl.result/v1` envelopes. The `Decision:` / `Decision saved as` prose parser and
+  its newest-file-in-`decisions/` fallback are gone; a HowlChangeOps without `--json`
+  (before 0.2.0) is reported with "update it with `howl update howlchangeops`"
+  instead of being guessed at. Execution receipts record the installed HowlChangeOps
+  version from its descriptor instead of a hard-coded `0.2.0`.
+- One resolver, `component_bin.resolve`, finds HowlChangeOps, HowlFrame, HowlDream,
+  HowlCreate, HowlWriter and HowlInstinct in the documented order (`HOWL<NAME>_BIN`,
+  `PATH`, the Howl-managed release, `~/.local/bin`). The HowlDream runner checked
+  `PATH` before `HOWLFRAME_BIN`; it now honours the override like everything else.
+- HowlDream's CLI path no longer raises on a `PARTIAL` exploration (exit 1 with its
+  result on stdout) and writes runs under `work_dir/<exploration_id>`, the same
+  layout as the in-process engine. `promote_candidate_to_howlcreate` accepts file
+  paths as its signature always said.
+- A wheel install (the Howl standard profile) carries the HowlFrame bytecode, the
+  HowlInstinct receipt schema and the evidence-entry schema as package data, and
+  keeps the evidence ledger under `HOWLPLANE_HOME` or `$XDG_STATE_HOME/howlplane`
+  instead of inside the virtualenv. A source checkout behaves as before.
+- The vendored HowlInstinct receipt schema is pinned to a commit on HowlInstinct's
+  `main` (it was pinned to a branch), and CI checks every vendored schema against
+  its pinned commit. `documentation/CLI_COMPOSITION.md` no longer recommends the
+  `howl plane` command tree Howl removed.
+
 ### Fixed
 
 - `howlplane write` fixes from its first runs against a real local model: a local

@@ -10,10 +10,11 @@ and validates tamper-evident execution receipts.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-import hashlib, json, os, shutil, subprocess, time
+import hashlib, json, os, subprocess, time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from howlplane.control_plane import component_bin
 from howlplane.control_plane.git_env import run_git_in_repo
 from howlplane.control_plane.proposed_action import ProposedAction
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
@@ -169,30 +170,17 @@ class AuthorityExecutor(ABC):
 
 
 def find_howlchangeops_binary() -> Optional[Path]:
-    """Discovers the canonical HowlChangeOps executable with safe fallbacks."""
-    # 1. Environment variable override
-    env_bin = os.environ.get("HOWLCHANGEOPS_BIN") or os.environ.get("CHANGEOPS_BIN")
-    if env_bin:
-        p = Path(env_bin).expanduser().resolve()
-        if p.is_file() and os.access(p, os.X_OK):
-            return p
+    """Locates HowlChangeOps in the Howl interop discovery order (see component_bin).
 
-    # 2. PATH resolution: howlchangeops
-    which_hco = shutil.which("howlchangeops")
-    if which_hco:
-        return Path(which_hco).resolve()
+    HOWLCHANGEOPS_BIN (or the legacy CHANGEOPS_BIN), then PATH (`howlchangeops`,
+    then the `changeops` alias), then the Howl-managed release, then ~/.local/bin.
+    """
+    found = component_bin.resolve("howlchangeops", legacy_env=("CHANGEOPS_BIN",), aliases=("changeops",))
+    return Path(found) if found else None
 
-    # 3. PATH resolution: changeops
-    which_co = shutil.which("changeops")
-    if which_co:
-        return Path(which_co).resolve()
 
-    # 4. ~/.local/bin/howlchangeops
-    user_local = Path.home() / ".local" / "bin" / "howlchangeops"
-    if user_local.is_file() and os.access(user_local, os.X_OK):
-        return user_local.resolve()
-
-    return None
+#: Oldest HowlChangeOps that prints howl.result/v1 envelopes with --json.
+MIN_HOWLCHANGEOPS_JSON = "0.2.0"
 
 
 class HowlChangeOpsExecutor(AuthorityExecutor):
@@ -225,6 +213,41 @@ class HowlChangeOpsExecutor(AuthorityExecutor):
 
     def supports_action(self, action_type: str) -> bool:
         return action_type in self.SUPPORTED_ACTIONS
+
+    def descriptor(self) -> Optional[Dict[str, Any]]:
+        """The installed HowlChangeOps' howl.interop/v1 descriptor (None before 0.2.0)."""
+        bin_path = self.get_binary_path()
+        return component_bin.describe(str(bin_path)) if bin_path else None
+
+    def version(self) -> str:
+        descriptor = self.descriptor()
+        return str(descriptor.get("version", "unknown")) if descriptor else "unknown"
+
+    def _json_unsupported(self, command: str) -> Optional[str]:
+        """Why `command --json` cannot be used with the installed HowlChangeOps, or None."""
+        if component_bin.offers(self.descriptor(), [command], "--json"):
+            return None
+        return (
+            f"HowlChangeOps at {self.get_binary_path()} does not offer `{command} --json` "
+            f"(needs {MIN_HOWLCHANGEOPS_JSON} or later); update it with `howl update howlchangeops`"
+        )
+
+    def _run(
+        self, args: List[str], target_dir: Path, timeout: int
+    ) -> Tuple[Optional[Dict[str, Any]], subprocess.CompletedProcess]:
+        """Runs `howlchangeops <args> --json` for target_dir; returns (envelope, process)."""
+        env = os.environ.copy()
+        env["HOWLCHANGEOPS_BASE"] = str(target_dir / ".howlchangeops")
+        res = subprocess.run(
+            [str(self.get_binary_path()), *args, "--json"],
+            cwd=str(self._get_howlchangeops_dir(target_dir)),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+        return component_bin.parse_result(res.stdout, "howlchangeops"), res
 
     def _get_howlchangeops_dir(self, repo_path: Path) -> Path:
         """Determines the HowlChangeOps working directory."""
@@ -264,51 +287,28 @@ class HowlChangeOpsExecutor(AuthorityExecutor):
         }
         prop_file.write_text(json.dumps(proposal_data, indent=2), encoding="utf-8")
 
-        hco_dir = self._get_howlchangeops_dir(target_dir)
-
-        # Run evaluate using safe subprocess
-        env = os.environ.copy()
-        env["HOWLCHANGEOPS_BASE"] = str(target_dir / ".howlchangeops")
-
+        unsupported = self._json_unsupported("evaluate")
+        if unsupported:
+            return "ERROR", None, unsupported
         try:
-            res = subprocess.run(
-                [str(bin_path), "evaluate", str(prop_file)],
-                cwd=str(hco_dir),
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=60,
-            )
+            envelope, res = self._run(["evaluate", str(prop_file)], target_dir, timeout=60)
         except Exception as e:
             return "ERROR", None, f"Failed to execute HowlChangeOps evaluate: {e}"
+        if envelope is None:
+            return "ERROR", None, (
+                f"HowlChangeOps evaluate printed no howl.result/v1 envelope (exit {res.returncode}): "
+                f"{res.stderr.strip()[-500:]}"
+            )
 
-        stdout = res.stdout + res.stderr
-        verdict = "DENY"
-        decision_id = None
-        reason = ""
-
-        for line in stdout.splitlines():
-            if line.startswith("Decision:"):
-                verdict = line.split("Decision:")[1].strip()
-            elif line.startswith("Reason:"):
-                reason = line.split("Reason:")[1].strip()
-            elif "Decision saved as" in line:
-                parts = line.split("Decision saved as")
-                if len(parts) > 1:
-                    raw_id = parts[1].strip().split()[0].rstrip(".")
-                    if raw_id:
-                        decision_id = raw_id
-
-        if not decision_id and verdict == "REQUIRE_APPROVAL":
-            # Fallback search for decision id in decisions dir
-            dec_dir = Path(env["HOWLCHANGEOPS_BASE"]) / "decisions"
-            if dec_dir.is_dir():
-                dec_files = sorted(dec_dir.glob("*.json"), key=os.path.getmtime, reverse=True)
-                if dec_files:
-                    decision_id = dec_files[0].stem
-
-        return verdict, decision_id, reason or stdout.strip()
+        data = envelope.get("data") or {}
+        error = envelope.get("error") or {}
+        if envelope["status"] in ("unavailable", "failed", "blocked"):
+            return "ERROR", None, f"{error.get('code', envelope['status'])}: {error.get('message', '')}".strip()
+        verdict = str(data.get("verdict") or "DENY")
+        decision_id = data.get("decision_id") if data.get("decision_saved") else None
+        if verdict == "REQUIRE_APPROVAL" and not decision_id:
+            return "ERROR", None, "HowlChangeOps required approval but saved no decision"
+        return verdict, decision_id, str(data.get("reason") or error.get("message") or "")
 
     def approve(
         self,
@@ -323,27 +323,19 @@ class HowlChangeOpsExecutor(AuthorityExecutor):
         if not bin_path:
             return False, "HowlChangeOps binary not found"
 
-        target_dir = Path(repo_path).resolve()
-        hco_dir = self._get_howlchangeops_dir(target_dir)
-        env = os.environ.copy()
-        env["HOWLCHANGEOPS_BASE"] = str(target_dir / ".howlchangeops")
-
+        unsupported = self._json_unsupported("approve")
+        if unsupported:
+            return False, unsupported
         try:
-            res = subprocess.run(
-                [str(bin_path), "approve", decision_id],
-                cwd=str(hco_dir),
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=30,
-            )
-            stdout = res.stdout + res.stderr
-            if res.returncode == 0 and "approved" in stdout.lower():
-                return True, stdout.strip()
-            return False, stdout.strip()
+            envelope, res = self._run(["approve", decision_id], Path(repo_path).resolve(), timeout=30)
         except Exception as e:
             return False, str(e)
+        if envelope is None:
+            return False, f"HowlChangeOps approve printed no howl.result/v1 envelope (exit {res.returncode})"
+        if envelope["status"] == "ok":
+            return True, f"Decision {decision_id} approved ({(envelope.get('data') or {}).get('approval_id')})"
+        error = envelope.get("error") or {}
+        return False, f"{error.get('code', envelope['status'])}: {error.get('message', '')}".strip()
 
     def execute(
         self,
@@ -370,22 +362,19 @@ class HowlChangeOpsExecutor(AuthorityExecutor):
 
         target_dir = Path(repo_path).resolve()
         run_dir = Path(task_run_dir).resolve()
-        hco_dir = self._get_howlchangeops_dir(target_dir)
-
-        env = os.environ.copy()
         hco_base = target_dir / ".howlchangeops"
-        env["HOWLCHANGEOPS_BASE"] = str(hco_base)
 
-        try:
-            res = subprocess.run(
-                [str(bin_path), "execute", decision_id],
-                cwd=str(hco_dir),
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=60,
+        unsupported = self._json_unsupported("execute")
+        if unsupported:
+            return ExecutionResult(
+                executor_id=self.name,
+                action_type=action.action_type,
+                status="unsupported",
+                decision_id=decision_id,
+                error_message=unsupported,
             )
+        try:
+            envelope, res = self._run(["execute", decision_id], target_dir, timeout=60)
         except Exception as e:
             return ExecutionResult(
                 executor_id=self.name,
@@ -399,9 +388,10 @@ class HowlChangeOpsExecutor(AuthorityExecutor):
         duration = time.time() - start_time
         stdout = res.stdout
         stderr = res.stderr
-        combined_out = (stdout + "\n" + stderr).strip()
+        error = (envelope or {}).get("error") or {}
+        combined_out = (error.get("message") or stderr or stdout).strip()
 
-        if "STALE_EVIDENCE" in combined_out or "STALE_REMOTE_EVIDENCE" in combined_out:
+        if error.get("code") in ("STALE_EVIDENCE", "STALE_REMOTE_EVIDENCE"):
             return ExecutionResult(
                 executor_id=self.name,
                 action_type=action.action_type,
@@ -425,8 +415,10 @@ class HowlChangeOpsExecutor(AuthorityExecutor):
             except Exception:
                 pass
 
-        if res.returncode != 0 or verif_status != "PASS":
+        if envelope is None or envelope["status"] != "ok" or verif_status != "PASS":
             err_msg = combined_out or "HowlChangeOps execution failed"
+            if envelope is None:
+                err_msg = f"HowlChangeOps execute printed no howl.result/v1 envelope (exit {res.returncode}): {err_msg}"
             return ExecutionResult(
                 executor_id=self.name,
                 action_type=action.action_type,
@@ -530,7 +522,7 @@ class HowlChangeOpsExecutor(AuthorityExecutor):
         return ExecutionReceipt(
             task_id=task_id,
             executor=self.name,
-            executor_version="0.2.0",
+            executor_version=self.version(),
             decision_id=decision_id,
             action_type=action.action_type,
             repository=target_dir.name,

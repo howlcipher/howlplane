@@ -151,6 +151,15 @@ jobs:
           git -C /tmp/howlframe checkout --detach 7631ce5d4008534ef681f35c3436922507d3f441
           cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+      # A vendored producer schema must equal the file at the commit its
+      # SOURCE.md pins, and that commit must be on the producer's main
+      # (docs/INTEROP.md in howlcipher/howl, section 6).
+      - name: Vendored schemas match their pinned producer commits
+        run: |
+          python3 scripts/check_vendored_schemas.py contracts/howl/SOURCE.md \
+            schemas/howl.exploration_result.v1.schema.json=contracts/howl/howl.exploration_result.v1.schema.json
+          python3 scripts/check_vendored_schemas.py contracts/howlinstinct/SOURCE.md \
+            schemas/decision-receipt.schema.json=contracts/howlinstinct/howlinstinct.decision_receipt.v1.schema.json
       # `live` tests are deselected by tests/conftest.py unless
       # HOWLPLANE_LIVE_PROVIDERS is set, so this step cannot reach a real
       # provider even though it names no marker expression.

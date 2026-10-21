@@ -44,6 +44,7 @@ _INTEGRATION_MODULES = {
 }
 
 _CONTRACT_MODULES = {
+    "test_interop_contract.py",
     "test_acceptance_canary.py",
     "test_acceptance_runner.py",
     "test_ai_resource_pool.py",
