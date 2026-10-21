@@ -18,36 +18,36 @@ The reusable Go command package is `github.com/howlcipher/howlplane/pkg/cli`.
 entry points in `cmd/howlplane` and `cmd/ai` contain only startup and error
 handling.
 
-`cli.NewPlaneCommand()` creates the attachable `plane` command. An umbrella
-program can compose it without copying validation logic:
-
-```go
-root := &cobra.Command{Use: "howl"}
-root.AddCommand(cli.NewPlaneCommand())
-```
-
-This exposes the native component adapter as `howl plane project validate`.
-The command receives its parent from Cobra at execution time, so it does not
-depend on the literal name of the outer executable.
+`cli.NewPlaneCommand()` creates the attachable `plane` command. It remains
+available to Go programs, but the `howl` installer no longer mounts it: Howl's
+scope review (`docs/SCOPE.md` in `howlcipher/howl`) removed the `howl plane`
+command tree, because it duplicated HowlPlane's own CLI and made Howl depend on
+HowlPlane's source.
 
 ## Integration Choices
 
-Direct Go composition is the preferred path for the native project integration
-commands. It keeps one command implementation, supports isolated command
-construction in tests, and lets the ecosystem CLI present a cohesive help tree.
-Its limitation is that it applies only to the Cobra command adapters provided by
-this module.
-
-The established Python control plane command set remains available through the
-direct `howlplane` launcher. Until those adapters are native Go commands, an
-umbrella CLI should use a process adapter that forwards arguments, stdin,
-stdout, stderr, and exit status to `howlplane`. This preserves HowlPlane policy
-and avoids copying orchestration, validation, or authority logic. The process
+Other Howl components run HowlPlane as a process and never import it (HowlWriter
+is the one in-process exception, through `howlplane.control_plane.role_binding`).
+The `howl` installer forwards exactly three commands to the installed
+`howlplane` (`orchestrate`, `agents doctor`, `factory prepare`), passing
+arguments, stdin, stdout, stderr, and exit status through unchanged. A process
 adapter must not parse human-readable output or infer authorization from it.
 
-Neither approach grants the umbrella repository extra authority. The component
-continues to enforce its own validation, policy, evidence, and human authority
-boundaries.
+All of this follows the Howl interop contract
+(`docs/INTEROP.md` in `howlcipher/howl`):
+
+- `howlplane interop --json` prints the `howl.interop/v1` descriptor: every
+  command and flag, the exit codes, and every command HowlPlane runs of another
+  component, which `howl doctor` checks against the installed producers.
+- HowlPlane finds other components with
+  `howlplane.control_plane.component_bin.resolve` (`HOWL<NAME>_BIN`, `PATH`, the
+  Howl-managed release, `~/.local/bin`) and reads their results as JSON:
+  HowlChangeOps through its `howl.result/v1` envelopes (`--json`), HowlInstinct
+  through `howlinstinct.decide_output/v1`, HowlDream and HowlCreate through the
+  `howl.*/v1` documents.
+
+Neither approach grants a caller extra authority. Each component continues to
+enforce its own validation, policy, evidence, and human authority boundaries.
 
 ## Installer Scope
 
