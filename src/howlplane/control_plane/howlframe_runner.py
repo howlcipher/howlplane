@@ -9,10 +9,12 @@ and records structured evidence to the durable ledger.
 """
 
 from dataclasses import dataclass, field, asdict
-import json, os, shutil, subprocess, time
+import json, os, subprocess, time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from howlplane.control_plane import component_bin
+from howlplane.control_plane.resources import CHECKOUT_ROOT, data_file, is_checkout
 from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, EvidenceSchemaError, sanitize_value
 from howlplane.control_plane.project_adapter import ProjectContext
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
@@ -78,20 +80,9 @@ def get_dogfood_mode() -> str:
 
 
 def find_howlframe_binary() -> Optional[str]:
-    """Discovers the howlframe binary executable path via env or PATH."""
-    env_bin = os.environ.get("HOWLFRAME_BIN")
-    if env_bin:
-        p = Path(env_bin).expanduser().resolve()
-        if p.is_file() and os.access(p, os.X_OK):
-            return str(p)
-        return None
-
-    which_bin = shutil.which("howlframe")
-    if which_bin:
-        p = Path(which_bin).resolve()
-        if p.is_file() and os.access(p, os.X_OK):
-            return str(p)
-    return None
+    """Discovers howlframe in the Howl interop order: HOWLFRAME_BIN, PATH, the Howl-managed release, ~/.local/bin."""
+    found = component_bin.resolve("howlframe")
+    return str(Path(found).resolve()) if found else None
 
 
 def get_howlframe_version(howlframe_bin: str) -> Optional[str]:
@@ -136,10 +127,10 @@ class HowlFrameAuditRunner:
 
     @classmethod
     def resolve_artifact_path(cls) -> Path:
-        repo_root = Path(__file__).resolve().parents[3]
-        bytecode_path = repo_root / "integrations" / "howlframe" / "project_context_audit.hfbc"
-        if not bytecode_path.is_file():
-            source_path = repo_root / "integrations" / "howlframe" / "project_context_audit.howl"
+        bytecode_path = data_file("integrations", "howlframe", "project_context_audit.hfbc")
+        # Rebuilding from source is for a checkout only; never write into an installed package.
+        if not bytecode_path.is_file() and is_checkout():
+            source_path = CHECKOUT_ROOT / "integrations" / "howlframe" / "project_context_audit.howl"
             if source_path.is_file():
                 h_bin = find_howlframe_binary()
                 if h_bin:

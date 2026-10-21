@@ -32,12 +32,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+from howlplane.control_plane import component_bin
 from howlplane.control_plane.staged_run import StageFailed, StagedRun, load as _load, sha256 as _sha256
 
 STATE_SCHEMA = "howlplane.write_run/v1"
@@ -88,9 +88,10 @@ class WriteRun(StagedRun):
                   if any(a == flag or a.startswith(flag + "=") for a in options)]
         if leaked:  # constructed here, never from input; a regression must not reach HowlWriter
             raise StageFailed(stage, f"refusing to relay an owner-only decision ({', '.join(leaked)})")
-        executable = shutil.which("howlwriter", path=self.env.get("PATH"))
+        executable = component_bin.resolve("howlwriter", env=self.env)
         if executable is None:
-            raise StageFailed(stage, "howlwriter is not on PATH; install it with `howl install howlwriter`")
+            raise StageFailed(stage, "howlwriter was not found (HOWLWRITER_BIN, PATH, or a Howl install); "
+                                     "install it with `howl install howlwriter`")
         record = self.state["stages"].setdefault(stage, {})
         record.setdefault("commands", []).append(["howlwriter", *args])
         record["executable"] = executable

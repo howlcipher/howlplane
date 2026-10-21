@@ -19,11 +19,12 @@ import uuid
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from howlplane.control_plane.resources import CHECKOUT_ROOT, data_file, is_checkout
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
 
 EVIDENCE_ENTRY_SCHEMA_VERSION = "ai.evidence_entry/v1"
 
-_SCHEMA_PATH = Path(__file__).resolve().parents[3] / "schemas" / "evidence-entry.schema.json"
+_SCHEMA_PATH = data_file("schemas", "evidence-entry.schema.json")
 _LOG = logging.getLogger(__name__)
 
 
@@ -151,14 +152,32 @@ class EvidenceEntry(DataClassSerializationMixin):
         return cls(schema=EVIDENCE_ENTRY_SCHEMA_VERSION, **filtered)
 
 
+def default_ledger_path() -> Path:
+    """logs/control_plane/evidence_ledger.jsonl under the checkout, HOWLPLANE_HOME, or XDG state.
+
+    A source checkout keeps its ledger in the repository, as before. An installed
+    wheel has no repository, and its package directory is replaced on update, so
+    the ledger goes under HOWLPLANE_HOME (or HOWLPLANE_DIR) when set, and
+    otherwise under $XDG_STATE_HOME/howlplane.
+    """
+    if is_checkout():
+        root = CHECKOUT_ROOT
+    else:
+        home = os.environ.get("HOWLPLANE_HOME") or os.environ.get("HOWLPLANE_DIR")
+        if home:
+            root = Path(home).expanduser()
+        else:
+            state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+            root = Path(state) / "howlplane"
+    return root / "logs" / "control_plane" / "evidence_ledger.jsonl"
+
+
 class EvidenceLedger:
     """Manages the append-only evidence ledger log files."""
 
     def __init__(self, ledger_file: Optional[str] = None):
         if ledger_file is None:
-            # Default to logs/control_plane/evidence_ledger.jsonl
-            repo_root = Path(__file__).resolve().parents[3]
-            ledger_file = str(repo_root / "logs" / "control_plane" / "evidence_ledger.jsonl")
+            ledger_file = str(default_ledger_path())
         self.ledger_file = Path(ledger_file)
         self.ledger_file.parent.mkdir(parents=True, exist_ok=True)
 

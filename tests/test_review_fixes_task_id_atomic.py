@@ -58,6 +58,6 @@ def test_explore_timeout_and_run_id_validation(tmp_path):
         _explore(tmp_path, timeout)
 
     def evil(*a, **k):
-        return mock.Mock(stdout='{"exploration_id": "../../etc"}')
+        return mock.Mock(stdout='{"exploration_id": "../../etc"}', stderr="", returncode=0)
     with pytest.raises(RuntimeError, match="invalid exploration_id"):
         _explore(tmp_path, evil)

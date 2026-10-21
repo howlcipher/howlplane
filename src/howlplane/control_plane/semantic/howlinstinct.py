@@ -15,7 +15,6 @@ import shutil
 import subprocess  # nosec B404
 from dataclasses import replace
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
 from jsonschema import Draft202012Validator
@@ -29,17 +28,14 @@ from howlplane.control_plane.semantic.models import (
     SemanticRecommendation,
     SemanticStatus,
 )
+from howlplane.control_plane import component_bin
+from howlplane.control_plane.resources import data_file
 from howlplane.control_plane.semantic.recommender import candidate_ids
 from howlplane.control_plane.task_spec import TaskSpec
 
 DECIDE_OUTPUT_SCHEMA = "howlinstinct.decide_output/v1"
 RECEIPT_SCHEMA_ID = "howlinstinct.decision_receipt/v1"
-_RECEIPT_SCHEMA_PATH = (
-    Path(__file__).resolve().parents[4]
-    / "contracts"
-    / "howlinstinct"
-    / "howlinstinct.decision_receipt.v1.schema.json"
-)
+_RECEIPT_SCHEMA_PATH = data_file("contracts", "howlinstinct", "howlinstinct.decision_receipt.v1.schema.json")
 _OBJECTIVE_LIMIT = 1000
 _DESCRIPTION_LIMIT = 240
 _REASON_LIMIT = 200
@@ -295,7 +291,9 @@ class HowlInstinctSemanticRecommender:
                 candidate_ids=offered,
             )
 
-        executable = shutil.which(self.command)
+        executable = (
+            component_bin.resolve("howlinstinct") if self.command == "howlinstinct" else shutil.which(self.command)
+        )
         if executable is None:
             return failed(SemanticStatus.UNAVAILABLE, "howlinstinct executable not found")
         payload = json.dumps(build_request(task, candidates, role, context))

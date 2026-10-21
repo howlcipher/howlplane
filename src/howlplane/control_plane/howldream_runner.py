@@ -14,12 +14,13 @@ import json
 import os
 import re
 from pathlib import Path
-import shutil
 import subprocess
 import time
 from typing import Any, Dict, List, Optional, Union
 
+from howlplane.control_plane import component_bin
 from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+from howlplane.control_plane.resources import data_file
 from howlplane.control_plane.project_adapter import ProjectContext
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
 
@@ -27,6 +28,17 @@ from howlplane.control_plane.task_spec import DataClassSerializationMixin
 _EXPLORE_TIMEOUT_SECONDS = 600
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
+
+
+def _as_document(value: Union[Dict[str, Any], Path, str]) -> Dict[str, Any]:
+    """A JSON document given inline or as a path to a file holding it."""
+    if isinstance(value, dict):
+        return value
+    with open(value, "r", encoding="utf-8") as handle:
+        loaded = json.load(handle)
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{value} does not hold a JSON object")
+    return loaded
 
 class ExplorationPolicy(str, Enum):
     """Exploration governance policies for HowlPlane."""
@@ -151,11 +163,7 @@ class NativeHowlDreamProvider(ExplorationProvider):
     """Production provider running real HowlDream via import or CLI binary."""
 
     def is_available(self) -> bool:
-        if os.environ.get("HOWLDREAM_BIN"):
-            p = Path(os.environ["HOWLDREAM_BIN"]).expanduser().resolve()
-            if p.is_file() and os.access(p, os.X_OK):
-                return True
-        if shutil.which("howldream"):
+        if component_bin.resolve("howldream"):
             return True
         try:
             import howldream  # noqa: F401
@@ -190,7 +198,7 @@ class NativeHowlDreamProvider(ExplorationProvider):
             run_dir, result = explore(req, root=work_dir)
             return run_dir, result.model_dump()
         except ImportError:
-            bin_path = os.environ.get("HOWLDREAM_BIN") or shutil.which("howldream")
+            bin_path = component_bin.resolve("howldream")
             if not bin_path:
                 raise RuntimeError("HowlDream engine is not available")
             req_file = work_dir / f"req_{uuid4().hex[:8]}.json"
@@ -207,25 +215,31 @@ class NativeHowlDreamProvider(ExplorationProvider):
                 "authority": {"type": "ADVISORY", "executable": False},
             }
             req_file.write_text(json.dumps(req_data), encoding="utf-8")
-            runs_dir = work_dir / ".howldream" / "runs"
-            runs_dir.mkdir(parents=True, exist_ok=True)
+            # Same layout as the in-process engine (explore(req, root=work_dir)):
+            # the run directory is work_dir/<exploration_id> either way.
             try:
                 res = subprocess.run(
-                    [str(bin_path), "explore", str(req_file), "--output", str(runs_dir)],
+                    [str(bin_path), "explore", str(req_file), "--output", str(work_dir)],
                     capture_output=True,
                     text=True,
-                    check=True,
+                    check=False,
                     timeout=_EXPLORE_TIMEOUT_SECONDS,
                 )
             except subprocess.TimeoutExpired as exc:
                 raise RuntimeError(
                     f"HowlDream explore timed out after {_EXPLORE_TIMEOUT_SECONDS}s"
                 ) from exc
+            # HowlDream exits 1 for a PARTIAL exploration and still prints its
+            # result; only 2 (error, JSON on stderr) is a failure.
+            if res.returncode not in (0, 1):
+                raise RuntimeError(
+                    f"HowlDream explore exited {res.returncode}: {res.stderr.strip()[-500:]}"
+                )
             data = json.loads(res.stdout)
             run_id = data.get("exploration_id", "")
             if not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id):
                 raise RuntimeError(f"HowlDream returned an invalid exploration_id: {run_id!r}")
-            return runs_dir / run_id, data
+            return work_dir / run_id, data
 
 
 # jscpd:ignore-start
@@ -381,12 +395,8 @@ class HowlDreamRunner:
             if p.is_file():
                 return p
 
-        repo_root = Path(__file__).resolve().parents[3]
-        local_bc = repo_root / "integrations" / "howlframe" / "candidate_evaluator.hfbc"
-        if local_bc.is_file():
-            return local_bc
-
-        return None
+        local_bc = data_file("integrations", "howlframe", "candidate_evaluator.hfbc")
+        return local_bc if local_bc.is_file() else None
 
     def evaluate_candidate_with_howlframe(
         self,
@@ -398,7 +408,7 @@ class HowlDreamRunner:
         Emits a structured howl.assessment/v1 payload.
         """
         bc_path = self.resolve_candidate_evaluator_bc()
-        howlframe_bin = shutil.which("howlframe") or os.environ.get("HOWLFRAME_BIN")
+        howlframe_bin = component_bin.resolve("howlframe")
 
         if not howlframe_bin or not bc_path or not bc_path.is_file():
             # In-process fallback evaluator conforming to candidate_evaluator.howl rules
@@ -514,7 +524,8 @@ class HowlDreamRunner:
             except ImportError:
                 from howlcreate.engine.candidate_ingestion import develop_candidate as scaffold_candidate
 
-            dev_result = scaffold_candidate(candidate_handoff, assessment)
+            # scaffold_candidate takes the documents, not paths to them.
+            dev_result = scaffold_candidate(_as_document(candidate_handoff), _as_document(assessment))
             dev_dict = (
                 dev_result if isinstance(dev_result, dict) else dev_result.model_dump()
             )
