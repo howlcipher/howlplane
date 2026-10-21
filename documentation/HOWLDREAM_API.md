@@ -38,14 +38,15 @@ Dream results are untrusted advisory data, never authorization. Model B owner
 approval requires an independently protected signing/execution boundary; neither
 this import nor a compatible schema establishes that authority.
 
-## Combined-environment limitation
+## Combined-environment assessment correction
 
 The exploration runner also optionally imports Create's scaffold_candidate for
-advisory promotion. With the current Create installed, four existing integration
-tests reject Plane's assessment fallback because it emits legacy schema and
-explanation fields rather than the current assessment contract. The same four
-fail on original Plane52b4a365. This is an unresolved runtime integration defect;
-the Dream API pin/test does not repair or certify that additional boundary.
-Full combined-environment readiness must remain blocked until its producer and
-fallback contract are repaired and independently reviewed. No validation was
-relaxed to conceal the failure.
+advisory promotion. With Create installed, four existing integration tests
+exposed legacy assessment fields in both the Python fallback and the Frame
+program. The same four failed on original Plane52b4a365. The fallback now reads
+the current flat candidate status and emits schema_version, assessment_id and
+limitations; the Frame program emits limitations instead of the obsolete reason
+field. Bytecode is rebuilt with the existing CI compiler pin and its packaged
+copy is synchronized. Create validation remains strict. New contract regressions
+preserve the original failure. This additional correction requires independent
+review; it must not be inferred from the earlier F9/F12/API-only review.

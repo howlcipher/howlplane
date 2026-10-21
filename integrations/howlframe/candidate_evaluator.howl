@@ -92,7 +92,7 @@
                                     (print (str_join (list "  \"candidate_id\": \"" (to_string cand_id) "\",") ""))
                                     (print (str_join (list "  \"disposition\": \"" disposition "\",") ""))
                                     (print (str_join (list "  \"confidence\": \"" confidence "\",") ""))
-                                    (print (str_join (list "  \"reason\": \"" reason "\",") ""))
+                                    (print (str_join (list "  \"limitations\": [\"" reason "\"],") ""))
                                     (print "  \"authority\": {")
                                     (print "    \"type\": \"ADVISORY\",")
                                     (print "    \"executable\": false")

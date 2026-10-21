@@ -571,3 +571,5 @@ completed work nor automatic recovery.
 The binding regression suite is `PYTHONPATH=src:. python3 -m pytest tests/test_factory_mission_binding.py tests/test_orchestration_verification_only.py`; the full project and unchanged repository hygiene gates still apply.
 
 The optional `dream-api` extra pins the existing in-process HowlDream boundary. See [the API contract](documentation/HOWLDREAM_API.md) for offline integration evidence and its CLI fallback limits. Invalid stored orchestration state exits1; Frame version probes are declared in interop.
+
+Combined installed Create intake exposed assessment-schema drift. The Python fallback and Frame evaluator now emit the current advisory assessment contract; bytecode and packaged copy are synchronized. No schema validation was relaxed.

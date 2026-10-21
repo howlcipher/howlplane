@@ -1112,3 +1112,5 @@ missing optional CLI into generic unavailability.
 ## Mission007 contract corrections
 
 Invalid stored orchestration state exits1 without dispatch or manifest rewriting (F9). Frame global version probe is declared (F12). Optional Dream Python API is pinned and exercised by an ordinary offline CI job, with advisory-only output and simulated generation labeled (F15).
+
+Combined installed Create intake exposed assessment-schema drift. The Python fallback and Frame evaluator now emit the current advisory assessment contract; bytecode and packaged copy are synchronized. No schema validation was relaxed.

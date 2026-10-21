@@ -465,42 +465,38 @@ class HowlDreamRunner:
         else:
             data = candidate_handoff
 
-        # Enforce negative authority assertion
+        # Mirror the current flat howl.candidate/v1 status rules, rather than
+        # the obsolete nested candidate shape. Results remain advisory only.
+        candidate_id = data.get("candidate_id", "unknown_candidate")
+        status = data.get("status", "GENERATED")
+        disposition, confidence = "INVESTIGATE", "LOW"
+        reason = "candidate challenged but requires downstream review"
         try:
             assert_no_execution_authority(data)
-        except AuthorityEscalationError as exc:
-            return {
-                "schema": "howl.assessment/v1",
-                "disposition": "REJECT",
-                "authority": {"type": "ADVISORY", "executable": False},
-                "explanation": f"Authority escalation attempt rejected: {exc}",
-            }
-
-        cand = data.get("candidate", {})
-        contradictions = cand.get("critical_contradictions", 0)
-        status = cand.get("status", "")
-        unresolved = cand.get("unresolved_assumptions", [])
-
-        if contradictions > 0 or status == "CONTRADICTED":
-            disposition = "REJECT"
-            reason = f"Candidate contradicted by NIGHTMARE analysis ({contradictions} conflicts)"
-        elif status == "RESOLVED":
-            disposition = "ACCEPT_FOR_DEVELOPMENT"
-            reason = "Candidate resolved invariants and grounded by WAKE evidence"
-        elif len(unresolved) > 0 or status == "EXPLORED":
-            disposition = "ACCEPT_FOR_DEVELOPMENT"
-            reason = "Candidate has explored potential and bounded assumptions"
+        except AuthorityEscalationError:
+            disposition, confidence = "REJECT", "HIGH"
+            reason = "authority escalation prohibited: speculative candidate cannot claim execution authority"
         else:
-            disposition = "UNRESOLVED"
-            reason = "Evidence is inconclusive; candidate deferred"
+            if status == "REJECTED":
+                disposition, confidence = "REJECT", "HIGH"
+                reason = "candidate rejected by verification or critical contradictions"
+            elif status == "LOCALLY_VERIFIED":
+                disposition, confidence = "ACCEPT_FOR_DEVELOPMENT", "MEDIUM"
+                reason = "sufficient evidence invariants passed for deliberate development"
+            elif status == "UNRESOLVED":
+                disposition = "UNRESOLVED"
+                reason = "unresolved assumptions require further evidence"
 
+        import hashlib
+        assessment_id = "assess-" + hashlib.sha256(str(candidate_id).encode()).hexdigest()[:32]
         return {
-            "schema": "howl.assessment/v1",
-            "candidate_id": cand.get("id", data.get("candidate_id", "unknown")),
-            "parent_dream_id": data.get("parent_dream_id", ""),
+            "schema_version": "howl.assessment/v1",
+            "assessment_id": assessment_id,
+            "candidate_id": candidate_id,
             "disposition": disposition,
+            "confidence": confidence,
             "authority": {"type": "ADVISORY", "executable": False},
-            "explanation": reason,
+            "limitations": [reason],
         }
 
     def promote_candidate_to_howlcreate(
