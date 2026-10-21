@@ -1108,3 +1108,7 @@ missing optional CLI into generic unavailability.
 * Render a bounded native-queue service with the inference ban and non-restarting configuration/mission-boundary failures. Installation, live provider recovery and default-branch availability require separate verification.
 
 * Consolidate repeated service-rendering test setup into one fixture, preserving the existing duplication ceiling and all boundary assertions.
+
+## Mission007 contract corrections
+
+Invalid stored orchestration state exits1 without dispatch or manifest rewriting (F9). Frame global version probe is declared (F12). Optional Dream Python API is pinned and exercised by an ordinary offline CI job, with advisory-only output and simulated generation labeled (F15).

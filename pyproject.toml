@@ -25,6 +25,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Optional in-process boundary; also exercised offline by the Dream API CI job.
+dream-api = [
+    "howldream @ git+https://github.com/howlcipher/howldream.git@9594c98b25df624733c9609fa5743aef091e59f5",
+]
 vector = [
     "chromadb>=1.5.9",
     "sentence-transformers>=5.6.0",

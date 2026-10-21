@@ -214,6 +214,18 @@ jobs:
 
   # The `main-protection` ruleset requires the status check context `test-go`.
   # Do not rename or remove this job without updating branch protection rules.
+  dream-api:
+    name: Pinned Dream API (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install '.[dev,dream-api]'
+      - run: python -c "import howldream.contracts, howldream.engine"
+      - run: python -m pytest tests/test_howldream_api_contract.py -q
+
   test-go:
     runs-on: ubuntu-latest
     steps:
