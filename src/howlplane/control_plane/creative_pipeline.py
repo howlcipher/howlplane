@@ -370,10 +370,10 @@ def command(args: argparse.Namespace) -> int:
             return _report(CreativeRun(Path(args.run_dir)).state, args.json)
         else:
             print("usage: howlplane creative {run,resume,status} ...", file=sys.stderr)
-            return 2
+            return 1
     except (ValueError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
-        return 2
+        return 1
     return _report(run.execute(), args.json)
 
 

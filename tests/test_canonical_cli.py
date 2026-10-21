@@ -178,7 +178,7 @@ def test_common_options_require_a_value(option, depth):
     argv = ["factory", "status"][:depth] + [option]
     with pytest.raises(SystemExit) as error:
         cli.build_parser().parse_args(argv)
-    assert error.value.code == 2
+    assert error.value.code == 1  # a usage error, not "awaiting a human" (2)
 
 
 @pytest.mark.contract

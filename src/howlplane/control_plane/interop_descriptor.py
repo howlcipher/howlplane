@@ -19,9 +19,9 @@ SCHEMA = "howl.interop/v1"
 
 EXIT_CODES = {
     "0": "ok",
-    "1": "error (a howlplane.error/v1 object on stderr with --json)",
-    "2": "awaiting a human decision; also a usage or input error, explained on stderr",
-    "3": "blocked by a boundary or readiness gate",
+    "1": "error, including a usage or input error (a howlplane.error/v1 object on stderr with --json)",
+    "2": "awaiting a human decision (approval, handoff, or confirmation); nothing else uses 2",
+    "3": "blocked by a boundary, readiness or verification gate (MISMATCH, REJECTED, refused preflight)",
     "4": "write: an owner-only decision HowlPlane will not relay (HowlWriter's code, passed through)",
     "141": "the reader of stdout went away",
 }

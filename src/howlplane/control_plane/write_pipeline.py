@@ -327,10 +327,10 @@ def command(args: argparse.Namespace) -> int:
             return _report({**run.state, "run_dir": str(run.run_dir)}, args.json)
         else:
             print("usage: howlplane write {run,resume,status} ...", file=sys.stderr)
-            return 2
+            return 1
     except (ValueError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
-        return 2
+        return 1
     return _report({**run.execute(), "run_dir": str(run.run_dir)}, args.json)
 
 

@@ -164,7 +164,7 @@ def test_cli_requires_exactly_one_dream_source(tmp_path, capsys):
     (tmp_path / "spec.json").write_text("{}")
     code = cli.main(["creative", "run", "--run-dir", str(tmp_path / "run"),
                      "--copy-spec", str(tmp_path / "spec.json"), "--command-config", "x"])
-    assert code == 2
+    assert code == 1
     assert "exactly one Dream source" in capsys.readouterr().err
 
 

@@ -653,7 +653,7 @@ def cmd_route(args: argparse.Namespace) -> int:
             )
         except ValueError as exc:
             print(f"Error: invalid semantic recommendation settings: {exc}", file=sys.stderr)
-            return 2
+            return 1
     spec, _decision = create_task_plan(
         ctx, target_repo, None, args, resource_pool=pool
     )
@@ -1018,9 +1018,9 @@ def cmd_howlframe_audit(args: argparse.Namespace) -> int:
     if res.status in ("MATCH", "HOWLFRAME_UNAVAILABLE"):
         return 0
     elif res.status == "MISMATCH":
-        return 1
+        return 3  # a gate's verdict, not an error
     else:
-        return 2
+        return 1
 
 
 def cmd_explore(args: argparse.Namespace) -> int:
@@ -1080,9 +1080,9 @@ def cmd_explore(args: argparse.Namespace) -> int:
     if res.status in ("SUCCESS", "NO_CANDIDATES", "SKIPPED", "UNAVAILABLE"):
         return 0
     elif res.status == "REJECTED":
-        return 1
+        return 3  # a gate's verdict, not an error
     else:
-        return 2
+        return 1
 
 
 def cmd_trace(args: argparse.Namespace) -> int:
@@ -1216,13 +1216,16 @@ class _FriendlyArgumentParser(argparse.ArgumentParser):
     """Argparse that answers a mistyped command with one line, not a 40-name dump."""
 
     def error(self, message: str) -> Any:
+        # Usage errors exit 1: exit 2 means a decision is waiting on a person
+        # (issues.md #21), and `howl orchestrate` passes the code through.
         import re
         import sys
         match = re.search(r"argument <command>: invalid choice: '([^']*)'", message)
         if match:
-            self.exit(2, f"{self.prog}: unknown command '{match.group(1)}'. "
+            self.exit(1, f"{self.prog}: unknown command '{match.group(1)}'. "
                          f"Run `{self.prog} --help` to see what is available.\n")
-        super().error(message)
+        self.print_usage(sys.stderr)
+        self.exit(1, f"{self.prog}: error: {message}\n")
 
 
 def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
@@ -2026,7 +2029,7 @@ def cmd_marathon(args: argparse.Namespace) -> int:
             print("\nWorking tree changes found:", file=_sys.stderr)
             for path in report["dirty_files"]:
                 print(f"  {path}", file=_sys.stderr)
-        return 2
+        return 3
 
     if getattr(args, "json", False):
         print(_json.dumps(report, indent=2))
@@ -2621,7 +2624,7 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
     args, debug, _COLOR_MODE = _extract_global_flags(list(args))
     if _COLOR_MODE is not None and _COLOR_MODE not in ("auto", "always", "never"):
         print("--color must be one of: auto, always, never", file=sys.stderr)
-        return 2
+        return 1
     parser = build_parser(program_name=program_name)
     parsed_args, unknown = parser.parse_known_args(args)
     if unknown:

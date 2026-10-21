@@ -119,7 +119,7 @@ def test_no_target_still_asks_for_one(product):
     assert code == 1 and "DECISION_TARGET_REQUIRED" in err and "howlplane status" in err
 
 
-def test_unknown_command_is_one_friendly_line_with_exit_2(tmp_path):
+def test_unknown_command_is_one_friendly_line_with_exit_1(tmp_path):
     import os
     import subprocess
     import sys
@@ -129,6 +129,7 @@ def test_unknown_command_is_one_friendly_line_with_exit_2(tmp_path):
     env = dict(os.environ, PYTHONPATH=f"{root / 'src'}:{root}")
     done = subprocess.run([sys.executable, "-m", "howlplane.control_plane.cli", "frobnicate"],
                           cwd=tmp_path, env=env, capture_output=True, text=True)
-    assert done.returncode == 2
+    # 1, not 2: exit 2 means a decision is waiting on a person (issues.md #21).
+    assert done.returncode == 1
     assert "unknown command 'frobnicate'" in done.stderr and "--help" in done.stderr
     assert "init-task" not in done.stderr and "choose from" not in done.stderr
