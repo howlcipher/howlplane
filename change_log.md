@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Changed
+
+- Exit status 2 now means only that a decision is waiting on a person (issues.md #21).
+  Usage and input errors (an unknown command or flag, an invalid `creative`/`write`
+  input, invalid semantic settings, a bad `--color`) exit 1, and gate verdicts
+  (`howlframe-audit` MISMATCH, `explore` REJECTED, a marathon refused by its
+  dirty-tree preflight) exit 3. `howl orchestrate`, `howl agents doctor` and
+  `howl factory prepare` pass these through unchanged.
+
 ### Interop
 
 - HowlPlane follows the Howl interop contract (`docs/INTEROP.md` in howlcipher/howl).

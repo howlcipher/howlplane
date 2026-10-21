@@ -387,9 +387,9 @@ release, then `~/.local/bin`.
 | Exit | Meaning |
 | --- | --- |
 | 0 | ok |
-| 1 | error (`howlplane.error/v1` on stderr with `--json`) |
-| 2 | awaiting a human decision; also a usage or input error (see issues.md #21) |
-| 3 | blocked by a boundary or readiness gate |
+| 1 | error, including a usage or input error (`howlplane.error/v1` on stderr with `--json`) |
+| 2 | awaiting a human decision (approval, handoff, confirmation); nothing else uses 2 |
+| 3 | blocked by a boundary, readiness or verification gate |
 | 4 | `write`: an owner-only decision HowlPlane will not relay |
 
 ---

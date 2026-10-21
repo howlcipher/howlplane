@@ -102,9 +102,9 @@ offered by the installed producer. Commands come from the live argparse tree;
 </span><span id="L-19"><a href="#L-19"><span class="linenos"> 19</span></a>
 </span><span id="L-20"><a href="#L-20"><span class="linenos"> 20</span></a><span class="n">EXIT_CODES</span> <span class="o">=</span> <span class="p">{</span>
 </span><span id="L-21"><a href="#L-21"><span class="linenos"> 21</span></a>    <span class="s2">"0"</span><span class="p">:</span> <span class="s2">"ok"</span><span class="p">,</span>
-</span><span id="L-22"><a href="#L-22"><span class="linenos"> 22</span></a>    <span class="s2">"1"</span><span class="p">:</span> <span class="s2">"error (a howlplane.error/v1 object on stderr with --json)"</span><span class="p">,</span>
-</span><span id="L-23"><a href="#L-23"><span class="linenos"> 23</span></a>    <span class="s2">"2"</span><span class="p">:</span> <span class="s2">"awaiting a human decision; also a usage or input error, explained on stderr"</span><span class="p">,</span>
-</span><span id="L-24"><a href="#L-24"><span class="linenos"> 24</span></a>    <span class="s2">"3"</span><span class="p">:</span> <span class="s2">"blocked by a boundary or readiness gate"</span><span class="p">,</span>
+</span><span id="L-22"><a href="#L-22"><span class="linenos"> 22</span></a>    <span class="s2">"1"</span><span class="p">:</span> <span class="s2">"error, including a usage or input error (a howlplane.error/v1 object on stderr with --json)"</span><span class="p">,</span>
+</span><span id="L-23"><a href="#L-23"><span class="linenos"> 23</span></a>    <span class="s2">"2"</span><span class="p">:</span> <span class="s2">"awaiting a human decision (approval, handoff, or confirmation); nothing else uses 2"</span><span class="p">,</span>
+</span><span id="L-24"><a href="#L-24"><span class="linenos"> 24</span></a>    <span class="s2">"3"</span><span class="p">:</span> <span class="s2">"blocked by a boundary, readiness or verification gate (MISMATCH, REJECTED, refused preflight)"</span><span class="p">,</span>
 </span><span id="L-25"><a href="#L-25"><span class="linenos"> 25</span></a>    <span class="s2">"4"</span><span class="p">:</span> <span class="s2">"write: an owner-only decision HowlPlane will not relay (HowlWriter's code, passed through)"</span><span class="p">,</span>
 </span><span id="L-26"><a href="#L-26"><span class="linenos"> 26</span></a>    <span class="s2">"141"</span><span class="p">:</span> <span class="s2">"the reader of stdout went away"</span><span class="p">,</span>
 </span><span id="L-27"><a href="#L-27"><span class="linenos"> 27</span></a><span class="p">}</span>
@@ -231,7 +231,7 @@ offered by the installed producer. Commands come from the live argparse tree;
                     <div class="attr variable">
             <span class="name">EXIT_CODES</span>        =
 <input id="EXIT_CODES-view-value" class="view-value-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
-            <label class="view-value-button pdoc-button" for="EXIT_CODES-view-value"></label><span class="default_value">{&#39;0&#39;: &#39;ok&#39;, &#39;1&#39;: &#39;error (a howlplane.error/v1 object on stderr with --json)&#39;, &#39;2&#39;: &#39;awaiting a human decision; also a usage or input error, explained on stderr&#39;, &#39;3&#39;: &#39;blocked by a boundary or readiness gate&#39;, &#39;4&#39;: &#34;write: an owner-only decision HowlPlane will not relay (HowlWriter&#39;s code, passed through)&#34;, &#39;141&#39;: &#39;the reader of stdout went away&#39;}</span>
+            <label class="view-value-button pdoc-button" for="EXIT_CODES-view-value"></label><span class="default_value">{&#39;0&#39;: &#39;ok&#39;, &#39;1&#39;: &#39;error, including a usage or input error (a howlplane.error/v1 object on stderr with --json)&#39;, &#39;2&#39;: &#39;awaiting a human decision (approval, handoff, or confirmation); nothing else uses 2&#39;, &#39;3&#39;: &#39;blocked by a boundary, readiness or verification gate (MISMATCH, REJECTED, refused preflight)&#39;, &#39;4&#39;: &#34;write: an owner-only decision HowlPlane will not relay (HowlWriter&#39;s code, passed through)&#34;, &#39;141&#39;: &#39;the reader of stdout went away&#39;}</span>
 
         
     </div>
