@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+- Generated HTTP products use explicit child filesystem inheritance and database authority only for CRUD. Runners bound filesystem access to reads in static/ and data/ and writes in data/; this preserves portability without embedding build-machine paths. Existing real acceptance tests and a new actual-VM out-of-scope read denial verify the migration.
 ### Security
 
 - HowlPlane no longer signs the HowlChangeOps approval it waits for (issues.md #20).
@@ -13,6 +15,12 @@ All notable changes to this project will be documented in this file.
   exact commands to run and the task stays resumable.
 
 ### Changed
+
+- Compile portable candidate-assessment and unchanged project-context sources
+  with published Frame v0.1.0 to HFBC1, retaining VM execution on that release and existing corrected readers.
+  Upgrade the CI runtime pin to41d56cec, declare the artifact producer separately,
+  and require real published-runtime parity/capability/limit checks without fallback.
+
 
 - Exit status 2 now means only that a decision is waiting on a person (issues.md #21).
   Usage and input errors (an unknown command or flag, an invalid `creative`/`write`
@@ -1108,3 +1116,9 @@ missing optional CLI into generic unavailability.
 * Render a bounded native-queue service with the inference ban and non-restarting configuration/mission-boundary failures. Installation, live provider recovery and default-branch availability require separate verification.
 
 * Consolidate repeated service-rendering test setup into one fixture, preserving the existing duplication ceiling and all boundary assertions.
+
+## Mission007 contract corrections
+
+Invalid stored orchestration state exits1 without dispatch or manifest rewriting (F9). Frame global version probe is declared (F12). Optional Dream Python API is pinned and exercised by an ordinary offline CI job, with advisory-only output and simulated generation labeled (F15).
+
+Combined installed Create intake exposed assessment-schema drift. The Python fallback and Frame evaluator now emit the current advisory assessment contract; bytecode and packaged copy are synchronized. No schema validation was relaxed.

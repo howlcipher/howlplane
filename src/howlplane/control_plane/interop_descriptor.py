@@ -47,7 +47,7 @@ CONSUMES: List[Dict[str, Any]] = [
     {"component": "howlchangeops", "command": ["execute"], "flags": ["--json"], "min_version": "0.2.0"},
     {"component": "howlframe", "command": ["run"], "flags": ["--max-instructions"]},
     {"component": "howlframe", "command": ["build"], "flags": ["-o"]},
-    {"component": "howlframe", "command": [], "flags": ["-run-bc", "-allow-caps"]},
+    {"component": "howlframe", "command": [], "flags": ["--version", "-run-bc", "-allow-caps"]},
     {"component": "howlinstinct", "command": ["decide"], "flags": ["--input", "--json"],
      "schemas": ["howlinstinct.decide_output/v1", "howlinstinct.decision_receipt/v1"]},
     {"component": "howldream", "command": ["explore"], "flags": ["--output", "--command-config", "--allow-remote"],

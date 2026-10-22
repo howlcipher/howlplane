@@ -1980,7 +1980,7 @@ def invalid_session_report(doc: Any, reason: str, repo: Path) -> int:
     print("HOWL ORCHESTRATION REPORT")
     print(f"Session: {redact(str(session))}\nStatus: SESSION_STATE_INVALID\nReason: {redact(reason)}")
     print(f"Next: howlplane orchestrate inspect --json --repo {repo}, then discard or repair the session")
-    return 2
+    return 1
 
 
 def resume_provider_options(doc: dict[str, Any], args: argparse.Namespace, repo: Path) -> None:

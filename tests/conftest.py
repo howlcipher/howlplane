@@ -19,6 +19,7 @@ from howlplane.control_plane.git_env import GIT_REPOSITORY_SELECTION_ENV_VARS
 # unfaked real-integration layer; only unit/control-plane and synthesis tests
 # get the fake compiler injected).
 _REAL_COMPILER_INTEGRATION_MODULES = {
+    "test_frame_artifact_compatibility.py",
     "test_howldream_integration.py",
     "test_howlframe_dogfood.py",
     "test_launcher.py",
@@ -31,6 +32,7 @@ _REAL_COMPILER_INTEGRATION_MODULES = {
 _ACCEPTANCE_MODULES = {"test_product_journey.py"}
 
 _INTEGRATION_MODULES = {
+    "test_frame_artifact_compatibility.py",
     "test_git_baseline.py",
     "test_git_env_isolation.py",
     "test_git_integration.py",

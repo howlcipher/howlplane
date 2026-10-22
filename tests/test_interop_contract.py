@@ -193,3 +193,20 @@ def test_wheel_installs_find_packaged_data_and_keep_the_ledger_out_of_the_packag
     monkeypatch.delenv("HOWLPLANE_DIR", raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     assert evidence_ledger.default_ledger_path().is_relative_to(tmp_path / "state" / "howlplane")
+
+
+def test_frame_version_probe_is_declared(monkeypatch):
+    from types import SimpleNamespace
+    from howlplane.control_plane import howlframe_runner
+
+    observed = []
+
+    def run(argv, **kwargs):
+        observed.append(argv)
+        return SimpleNamespace(returncode=0, stdout="howlframe 0.1.0\n")
+
+    monkeypatch.setattr(howlframe_runner.subprocess, "run", run)
+    assert howlframe_runner.get_howlframe_version("/synthetic/howlframe") == "howlframe 0.1.0"
+    assert observed == [["/synthetic/howlframe", "--version"]]
+    assert any(use["component"] == "howlframe" and use["command"] == []
+               and "--version" in use["flags"] for use in CONSUMES)

@@ -160,7 +160,7 @@ def test_unrecoverable_manifest_returns_structured_session_state_invalid(tmp_pat
     before = path.read_bytes()
     monkeypatch.setattr(module, "execute_assignment", lambda *args: pytest.fail("invalid state must not dispatch"))
 
-    assert module.command(arguments(repo, input="resume", orchestrator=None)) == 2
+    assert module.command(arguments(repo, input="resume", orchestrator=None)) == 1
 
     output = capsys.readouterr().out
     assert "Status: SESSION_STATE_INVALID" in output
