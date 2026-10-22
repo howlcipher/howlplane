@@ -72,3 +72,17 @@ This helper targets the Linux amd64 CI producer only; it is not a general system
 installer and does not modify owner-installed tools. Other producer platforms
 need independent byte-for-byte verification before substituting them. Source
 wheels remain unreleased until owner-authorized publication.
+
+## Generated HTTP application contract
+
+Published-runtime compatibility above applies to the two packaged CLI artifacts,
+not every generated application. Generated HTTP applications compile and run with
+the modern pinned runtime41d56cec. That runtime correctly attenuates child
+capabilities. Generated runners restrict parent filesystem grants to reads under
+static/ and data/ and writes under data/. Handlers use the existing explicit
+inherit:filesystem request so no build-machine absolute paths enter bytecode;
+only CRUD handlers additionally receive database capability. Health handlers
+receive no effect grants. The runtime and its capability gates are not weakened.
+Existing real notes/todo acceptance tests and a generated-handler out-of-scope
+read test verify this migration. The first full gate exposed21 failures from
+the prior ambient-grant assumption; those failures remain preserved.

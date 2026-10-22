@@ -584,3 +584,9 @@ executes the same artifact. This compatibility claim applies to both packaged as
 artifacts, produced by the declared published compiler. Generated applications
 retain their separately pinned compiler/runtime requirements. Artifact provenance and exact
 rebuild commands are in [FRAME_ARTIFACTS.md](documentation/FRAME_ARTIFACTS.md).
+
+Generated HTTP products declare child grants explicitly under the corrected Frame
+runtime: runners permit reads under `static/` and `data/`, and writes only under `data/`.
+Static and CRUD handlers explicitly inherit that filesystem subset; only CRUD
+handlers receive database authority, and health handlers receive no effect grants.
+A real-VM test rejects out-of-scope reads.

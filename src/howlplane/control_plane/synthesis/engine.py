@@ -536,11 +536,12 @@ Description: {spec.description}
 Entity: {ent_name} (fields: title, content, created_at)
 Storage: {store_path} (Native persistent key-value storage)
 Port: {port}
-Capabilities: network, database, filesystem
+Parent capabilities: network, database, filesystem:read=static, filesystem:read=data, filesystem:write=data
 
 Required File Structure to create in the current directory:
 1. app/backend.howl:
    - Must contain (http_server {port} ...)
+   - Explicit child grants are required: static routes use (grants "inherit:filesystem"); CRUD routes use (grants "database" "inherit:filesystem"). Health needs no child grants.
    - Routes:
      * "/health" -> JSON 200 {{"status": "ok", "service": "{spec.name}", "healthy": "true"}}
      * "/" -> HTML 200 serving static/index.html via (read_file "static/index.html")
@@ -562,7 +563,7 @@ Required File Structure to create in the current directory:
 6. scripts/build.sh:
    - Deterministic build script compiling app/backend.howl -> build/backend.hfbc via howlframe -compile-bc.
 7. scripts/run.sh:
-   - Deterministic runner script starting howlframe -run-bc -allow-caps network,database,filesystem build/backend.hfbc.
+   - Deterministic runner script starting howlframe -run-bc -allow-caps network,database,filesystem:read=static,filesystem:read=data,filesystem:write=data build/backend.hfbc.
 8. scripts/test.sh:
    - Test execution script.
 9. data/{ent_slug}.json:
@@ -854,7 +855,7 @@ fi
 
 echo "==> Starting {spec.title} on port ${{PORT}}..."
 export PORT="${{PORT}}"
-exec "$HOWLFRAME_EXEC" -run-bc -allow-caps network,database,filesystem build/backend.hfbc
+exec "$HOWLFRAME_EXEC" -run-bc -allow-caps network,database,filesystem:read=static,filesystem:read=data,filesystem:write=data build/backend.hfbc
 """
         atomic_write_text(scripts_dir / "run.sh", run_script)
         os.chmod(scripts_dir / "run.sh", 0o755)  # nosec B103
@@ -901,21 +902,21 @@ echo "✓ All tests verified."
   ))
 
   ;; Static assets serving
-  (route "/" (lambda (req)
+  (route "/" (grants "inherit:filesystem") (lambda (req)
     (do
       (res_header "Content-Type" "text/html; charset=utf-8")
       (res 200 "text/html" (read_file "static/index.html"))
     )
   ))
 
-  (route "/static/app.js" (lambda (req)
+  (route "/static/app.js" (grants "inherit:filesystem") (lambda (req)
     (do
       (res_header "Content-Type" "application/javascript; charset=utf-8")
       (res 200 "application/javascript" (read_file "static/app.js"))
     )
   ))
 
-  (route "/static/style.css" (lambda (req)
+  (route "/static/style.css" (grants "inherit:filesystem") (lambda (req)
     (do
       (res_header "Content-Type" "text/css; charset=utf-8")
       (res 200 "text/css" (read_file "static/style.css"))
@@ -923,7 +924,7 @@ echo "✓ All tests verified."
   ))
 
   ;; Primary REST CRUD Endpoints for {slug_plural}
-  (route "/api/{slug_plural}" (lambda (req)
+  (route "/api/{slug_plural}" (grants "database" "inherit:filesystem") (lambda (req)
     (do
       (res_header "Access-Control-Allow-Origin" "*")
       (res_header "Access-Control-Allow-Methods" "GET, POST, PUT, DELETE, OPTIONS")
