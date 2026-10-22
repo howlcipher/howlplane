@@ -83,8 +83,7 @@ def test_generated_static_route_cannot_read_outside_its_grant(tmp_path: Path):
     import socket
     import subprocess
     import time
-    import urllib.error
-    import urllib.request
+    import http.client
 
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -111,17 +110,19 @@ def test_generated_static_route_cannot_read_outside_its_grant(tmp_path: Path):
         try:
             deadline = time.monotonic() + 10
             while True:
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=0.25)
                 try:
-                    urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=0.25).close()
-                    pytest.fail("Out-of-scope read returned success")
-                except urllib.error.HTTPError as error:
-                    assert error.code == 500
-                    assert "synthetic-outside-grant" not in error.read().decode()
+                    connection.request("GET", "/")
+                    response = connection.getresponse()
+                    assert response.status == 500
+                    assert "synthetic-outside-grant" not in response.read().decode()
                     break
-                except urllib.error.URLError:
+                except (OSError, http.client.HTTPException):
                     assert server.poll() is None, log.read_text()
                     assert time.monotonic() < deadline, "Generated server did not start"
                     time.sleep(0.05)
+                finally:
+                    connection.close()
         finally:
             server.terminate()
             try:
