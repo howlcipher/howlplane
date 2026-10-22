@@ -14,6 +14,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Compile portable candidate-assessment and unchanged project-context sources
+  with published Frame v0.1.0 to HFBC1, retaining VM execution on that release and existing corrected readers.
+  Upgrade the CI runtime pin to41d56cec, declare the artifact producer separately,
+  and require real published-runtime parity/capability/limit checks without fallback.
+
+
 - Exit status 2 now means only that a decision is waiting on a person (issues.md #21).
   Usage and input errors (an unknown command or flag, an invalid `creative`/`write`
   input, invalid semantic settings, a bad `--color`) exit 1, and gate verdicts

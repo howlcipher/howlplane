@@ -1,0 +1,12 @@
+{
+  "producer_release": "v0.1.0",
+  "linux_amd64_asset_sha256": "d44006c23cb9c152c815b5acc8762a53f06a93777877b86bfea57d173cc9d907",
+  "linux_amd64_compiler_sha256": "3396379ffdbe7823f47e9fd161d11239e886b3b656757203d3063f54a87b882c",
+  "tested_runtime_revision": "41d56cecd9e8f936cf9da35240331ab7da0244cd",
+  "files": {
+    "integrations/howlframe/candidate_evaluator.howl": "80f2c1db77cb8d00da3d22412c7c79bfc4799dc7f61eb7d26e43b14f18feb5be",
+    "integrations/howlframe/candidate_evaluator.hfbc": "7756b67fca963b9ce13d2e264dd59d9e459d749af24b46c93584bec024123bbb",
+    "integrations/howlframe/project_context_audit.howl": "f8fe80b950281d921dacfe5c4b44e2e8dc69d7bb0d801bc5e0cd35f3856dee06",
+    "integrations/howlframe/project_context_audit.hfbc": "2f277980827c6067584b264f43e6c7f9bc373f38771a154ffa0d64bb1dd23ae6"
+  }
+}

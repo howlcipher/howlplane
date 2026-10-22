@@ -53,11 +53,15 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           bash scripts/install_slopslint.sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install the published artifact compiler separately from the runtime
+        run: |
+          bash scripts/fetch_frame_artifact_compiler.sh "$RUNNER_TEMP/frame-v010"
+          echo "HOWLFRAME_ARTIFACT_COMPILER_BIN=$RUNNER_TEMP/frame-v010/howlframe" >> "$GITHUB_ENV"
       - name: Install pinned HowlFrame binary
         run: |
           mkdir -p "$HOME/.local/bin"
           git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
-          git -C /tmp/howlframe checkout --detach 7631ce5d4008534ef681f35c3436922507d3f441
+          git -C /tmp/howlframe checkout --detach 41d56cecd9e8f936cf9da35240331ab7da0244cd
           cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Run fast deterministic suite
@@ -92,11 +96,15 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           bash scripts/install_slopslint.sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install the published artifact compiler separately from the runtime
+        run: |
+          bash scripts/fetch_frame_artifact_compiler.sh "$RUNNER_TEMP/frame-v010"
+          echo "HOWLFRAME_ARTIFACT_COMPILER_BIN=$RUNNER_TEMP/frame-v010/howlframe" >> "$GITHUB_ENV"
       - name: Install pinned HowlFrame binary
         run: |
           mkdir -p "$HOME/.local/bin"
           git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
-          git -C /tmp/howlframe checkout --detach 7631ce5d4008534ef681f35c3436922507d3f441
+          git -C /tmp/howlframe checkout --detach 41d56cecd9e8f936cf9da35240331ab7da0244cd
           cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       # `shell: bash` is load-bearing: it runs the step under `bash -eo pipefail`.
@@ -144,11 +152,15 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           bash scripts/install_slopslint.sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install the published artifact compiler separately from the runtime
+        run: |
+          bash scripts/fetch_frame_artifact_compiler.sh "$RUNNER_TEMP/frame-v010"
+          echo "HOWLFRAME_ARTIFACT_COMPILER_BIN=$RUNNER_TEMP/frame-v010/howlframe" >> "$GITHUB_ENV"
       - name: Install pinned HowlFrame binary
         run: |
           mkdir -p "$HOME/.local/bin"
           git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
-          git -C /tmp/howlframe checkout --detach 7631ce5d4008534ef681f35c3436922507d3f441
+          git -C /tmp/howlframe checkout --detach 41d56cecd9e8f936cf9da35240331ab7da0244cd
           cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       # A vendored producer schema must equal the file at the commit its
@@ -202,7 +214,7 @@ jobs:
   test-python:
     name: test-python
     if: always() && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    needs: [fast-python, full-python]
+    needs: [fast-python, full-python, dream-api, published-frame]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any Python gate failed
@@ -211,6 +223,8 @@ jobs:
           echo "full-python: ${{ needs.full-python.result }}"
           [ "${{ needs.fast-python.result }}" = "success" ] || exit 1
           [ "${{ needs.full-python.result }}" = "success" ] || exit 1
+          [ "${{ needs.dream-api.result }}" = "success" ] || exit 1
+          [ "${{ needs.published-frame.result }}" = "success" ] || exit 1
 
   # The `main-protection` ruleset requires the status check context `test-go`.
   # Do not rename or remove this job without updating branch protection rules.
@@ -239,3 +253,25 @@ jobs:
         run: go mod tidy
       - name: Run Go tests with Coverage
         run: make coverage-go
+
+  published-frame:
+    name: Published Frame v0.1.0 artifact compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install '.[dev]'
+      - name: Fetch published Linux compiler/runtime and verify release checksum
+        run: |
+          bash scripts/fetch_frame_artifact_compiler.sh "$RUNNER_TEMP/frame-v010"
+          echo "HOWLFRAME_ARTIFACT_COMPILER_BIN=$RUNNER_TEMP/frame-v010/howlframe" >> "$GITHUB_ENV"
+      - name: Reproduce the committed assessment artifact exactly
+        run: |
+          "$RUNNER_TEMP/frame-v010/howlframe" -compile-bc integrations/howlframe/candidate_evaluator.howl -o "$RUNNER_TEMP/rebuilt-candidate.hfbc"
+          cmp integrations/howlframe/candidate_evaluator.hfbc "$RUNNER_TEMP/rebuilt-candidate.hfbc"
+      - name: Execute committed artifact without fallback
+        env:
+          HOWLFRAME_BIN: ${{ runner.temp }}/frame-v010/howlframe
+        run: python -m pytest tests/test_frame_artifact_compatibility.py tests/test_howlframe_dogfood.py::test_bytecode_compilation_deterministic_reproducibility -q

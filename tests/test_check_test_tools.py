@@ -20,6 +20,7 @@ def _tool(tmp_path, name, body):
 def isolated_path(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + "/usr/bin" + os.pathsep + "/bin")
     monkeypatch.delenv("HOWLFRAME_BIN", raising=False)
+    monkeypatch.delenv("HOWLFRAME_ARTIFACT_COMPILER_BIN", raising=False)
     return tmp_path
 
 
@@ -56,3 +57,12 @@ def test_exit_status_follows_the_requested_tier(isolated_path, capsys):
     doc = json.loads(capsys.readouterr().out)
     missing = {c["name"] for c in doc["checks"] if c["status"] != "ok" and c["tier"] == "full"}
     assert {"howlframe"} <= missing and doc["ok"] is False
+
+
+def test_artifact_compiler_override_is_required_and_does_not_use_runtime(isolated_path, monkeypatch):
+    _tool(isolated_path, "howlframe", "echo runtime")
+    assert ctt.binary_problem("howlframe-artifact-compiler") == "not found"
+    monkeypatch.setenv("HOWLFRAME_ARTIFACT_COMPILER_BIN", str(isolated_path / "missing"))
+    assert ctt.binary_problem("howlframe-artifact-compiler") == "not found"
+    monkeypatch.setenv("HOWLFRAME_ARTIFACT_COMPILER_BIN", str(isolated_path / "howlframe"))
+    assert ctt.binary_problem("howlframe-artifact-compiler") is None

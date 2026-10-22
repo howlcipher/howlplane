@@ -174,8 +174,8 @@ def test_falsifications_bounds_and_lifecycle(tmp_path):
 
 def test_bytecode_compilation_deterministic_reproducibility(tmp_path: Path):
     """Proves that compiling project_context_audit.howl reproduces the exact committed .hfbc artifact."""
-    h_bin = find_howlframe_binary()
-    assert h_bin is not None, "Real howlframe binary is required for integration tests; not found on PATH or via HOWLFRAME_BIN"
+    h_bin = os.environ.get("HOWLFRAME_ARTIFACT_COMPILER_BIN")
+    assert h_bin is not None, "Set HOWLFRAME_ARTIFACT_COMPILER_BIN to the published v0.1.0 producer; runtime discovery is separate"
 
     out_hfbc = tmp_path / "compiled_audit.hfbc"
     proc = subprocess.run(

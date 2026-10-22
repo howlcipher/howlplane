@@ -551,7 +551,7 @@ Validation maintenance separates existing Bandit annotation reasons from rule ID
 and removes obsolete suppressions. It changes no runtime behavior or trust policy.
 
 The generated-application CI suites compile and execute against HowlFrame source
-`7631ce5d4008534ef681f35c3436922507d3f441`. Fast, full and nightly jobs use
+`41d56cecd9e8f936cf9da35240331ab7da0244cd`. Fast, full and nightly jobs use
 that same immutable commit. A moving sibling default branch is not a runtime
 compatibility guarantee: the newer sibling revision observed in CI fails
 generated notes/todo acceptance. The source pin records the tested contract; it does not establish
@@ -573,3 +573,14 @@ The binding regression suite is `PYTHONPATH=src:. python3 -m pytest tests/test_f
 The optional `dream-api` extra pins the existing in-process HowlDream boundary. See [the API contract](documentation/HOWLDREAM_API.md) for offline integration evidence and its CLI fallback limits. Invalid stored orchestration state exits1; Frame version probes are declared in interop.
 
 Combined installed Create intake exposed assessment-schema drift. The Python fallback and Frame evaluator now emit the current advisory assessment contract; bytecode and packaged copy are synchronized. No schema validation was relaxed.
+
+The two packaged Frame programs additionally target the published Frame
+v0.1.0 runtime: portable assessment source and unchanged audit source are compiled by that release into one HFBC1
+artifacts. A dedicated CI job downloads and checksum-verifies the actual release,
+executes every candidate-status/authority case without allowing Python fallback,
+and verifies filesystem denial and finite instruction limits. The ordinary CI
+runtime pin above includes the existing legacy-opcode reader correction and
+executes the same artifact. This compatibility claim applies to both packaged assessment and project-context
+artifacts, produced by the declared published compiler. Generated applications
+retain their separately pinned compiler/runtime requirements. Artifact provenance and exact
+rebuild commands are in [FRAME_ARTIFACTS.md](documentation/FRAME_ARTIFACTS.md).

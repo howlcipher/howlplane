@@ -21,6 +21,7 @@ import sys
 from typing import Dict, List, Optional
 
 INSTALL = {
+    "howlframe-artifact-compiler": "set HOWLFRAME_ARTIFACT_COMPILER_BIN to the published v0.1.0 producer (documentation/FRAME_ARTIFACTS.md)",
     "slopslint": "bash scripts/install_slopslint.sh  (and unset BUN_OPTIONS if it is set to --smol)",
     "howlframe": "build the pinned binary as .github/workflows/test.yml does, or set HOWLFRAME_BIN",
     "go": "install Go 1.26+ (https://go.dev/dl/)",
@@ -37,10 +38,13 @@ def module_present(name: str) -> bool:
 
 def binary_problem(name: str, version_substring: Optional[str] = None) -> Optional[str]:
     """None when the tool runs (with the expected version), else why it cannot be used."""
-    path = os.environ.get("HOWLFRAME_BIN") if name == "howlframe" and os.environ.get("HOWLFRAME_BIN") else shutil.which(name)
+    if name == "howlframe-artifact-compiler":
+        path = os.environ.get("HOWLFRAME_ARTIFACT_COMPILER_BIN")
+    else:
+        path = os.environ.get("HOWLFRAME_BIN") if name == "howlframe" and os.environ.get("HOWLFRAME_BIN") else shutil.which(name)
     if not path or not os.access(path, os.X_OK):
         return "not found"
-    if name == "howlframe":
+    if name in {"howlframe", "howlframe-artifact-compiler"}:
         return None
     arg = "version" if name == "go" else "--version"
     try:
@@ -61,7 +65,7 @@ def collect() -> List[Dict[str, str]]:
     for module in ("pytest", "jsonschema", "yaml"):
         rows.append({"name": module, "tier": "fast", "status": "ok" if module_present(module) else "missing",
                      "detail": "", "fix": 'pip install -e ".[dev]"'})
-    for name, version, tier in (("slopslint", "0.1.0", "fast"), ("go", None, "full"), ("howlframe", None, "full")):
+    for name, version, tier in (("slopslint", "0.1.0", "fast"), ("go", None, "full"), ("howlframe", None, "full"), ("howlframe-artifact-compiler", None, "full")):
         problem = binary_problem(name, version)
         rows.append({"name": name, "tier": tier, "status": "ok" if problem is None else "missing",
                      "detail": problem or "", "fix": INSTALL[name]})
