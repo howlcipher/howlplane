@@ -2485,7 +2485,7 @@
 </span><span id="L-1980"><a href="#L-1980"><span class="linenos">1980</span></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">"HOWL ORCHESTRATION REPORT"</span><span class="p">)</span>
 </span><span id="L-1981"><a href="#L-1981"><span class="linenos">1981</span></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Session: </span><span class="si">{</span><span class="n">redact</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">session</span><span class="p">))</span><span class="si">}</span><span class="se">\n</span><span class="s2">Status: SESSION_STATE_INVALID</span><span class="se">\n</span><span class="s2">Reason: </span><span class="si">{</span><span class="n">redact</span><span class="p">(</span><span class="n">reason</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </span><span id="L-1982"><a href="#L-1982"><span class="linenos">1982</span></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Next: howlplane orchestrate inspect --json --repo </span><span class="si">{</span><span class="n">repo</span><span class="si">}</span><span class="s2">, then discard or repair the session"</span><span class="p">)</span>
-</span><span id="L-1983"><a href="#L-1983"><span class="linenos">1983</span></a>    <span class="k">return</span> <span class="mi">2</span>
+</span><span id="L-1983"><a href="#L-1983"><span class="linenos">1983</span></a>    <span class="k">return</span> <span class="mi">1</span>
 </span><span id="L-1984"><a href="#L-1984"><span class="linenos">1984</span></a>
 </span><span id="L-1985"><a href="#L-1985"><span class="linenos">1985</span></a>
 </span><span id="L-1986"><a href="#L-1986"><span class="linenos">1986</span></a><span class="k">def</span><span class="w"> </span><span class="nf">resume_provider_options</span><span class="p">(</span><span class="n">doc</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">],</span> <span class="n">args</span><span class="p">:</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">,</span> <span class="n">repo</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
@@ -2789,7 +2789,7 @@
                 <section id="READ_ONLY_ROLES">
                     <div class="attr variable">
             <span class="name">READ_ONLY_ROLES</span>        =
-<span class="default_value">frozenset({&#39;planning&#39;, &#39;review&#39;, &#39;acceptance&#39;})</span>
+<span class="default_value">frozenset({&#39;planning&#39;, &#39;acceptance&#39;, &#39;review&#39;})</span>
 
         
     </div>
@@ -2825,7 +2825,7 @@
                 <section id="AGENT_STATES">
                     <div class="attr variable">
             <span class="name">AGENT_STATES</span>        =
-<span class="default_value">{&#39;RESERVED&#39;, &#39;AVAILABLE&#39;, &#39;UNAVAILABLE&#39;, &#39;DEGRADED&#39;}</span>
+<span class="default_value">{&#39;AVAILABLE&#39;, &#39;RESERVED&#39;, &#39;DEGRADED&#39;, &#39;UNAVAILABLE&#39;}</span>
 
         
     </div>
@@ -2837,7 +2837,7 @@
                 <section id="UNAVAILABLE_FAILURES">
                     <div class="attr variable">
             <span class="name">UNAVAILABLE_FAILURES</span>        =
-<span class="default_value">{&#39;AUTHENTICATION_REQUIRED&#39;, &#39;MISSING_EXECUTABLE&#39;, &#39;PROVIDER_UNAVAILABLE&#39;}</span>
+<span class="default_value">{&#39;PROVIDER_UNAVAILABLE&#39;, &#39;AUTHENTICATION_REQUIRED&#39;, &#39;MISSING_EXECUTABLE&#39;}</span>
 
         
     </div>
@@ -2849,7 +2849,7 @@
                 <section id="MODEL_LIMIT_FAILURES">
                     <div class="attr variable">
             <span class="name">MODEL_LIMIT_FAILURES</span>        =
-<span class="default_value">{&#39;SESSION_LIMIT&#39;, &#39;QUOTA_EXHAUSTED&#39;, &#39;RATE_LIMITED&#39;}</span>
+<span class="default_value">{&#39;QUOTA_EXHAUSTED&#39;, &#39;RATE_LIMITED&#39;, &#39;SESSION_LIMIT&#39;}</span>
 
         
     </div>
@@ -2946,7 +2946,7 @@
                     <div class="attr variable">
             <span class="name">ROLE_FAILURES</span>        =
 <input id="ROLE_FAILURES-view-value" class="view-value-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
-            <label class="view-value-button pdoc-button" for="ROLE_FAILURES-view-value"></label><span class="default_value">{&#39;MALFORMED_OUTPUT&#39;, &#39;ACCEPTANCE_REJECTED_OR_UNCONFIRMED&#39;, &#39;PROVIDER_STALLED&#39;, &#39;CAPABILITY_FAILURE&#39;, &#39;READ_ONLY_ROLE_MUTATED_REPOSITORY&#39;, &#39;AUDIT_FINDINGS_OR_UNCONFIRMED&#39;, &#39;VERIFICATION_FAILURE&#39;, &#39;POLICY_FAILURE&#39;, &#39;AUDIT_NO_VERDICT&#39;, &#39;NO_REPOSITORY_CHANGE&#39;, &#39;ENGINEERING_FAILURE&#39;, &#39;IMPLEMENTATION_INCOMPLETE&#39;, &#39;EXECUTION_PERMISSION_REQUIRED&#39;}</span>
+            <label class="view-value-button pdoc-button" for="ROLE_FAILURES-view-value"></label><span class="default_value">{&#39;READ_ONLY_ROLE_MUTATED_REPOSITORY&#39;, &#39;ACCEPTANCE_REJECTED_OR_UNCONFIRMED&#39;, &#39;AUDIT_NO_VERDICT&#39;, &#39;VERIFICATION_FAILURE&#39;, &#39;PROVIDER_STALLED&#39;, &#39;NO_REPOSITORY_CHANGE&#39;, &#39;CAPABILITY_FAILURE&#39;, &#39;MALFORMED_OUTPUT&#39;, &#39;EXECUTION_PERMISSION_REQUIRED&#39;, &#39;AUDIT_FINDINGS_OR_UNCONFIRMED&#39;, &#39;ENGINEERING_FAILURE&#39;, &#39;IMPLEMENTATION_INCOMPLETE&#39;, &#39;POLICY_FAILURE&#39;}</span>
 
         
     </div>
@@ -2996,7 +2996,7 @@
                 <section id="SUCCESSFULLY_TERMINAL_STATUSES">
                     <div class="attr variable">
             <span class="name">SUCCESSFULLY_TERMINAL_STATUSES</span>        =
-<span class="default_value">frozenset({&#39;COMPLETE&#39;, &#39;COMPLETE WITH WARNINGS&#39;})</span>
+<span class="default_value">frozenset({&#39;COMPLETE WITH WARNINGS&#39;, &#39;COMPLETE&#39;})</span>
 
         
     </div>
@@ -3009,7 +3009,7 @@
                     <div class="attr variable">
             <span class="name">RESUMABLE_STATUSES</span>        =
 <input id="RESUMABLE_STATUSES-view-value" class="view-value-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
-            <label class="view-value-button pdoc-button" for="RESUMABLE_STATUSES-view-value"></label><span class="default_value">frozenset({&#39;IMPLEMENTATION&#39;, &#39;ACCEPTANCE&#39;, &#39;PLANNED&#39;, &#39;PLANNING&#39;, &#39;INTERRUPTED&#39;, &#39;REVIEW&#39;, &#39;HANDOFF REQUIRED&#39;})</span>
+            <label class="view-value-button pdoc-button" for="RESUMABLE_STATUSES-view-value"></label><span class="default_value">frozenset({&#39;ACCEPTANCE&#39;, &#39;PLANNED&#39;, &#39;PLANNING&#39;, &#39;HANDOFF REQUIRED&#39;, &#39;INTERRUPTED&#39;, &#39;IMPLEMENTATION&#39;, &#39;REVIEW&#39;})</span>
 
         
     </div>
@@ -3033,7 +3033,7 @@
                 <section id="TRULY_TERMINAL_STATUSES">
                     <div class="attr variable">
             <span class="name">TRULY_TERMINAL_STATUSES</span>        =
-<span class="default_value">frozenset({&#39;SUPERSEDED&#39;, &#39;SESSION_STATE_INVALID&#39;})</span>
+<span class="default_value">frozenset({&#39;SESSION_STATE_INVALID&#39;, &#39;SUPERSEDED&#39;})</span>
 
         
     </div>
@@ -3045,7 +3045,7 @@
                 <section id="TERMINAL">
                     <div class="attr variable">
             <span class="name">TERMINAL</span>        =
-<span class="default_value">frozenset({&#39;SUPERSEDED&#39;, &#39;COMPLETE&#39;, &#39;COMPLETE WITH WARNINGS&#39;, &#39;SESSION_STATE_INVALID&#39;})</span>
+<span class="default_value">frozenset({&#39;COMPLETE WITH WARNINGS&#39;, &#39;SESSION_STATE_INVALID&#39;, &#39;SUPERSEDED&#39;, &#39;COMPLETE&#39;})</span>
 
         
     </div>
@@ -6310,7 +6310,7 @@ result, not a crash: the record says so in place of the runner's output.</p>
                     <div class="attr variable">
             <span class="name">VERDICT_FAILURES</span>        =
 <input id="VERDICT_FAILURES-view-value" class="view-value-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
-            <label class="view-value-button pdoc-button" for="VERDICT_FAILURES-view-value"></label><span class="default_value">frozenset({&#39;ACCEPTANCE_REJECTED_OR_UNCONFIRMED&#39;, &#39;AUDIT_NO_VERDICT&#39;, &#39;AUDIT_FINDINGS_OR_UNCONFIRMED&#39;})</span>
+            <label class="view-value-button pdoc-button" for="VERDICT_FAILURES-view-value"></label><span class="default_value">frozenset({&#39;AUDIT_FINDINGS_OR_UNCONFIRMED&#39;, &#39;ACCEPTANCE_REJECTED_OR_UNCONFIRMED&#39;, &#39;AUDIT_NO_VERDICT&#39;})</span>
 
         
     </div>
@@ -6884,7 +6884,7 @@ judge the new state, or <code>resume</code> finds no acceptance worker (DOG-007)
 </span><span id="invalid_session_report-1981"><a href="#invalid_session_report-1981"><span class="linenos">1981</span></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">"HOWL ORCHESTRATION REPORT"</span><span class="p">)</span>
 </span><span id="invalid_session_report-1982"><a href="#invalid_session_report-1982"><span class="linenos">1982</span></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Session: </span><span class="si">{</span><span class="n">redact</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">session</span><span class="p">))</span><span class="si">}</span><span class="se">\n</span><span class="s2">Status: SESSION_STATE_INVALID</span><span class="se">\n</span><span class="s2">Reason: </span><span class="si">{</span><span class="n">redact</span><span class="p">(</span><span class="n">reason</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </span><span id="invalid_session_report-1983"><a href="#invalid_session_report-1983"><span class="linenos">1983</span></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Next: howlplane orchestrate inspect --json --repo </span><span class="si">{</span><span class="n">repo</span><span class="si">}</span><span class="s2">, then discard or repair the session"</span><span class="p">)</span>
-</span><span id="invalid_session_report-1984"><a href="#invalid_session_report-1984"><span class="linenos">1984</span></a>    <span class="k">return</span> <span class="mi">2</span>
+</span><span id="invalid_session_report-1984"><a href="#invalid_session_report-1984"><span class="linenos">1984</span></a>    <span class="k">return</span> <span class="mi">1</span>
 </span></pre></div>
 
 
