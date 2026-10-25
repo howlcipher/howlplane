@@ -44,13 +44,13 @@ Every executable `.howl` file must declare a single root form:
 * `(http_server <port> ...)`: Standalone HTTP server and API backend.
 * `(web_app ...)`: Browser UI client logic (compiles to vanilla JavaScript).
 * `(cli_app ...)`: Command-line tool or worker process.
-* `(module ...)`: Reusable modular library imported with `(use "path/to/module.howl" as alias)`.
+* `(module ...)`: Reusable modular library imported with `(use "path/to/module.howl" as alias)`. Call an exported function as `(call alias/func args...)`. The dotted form `alias.func` passes `check` but fails when the artifact loads (howlframe#224).
 
 ### B. Standard Expressions & Data Types
-* **Functions & Flow:** `(defun name (args) ...)`, `(lambda (args) ...)`, `(let (var val) ...)`, `(set var val)`, `(do ...)` (sequential block), `(if cond then [else])`, `(return val)`.
-* **Error Handling:** `(try_let (var expr) (catch err ...))`.
-* **Collections:** `(dict ("key" val) ...)`, `(list item1 item2 ...)`, `(map_get dict "key")`, `(map_set dict "key" val)`, `(map_delete dict "key")`, `(append list item)`.
-* **Strings & Conversion:** `(str_join list sep)`, `(str_split str sep)`, `(to_string val)`, `(to_int val)`, `(regex_match pattern str)`.
+* **Functions & Flow:** `(defun name (args) ...)`, `(lambda (args) ...)`, `(let (var val) ...)`, `(set var val)`, `(do ...)` (sequential block), `(if cond then [else])`, `(return val)`. Untyped `defun` parameters and return values are `string`; declare other types in the body with `(type_hint x "int")` and `(type_hint return "void")`.
+* **Error Handling:** `(try_let (var expr) (catch err handler) body)`: three operands; `body` runs with `var` bound when `expr` succeeds.
+* **Collections:** `(dict ("key" val) ...)`, `(list item1 item2 ...)`, `(map_get dict "key")`, `(map_set dict "key" val)`, `(map_delete dict "key")`, `(append list item)` (a statement: it changes `list` in place and produces no value).
+* **Strings & Conversion:** `(str_join list sep)`, `(str_split str sep)`, `(to_string val)`, `(to_int val)`, `(regex_match pattern str)`. `(read_file path)` returns bytes; convert with `(bytes_to_string ...)` before string operations.
 
 ---
 
@@ -148,6 +148,7 @@ Frontend applications declare interactive UI logic inside `(web_app ...)`:
 ```lisp
 (web_app
   (defun load_data ()
+    (type_hint return "void")
     (do
       (let (status_banner (dom_query "#status"))
         (set_text status_banner "Loading...")
@@ -211,7 +212,7 @@ my-howl-app/
    mkdir -p build static
    howlframe build app/backend.howl -o build/backend.hfbc
    if [ -f app/frontend.howl ]; then
-     howlframe compile-js app/frontend.howl -o static/app.js
+     howlframe build app/frontend.howl --target js -o static/app.js
    fi
    ```
 
@@ -226,7 +227,7 @@ When reviewing changes to HowlFrame applications, verify:
 
 1. **Syntax & Balanced Parentheses:** All S-expressions are properly balanced.
 2. **Single Root Form:** Exactly one root form (`http_server`, `web_app`, `cli_app`, or `module`) per file.
-3. **Capability Grants:** Capability flags (`-caps network,database,filesystem`) correctly match application requirements.
-4. **Failure Closed:** All input parsing (`parse_json`), file operations (`read_file`), and network calls (`fetch`) use `try_let` or error checking.
+3. **Capability Grants:** Runtime grants (`howlframe run --allow-caps network,database,filesystem ...`) match application requirements; `howlframe inspect --caps build/backend.hfbc` lists what an artifact needs.
+4. **Failure Closed:** All input parsing (`parse_json`), file operations (`read_file`), and network calls (`fetch`) use `try_let` or error checking. `write_file` produces no value, so wrap it to catch failures: `(try_let (ok (do (write_file path data) "ok")) (catch err ...) body)`.
 5. **No Transpiler Drift:** Bytecode builds succeed with clean exit code 0 against the pinned compiler version.
 6. **Deterministic Verification:** `bash scripts/build.sh` and `bash scripts/test.sh` execute and pass cleanly.
