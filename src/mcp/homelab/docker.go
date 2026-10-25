@@ -21,6 +21,7 @@ func (c *SSHDockerClient) runSSH(ctx context.Context, args ...string) (string, e
 	sshArgs := []string{fmt.Sprintf("%s@%s", c.User, c.Host)}
 	sshArgs = append(sshArgs, args...)
 
+	// #nosec G204
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
