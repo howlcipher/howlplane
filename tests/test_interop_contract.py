@@ -210,3 +210,17 @@ def test_frame_version_probe_is_declared(monkeypatch):
     assert observed == [["/synthetic/howlframe", "--version"]]
     assert any(use["component"] == "howlframe" and use["command"] == []
                and "--version" in use["flags"] for use in CONSUMES)
+
+
+def test_version_matches_pyproject():
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib
+    from howlplane import __version__
+
+    pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    with open(pyproject_path, "rb") as f:
+        data = tomllib.load(f)
+    assert __version__ == data["project"]["version"]
+
