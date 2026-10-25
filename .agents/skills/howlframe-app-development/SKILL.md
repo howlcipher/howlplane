@@ -44,7 +44,7 @@ Every executable `.howl` file must declare a single root form:
 * `(http_server <port> ...)`: Standalone HTTP server and API backend.
 * `(web_app ...)`: Browser UI client logic (compiles to vanilla JavaScript).
 * `(cli_app ...)`: Command-line tool or worker process.
-* `(module ...)`: Reusable modular library imported with `(use "path/to/module.howl" as alias)`. Call an exported function as `(call alias/func args...)`. The dotted form `alias.func` passes `check` but fails when the artifact loads (howlframe#224).
+* `(module ...)`: Reusable modular library imported with `(use "path/to/module.howl" as alias)`. Call an exported function as `(call alias/func args...)`. Do not write the dotted form `alias.func`: compilers with the howlframe#224 fix reject it at `check`, and older ones accepted it but built an artifact the VM refuses to load.
 
 ### B. Standard Expressions & Data Types
 * **Functions & Flow:** `(defun name (args) ...)`, `(lambda (args) ...)`, `(let (var val) ...)`, `(set var val)`, `(do ...)` (sequential block), `(if cond then [else])`, `(return val)`. Untyped `defun` parameters and return values are `string`; declare other types in the body with `(type_hint x "int")` and `(type_hint return "void")`.
