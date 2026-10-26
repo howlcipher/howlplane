@@ -1,3 +1,5 @@
+; Equality expressions preserve boolean comparisons with the published v0.1.0
+; compiler, which otherwise lowers bare true as an undefined variable.
 (cli_app
   (let (cand_path (cli_args 0))
     (if (= cand_path "")
@@ -29,15 +31,15 @@
                       (let (auth_exec "false")
                         (let (auth_type "ADVISORY")
                           (do
-                            (if (!= (is_nil authority) true)
+                            (if (!= (is_nil authority) (= 1 1))
                               (do
                                 (let (e (map_get authority "executable"))
-                                  (if (!= (is_nil e) true)
+                                  (if (!= (is_nil e) (= 1 1))
                                     (set auth_exec (to_string e))
                                   )
                                 )
                                 (let (t (map_get authority "type"))
-                                  (if (!= (is_nil t) true)
+                                  (if (!= (is_nil t) (= 1 1))
                                     (set auth_type (to_string t))
                                   )
                                 )
@@ -92,7 +94,7 @@
                                     (print (str_join (list "  \"candidate_id\": \"" (to_string cand_id) "\",") ""))
                                     (print (str_join (list "  \"disposition\": \"" disposition "\",") ""))
                                     (print (str_join (list "  \"confidence\": \"" confidence "\",") ""))
-                                    (print (str_join (list "  \"reason\": \"" reason "\",") ""))
+                                    (print (str_join (list "  \"limitations\": [\"" reason "\"],") ""))
                                     (print "  \"authority\": {")
                                     (print "    \"type\": \"ADVISORY\",")
                                     (print "    \"executable\": false")

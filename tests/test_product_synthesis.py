@@ -76,3 +76,58 @@ def test_synthesis_blocked_on_unsupported_framework_gap(tmp_path: Path):
     assert res.status == "PRODUCT_BLOCKED"
     assert len(res.framework_gaps) >= 1
     assert res.framework_gaps[0].code == "HF_GAP_ATOMIC_MUTATION"
+
+
+def test_generated_static_route_cannot_read_outside_its_grant(tmp_path: Path):
+    """Actual VM: a generated static handler cannot inherit ambient filesystem access."""
+    import socket
+    import subprocess
+    import time
+    import http.client
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    output = tmp_path / "product"
+    result = ProductSynthesizer().create_from_prompt(
+        "Create a notes app with browser UI and API", output_dir=output, port=port,
+    )
+    assert result.success, result.error_message
+    outside = tmp_path / "outside.txt"
+    outside.write_text("synthetic-outside-grant", encoding="utf-8")
+    source = output / "app/backend.howl"
+    original = source.read_text()
+    assert '(read_file "static/index.html")' in original
+    source.write_text(original.replace('(read_file "static/index.html")',
+                                       f'(read_file "{outside.as_posix()}")'))
+    built = subprocess.run(["bash", "scripts/build.sh"], cwd=output,
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stderr
+    log = tmp_path / "server.log"
+    with log.open("w") as stream:
+        server = subprocess.Popen(["bash", "scripts/run.sh", str(port)], cwd=output,
+                                  stdout=stream, stderr=stream)
+        try:
+            deadline = time.monotonic() + 10
+            while True:
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=0.25)
+                try:
+                    connection.request("GET", "/")
+                    response = connection.getresponse()
+                    assert response.status == 500
+                    assert "synthetic-outside-grant" not in response.read().decode()
+                    break
+                except (OSError, http.client.HTTPException):
+                    assert server.poll() is None, log.read_text()
+                    assert time.monotonic() < deadline, "Generated server did not start"
+                    time.sleep(0.05)
+                finally:
+                    connection.close()
+        finally:
+            server.terminate()
+            try:
+                server.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait(timeout=5)
+    assert "CAPABILITY_DENIED" in log.read_text()

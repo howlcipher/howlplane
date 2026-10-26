@@ -1,7 +1,7 @@
 """`howlplane creative`: native Dream -> Writer -> Create orchestration.
 
-Plane runs each component through its own supported CLI (``python -m
-howldream.cli``, ``python -m howlwriter``, ``python -m howlcreate.cli``) and
+Plane runs each component as its own installed executable (``howldream``,
+``howlwriter``, ``howlcreate``, located by ``component_bin.resolve``) and
 passes only the artifacts those components define:
 
     Dream   howl.candidate/v1            (explore, export, or cluster external)
@@ -29,6 +29,7 @@ import subprocess
 import sys
 from typing import Any, Dict, List, Optional
 
+from howlplane.control_plane import component_bin
 from howlplane.control_plane.staged_run import StageFailed, StagedRun, load as _load
 
 STATE_SCHEMA = "howlplane.creative_run/v1"
@@ -61,9 +62,10 @@ class CreativeRun(StagedRun):
         # Each component runs as its own CLI, in the environment that installed it. Running
         # `python -m` inside HowlPlane's interpreter required all three components and their
         # provider-core pin to be co-installed there, which no installer provides (DOG-032).
-        executable = shutil.which(command, path=self.env.get("PATH"))
+        executable = component_bin.resolve(command, env=self.env)
         if executable is None:
-            raise StageFailed(stage, f"{command} is not on PATH; install it (see `howlplane doctor --creative`)")
+            raise StageFailed(stage, f"{command} was not found ({component_bin.env_var(command)}, PATH, or a Howl "
+                                     f"install); install it (see `howlplane doctor --creative`)")
         record = self.state["stages"].setdefault(stage, {})
         record.setdefault("commands", []).append([command, *args])
         record["executables"] = {**record.get("executables", {}), command: executable}
@@ -368,10 +370,10 @@ def command(args: argparse.Namespace) -> int:
             return _report(CreativeRun(Path(args.run_dir)).state, args.json)
         else:
             print("usage: howlplane creative {run,resume,status} ...", file=sys.stderr)
-            return 2
+            return 1
     except (ValueError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
-        return 2
+        return 1
     return _report(run.execute(), args.json)
 
 

@@ -314,7 +314,7 @@ class ProductAcceptanceRunner:
         else:
             howlframe_bin = os.environ.get("HOWLFRAME_BIN") or shutil.which("howlframe") or "howlframe"
             bc_file = prod_path / "build" / "backend.hfbc"
-            cmd = [howlframe_bin, "-run-bc", "-allow-caps", "network,database,filesystem", str(bc_file)]
+            cmd = [howlframe_bin, "-run-bc", "-allow-caps", "network,database,filesystem:read=static,filesystem:read=data,filesystem:write=data", str(bc_file)]
 
         try:
             proc = subprocess.Popen(

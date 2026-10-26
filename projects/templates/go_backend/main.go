@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"time"
 )
 
 func helloHandler(w http.ResponseWriter, r *http.Request) {
@@ -11,5 +12,9 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	http.HandleFunc("/", helloHandler)
-	http.ListenAndServe(":8080", nil)
+	server := &http.Server{
+		Addr:              ":8080",
+		ReadHeaderTimeout: 3 * time.Second,
+	}
+	_ = server.ListenAndServe()
 }

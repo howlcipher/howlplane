@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ai.handoff/v1",
   "title": "AI Run Handoff",
-  "description": "Structured summary of an interrupted or provider-switched run, rendered into a run's handoff.md.",
+  "description": "Structured summary of an interrupted or provider-switched run, rendered into a run's handoff.md. Superseded for new work by HowlForge's howlforge.checkpoint/v1 (the ecosystem's handoff between AI workers, read by HowlRelay); kept so existing examples and internal/runtime keep validating. See docs/INTEROP.md in howlcipher/howl.",
   "type": "object",
   "properties": {
     "schema": {

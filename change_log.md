@@ -2,7 +2,63 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.1.1]
+
+- Generated HTTP products use explicit child filesystem inheritance and database authority only for CRUD. Runners bound filesystem access to reads in static/ and data/ and writes in data/; this preserves portability without embedding build-machine paths. Existing real acceptance tests and a new actual-VM out-of-scope read denial verify the migration.
+### Security
+
+- HowlPlane no longer signs the HowlChangeOps approval it waits for (issues.md #20).
+  `howlplane approve` relays the owner's decision to `howlchangeops approve
+  --owner-confirmed --approver <user>` only when it ran at a terminal or was given
+  `--owner-confirmed`; otherwise it tells the owner to run `howlchangeops approve`.
+  Bounded execution never calls `approve`: without an approval it stops with the
+  exact commands to run and the task stays resumable.
+
+### Changed
+
+- Compile portable candidate-assessment and unchanged project-context sources
+  with published Frame v0.1.0 to HFBC1, retaining VM execution on that release and existing corrected readers.
+  Upgrade the CI runtime pin to41d56cec, declare the artifact producer separately,
+  and require real published-runtime parity/capability/limit checks without fallback.
+
+
+- Exit status 2 now means only that a decision is waiting on a person (issues.md #21).
+  Usage and input errors (an unknown command or flag, an invalid `creative`/`write`
+  input, invalid semantic settings, a bad `--color`) exit 1, and gate verdicts
+  (`howlframe-audit` MISMATCH, `explore` REJECTED, a marathon refused by its
+  dirty-tree preflight) exit 3. `howl orchestrate`, `howl agents doctor` and
+  `howl factory prepare` pass these through unchanged.
+
+### Interop
+
+- HowlPlane follows the Howl interop contract (`docs/INTEROP.md` in howlcipher/howl).
+  `howlplane interop --json` prints the `howl.interop/v1` descriptor: every command
+  and flag from the live parser (plus the Go launcher's `project validate`), the exit
+  codes, and every command HowlPlane runs of another component with the flags it
+  passes, which `howl doctor` checks against the installed producers.
+- HowlChangeOps is driven through `evaluate|approve|execute --json` and its
+  `howl.result/v1` envelopes. The `Decision:` / `Decision saved as` prose parser and
+  its newest-file-in-`decisions/` fallback are gone; a HowlChangeOps without `--json`
+  (before 0.2.0) is reported with "update it with `howl update howlchangeops`"
+  instead of being guessed at. Execution receipts record the installed HowlChangeOps
+  version from its descriptor instead of a hard-coded `0.2.0`.
+- One resolver, `component_bin.resolve`, finds HowlChangeOps, HowlFrame, HowlDream,
+  HowlCreate, HowlWriter and HowlInstinct in the documented order (`HOWL<NAME>_BIN`,
+  `PATH`, the Howl-managed release, `~/.local/bin`). The HowlDream runner checked
+  `PATH` before `HOWLFRAME_BIN`; it now honours the override like everything else.
+- HowlDream's CLI path no longer raises on a `PARTIAL` exploration (exit 1 with its
+  result on stdout) and writes runs under `work_dir/<exploration_id>`, the same
+  layout as the in-process engine. `promote_candidate_to_howlcreate` accepts file
+  paths as its signature always said.
+- A wheel install (the Howl standard profile) carries the HowlFrame bytecode, the
+  HowlInstinct receipt schema and the evidence-entry schema as package data, and
+  keeps the evidence ledger under `HOWLPLANE_HOME` or `$XDG_STATE_HOME/howlplane`
+  instead of inside the virtualenv. A source checkout behaves as before.
+- The vendored HowlInstinct receipt schema is pinned to a commit on HowlInstinct's
+  `main` (it was pinned to a branch), and CI checks every vendored schema against
+  its pinned commit. `documentation/CLI_COMPOSITION.md` no longer recommends the
+  `howl plane` command tree Howl removed.
+
 ### Fixed
 
 - `howlplane write` fixes from its first runs against a real local model: a local
@@ -1060,3 +1116,9 @@ missing optional CLI into generic unavailability.
 * Render a bounded native-queue service with the inference ban and non-restarting configuration/mission-boundary failures. Installation, live provider recovery and default-branch availability require separate verification.
 
 * Consolidate repeated service-rendering test setup into one fixture, preserving the existing duplication ceiling and all boundary assertions.
+
+## Mission007 contract corrections
+
+Invalid stored orchestration state exits1 without dispatch or manifest rewriting (F9). Frame global version probe is declared (F12). Optional Dream Python API is pinned and exercised by an ordinary offline CI job, with advisory-only output and simulated generation labeled (F15).
+
+Combined installed Create intake exposed assessment-schema drift. The Python fallback and Frame evaluator now emit the current advisory assessment contract; bytecode and packaged copy are synchronized. No schema validation was relaxed.

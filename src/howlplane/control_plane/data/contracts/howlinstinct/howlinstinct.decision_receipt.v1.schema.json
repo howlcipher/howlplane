@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "howlinstinct.decision_receipt/v1",
+  "title": "Decision Receipt",
+  "description": "Durable record of one bounded semantic judgment. Records what was asked, what was judged, how uncertain the judgment was, and which provider produced it. Inputs are identified by hash rather than reproduced, because a receipt is durable and state routinely contains sensitive material.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "receipt_version",
+    "decision_id",
+    "batch_id",
+    "timestamp",
+    "question_id",
+    "decision_type",
+    "state_hash",
+    "question_hash",
+    "outcome",
+    "needs_escalation",
+    "provider",
+    "latency_ms"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "howlinstinct.decision_receipt/v1",
+      "description": "Identifies the schema and version this document conforms to."
+    },
+    "receipt_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Human-facing receipt version, tracked alongside the schema identifier."
+    },
+    "decision_id": {
+      "type": "string",
+      "description": "Unique identifier for this one judgment. Random rather than content-derived: two identical questions asked at different times are two decisions, and collapsing them would make an audit trail understate how many judgments were made. Excluded from every hash for the same reason."
+    },
+    "batch_id": {
+      "type": "string",
+      "description": "Shared by every judgment produced by the same provider call."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 time the decision was started, in UTC."
+    },
+    "question_id": {
+      "type": "string",
+      "description": "The caller's own identifier for this question, preserved exactly."
+    },
+    "decision_type": {
+      "type": "string",
+      "enum": ["noul", "choice", "score", "classify"],
+      "description": "The type the caller asked for."
+    },
+    "compiled_to": {
+      "type": "string",
+      "enum": ["noul", "choice", "score"],
+      "description": "The provider primitive actually requested, present only when it differs from decision_type. Classify lowers to choice; recording both preserves what the caller asked across the lowering."
+    },
+    "state_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Labelled SHA-256 of the raw state. Identifies the input without reproducing it."
+    },
+    "question_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Labelled SHA-256 over the canonical form of the question, so that map ordering cannot perturb it."
+    },
+    "state": {
+      "type": "string",
+      "description": "The raw state, present ONLY when the caller explicitly opted into retention. Absent by default because a receipt is durable and state routinely contains logs, customer records, or credentials."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["ACCEPTABLE_CONFIDENCE", "LOW_CONFIDENCE", "UNAVAILABLE", "ERROR"],
+      "description": "Policy-neutral classification of how the decision turned out. Describes the state of the judgment, never what should be done about it. LOW_CONFIDENCE is set only when the caller supplied an escalation rule that was not satisfied."
+    },
+    "bool": {
+      "type": "boolean",
+      "description": "The answer to a noul: argmax over the two classes, not a thresholded probability."
+    },
+    "choice": {
+      "type": "string",
+      "description": "The selected option, for a choice or classify question."
+    },
+    "score": {
+      "type": "number",
+      "description": "The probability-weighted level index for a score question, within [0, len(legend)-1]."
+    },
+    "legend": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Ordered level names for a score question; index i is the score value i. Echoed so a stored receipt stays interpretable without the original request."
+    },
+    "probability_yes": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "The provider's P(yes) for a noul. A noul carries no separate confidence: this probability is itself the uncertainty signal."
+    },
+    "probabilities": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 },
+      "description": "The provider's distribution, keyed by option or level name. Absent when the provider reported none."
+    },
+    "provider_confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Confidence as reported by the provider itself, named for its origin so it cannot be mistaken for a derived quantity. ABSENT, never zero, when the provider reported none: emitting 0.0 would assert the provider was maximally unconfident when it said nothing at all."
+    },
+    "instinct_margin": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Derived by HowlInstinct, never by a provider. How decisively the distribution favours the selected value: |2*P(yes)-1| for a noul, and p(top) minus p(runner-up) for a choice or score. A restatement of the probabilities and nothing more: not a calibration result, not an accuracy estimate, and not a substitute for a confidence the provider declined to give."
+    },
+    "needs_escalation": {
+      "type": "boolean",
+      "description": "True only when the caller supplied an escalation rule that was not satisfied or could not be evaluated. HowlInstinct has no default threshold and never sets this on its own initiative."
+    },
+    "escalation_reason": {
+      "type": "string",
+      "enum": ["BELOW_CALLER_THRESHOLD", "CONFIDENCE_UNAVAILABLE"],
+      "description": "Why escalation was flagged. Both reasons are consequences of a rule the caller supplied. CONFIDENCE_UNAVAILABLE means the caller gated on provider confidence for a question type that has none."
+    },
+    "provider": {
+      "type": "string",
+      "description": "The adapter that produced the judgment."
+    },
+    "provider_model": {
+      "type": "string",
+      "description": "The model identifier the provider reported or was asked for."
+    },
+    "provider_endpoint": {
+      "type": "string",
+      "description": "Scheme, host, and path only. Rebuilt from those three components as an allow-list, so a credential in userinfo, a query string, or any other component cannot survive into the receipt."
+    },
+    "latency_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Wall-clock duration of the provider call. Excluded from hashes."
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Provider-reported token accounting, when supplied.",
+      "properties": {
+        "input_tokens": { "type": "integer" },
+        "output_tokens": { "type": "integer" }
+      }
+    },
+    "correlation_id": {
+      "type": "string",
+      "description": "Opaque caller identifier carried through for tracing."
+    },
+    "workflow_id": {
+      "type": "string",
+      "description": "Opaque caller workflow identifier carried through for tracing."
+    },
+    "error": {
+      "type": "string",
+      "description": "Human-readable reason when outcome is UNAVAILABLE or ERROR. Never carries credentials or raw state."
+    }
+  }
+}

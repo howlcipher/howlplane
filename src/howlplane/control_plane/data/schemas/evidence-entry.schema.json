@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ai.evidence_entry/v1",
+  "title": "Evidence Entry Schema",
+  "description": "Schema for append-only audit trail and evidence collection entries.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "ai.evidence_entry/v1",
+      "description": "Identifies the schema and version this document conforms to."
+    },
+    "entry_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agent_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "task_created",
+        "routed",
+        "state_transition",
+        "implementation_started",
+        "diff_generated",
+        "review_submitted",
+        "reconciliation_completed",
+        "remediation_started",
+        "remediation_completed",
+        "verification_executed",
+        "boundary_checked",
+        "boundary_triggered",
+        "human_decision",
+        "work_item_decision",
+        "repo_proposal_decision",
+        "test_impact_assessed",
+        "control_plane_defect_caught",
+        "slop_check_executed",
+        "debt_acceptance_requested",
+        "debt_acceptance_approved",
+        "debt_acceptance_rejected",
+        "slop_finding_remediated",
+        "task_closed",
+        "bootstrap_completed",
+        "bootstrap_failed",
+        "bootstrap_refused",
+        "bootstrap_started",
+        "bounded_execution_completed",
+        "completion_blocked_tia",
+        "effective_route_updated",
+        "engineering_gap_resolved",
+        "howldream_exploration",
+        "howlframe_project_context_audit",
+        "human_approval",
+        "human_boundary_triggered",
+        "human_decision_requested",
+        "human_rejection",
+        "implementation_completed",
+        "implementation_failed_with_partial_work",
+        "implementation_failover",
+        "implementation_recovered",
+        "out_of_scope_edits_reverted",
+        "project_discovered",
+        "provider_capacity_reset",
+        "provider_scratch_relocated",
+        "remediation_failed",
+        "remediation_timeout_derived",
+        "repository_delta_captured",
+        "resume_blocked_on_verification",
+        "resume_completed",
+        "resume_failed",
+        "resume_lock_state",
+        "resume_requested",
+        "resume_started",
+        "retained_salvage_captured",
+        "retained_salvage_promoted",
+        "retained_salvage_promotion_failed",
+        "retained_salvage_promotion_recovered",
+        "retained_salvage_replay_checked",
+        "retained_salvage_superseded",
+        "review_completed",
+        "review_started",
+        "reviewers_recomputed_after_failover",
+        "route_selected",
+        "stale_approval_detected",
+        "stale_evidence_detected",
+        "stale_lock_reclaimed",
+        "synthesis_verified",
+        "task_cancelled",
+        "task_completed",
+        "task_failed",
+        "task_resumed",
+        "timeout_candidate_captured",
+        "timeout_candidate_rejected",
+        "trajectory_persistence_conflict",
+        "unlock_refused",
+        "unlock_requested",
+        "verification_completed",
+        "verification_executed_on_resume",
+        "verification_started",
+        "verification_view_created",
+        "verification_view_failed"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "command": {
+      "type": ["string", "null"]
+    },
+    "result": {
+      "type": ["string", "null"]
+    },
+    "artifact": {
+      "type": ["string", "null"]
+    },
+    "task_class": {
+      "type": ["string", "null"]
+    },
+    "risk_level": {
+      "type": ["string", "null"]
+    },
+    "reasoning_tier": {
+      "type": ["string", "null"]
+    },
+    "implementing_agent": {
+      "type": ["string", "null"]
+    },
+    "recommended_agent": {
+      "type": ["string", "null"]
+    },
+    "actual_agent": {
+      "type": ["string", "null"]
+    },
+    "is_override": {
+      "type": ["boolean", "null"]
+    },
+    "override_reason": {
+      "type": ["string", "null"]
+    },
+    "defect_type": {
+      "type": ["string", "null"],
+      "enum": ["review_caught_defect", "verification_caught_defect", "boundary_caught_risk", null]
+    },
+    "orchestration_action": {
+      "type": ["string", "null"]
+    },
+    "repository": {
+      "type": ["string", "null"]
+    },
+    "reviewing_agents": {
+      "type": ["array", "null"],
+      "items": { "type": "string" }
+    },
+    "remediation_cycles": {
+      "type": ["integer", "null"]
+    },
+    "control_plane_caught_defect": {
+      "type": ["boolean", "null"]
+    },
+    "session_count": {
+      "type": ["integer", "string", "null"]
+    },
+    "elapsed_work_time": {
+      "type": ["number", "string", "null"]
+    },
+    "token_usage": {
+      "type": ["object", "integer", "string", "null"]
+    },
+    "monetary_cost": {
+      "type": ["number", "string", "null"]
+    },
+    "findings_summary": {
+      "type": ["object", "null"],
+      "additionalProperties": { "type": "integer" }
+    },
+    "verification_summary": {
+      "type": ["object", "null"],
+      "additionalProperties": { "type": "string" }
+    },
+    "human_decision": {
+      "type": ["string", "null"]
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": ["schema", "entry_id", "task_id", "agent_id", "action", "timestamp"],
+  "additionalProperties": false
+}

@@ -255,7 +255,7 @@ def test_other_subcommand_unknown_verify_gets_no_hint(capsys):
 
     with pytest.raises(SystemExit) as stop:
         main(["status", "--verify=python3 -m pytest"])
-    assert stop.value.code == 2
+    assert stop.value.code == 1  # a usage error; 2 means awaiting a person
     err = capsys.readouterr().err
     assert "unrecognized arguments" in err
     assert "quote a verification command" not in err
@@ -266,7 +266,7 @@ def test_unquoted_verification_options_fail_with_a_quoting_hint(capsys):
 
     with pytest.raises(SystemExit) as stop:
         main(["orchestrate", "Goal", "--verify", "python3", "-m", "unittest"])
-    assert stop.value.code == 2
+    assert stop.value.code == 1  # a usage error; 2 means awaiting a person
     err = capsys.readouterr().err
     assert "unrecognized arguments: -m unittest" in err
     assert 'quote a verification command that has options, for example --verify "python3 -m pytest -q"' in err

@@ -373,6 +373,25 @@ HowlPlane provides mechanically enforced runtime egress governance configured vi
 
 HowlPlane is designed to operate seamlessly across any codebase on your machine (Go, Python, TypeScript, Rust, C++, etc.). The control plane provides orchestration rules, reviewer roles, and verification schemas, while the target repository provides local truth: manifest configurations, local skills, and test/build commands.
 
+### Talking to other Howl components
+
+HowlPlane runs the other components as processes and reads their JSON, under the
+[Howl interop contract](https://github.com/howlcipher/howl/blob/main/docs/INTEROP.md).
+`howlplane interop --json` lists every command and flag, the exit codes, and every
+command HowlPlane runs elsewhere (HowlChangeOps `evaluate|approve|execute --json`,
+HowlFrame `run`/`build`, HowlInstinct `decide --json`, HowlDream, HowlCreate and
+HowlWriter); `howl doctor` checks those against the installed versions. Each
+component is found through `HOWL<NAME>_BIN`, then `PATH`, then the Howl-managed
+release, then `~/.local/bin`.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | ok |
+| 1 | error, including a usage or input error (`howlplane.error/v1` on stderr with `--json`) |
+| 2 | awaiting a human decision (approval, handoff, confirmation); nothing else uses 2 |
+| 3 | blocked by a boundary, readiness or verification gate |
+| 4 | `write`: an owner-only decision HowlPlane will not relay |
+
 ---
 
 ## Native Creative Pipeline (HowlDream -> HowlWriter -> HowlCreate)
@@ -532,7 +551,7 @@ Validation maintenance separates existing Bandit annotation reasons from rule ID
 and removes obsolete suppressions. It changes no runtime behavior or trust policy.
 
 The generated-application CI suites compile and execute against HowlFrame source
-`7631ce5d4008534ef681f35c3436922507d3f441`. Fast, full and nightly jobs use
+`41d56cecd9e8f936cf9da35240331ab7da0244cd`. Fast, full and nightly jobs use
 that same immutable commit. A moving sibling default branch is not a runtime
 compatibility guarantee: the newer sibling revision observed in CI fails
 generated notes/todo acceptance. The source pin records the tested contract; it does not establish
@@ -550,3 +569,24 @@ contract and deployment gates. A dry run or a rendered service unit proves neith
 completed work nor automatic recovery.
 
 The binding regression suite is `PYTHONPATH=src:. python3 -m pytest tests/test_factory_mission_binding.py tests/test_orchestration_verification_only.py`; the full project and unchanged repository hygiene gates still apply.
+
+The optional `dream-api` extra pins the existing in-process HowlDream boundary. See [the API contract](documentation/HOWLDREAM_API.md) for offline integration evidence and its CLI fallback limits. Invalid stored orchestration state exits1; Frame version probes are declared in interop.
+
+Combined installed Create intake exposed assessment-schema drift. The Python fallback and Frame evaluator now emit the current advisory assessment contract; bytecode and packaged copy are synchronized. No schema validation was relaxed.
+
+The two packaged Frame programs additionally target the published Frame
+v0.1.0 runtime: portable assessment source and unchanged audit source are compiled by that release into one HFBC1
+artifacts. A dedicated CI job downloads and checksum-verifies the actual release,
+executes every candidate-status/authority case without allowing Python fallback,
+and verifies filesystem denial and finite instruction limits. The ordinary CI
+runtime pin above includes the existing legacy-opcode reader correction and
+executes the same artifact. This compatibility claim applies to both packaged assessment and project-context
+artifacts, produced by the declared published compiler. Generated applications
+retain their separately pinned compiler/runtime requirements. Artifact provenance and exact
+rebuild commands are in [FRAME_ARTIFACTS.md](documentation/FRAME_ARTIFACTS.md).
+
+Generated HTTP products declare child grants explicitly under the corrected Frame
+runtime: runners permit reads under `static/` and `data/`, and writes only under `data/`.
+Static and CRUD handlers explicitly inherit that filesystem subset; only CRUD
+handlers receive database authority, and health handlers receive no effect grants.
+A real-VM test rejects out-of-scope reads.

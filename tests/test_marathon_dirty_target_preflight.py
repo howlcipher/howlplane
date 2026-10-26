@@ -345,7 +345,7 @@ def test_the_cli_reports_a_refusal_on_stderr_with_a_non_zero_exit(target_repo, t
     ])
 
     captured = capsys.readouterr()
-    assert code == 2
+    assert code == 3  # refused by a precondition gate; 2 is reserved for awaiting a person
     assert "MARATHON REFUSED" in captured.err
     assert "widget.py" in captured.err
     assert captured.out == ""

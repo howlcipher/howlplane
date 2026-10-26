@@ -164,7 +164,7 @@ def test_cli_requires_exactly_one_dream_source(tmp_path, capsys):
     (tmp_path / "spec.json").write_text("{}")
     code = cli.main(["creative", "run", "--run-dir", str(tmp_path / "run"),
                      "--copy-spec", str(tmp_path / "spec.json"), "--command-config", "x"])
-    assert code == 2
+    assert code == 1
     assert "exactly one Dream source" in capsys.readouterr().err
 
 
@@ -190,13 +190,16 @@ def test_fully_verified_run_prints_no_review_section(tmp_path, fake_env, capsys)
     assert "Review required" not in capsys.readouterr().out
 
 
-def test_components_run_as_their_own_clis(tmp_path, fake_env):
+def test_components_run_as_their_own_clis(tmp_path, fake_env, monkeypatch):
     """DOG-032: stages run each component's console script, not `python -m` in HowlPlane's interpreter."""
     (tmp_path / "bin" / "howlcreate").unlink()
+    # A missing component must not be found in a real Howl install or ~/.local/bin either.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     state = CreativeRun(tmp_path / "run", inputs(tmp_path)).execute()
 
     assert state["status"] == "FAILED" and state["failed_stage"] == "create_develop"
-    assert "howlcreate is not on PATH" in state["stages"]["create_develop"]["error"]
+    assert "howlcreate was not found" in state["stages"]["create_develop"]["error"]
     writer = state["stages"]["writer_write"]
     assert writer["commands"][0][0] == "howlwriter"
     assert writer["executables"]["howlwriter"] == str(tmp_path / "bin" / "howlwriter")

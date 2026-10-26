@@ -94,13 +94,26 @@ def _handle_decision(args: argparse.Namespace, decision: str) -> int:
     target_repo = str(_cli()._resolve_repo(args))
     ledger_file = _cli()._resolve_ledger_file(args)
     ledger = _cli().EvidenceLedger(ledger_file) if ledger_file else None
-    fn = _cli().HumanLifecycleManager.approve if decision == "approved" else _cli().HumanLifecycleManager.reject
+    kwargs = {}
+    if decision == "approved":
+        import getpass
+        import sys
+        # A person at a terminal, or an explicit relay of their decision, may
+        # also approve the HowlChangeOps decision (issues.md #20).
+        kwargs = {
+            "owner_confirmed": sys.stdin.isatty() or bool(getattr(args, "owner_confirmed", False)),
+            "approver": getpass.getuser(),
+        }
+        fn = _cli().HumanLifecycleManager.approve
+    else:
+        fn = _cli().HumanLifecycleManager.reject
     record = fn(
         target_repo=target_repo,
         task_id=args.task_id,
         reason=getattr(args, "reason", None),
         operator_source="cli",
         ledger=ledger,
+        **kwargs,
     )
     if getattr(args, "json", False):
         print(record.to_json())

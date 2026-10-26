@@ -31,6 +31,7 @@ from howlplane.control_plane.cli import cmd_unlock
 from howlplane.control_plane.evidence_ledger import EvidenceLedger
 from howlplane.control_plane.executor import (
     AuthorityExecutor,
+    ExecutionFailedError,
     ExecutionReceipt,
     ExecutionResult,
     ExecutorRegistry,
@@ -380,6 +381,9 @@ def test_interrupted_bounded_execution_unexecuted_executes_once(tmp_path):
 
         def is_available(self):
             return True
+
+        def has_approval(self, decision_id, repo_path):
+            return True  # the owner approved the HowlChangeOps decision at a terminal
 
         def query_execution_status(
             self,
@@ -862,3 +866,44 @@ def test_ambiguous_supervisor_lock_message_names_real_lock_path(tmp_path):
     assert "INDETERMINATE" in message
     assert str(lock_path) in message
     assert "howlplane unlock" not in message
+
+
+def test_bounded_execution_waits_for_the_owner_to_approve_the_changeops_decision(tmp_path):
+    """HowlPlane never signs the HowlChangeOps approval itself (issues.md #20)."""
+    _init_git_repo(tmp_path)
+    decision_id = "DEC-OWNER-PENDING"
+    spec, run_dir = _setup_awaiting_human_task(
+        tmp_path, "TASK-OWNER-PENDING", decision_id=decision_id, approve_now=True
+    )
+    action = ProposedAction(
+        action_type="create_release_candidate",
+        target_repo=tmp_path.name,
+        authority_boundary="release_management",
+    )
+    (run_dir / "proposed_action.yaml").write_text(action.to_yaml(), encoding="utf-8")
+
+    class NoApprovalExecutor(HowlChangeOpsExecutor):
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def is_available(self):
+            return True
+
+        def query_execution_status(self, *args, **kwargs):
+            return "not_executed", None, None
+
+        def approve(self, *args, **kwargs):
+            self.calls.append("approve")
+            return False, "unexpected"
+
+        def execute(self, *args, **kwargs):
+            self.calls.append("execute")
+            raise AssertionError("must not execute without the owner's approval")
+
+    executor = NoApprovalExecutor()
+    ExecutorRegistry.register(executor)
+    with pytest.raises(ExecutionFailedError, match=f"howlchangeops approve {decision_id}"):
+        HumanLifecycleManager.resume(tmp_path, spec.task_id)
+    assert executor.calls == []
+

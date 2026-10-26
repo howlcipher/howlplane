@@ -5,9 +5,9 @@ by HowlPlane to validate receipts before trusting any semantic judgment.
 
 - Repository: howlcipher/howlInstinct
 - Source path: schemas/decision-receipt.schema.json
-- Pinned commit: 894df82eb6300f4636352e5cc0b8f4ea77013d74 (branch claude/howlinstinct-howlplane-integration-y2risp)
+- Pinned commit: cb211db310873d754482542578c5656afc8eca68 (main; the file is unchanged since 7d81034)
 - Schema id: howlinstinct.decision_receipt/v1
-- Vendored: 2026-10-01
+- Vendored: 2026-10-01; re-pinned to main 2026-10-20
 
 Re-vendor steps: copy the file from the pinned upstream path over
 howlinstinct.decision_receipt.v1.schema.json, update the commit above, and run

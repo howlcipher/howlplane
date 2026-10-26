@@ -237,7 +237,7 @@ def test_claude_inside_a_claude_code_session_needs_allow_nested(tmp_path, fake_w
     (["--input", "/nonexistent/file.md", "--provider", "local"], "is not a file"),
 ])
 def test_inconsistent_inputs_are_rejected_before_anything_runs(tmp_path, fake_writer, capsys, args, message):
-    assert run_cli(tmp_path, *args) == 2
+    assert run_cli(tmp_path, *args) == 1
     assert message in capsys.readouterr().err
     assert not (tmp_path / "run").exists()
     assert fake_writer() == []
@@ -245,6 +245,9 @@ def test_inconsistent_inputs_are_rejected_before_anything_runs(tmp_path, fake_wr
 
 def test_missing_howlwriter_fails_with_an_install_hint(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    # Nor in a real Howl install or ~/.local/bin (component_bin looks there after PATH).
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.delenv("CLAUDECODE", raising=False)
     assert run_cli(tmp_path, "--prompt", "x", "--provider", "local") == 1
     record = state(tmp_path)
@@ -254,11 +257,11 @@ def test_missing_howlwriter_fails_with_an_install_hint(tmp_path, monkeypatch):
 
 def test_a_run_directory_holds_one_request(tmp_path, fake_writer, capsys):
     assert run_cli(tmp_path, "--prompt", "First", "--provider", "local") == 0
-    assert run_cli(tmp_path, "--prompt", "Second", "--provider", "local") == 2
+    assert run_cli(tmp_path, "--prompt", "Second", "--provider", "local") == 1
     assert "different inputs" in capsys.readouterr().err
     assert cli.main(["write", "status", "--run-dir", str(tmp_path / "run"), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["inputs"]["prompt"] == "First"
-    assert cli.main(["write", "status", "--run-dir", str(tmp_path / "missing")]) == 2
+    assert cli.main(["write", "status", "--run-dir", str(tmp_path / "missing")]) == 1
 
 
 def test_writes_stay_in_the_run_directory(tmp_path, fake_writer):
