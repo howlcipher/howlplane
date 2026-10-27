@@ -7,6 +7,7 @@ import tempfile
 import pytest
 
 from howlplane.control_plane.git_env import GIT_REPOSITORY_SELECTION_ENV_VARS
+from tests._provider_isolation import path_without, provider_binaries
 
 
 # Real HowlFrame compiler integration tests deliberately exercise the genuine
@@ -269,6 +270,26 @@ def _scrub_inherited_git_repository_selection(monkeypatch):
     """
     for name in GIT_REPOSITORY_SELECTION_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(scope="session")
+def _path_without_provider_clis(tmp_path_factory):
+    return path_without(provider_binaries(), os.environ.get("PATH", ""), tmp_path_factory.mktemp("path-without-provider-clis"))
+
+
+@pytest.fixture(autouse=True)
+def _hide_real_provider_clis(request, monkeypatch, _path_without_provider_clis):
+    """Ordinary runs never find the operator's real agent CLIs on PATH.
+
+    CI has no agent CLI installed; a developer machine usually has several, and
+    tests that discover providers would probe and call them (see
+    tests/_provider_isolation.py). `live` tests and runs with
+    HOWLPLANE_LIVE_PROVIDERS keep the real PATH. Tests that install fake CLIs
+    set PATH themselves with `monkeypatch.setenv`, which wins over this fixture.
+    """
+    if os.environ.get("HOWLPLANE_LIVE_PROVIDERS") or request.node.get_closest_marker("live"):
+        return
+    monkeypatch.setenv("PATH", _path_without_provider_clis)
 
 
 @pytest.fixture(autouse=True)
