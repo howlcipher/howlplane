@@ -27,6 +27,16 @@ so a command-line gate would be no gate at all. `HOWLPLANE_LIVE_PROVIDERS` is
 the one signal that opens it, and `make test-live` and the nightly live step
 both set it explicitly.
 
+A deselected marker does not stop a test from finding a real agent CLI on
+`PATH`, so the same signal also governs `PATH`. For every test that is not
+`live`, `tests/conftest.py` replaces `PATH` with one on which the agent CLIs in
+the routing registries (`agy`, `codex`, `claude`, `agent`, `devin`) and
+`ollama` do not resolve. Directories that hold them are mirrored without them,
+so Go, Node and the other tools beside them still resolve. CI installs none of
+these CLIs; without this, a developer machine probed and ran real provider
+sessions, took hours, and failed tests that pass in CI. Tests that install fake
+CLIs set `PATH` themselves and are unaffected.
+
 ### How `slow` is decided
 
 `slow` is applied at the granularity the measurement supports, not per module.
