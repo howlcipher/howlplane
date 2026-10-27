@@ -44,7 +44,7 @@ Every executable `.howl` file must declare a single root form:
 * `(http_server <port> ...)`: Standalone HTTP server and API backend.
 * `(web_app ...)`: Browser UI client logic (compiles to vanilla JavaScript).
 * `(cli_app ...)`: Command-line tool or worker process.
-* `(module ...)`: Reusable modular library imported with `(use "path/to/module.howl" as alias)`. Call an exported function as `(call alias/func args...)`. Do not write the dotted form `alias.func`: compilers with the howlframe#224 fix reject it at `check`, and older ones accepted it but built an artifact the VM refuses to load.
+* `(module ...)`: Reusable modular library imported with `(use "path/to/module.howl" as alias)`. Call an exported function as `(call alias/func args...)`, with a slash; `alias.func` is not a module call.
 
 ### B. Standard Expressions & Data Types
 * **Functions & Flow:** `(defun name (args) ...)`, `(lambda (args) ...)`, `(let (var val) ...)`, `(set var val)`, `(do ...)` (sequential block), `(if cond then [else])`, `(return val)`. Untyped `defun` parameters and return values are `string`; declare other types in the body with `(type_hint x "int")` and `(type_hint return "void")`.
@@ -62,7 +62,7 @@ Backend services declare routes and handlers inside `(http_server <port> ...)`:
 (http_server 8088
 
   ;; Route declarations
-  (route "/api/notes" (lambda (req)
+  (route "/api/notes" (grants "database" "filesystem") (lambda (req)
     (let (method (req_method req))
       (do
         (res_header "Access-Control-Allow-Origin" "*")
@@ -95,7 +95,7 @@ Backend services declare routes and handlers inside `(http_server <port> ...)`:
   ))
 
   ;; Static asset serving
-  (route "/" (lambda (req)
+  (route "/" (grants "filesystem") (lambda (req)
     (do
       (res_header "Content-Type" "text/html; charset=utf-8")
       (res 200 "text/html" (read_file "static/index.html"))
@@ -227,7 +227,7 @@ When reviewing changes to HowlFrame applications, verify:
 
 1. **Syntax & Balanced Parentheses:** All S-expressions are properly balanced.
 2. **Single Root Form:** Exactly one root form (`http_server`, `web_app`, `cli_app`, or `module`) per file.
-3. **Capability Grants:** Runtime grants (`howlframe run --allow-caps network,database,filesystem ...`) match application requirements; `howlframe inspect --caps build/backend.hfbc` lists what an artifact needs.
-4. **Failure Closed:** All input parsing (`parse_json`), file operations (`read_file`), and network calls (`fetch`) use `try_let` or error checking. `write_file` produces no value, so wrap it to catch failures: `(try_let (ok (do (write_file path data) "ok")) (catch err ...) body)`.
+3. **Capability Grants:** Runtime grants (`howlframe run --allow-caps network,database,filesystem ...`) match application requirements, and each `route` declares the capabilities its handler uses with `(grants ...)`: a handler gets only its route's grants. `howlframe inspect --caps build/backend.hfbc` lists what an artifact needs.
+4. **Failure Closed:** All input parsing (`parse_json`), file operations (`read_file`), and network calls (`fetch`) use `try_let` or error checking.
 5. **No Transpiler Drift:** Bytecode builds succeed with clean exit code 0 against the pinned compiler version.
 6. **Deterministic Verification:** `bash scripts/build.sh` and `bash scripts/test.sh` execute and pass cleanly.
