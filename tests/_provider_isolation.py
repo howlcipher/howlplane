@@ -20,7 +20,7 @@ import re
 import shlex
 from pathlib import Path
 
-_INTERPRETER = re.compile(r"python(\d+(\.\d+)?)?")
+_INTERPRETER = re.compile(r"python(\d+(\.\d+)?t?)?")
 
 
 def provider_binaries() -> frozenset[str]:

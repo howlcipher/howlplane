@@ -73,21 +73,38 @@ def test_only_executable_files_named_like_a_provider_are_hidden(tmp_path):
     assert shutil.which("codex", path=hidden) is None
 
 
-def test_a_mirrored_virtualenv_keeps_its_interpreter(tmp_path):
+@pytest.mark.parametrize("interpreter", ["python3", "python3.14t"])
+@pytest.mark.parametrize("through_symlink", [False, True])
+def test_a_mirrored_virtualenv_keeps_its_interpreter(tmp_path, interpreter, through_symlink):
     venv = tmp_path / "venv"
     subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True)
     _executable(venv / "bin", "agy")
+    if not (venv / "bin" / interpreter).exists():
+        (venv / "bin" / interpreter).symlink_to("python3")
     tool = venv / "bin" / "venvtool"
-    tool.write_text("#!/usr/bin/env python3\nimport sys\nprint(sys.prefix)\n", encoding="utf-8")
+    tool.write_text(f"#!/usr/bin/env {interpreter}\nimport sys\nprint(sys.prefix)\n", encoding="utf-8")
     tool.chmod(0o755)
+    bin_dir = venv / "bin"
+    if through_symlink:
+        (tmp_path / "links").mkdir()
+        bin_dir = tmp_path / "links" / "env-bin"
+        bin_dir.symlink_to(venv / "bin")
 
-    hidden = path_without(frozenset({"agy"}), os.pathsep.join([str(venv / "bin"), "/usr/bin", "/bin"]),
-                          tmp_path / "mirrors")
+    real = os.pathsep.join([str(bin_dir), "/usr/bin", "/bin"])
+    hidden = path_without(frozenset({"agy"}), real, tmp_path / "mirrors")
+
+    def prefix(path):
+        run = subprocess.run(["venvtool"], env={**os.environ, "PATH": path}, capture_output=True, text=True)
+        assert run.returncode == 0, run.stderr
+        return os.path.realpath(run.stdout.strip())
 
     assert shutil.which("agy", path=hidden) is None
-    run = subprocess.run(["venvtool"], env={**os.environ, "PATH": hidden}, capture_output=True, text=True)
-    assert run.returncode == 0, run.stderr
-    assert os.path.realpath(run.stdout.strip()) == os.path.realpath(venv)
+    # The mirror behaves as the real PATH does. CPython finds pyvenv.cfg next
+    # to the unresolved interpreter path, so a venv bin reached through a
+    # symlinked directory is not a venv even without the mirror.
+    assert prefix(hidden) == prefix(real)
+    if not through_symlink:
+        assert prefix(hidden) == os.path.realpath(venv)
 
 
 def test_ordinary_tests_resolve_no_provider_cli():
