@@ -1,0 +1,49 @@
+{
+  "reviewer": "security_audit sibling Codex agent",
+  "scope": [
+    "scripts/run_operational_proof.py",
+    "tests/test_operational_proof_runner.py"
+  ],
+  "revision": "initial uncommitted parent runner inspected2026-10-28",
+  "status": "reviewed_no_remaining_blockers",
+  "tests": "16 passed in1.00s using python -m pytest -q -p no:cacheprovider tests/test_operational_proof_runner.py",
+  "findings": [
+    {
+      "id": "RUNNER-1",
+      "severity": "high",
+      "path": "scripts/run_operational_proof.py:68,154,160",
+      "finding": "Receipt exclusion can hide existing tracked source and overwrite it while claiming fresh passed observations.",
+      "reproduction": "Use tracked source.txt as excluded output, run python -c pass, write receipt there: source replaced by receipt and check_receipt returnsTrue.",
+      "disposition": "resolved and independently reviewed; regression passes"
+    },
+    {
+      "id": "RUNNER-2",
+      "severity": "high",
+      "path": "scripts/run_operational_proof.py:110-119",
+      "finding": "Successful process leader leaves descendants running after verification and timeout.",
+      "reproduction": "Leader launches Python child sleeping0.5s then writes temporary marker; timeout0.2s; runner returnspassed~0.07s and child creates marker later.",
+      "disposition": "resolved and independently reviewed; regression passes"
+    }
+  ],
+  "limitations": [
+    "Review is independent agent/context, same Codex provider/model family, not independent provider.",
+    "Environment prohibition flags are cooperative policy propagation, not sandbox/network controls. Trusted component tests only.",
+    "Snapshot excludes ignored dependencies and records link spelling, not external symlink referent bytes. These are stale-evidence scope limitations requiring honest documentation.",
+    "Atomic rename plus file fsync does not establish crash-durable directory entry without directory fsync; no exactly-once/recovery guarantee should be claimed."
+  ],
+  "retest": "19 passed in focused suite (see precise command output sent separately)",
+  "reviewed_source_sha256": "9074574e78693f21d389dbf71127ee93d0415eddea727ebd49d1c8dc49791924",
+  "reviewed_tests_sha256": "9d190c5284291f33508045bd6471182f8323dc0e635504507ad85fba18c65dc5",
+  "resolution": "All measured source exclusion removed; CLI rejects output within measured repositories before execution, checker rejects internal receipts. Process-group cleanup on every exit precedes post-snapshot and surviving descendants cause failure.",
+  "final_review": {
+    "reviewer": "security_audit independent sibling worker",
+    "result": "no material remaining blocker within trusted-component runner scope",
+    "tests": "20 passed in1.80s",
+    "reviewed_sha256": {
+      "scripts/run_operational_proof.py": "90f056ed552608928e3e743acbe1fbcf146240448de6627e0d0efdf6fad897c8",
+      "tests/test_operational_proof_runner.py": "887811037491efa49ae5677842c9b6eac5561b0194d0f325be82196f3bdd5f73"
+    },
+    "scope": "Includes final symlink output-location guard; no source modification by reviewer",
+    "limitations": "Same provider/model family. Cooperative flags, unauthenticated receipts, no hostile detached-process sandbox or ignored-dependency/external-symlink referent assurance."
+  }
+}

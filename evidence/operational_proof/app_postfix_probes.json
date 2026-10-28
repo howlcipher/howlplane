@@ -1,0 +1,86 @@
+{
+  "classification": "deterministic simulated regression and exact-byte restoration; not model repair",
+  "original_sha256": "14dcb47dd4f3011bc092459ea262f070ca0499bb53b04c33b029a5d377804a73",
+  "injected_sha256": "d49646e6613b03aaed4de9b4b23dc927045e8c5b5c99c8394660b535e5dc4050",
+  "regression_tests": {
+    "command": [
+      "/usr/bin/python3",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-v"
+    ],
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "test_counts_groups_and_order (test_cli.CliTests.test_counts_groups_and_order) ... FAIL\ntest_deep_json_is_rejected (test_cli.CliTests.test_deep_json_is_rejected) ... ok\ntest_documented_edge_cases (test_cli.CliTests.test_documented_edge_cases) ... ok\ntest_dot_api_key_labels (test_cli.CliTests.test_dot_api_key_labels) ... ok\ntest_exact_types_and_required_fields (test_cli.CliTests.test_exact_types_and_required_fields) ... ok\ntest_files_and_stdin (test_cli.CliTests.test_files_and_stdin) ... ok\ntest_filters_individual_and_combined (test_cli.CliTests.test_filters_individual_and_combined) ... ok\ntest_help_version (test_cli.CliTests.test_help_version) ... ok\ntest_invalid_timestamps (test_cli.CliTests.test_invalid_timestamps) ... ok\ntest_malformed_utf8_and_strict (test_cli.CliTests.test_malformed_utf8_and_strict) ... ok\ntest_nonstandard_constants (test_cli.CliTests.test_nonstandard_constants) ... FAIL\ntest_redaction_and_untrusted_content (test_cli.CliTests.test_redaction_and_untrusted_content) ... FAIL\ntest_safe_usage_and_input_errors (test_cli.CliTests.test_safe_usage_and_input_errors) ... ok\ntest_time_boundaries (test_cli.CliTests.test_time_boundaries) ... ok\ntest_timezone (test_cli.CliTests.test_timezone) ... FAIL\ntest_reproducible_build_and_clean_install (test_packaging.PackagingTests.test_reproducible_build_and_clean_install) ... ok\n\n======================================================================\nFAIL: test_counts_groups_and_order (test_cli.CliTests.test_counts_groups_and_order)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/app_final_review_copy/tests/test_cli.py\", line 41, in test_counts_groups_and_order\n    self.assertEqual(report['groups'], [\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^\n        dict(category='failure', hour='2026-10-28T10:00:00Z',\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n             source='a', count=2),\n             ^^^^^^^^^^^^^^^^^^^^^\n        dict(category='failure', hour='2026-10-28T10:00:00Z',\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n             source='z', count=1)])\n             ^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [{'ca[16 chars]e', 'count': 4, 'hour': '2026-10-28T10:00:00Z'[96 chars]'z'}] != [{'ca[16 chars]e', 'hour': '2026-10-28T10:00:00Z', 'source': [96 chars]: 1}]\n\nFirst differing element 0:\n{'cat[14 chars]re', 'count': 4, 'hour': '2026-10-28T10:00:00Z', 'source': 'a'}\n{'cat[14 chars]re', 'hour': '2026-10-28T10:00:00Z', 'source': 'a', 'count': 2}\n\n  [{'category': 'failure',\n-   'count': 4,\n?            ^\n\n+   'count': 2,\n?            ^\n\n    'hour': '2026-10-28T10:00:00Z',\n    'source': 'a'},\n   {'category': 'failure',\n-   'count': 2,\n?            ^\n\n+   'count': 1,\n?            ^\n\n    'hour': '2026-10-28T10:00:00Z',\n    'source': 'z'}]\n\n======================================================================\nFAIL: test_nonstandard_constants (test_cli.CliTests.test_nonstandard_constants)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/app_final_review_copy/tests/test_cli.py\", line 170, in test_nonstandard_constants\n    self.assertEqual(report['groups'][0]['count'], 1)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 2 != 1\n\n======================================================================\nFAIL: test_redaction_and_untrusted_content (test_cli.CliTests.test_redaction_and_untrusted_content)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/app_final_review_copy/tests/test_cli.py\", line 140, in test_redaction_and_untrusted_content\n    self.assertEqual(report['groups'][0]['count'], 2)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 4 != 2\n\n======================================================================\nFAIL: test_timezone (test_cli.CliTests.test_timezone)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/app_final_review_copy/tests/test_cli.py\", line 53, in test_timezone\n    self.assertEqual(report['groups'][0]['count'], 2)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 4 != 2\n\n----------------------------------------------------------------------\nRan 16 tests in 7.236s\n\nFAILED (failures=4)\n"
+  },
+  "restored_sha256": "14dcb47dd4f3011bc092459ea262f070ca0499bb53b04c33b029a5d377804a73",
+  "restored_tests": {
+    "command": [
+      "bash",
+      "scripts/test.sh"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": "test_counts_groups_and_order (test_cli.CliTests.test_counts_groups_and_order) ... ok\ntest_deep_json_is_rejected (test_cli.CliTests.test_deep_json_is_rejected) ... ok\ntest_documented_edge_cases (test_cli.CliTests.test_documented_edge_cases) ... ok\ntest_dot_api_key_labels (test_cli.CliTests.test_dot_api_key_labels) ... ok\ntest_exact_types_and_required_fields (test_cli.CliTests.test_exact_types_and_required_fields) ... ok\ntest_files_and_stdin (test_cli.CliTests.test_files_and_stdin) ... ok\ntest_filters_individual_and_combined (test_cli.CliTests.test_filters_individual_and_combined) ... ok\ntest_help_version (test_cli.CliTests.test_help_version) ... ok\ntest_invalid_timestamps (test_cli.CliTests.test_invalid_timestamps) ... ok\ntest_malformed_utf8_and_strict (test_cli.CliTests.test_malformed_utf8_and_strict) ... ok\ntest_nonstandard_constants (test_cli.CliTests.test_nonstandard_constants) ... ok\ntest_redaction_and_untrusted_content (test_cli.CliTests.test_redaction_and_untrusted_content) ... ok\ntest_safe_usage_and_input_errors (test_cli.CliTests.test_safe_usage_and_input_errors) ... ok\ntest_time_boundaries (test_cli.CliTests.test_time_boundaries) ... ok\ntest_timezone (test_cli.CliTests.test_timezone) ... ok\ntest_reproducible_build_and_clean_install (test_packaging.PackagingTests.test_reproducible_build_and_clean_install) ... ok\n\n----------------------------------------------------------------------\nRan 16 tests in 7.444s\n\nOK\n"
+  },
+  "injection_cli": {
+    "command": [
+      "/usr/bin/python3",
+      "-m",
+      "incident_sift",
+      "--strict"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"counts\":{\"accepted\":1,\"filtered\":0,\"rejected\":0},\"groups\":[{\"category\":\"failure\",\"count\":1,\"hour\":\"2026-10-28T10:00:00Z\",\"source\":\"app\"}]}\n",
+    "stderr": ""
+  },
+  "injection_marker_created": false,
+  "injection_limitation": "CLI treats command-like log content as data; not proof of worker sandbox or network isolation",
+  "security_fix": {
+    "command": [
+      "/usr/bin/python3",
+      "-m",
+      "incident_sift",
+      "--strict"
+    ],
+    "exit_code": 0,
+    "stdout": "{\"counts\":{\"accepted\":1,\"filtered\":0,\"rejected\":0},\"groups\":[{\"category\":\"failure\",\"count\":1,\"hour\":\"2026-10-28T10:00:00Z\",\"source\":\"[REDACTED]\"}]}\n",
+    "stderr": ""
+  },
+  "json_fix_NaN": {
+    "command": [
+      "/usr/bin/python3",
+      "-m",
+      "incident_sift",
+      "--strict"
+    ],
+    "exit_code": 1,
+    "stdout": "{\"counts\":{\"accepted\":0,\"filtered\":0,\"rejected\":1},\"groups\":[]}\n",
+    "stderr": ""
+  },
+  "json_fix_Infinity": {
+    "command": [
+      "/usr/bin/python3",
+      "-m",
+      "incident_sift",
+      "--strict"
+    ],
+    "exit_code": 1,
+    "stdout": "{\"counts\":{\"accepted\":0,\"filtered\":0,\"rejected\":1},\"groups\":[]}\n",
+    "stderr": ""
+  },
+  "json_fix_-Infinity": {
+    "command": [
+      "/usr/bin/python3",
+      "-m",
+      "incident_sift",
+      "--strict"
+    ],
+    "exit_code": 1,
+    "stdout": "{\"counts\":{\"accepted\":0,\"filtered\":0,\"rejected\":1},\"groups\":[]}\n",
+    "stderr": ""
+  }
+}

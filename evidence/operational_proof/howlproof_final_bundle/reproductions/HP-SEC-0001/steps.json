@@ -1,0 +1,18 @@
+{
+  "summary": "Re-read the file and match the same pattern.",
+  "requires_service": false,
+  "notes": "",
+  "steps": [
+    {
+      "description": "Search tests/test_cli.py for the openai_key pattern.",
+      "kind": "file_probe",
+      "payload": {
+        "path": "tests/test_cli.py",
+        "pattern": "sk-[A-Za-z0-9]{20,}"
+      },
+      "expect": {
+        "matches": true
+      }
+    }
+  ]
+}

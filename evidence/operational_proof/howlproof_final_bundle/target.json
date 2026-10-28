@@ -1,0 +1,11 @@
+{
+  "root": "/run/media/system/tallgeese/dev/operational_missions/incident_sift_20261028",
+  "is_git": true,
+  "commit": "02f9a2c0bfeef5eb0a621324ebdf6eb884c00705",
+  "branch": "mission/incident-sift",
+  "dirty": false,
+  "file_count": 14,
+  "oversized_files_not_copied": [],
+  "tree_digest_before": "c46891a7a95873f53b71fbaf8c09779368d96e1464fc41e4a5cce58d664f17bf",
+  "tree_digest_after": "c46891a7a95873f53b71fbaf8c09779368d96e1464fc41e4a5cce58d664f17bf"
+}

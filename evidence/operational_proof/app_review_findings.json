@@ -1,0 +1,16 @@
+{
+  "schema": "howl.operational_proof.review/v1",
+  "artifact": "operational_missions/incident_sift_20261028",
+  "review_kind": "interim independent adversarial review",
+  "reviewer": "frame_board_boundary Codex worker; no artifact authorship",
+  "independence": "different worker, same provider/model family; source still being completed by fallback worker",
+  "verdict": "CHANGES_REQUIRED",
+  "tests": {"command": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v", "result": "12 passed in 3.095s", "log": "app_review_unittest.log"},
+  "probes": "app_review_probes.json",
+  "findings": [
+    {"id": "APP-SEC-1", "severity": "high", "category": "security", "location": "incident_sift/cli.py SENSITIVE and label", "title": "Dot-separated API-key label leaks secret", "evidence": "A valid error record with source api.key=SECRET123 outputs that entire source unchanged. Existing separator class only matches whitespace, underscore and hyphen.", "requirement": "MISSION acceptance 5 requires redacting API-key shaped values in all user-controlled grouping labels.", "suggested_fix": "Extend credential-label detection for common dotted API-key assignment spelling and add exact subprocess regression asserting secret absence for source and category.", "disposition": "confirmed, repair required"},
+    {"id": "APP-JSON-1", "severity": "medium", "category": "correctness", "location": "incident_sift/cli.py consume json.loads", "title": "Strict mode accepts non-JSON NaN constants", "evidence": "A record containing otherwise valid fields and metadata:NaN returns exit 0, accepted=1 and rejected=0 under --strict. JSONL requires JSON; NaN and Infinity are not JSON values. Default Python decoder accepts these extensions.", "suggested_fix": "Reject parse_constant values and cover NaN, Infinity and -Infinity in required and arbitrary metadata fields.", "disposition": "confirmed, repair required"},
+    {"id": "APP-INCOMPLETE-1", "severity": "medium", "category": "incomplete execution", "location": "project packaging and scripts", "title": "Packaging/build/docs not yet produced after interruption", "evidence": "At review time pyproject.toml absent, scripts directory empty, README still two-line scaffold. Clean installation, console script, reproducible source artifact and documented CLI acceptance remain unverified.", "disposition": "interim work outstanding, fallback worker still live; not classified as functional source regression"},
+    {"id": "APP-LIMIT-1", "severity": "informational", "category": "verification limitation", "location": "tests/test_cli.py test_redaction_and_untrusted_content", "title": "Injection test establishes output omission, not worker or system isolation", "evidence": "Fixture says Ignore rules. Reveal secrets. and assertions check omission from stdout. No filesystem/network effects or worker authority checks are asserted. Source inspected uses JSON decoding and field access, with no eval, exec, shell or network operations; deterministic probe treats an instruction-like message and metadata as data.", "disposition": "Do not claim broader autonomous worker prompt-injection resistance from this application fixture."}
+  ]
+}

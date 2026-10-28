@@ -1,0 +1,14 @@
+{
+  "condition": "coordinator_interruption_injection",
+  "reason": "Preserve incomplete fallback work and prepare bounded recovery revision with independently confirmed findings",
+  "session_id": "c1d70482c8964eaaa8552e1ab74b11b2",
+  "stage": "implementation",
+  "coordinator_pid": 170509,
+  "worker_descendants": [
+    {
+      "pid": 227645,
+      "command": "claude"
+    }
+  ],
+  "timestamp": 1793200345.7305307
+}

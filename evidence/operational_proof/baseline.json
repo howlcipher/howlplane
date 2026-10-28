@@ -1,0 +1,790 @@
+{
+  "observed_at": "2026-10-28T14:58:47.981150+00:00",
+  "repositories": [
+    {
+      "repository": "howl",
+      "head": {
+        "exit_code": 0,
+        "value": "c7f68e09ad9fcef124b8961217b882157b2234ff",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howl"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-22T21:39:13Z",
+            "tagName": "v0.2.1"
+          },
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-21T13:17:06Z",
+            "tagName": "v0.2.0"
+          }
+        ],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/decode-pages.yml",
+        ".github/workflows/release.yml",
+        ".github/workflows/interop.yml",
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "repository": "howlplane",
+      "head": {
+        "exit_code": 0,
+        "value": "07175bd6018ce4262656089db29698396cff51d0",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howlplane"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-25T00:34:43Z",
+            "tagName": "v0.1.1"
+          },
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-21T06:01:28Z",
+            "tagName": "v0.1.0"
+          },
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-07-07T20:03:25Z",
+            "tagName": "v1.2.0"
+          }
+        ],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/release_control_plane.yml",
+        ".github/workflows/test.yml",
+        ".github/workflows/lint.yml",
+        ".github/workflows/codeql.yml",
+        ".github/workflows/release_installer.yml",
+        ".github/workflows/hygiene.yml",
+        ".github/workflows/update_badges.yml",
+        ".github/workflows/docker-publish.yml",
+        ".github/workflows/docs.yml",
+        ".github/workflows/cross_platform.yml"
+      ]
+    },
+    {
+      "repository": "howlframe",
+      "head": {
+        "exit_code": 0,
+        "value": "def34540969ff7bfcff4275263215fb3e0253630",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howlframe"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [
+          {
+            "baseRefName": "main",
+            "headRefName": "m3-freeze",
+            "number": 206,
+            "title": "Milestone 3 spec freeze at e6fdd48a: FREEZE.md, Owner-ack record, spec R1 (no new venue after FAIL)",
+            "url": "https://github.com/howlcipher/howlframe/pull/206"
+          },
+          {
+            "baseRefName": "main",
+            "headRefName": "live-comparison-harness",
+            "number": 178,
+            "title": "live-v1: pre-registered harness for the live-model comparison (HowlFrame vs JSON action plans), no live runs",
+            "url": "https://github.com/howlcipher/howlframe/pull/178"
+          }
+        ],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-08-13T03:33:30Z",
+            "tagName": "v0.1.0"
+          }
+        ],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/decode-pages.yml",
+        ".github/workflows/release.yml",
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "repository": "howlchangeops",
+      "head": {
+        "exit_code": 0,
+        "value": "df36af7b6b6b30fd34a1a775be80adf454f1717c",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howlchangeops"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-24T17:03:38Z",
+            "tagName": "v0.2.2"
+          },
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-22T21:39:38Z",
+            "tagName": "v0.2.1"
+          },
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-21T04:35:39Z",
+            "tagName": "v0.2.0"
+          }
+        ],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/release.yml",
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "repository": "howlproof",
+      "head": {
+        "exit_code": 0,
+        "value": "9e817cb173cf1653bc4381133afb4e03b5c7d0d8",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howlproof"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/pages.yml",
+        ".github/workflows/decode-pages.yml",
+        ".github/workflows/contracts.yml",
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "repository": "howlboard",
+      "head": {
+        "exit_code": 0,
+        "value": "2e174395602bdc846b08a730f915bf0a80b5dfd0",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howlboard"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "repository": "howlforge",
+      "head": {
+        "exit_code": 0,
+        "value": "3d6d6c67de982306060008ee425033a324f38766",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "claude/howlforge-initial-build"
+          },
+          "url": "https://github.com/howlcipher/howlforge"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/pages.yml",
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "repository": "howlrelay",
+      "head": {
+        "exit_code": 0,
+        "value": "725d4a729a0a1b91088b69b6c32c978e49b814d0",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howlrelay"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-25T00:24:31Z",
+            "tagName": "v0.1.1"
+          }
+        ],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "repository": "howl-provider-core",
+      "head": {
+        "exit_code": 0,
+        "value": "c426b99c2196f28ca903dc89406810b173e3c96e",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howl-provider-core"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-24T17:02:51Z",
+            "tagName": "v0.2.1"
+          }
+        ],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "repository": "howlalign",
+      "head": {
+        "exit_code": 0,
+        "value": "a31999f01bbff307d13f5ecf3edbace0b3c17372",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howlalign"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "repository": "HowlFutureWorks",
+      "head": {
+        "exit_code": 0,
+        "value": "e42a7a290320fd4998cf1aa1e5b2c1a635ef13f3",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/HowlFutureWorks"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [
+          {
+            "baseRefName": "main",
+            "headRefName": "dependabot/github_actions/actions/setup-python-7.1.0",
+            "number": 20,
+            "title": "chore(deps): bump actions/setup-python from 7.0.0 to 7.1.0",
+            "url": "https://github.com/howlcipher/HowlFutureWorks/pull/20"
+          }
+        ],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/validate.yml"
+      ]
+    },
+    {
+      "repository": "howlwriter",
+      "head": {
+        "exit_code": 0,
+        "value": "7d27e3377fa9f000e64256b1a9d6fea335086b87",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howlwriter"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-25T00:24:51Z",
+            "tagName": "v0.1.1"
+          },
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-21T06:09:31Z",
+            "tagName": "v0.1.0"
+          }
+        ],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/decode-pages.yml",
+        ".github/workflows/release.yml",
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "repository": "howlcreate",
+      "head": {
+        "exit_code": 0,
+        "value": "adcb760df9397bda1f18b830a48a8fd075bccbe3",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howlcreate"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-25T00:24:08Z",
+            "tagName": "v0.2.1"
+          }
+        ],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "repository": "howldream",
+      "head": {
+        "exit_code": 0,
+        "value": "08eea931d3b8a48763e92dbbe8b1204ea790caef",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howldream"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [
+          {
+            "isDraft": false,
+            "isPrerelease": false,
+            "publishedAt": "2026-10-25T00:23:51Z",
+            "tagName": "v0.4.5"
+          }
+        ],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/pages.yml",
+        ".github/workflows/evaluation.yml",
+        ".github/workflows/ci.yml"
+      ]
+    },
+    {
+      "repository": "howlInstinct",
+      "head": {
+        "exit_code": 0,
+        "value": "c310bafe9ba866db11c0ad0b97972d3fa6d5841b",
+        "error": ""
+      },
+      "branch": {
+        "exit_code": 0,
+        "value": "main",
+        "error": ""
+      },
+      "status": {
+        "exit_code": 0,
+        "value": "",
+        "error": ""
+      },
+      "github": {
+        "exit_code": 0,
+        "value": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "url": "https://github.com/howlcipher/howlInstinct"
+        },
+        "error": ""
+      },
+      "pull_requests": {
+        "exit_code": 0,
+        "value": [
+          {
+            "baseRefName": "main",
+            "headRefName": "dependabot/github_actions/actions/upload-pages-artifact-5.0.0",
+            "number": 4,
+            "title": "Bump actions/upload-pages-artifact from 3.0.1 to 5.0.0",
+            "url": "https://github.com/howlcipher/howlInstinct/pull/4"
+          },
+          {
+            "baseRefName": "main",
+            "headRefName": "dependabot/github_actions/actions/checkout-7.0.1",
+            "number": 3,
+            "title": "Bump actions/checkout from 4.4.0 to 7.0.1",
+            "url": "https://github.com/howlcipher/howlInstinct/pull/3"
+          },
+          {
+            "baseRefName": "main",
+            "headRefName": "dependabot/github_actions/actions/deploy-pages-5.0.1",
+            "number": 2,
+            "title": "Bump actions/deploy-pages from 4.0.5 to 5.0.1",
+            "url": "https://github.com/howlcipher/howlInstinct/pull/2"
+          }
+        ],
+        "error": ""
+      },
+      "releases": {
+        "exit_code": 0,
+        "value": [],
+        "error": ""
+      },
+      "workflows": [
+        ".github/workflows/pages.yml",
+        ".github/workflows/test.yml",
+        ".github/workflows/lint.yml",
+        ".github/workflows/codeql.yml"
+      ]
+    }
+  ]
+}

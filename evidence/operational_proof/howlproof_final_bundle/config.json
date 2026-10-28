@@ -1,0 +1,51 @@
+{
+  "source": "operational_missions/incident_sift_proof.yaml",
+  "schema_version": 1,
+  "artifact": "incident-sift-operational-proof",
+  "description": "Independent source scan and documentation inspection only; functional acceptance is outside this contract.",
+  "profiles": [
+    "secrets.scan",
+    "docs.claims"
+  ],
+  "adversaries": [
+    "FUNCTIONAL",
+    "SECURITY",
+    "RELIABILITY",
+    "AI",
+    "OPERATOR"
+  ],
+  "blocking_severity": "HIGH",
+  "acceptance": [
+    {
+      "id": "SOURCE-SCAN",
+      "requirement": "checks_pass",
+      "checks": [
+        "secrets.scan"
+      ],
+      "optional": false
+    },
+    {
+      "id": "HIGH-FINDINGS",
+      "requirement": "max_findings",
+      "limit": 0,
+      "min_severity": "HIGH",
+      "adversary": null,
+      "optional": false
+    }
+  ],
+  "exclusions": [],
+  "include_ignored": [],
+  "service": null,
+  "api": null,
+  "web": null,
+  "markup": null,
+  "injection": null,
+  "cli": null,
+  "ai": null,
+  "docs": {
+    "claim_sources": [
+      "README.md"
+    ],
+    "synced_pairs": []
+  }
+}
