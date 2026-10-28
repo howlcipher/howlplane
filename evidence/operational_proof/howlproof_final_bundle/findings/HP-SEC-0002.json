@@ -1,0 +1,49 @@
+{
+  "check_id": "secrets.scan",
+  "adversary": "SECURITY",
+  "category": "security",
+  "title": "Credential-shaped aws_access_key in tests/test_cli.py",
+  "severity": "BLOCKER",
+  "confidence": "HIGH",
+  "summary": "A string matching the aws_access_key credential format appears at tests/test_cli.py:123. The path suggests a fixture, so this may be intentional test data.",
+  "evidence": "pqrstuv', '[REDACTED]',\n                   'AKIA...[20 chars redacted]']\n        for secre",
+  "recommended_remediation": "Remove the value from the tree, rotate it if it was ever real, and load it from the environment or a secret store instead.",
+  "location": "tests/test_cli.py:123",
+  "rule": "secrets.aws_access_key",
+  "state": "FOUND",
+  "reproduction": {
+    "summary": "Re-read the file and match the same pattern.",
+    "requires_service": false,
+    "notes": "",
+    "steps": [
+      {
+        "description": "Search tests/test_cli.py for the aws_access_key pattern.",
+        "kind": "file_probe",
+        "payload": {
+          "path": "tests/test_cli.py",
+          "pattern": "AKIA[0-9A-Z]{16}"
+        },
+        "expect": {
+          "matches": true
+        }
+      }
+    ]
+  },
+  "resolution_reason": null,
+  "id": "HP-SEC-0002",
+  "fingerprint_basis": null,
+  "fingerprint": "af85a891e1219859b3274c99274a541884df83c567ea1bd411b8a7df6b7f05c2",
+  "first_seen_run": "hp-20261028-151401-a85ebe1ba56a",
+  "first_seen_commit": "cdccf0c305267fe4f59922c09fa233a9067f6c3e",
+  "last_seen_run": "hp-20261028-152521-5f46c56f16ce",
+  "detail": {
+    "file": "tests/test_cli.py",
+    "line": 123,
+    "kind": "aws_access_key",
+    "pattern": "AKIA[0-9A-Z]{16}",
+    "severity": "BLOCKER",
+    "looks_like_fixture": true,
+    "excerpt": "pqrstuv', '[REDACTED]',\n                   'AKIA...[20 chars redacted]']\n        for secre"
+  },
+  "blocking": false
+}

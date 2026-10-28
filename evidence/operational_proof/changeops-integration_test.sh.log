@@ -1,0 +1,137 @@
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+Initialized empty Git repository in /tmp/tmp.t1ZaWCZkQa/.git/
+[master (root-commit) e7618a1] initial commit
+ 1 file changed, 1 insertion(+)
+ create mode 100644 file.txt
+go: creating new go.mod: module testrepo
+go: to add module requirements and sums:
+	go mod tidy
+[main 32cfe86] add go mock profile
+ 3 files changed, 7 insertions(+)
+ create mode 100644 .gitignore
+ create mode 100644 go.mod
+ create mode 100644 main.go
+Built howlchangeops.hfbc
+=== Scenario 1 - Dirty Repo ===
+PASS: Denied due to dirty repo
+=== Scenario 2 - Clean repo but no approval ===
+[main 122f61d] clean
+ 1 file changed, 1 insertion(+)
+Running go test ./...
+Running go build ./...
+Validation complete. evidence_digest=7caffc9d1a5ed4c4d012784173963780b7394adb2f7112222c4607a77e98683c
+PASS: Required approval
+=== Scenario 3 - AI self approval ===
+PASS: Self approval ignored, still REQUIRE_APPROVAL
+=== Scenario 4 - Trusted approval & execution ===
+Decision decision-7d51cbc approved.
+PASS: Action executed
+PASS: Post-action verification passed
+PASS: Tag created
+PASS: Execution receipt verified PASS
+=== Scenario 5 - Stale local evidence ===
+[main 6b51ddb] clean commit
+Running go test ./...
+Running go build ./...
+Validation complete. evidence_digest=47c59c40a22b35e50858a6e9ce24426ceff5558d7a3f564a56c84dab08765ba0
+Decision decision-74bf33b approved.
+[main a8d8f06] stale commit
+ 1 file changed, 1 insertion(+)
+PASS: Stale local evidence detected and blocked
+=== Scenario 6 - Stale remote evidence (TOCTOU) ===
+[main 6d22520] clean commit for remote TOCTOU
+Running go test ./...
+Running go build ./...
+Validation complete. evidence_digest=8ee80fbd5e22a6c2c583b2a50113cc7ef46792d7118ef6b094d0d3f8b87ad955
+Decision decision-a411a60 approved.
+PASS: Remote TOCTOU drift detected and blocked with STALE_REMOTE_EVIDENCE
+=== Scenario 7 - HowlFrame failure (Fail-Closed) ===
+[main f971d78] clean for scenario 7
+Running go test ./...
+Running go build ./...
+Validation complete. evidence_digest=b791e907d1d3a0b947bcc4810dd0e5fc21131c40c4c3cec1d700977a8063a749
+Decision decision-3766a47 approved.
+PASS: HowlFrame failure blocked execution
+=== Scenario 8 - Governed Rollback Workflow ===
+[main 5cabad1] clean for rollback test
+Running go test ./...
+Running go build ./...
+Validation complete. evidence_digest=cddace1fc586439341f4729666a85b5998f62a394cae9d13e76f1c12087878d8
+Decision decision-0438fc6 approved.
+Executing action: create_release_candidate
+Created tag: howlchangeops/rc-5cabad1
+Verified: tag created successfully.
+PASS: Rollback proposal evaluated and requires approval
+Decision decision-61489df approved.
+PASS: Rollback executed and tag removed
+PASS: Rollback receipt recorded
+=== Scenario 9 - Plan Simulation ===
+PASS: Plan simulated create_release_candidate
+PASS: Plan simulated rollback_release_candidate
+=== Scenario 10 - Explain Output with Execution Receipt ===
+PASS: Explain displays execution receipt
+PASS: Explain displays verification status
+=== Scenario 11 - Post-Action Failure, Receipt Persistence & Replay Prevention ===
+[main 6f44b7f] clean for scenario 11
+Running go test ./...
+Running go build ./...
+Validation complete. evidence_digest=2c732a8327bcf2139fca657f064b07ef42b7dd821dc5912a35fbd297f96f06c2
+Decision decision-6a7805b approved.
+PASS: Action failure detected
+PASS: Failure execution receipt persisted
+PASS: Replay protection blocks re-executing failed decision
+=== Scenario 12 - Compatibility Alias (changeops CLI command) ===
+PASS: Compatibility alias changeops executes plan successfully
+=== Scenario 13 - JSON result envelopes (howl.result/v1) ===
+[main 4b4477d] clean for json scenario
+Running go test ./...
+Running go build ./...
+Validation complete. evidence_digest=6d498bc958d66b319ff0d39a14f3277b5a08c81f0b36165941c30099d6dd3046
+Decision: REQUIRE_APPROVAL
+Reason: approval required for release candidate
+Decision saved as decision-d99c2f2. Use 'howlchangeops approve decision-d99c2f2' to approve.
+PASS: evaluate --json reports awaiting_human
+PASS: evaluate --json carries the verdict
+PASS: evaluate --json decision_id names the saved decision
+Decision decision-d99c2f2 approved.
+PASS: approve --json ok
+Executing action: create_release_candidate
+Created tag: howlchangeops/rc-4b4477d
+Verified: tag created successfully.
+PASS: execute --json reports verification
+DENIED: Decision already executed successfully
+PASS: replay is denied with ALREADY_EXECUTED
+Decision: DENY
+Reason: evidence is missing or failing
+PASS: evaluate --json reports denied
+PASS: interop descriptor
+=== Scenario 14 - Configuration from XDG_CONFIG_HOME, any working directory ===
+PASS: plan runs from another directory with the XDG config
+=== Scenario 15 - Approval is the owner's decision ===
+[main 042cbc2] clean for owner approval scenario
+Running go test ./...
+Running go build ./...
+Validation complete. evidence_digest=6c471e3d8287452d205263f174b761e99d24b9ce6a6d821aae5bf509a932922d
+Decision: REQUIRE_APPROVAL
+Reason: approval required for release candidate
+Decision saved as decision-13943a8. Use 'howlchangeops approve decision-13943a8' to approve.
+DENIED: approving decision-13943a8 is the owner's decision; run `howlchangeops approve decision-13943a8` at a terminal, or pass --owner-confirmed only to relay a decision the owner gave
+PASS: approve without a terminal or --owner-confirmed is refused
+PASS: a refused approval writes nothing
+Decision decision-13943a8 approved.
+PASS: the named approver is recorded
+PASS: a relayed approval says so
+PASS: the signed approval file names the approver
+ALL INTEGRATION TESTS PASSED

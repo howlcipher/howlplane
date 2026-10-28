@@ -1,0 +1,42 @@
+{
+  "schema": "howlplane.agent_readiness/v1",
+  "generated_at": "2026-10-28T15:13:36.026833+00:00",
+  "agents": [
+    {
+      "agent": "cursor",
+      "installed": true,
+      "authenticated": true,
+      "auth_source": "agent status",
+      "capacity": {
+        "state": "UNKNOWN",
+        "visibility": "UNKNOWN",
+        "source": null,
+        "scope": null,
+        "reason": "CLI does not expose remaining allowance",
+        "five_hour_remaining_percent": null,
+        "weekly_remaining_percent": null,
+        "reset_at": null,
+        "limits": []
+      },
+      "advertised_model_count": 269
+    },
+    {
+      "agent": "devin_cli",
+      "installed": true,
+      "authenticated": true,
+      "auth_source": "devin auth status",
+      "capacity": {
+        "state": "UNKNOWN",
+        "visibility": "UNKNOWN",
+        "source": null,
+        "scope": null,
+        "reason": "CLI does not expose remaining allowance",
+        "five_hour_remaining_percent": null,
+        "weekly_remaining_percent": null,
+        "reset_at": null,
+        "limits": []
+      },
+      "advertised_model_count": 907
+    }
+  ]
+}

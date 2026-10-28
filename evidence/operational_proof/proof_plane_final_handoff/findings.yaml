@@ -1,0 +1,41 @@
+produced_by: howlproof 0.2.0b1
+run_id: hp-20261028-152521-5f46c56f16ce
+artifact: incident-sift-operational-proof
+commit: 02f9a2c0bfeef5eb0a621324ebdf6eb884c00705
+howlproof_verdict: REJECT
+note: Advisory findings for `python -m src.control_plane reconcile --findings-file`.
+  HowlProof does not remediate what it reports; routing the repair is HowlPlane's
+  decision. Dismissing a blocker or high finding requires a resolution_reason.
+findings:
+- schema: ai.review_finding/v1
+  id: HP-SEC-0001
+  reviewer_role: howlproof-security
+  title: Credential-shaped openai_key in tests/test_cli.py
+  severity: blocker
+  category: security
+  description: A string matching the openai_key credential format appears at tests/test_cli.py:122.
+    The path suggests a fixture, so this may be intentional test data.
+  status: open
+  component: incident-sift-operational-proof
+  location: tests/test_cli.py:122
+  evidence: ", '[REDACTED]\"', 'API-KEY hidden',\n                   'sk-a...[25 chars\
+    \ redacted]', '[REDACTED]"
+  suggested_fix: Remove the value from the tree, rotate it if it was ever real, and
+    load it from the environment or a secret store instead.
+  redundancy_status: independent
+- schema: ai.review_finding/v1
+  id: HP-SEC-0002
+  reviewer_role: howlproof-security
+  title: Credential-shaped aws_access_key in tests/test_cli.py
+  severity: blocker
+  category: security
+  description: A string matching the aws_access_key credential format appears at tests/test_cli.py:123.
+    The path suggests a fixture, so this may be intentional test data.
+  status: open
+  component: incident-sift-operational-proof
+  location: tests/test_cli.py:123
+  evidence: "pqrstuv', '[REDACTED]',\n                   'AKIA...[20 chars redacted]']\n\
+    \        for secre"
+  suggested_fix: Remove the value from the tree, rotate it if it was ever real, and
+    load it from the environment or a secret store instead.
+  redundancy_status: independent

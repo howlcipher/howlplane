@@ -1,0 +1,38 @@
+{
+  "feed": {
+    "events": [
+      {
+        "action": "implementation_completed",
+        "actor": "operational_proof_coordinator",
+        "detail": "partial",
+        "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+        "mission_id": "INCIDENT-SIFT-001",
+        "recording_mode": "manual_coordinator_projection_of_observed_native_runs"
+      },
+      {
+        "action": "verification_completed",
+        "actor": "operational_proof_coordinator",
+        "detail": "passed",
+        "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+        "mission_id": "INCIDENT-SIFT-001",
+        "recording_mode": "manual_coordinator_projection_of_observed_native_runs"
+      },
+      {
+        "action": "verification_completed",
+        "actor": "operational_proof_coordinator",
+        "detail": "failed",
+        "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+        "mission_id": "INCIDENT-SIFT-001",
+        "recording_mode": "manual_coordinator_projection_of_observed_native_runs"
+      },
+      {
+        "action": "task_failed",
+        "actor": "operational_proof_coordinator",
+        "detail": "PARTIALLY VERIFIED overall. Native Factory BLOCKED at independent review: Cursor timed out180s; Devin failed exit1; acceptance did not run. App16 tests/install/build and separate sibling-worker review passed. HowlProof REJECT synthetic credential-shaped fixtures, human judgment unresolved. Governed release BLOCKED: independent Model B deployment unavailable. Board interrupted publication can partially mutate stores. Manual coordinator projection; no approval granted.",
+        "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+        "mission_id": "INCIDENT-SIFT-001",
+        "recording_mode": "manual_coordinator_projection_of_observed_native_runs"
+      }
+    ]
+  }
+}

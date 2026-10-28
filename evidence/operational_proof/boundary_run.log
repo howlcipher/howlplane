@@ -1,0 +1,105 @@
+{
+  "first_import": {
+    "command": [
+      "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/howlframe",
+      "-run-bc",
+      "-allow-caps",
+      "filesystem,database",
+      "-max-instructions",
+      "200000000",
+      "-max-memory-bytes",
+      "268435456",
+      "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/ledger_import.hfbc",
+      "mission.jsonl",
+      "10"
+    ],
+    "cwd": "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/board_state",
+    "exit_code": 0,
+    "stdout": "entries=1\nmissions=1\n",
+    "stderr": ""
+  },
+  "replay": {
+    "command": [
+      "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/howlframe",
+      "-run-bc",
+      "-allow-caps",
+      "filesystem,database",
+      "-max-instructions",
+      "200000000",
+      "-max-memory-bytes",
+      "268435456",
+      "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/ledger_import.hfbc",
+      "mission.jsonl",
+      "10"
+    ],
+    "cwd": "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/board_state",
+    "exit_code": 0,
+    "stdout": "entries=1\nmissions=1\n",
+    "stderr": ""
+  },
+  "replay_identical_bytes": true,
+  "malformed": {
+    "command": [
+      "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/howlframe",
+      "-run-bc",
+      "-allow-caps",
+      "filesystem,database",
+      "-max-instructions",
+      "200000000",
+      "-max-memory-bytes",
+      "268435456",
+      "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/ledger_import.hfbc",
+      "malformed.jsonl",
+      "10"
+    ],
+    "cwd": "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/board_state",
+    "exit_code": 3,
+    "stdout": "",
+    "stderr": "ledger_import: invalid_ledger at line 2: Malformed JSON; nothing was imported"
+  },
+  "malformed_stores_unchanged": true,
+  "duplicate": {
+    "command": [
+      "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/howlframe",
+      "-run-bc",
+      "-allow-caps",
+      "filesystem,database",
+      "-max-instructions",
+      "200000000",
+      "-max-memory-bytes",
+      "268435456",
+      "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/ledger_import.hfbc",
+      "duplicate.jsonl",
+      "10"
+    ],
+    "cwd": "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/board_state",
+    "exit_code": 3,
+    "stdout": "",
+    "stderr": "ledger_import: invalid_ledger at line 2: Duplicate entry_id; nothing was imported"
+  },
+  "duplicate_stores_unchanged": true,
+  "store_sha256": {
+    "howlboard_timeline.json": "1e0bd0d08366eced8cd0a54a6e104f6edfbdb07002166474a966d822fe5bcfc5",
+    "howlboard_missions.json": "75a052a3512024ad45ca161b02e98d8ed92bcc045a6e69f5c68527803a382082"
+  },
+  "corrupt_timeline": {
+    "command": [
+      "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/howlframe",
+      "-run-bc",
+      "-allow-caps",
+      "filesystem,database",
+      "-max-instructions",
+      "200000000",
+      "-max-memory-bytes",
+      "268435456",
+      "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/ledger_import.hfbc",
+      "mission.jsonl",
+      "10"
+    ],
+    "cwd": "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/corrupt_timeline_state",
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "{\"phase\":\"runtime\",\"code\":\"STORE_INVALID_PERSISTED_JSON\",\"function\":\"main\",\"instruction\":495,\"opcode\":\"STORE_OPEN\",\"message\":\"decode persisted store \\\"howlboard_timeline.json\\\": invalid character 'i' looking for beginning of object key string\"}\n"
+  },
+  "corrupt_timeline_mission_written_before_failure": true
+}

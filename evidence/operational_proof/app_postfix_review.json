@@ -1,0 +1,49 @@
+{
+  "schema": "howl.operational_proof.review/v1",
+  "verdict": "NO_BLOCKING_FINDINGS_IN_REVIEWED_FINAL_SOURCE",
+  "reviewer": "frame_board_boundary independent Codex worker; no application authorship",
+  "review_scope": "copied snapshot; hashes attached; later changes require revalidation",
+  "findings_disposition": {
+    "APP-SEC-1": "fixed and independent exact repro passed",
+    "APP-JSON-1": "fixed; NaN Infinity -Infinity independently rejected under strict",
+    "APP-INCOMPLETE-1": "resolved; packaging docs scripts supplied and installation exercised"
+  },
+  "unit_tests": {
+    "result": "16 passed",
+    "elapsed_seconds": 7.375,
+    "log": "app_final_tests.log"
+  },
+  "source_sha256": {
+    "pyproject.toml": "e2615ac1f821b61e37b4fb4b9e21e542c89687b4cf2af98127685ca987e7e7bc",
+    "MISSION.md": "a595f8fc54a6ba903c6d31e55936724bb71ce936982b89e7a03033a3625c3eaf",
+    "change_log.md": "c47492c3ae745c14f5b47f2d1efff281e61868007877a42b327157e092bd76de",
+    "build_backend.py": "4c3cb35012cbc1cf29b01b5b4db520cd019904a2f927454d800b0e135c26a7d7",
+    "README.md": "84427d19be4aca63bcd0d142b73754b1a14906975e119e614efcccffffe78972",
+    "REVIEW_FINDINGS.md": "31bc3b713db0d6df12ee9b722f4e75de55567b80f29f4650eb3c9c099af8deb0",
+    "incident_sift/__init__.py": "9b0908c979ec1796ad9b403b42d21991f53aa9cd72b0db9d9eb7baf46530f8ce",
+    "incident_sift/cli.py": "14dcb47dd4f3011bc092459ea262f070ca0499bb53b04c33b029a5d377804a73",
+    "incident_sift/__main__.py": "dbb0b5436057325bdd980a5d2d47a41efc84c4770041caa4da163fd34068c631",
+    "scripts/test.sh": "25b8f82d2b48d7da3ddd9fd8fdec067871055b82fa42f927e58833847e55f155",
+    "scripts/build.sh": "9f2971a24878ea0929b797a55ba1d6fe1ef0d1c30c7eeaad41388dd0f8ed5ab4",
+    "tests/test_packaging.py": "130a3c6411f121929a462af1ea723cff4d45446c5094a5f3ab6bcda4e865f9f4",
+    "tests/test_cli.py": "89acda97466f28ae31d042da88b4b8320eca02c60f629a2d8cedfe678f705404"
+  },
+  "source_matches_current_original": true,
+  "source_artifact_sha256": "16c190585b82b21e751958566277bd37272a253aeedf1a190a1cdad0a0b7bcd6",
+  "regression_fault": {
+    "classification": "simulated mutation + deterministic exact-byte restoration, not autonomous model repair",
+    "detection_exit": 1,
+    "restored_exit": 0,
+    "original_sha256": "14dcb47dd4f3011bc092459ea262f070ca0499bb53b04c33b029a5d377804a73",
+    "injected_sha256": "d49646e6613b03aaed4de9b4b23dc927045e8c5b5c99c8394660b535e5dc4050",
+    "restored_sha256": "14dcb47dd4f3011bc092459ea262f070ca0499bb53b04c33b029a5d377804a73",
+    "details": "app_postfix_probes.json"
+  },
+  "prompt_injection": {
+    "exit_code": 0,
+    "marker_created": false,
+    "limitations": "CLI treats command-like log content as data; not proof of worker sandbox or network isolation"
+  },
+  "independence_limitations": "Different worker on same provider/model family; no organization-independent certification or comprehensive security proof",
+  "packaging": "unittest executes build twice and compares hashes, extracts deterministic allowlisted source artifact, fresh venv offline pip install, installed console smoke outside source; standard library build backend inspected"
+}

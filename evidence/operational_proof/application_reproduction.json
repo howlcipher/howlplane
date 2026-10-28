@@ -1,0 +1,56 @@
+{
+  "kind": "real_clean_git_bundle_reproduction",
+  "runs": [
+    {
+      "command": [
+        "git",
+        "clone",
+        "/run/media/system/tallgeese/dev/worktrees/howl_operational_proof/evidence/operational_proof/incident_sift.bundle",
+        "/run/media/system/tallgeese/dev/operational_missions/reproduce_incident_sift_20261028"
+      ],
+      "cwd": "/run/media/system/tallgeese/dev",
+      "exit_code": 0,
+      "elapsed_seconds": 0.037,
+      "stdout": "",
+      "stderr": "Cloning into '/run/media/system/tallgeese/dev/operational_missions/reproduce_incident_sift_20261028'...\n"
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/test.sh"
+      ],
+      "cwd": "/run/media/system/tallgeese/dev/operational_missions/reproduce_incident_sift_20261028",
+      "exit_code": 0,
+      "elapsed_seconds": 9.305,
+      "stdout": "",
+      "stderr": "test_counts_groups_and_order (test_cli.CliTests.test_counts_groups_and_order) ... ok\ntest_deep_json_is_rejected (test_cli.CliTests.test_deep_json_is_rejected) ... ok\ntest_documented_edge_cases (test_cli.CliTests.test_documented_edge_cases) ... ok\ntest_dot_api_key_labels (test_cli.CliTests.test_dot_api_key_labels) ... ok\ntest_exact_types_and_required_fields (test_cli.CliTests.test_exact_types_and_required_fields) ... ok\ntest_files_and_stdin (test_cli.CliTests.test_files_and_stdin) ... ok\ntest_filters_individual_and_combined (test_cli.CliTests.test_filters_individual_and_combined) ... ok\ntest_help_version (test_cli.CliTests.test_help_version) ... ok\ntest_invalid_timestamps (test_cli.CliTests.test_invalid_timestamps) ... ok\ntest_malformed_utf8_and_strict (test_cli.CliTests.test_malformed_utf8_and_strict) ... ok\ntest_nonstandard_constants (test_cli.CliTests.test_nonstandard_constants) ... ok\ntest_redaction_and_untrusted_content (test_cli.CliTests.test_redaction_and_untrusted_content) ... ok\ntest_safe_usage_and_input_errors (test_cli.CliTests.test_safe_usage_and_input_errors) ... ok\ntest_time_boundaries (test_cli.CliTests.test_time_boundaries) ... ok\ntest_timezone (test_cli.CliTests.test_timezone) ... ok\ntest_reproducible_build_and_clean_install (test_packaging.PackagingTests.test_reproducible_build_and_clean_install) ... ok\n\n----------------------------------------------------------------------\nRan 16 tests in 9.120s\n\nOK\n"
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/build.sh"
+      ],
+      "cwd": "/run/media/system/tallgeese/dev/operational_missions/reproduce_incident_sift_20261028",
+      "exit_code": 0,
+      "elapsed_seconds": 0.081,
+      "stdout": "incident_sift-1.0.0.tar.gz\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python",
+        "-m",
+        "flake8",
+        "incident_sift",
+        "tests",
+        "build_backend.py",
+        "--select=E9,F63,F7,F82"
+      ],
+      "cwd": "/run/media/system/tallgeese/dev/operational_missions/reproduce_incident_sift_20261028",
+      "exit_code": 0,
+      "elapsed_seconds": 0.993,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

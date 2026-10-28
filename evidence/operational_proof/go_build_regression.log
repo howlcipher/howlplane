@@ -1,0 +1,62 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+______________________ test_go_code_compiles_successfully ______________________
+
+    def test_go_code_compiles_successfully():
+        """
+        Regression test to ensure the Go package compiles correctly.
+        Prevents errors like 'undefined: T' caused by ignoring multiple files in a package.
+        """
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+        # Run the exact build command used in cross_platform.yml
+        result = subprocess.run(
+            ["go", "build", "-o", os.devnull, "./cmd/howlplane"],
+            cwd=repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+>       assert (
+            result.returncode == 0
+        ), f"Go compilation failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+E       AssertionError: Go compilation failed:
+E         STDOUT:
+E
+E         STDERR:
+E         Error: no such container "devbox"
+E         Create it now, out of image registry.fedoraproject.org/fedora-toolbox:latest? [Y/n]:
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['go', 'build', '-o', '/dev/null', './cmd/howlplane'], returncode=1, stdout='', stderr='Error: no such container "devbox"\nCreate it now, out of image registry.fedoraproject.org/fedora-toolbox:latest? [Y/n]: ').returncode
+
+tests/test_go_build.py:21: AssertionError
+__________________________ test_go_code_is_formatted ___________________________
+
+    def test_go_code_is_formatted():
+        """
+        Regression test to ensure all Go files are perfectly formatted using gofmt.
+        Prevents golangci-lint from failing the CI pipeline unexpectedly.
+        """
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+        result = subprocess.run(
+            ["gofmt", "-l", "."],
+            cwd=repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        unformatted_files = result.stdout.strip()
+>       assert result.returncode == 0, f"gofmt execution failed: {result.stderr}"
+E       AssertionError: gofmt execution failed: Error: no such container "devbox"
+E         Create it now, out of image registry.fedoraproject.org/fedora-toolbox:latest? [Y/n]:
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['gofmt', '-l', '.'], returncode=1, stdout='', stderr='Error: no such container "devbox"\nCreate it now, out of image registry.fedoraproject.org/fedora-toolbox:latest? [Y/n]: ').returncode
+
+tests/test_go_build.py:42: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_go_build.py::test_go_code_compiles_successfully - Assertion...
+FAILED tests/test_go_build.py::test_go_code_is_formatted - AssertionError: go...
+2 failed in 0.68s

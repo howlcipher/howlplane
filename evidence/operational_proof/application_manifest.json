@@ -1,0 +1,12 @@
+{
+  "repository": "/run/media/system/tallgeese/dev/operational_missions/incident_sift_20261028",
+  "commit": "02f9a2c0bfeef5eb0a621324ebdf6eb884c00705",
+  "baseline": "db34738d356c75b551a215be0bb61f453aaf37f4",
+  "checkpoint": "cdccf0c305267fe4f59922c09fa233a9067f6c3e",
+  "source_archive": "incident_sift-1.0.0.tar.gz",
+  "source_archive_sha256": "16c190585b82b21e751958566277bd37272a253aeedf1a190a1cdad0a0b7bcd6",
+  "git_bundle_sha256": "0b0a3e8b1b491b080b3d244204b1d6ce12cba18ea02a6da99b2680e8da127d21",
+  "native_workflow": "BLOCKED at independent review",
+  "application_verification": "16 tests + reproducible build + offline install; independent worker review",
+  "release_ready": false
+}

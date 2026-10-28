@@ -1,0 +1,22 @@
+{
+  "checked_at": 1793200109.676435,
+  "session_id": "c1d70482c8964eaaa8552e1ab74b11b2",
+  "checks": {
+    "incident_sift/__init__.py": {
+      "exists": true,
+      "hash_preserved_at_handoff": true
+    },
+    "incident_sift/cli.py": {
+      "exists": true,
+      "hash_preserved_at_handoff": true
+    },
+    "incident_sift/__main__.py": {
+      "exists": true,
+      "hash_preserved_at_handoff": true
+    },
+    "tests/test_cli.py": {
+      "exists": true,
+      "hash_preserved_at_handoff": true
+    }
+  }
+}

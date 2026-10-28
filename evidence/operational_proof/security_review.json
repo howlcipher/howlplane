@@ -1,0 +1,19 @@
+{
+  "schema": "howl.operational_proof.review/v1",
+  "reviewer": "frame_board_boundary independent Codex sub-agent",
+  "independence": "different worker, same model/provider; not independent organization or provider",
+  "verdict": "no new blocking findings in reviewed diffs",
+  "scope": ["worktrees/changeops-operational-proof uncommitted security diff", "worktrees/provider-core-operational-proof commit 977dd104d5d02a7afaa228b9e4df083f9a8342ca"],
+  "checks": [
+    {"command": "go test ./adapter -run 'TestModelBUnavailable|TestAuthorityCLIProtected|TestModelBCriterion' -count=1", "result": "passed", "elapsed_seconds": 12.075, "log": "changeops_review_test.log"},
+    {"command": "PYTHONPATH=src howlplane/.venv/bin/python -m pytest tests/test_runtime.py -q", "result": "30 passed", "elapsed_seconds": 4.63, "log": "provider_review_test.log"},
+    {"command": "git diff --check in both worktrees", "result": "passed"}
+  ],
+  "source_findings": [
+    {"severity": "informational", "category": "deployment", "location": "changeops adapter/main.go and internal/authority/adapters.go", "evidence": "Model B execute refuses before legacy dispatch regardless of ledger environment. Lower-level CLI checks exact synthetic_action before ledger/envelope reads; the selected adapter only returns JSON. Real adapters remain internal library code and cooperative mode remains available.", "disposition": "No new bypass found; do not claim credential custody, authenticated owner approval, OS isolation, or protected deployment."},
+    {"severity": "informational", "category": "policy", "location": "provider-core src/howl_provider_core/runtime.py Policy.local_allowed", "evidence": "Both environment aliases are AND-negated and invalid generic values raise ProviderError. Existing provider, URL, and connection-time checks consume local_allowed.", "disposition": "Monotonic prohibition preserved; no inference dispatched by review tests."},
+    {"severity": "low", "category": "test-falsifier", "location": "changeops adapter/model_b_acceptance_test.go TestModelBCriterion3_AgentCannotModifySecurityPolicy", "evidence": "Pre-existing conditional if err == nil after parseResultEnvelope silently skips assertions on malformed output. This diff adjusts inner assertions but retains conditional weakness.", "disposition": "Nonblocking to new refusal tests, which unconditionally fail envelope parse errors. Tighten this older assertion in a bounded follow-up."}
+  ],
+  "remaining_operational_blocker": "Board mission and timeline writes are not atomic; injected corrupt timeline leaves mission store written before failure. See boundary_results.json.",
+  "limitations": ["Targeted deterministic tests only; no protected deployment, paid calls, releases, or live inference tested", "No claim of complete independent ecosystem security audit"]
+}
