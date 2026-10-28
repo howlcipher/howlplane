@@ -214,6 +214,7 @@ def run_reasoning_task(
     options.update(config_overrides)
     orchestrator = GovernedTaskOrchestrator(
         target_repo=target_repo,
+        control_plane_root=Path(target_repo).parent / "control_plane",
         config=OrchestrationConfig(**options),
     )
     result = orchestrator.run(task_spec)

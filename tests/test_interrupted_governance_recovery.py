@@ -197,7 +197,7 @@ def test_no_lock_survives_a_failure_during_startup(tmp_path, fault_stage):
         failure_injection_hook=explode,
         progress_mode="never",
     )
-    orch = GovernedTaskOrchestrator(target_repo=repo, config=config)
+    orch = GovernedTaskOrchestrator(target_repo=repo, control_plane_root=tmp_path / "cp", config=config)
 
     with pytest.raises(RuntimeError):
         orch.run(task)
@@ -284,7 +284,7 @@ def test_unlock_refuses_a_live_repository_lock(tmp_path):
             "repository_mutation",
             create_time=get_process_create_time(proc.pid),
         )
-        assert cmd_unlock(_unlock_args(repo, "T-ACTIVE")) == 1
+        assert cmd_unlock(_unlock_args(repo, "T-ACTIVE", tmp_path / "ledger.jsonl")) == 1
         assert get_repo_lock_path(repo).exists()
     finally:
         proc.kill()
@@ -293,7 +293,7 @@ def test_unlock_refuses_a_live_repository_lock(tmp_path):
 
 def test_unlock_is_a_truthful_no_op_when_nothing_is_held(tmp_path, capsys):
     repo = _repo(tmp_path)
-    assert cmd_unlock(_unlock_args(repo, "T-NONE")) == 0
+    assert cmd_unlock(_unlock_args(repo, "T-NONE", tmp_path / "ledger.jsonl")) == 0
     assert "Nothing to reclaim" in capsys.readouterr().out
 
 

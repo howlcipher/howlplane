@@ -225,6 +225,7 @@ Separates review claims from verifiable command outcomes:
 ### 3.7 Durable Evidence Ledger (`EvidenceLedger`)
 Append-only log (`logs/control_plane/evidence_ledger.jsonl`) recording actions, commands, results, findings, and verification outcomes.
 - **Automated redaction:** Automatically scrubs API keys (`sk-...`, `ghp_...`), passwords, authorization headers, private keys, and email addresses before recording.
+- **Rotation:** an append that leaves the active file at or above 64 MiB compresses it into `evidence_ledger.jsonl.<UTC timestamp>.gz` beside it. Every read returns the archives oldest first and then the active file, so the completion gate, metrics and `doctor` see the whole history. Appends and reads hold a shared `flock` on the ledger's directory and rotation holds it exclusively; a crash during rotation is finished by the next one without losing or duplicating an entry. `EvidenceLedger.rotate()` archives on demand. To read an archive by hand: `zcat logs/control_plane/evidence_ledger.jsonl.*.gz`.
 
 ### 3.8 Transparent Performance Metrics (`MetricsCalculator`)
 Calculates real engineering statistics from evidence history without subjective guessing:

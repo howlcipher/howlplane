@@ -39,6 +39,17 @@ real provider sessions, took hours, and failed tests that pass in CI. Tests
 that install fake CLIs set `PATH` themselves and are unaffected
 (`tests/_provider_isolation.py`).
 
+Evidence follows the same rule. Code that is not handed a ledger writes
+`logs/control_plane/evidence_ledger.jsonl` under the control plane root, which
+during a test run is this checkout or, through `~/.config/howlplane/config.toml`,
+the operator's own HowlPlane. Tests relying on that default made 99% of a
+422 MB operator ledger fixture records, fake approvals included.
+`tests/conftest.py` therefore refuses any evidence append outside the temporary
+directory and fails the run naming the test, even when the code under test
+swallows the refusal. Give an orchestrator a `control_plane_root` under
+`tmp_path`, a command `--ledger-file`, or, for a test that drives the CLI as a
+user types it, a private install from `tests/_control_plane_home.py`.
+
 ### How `slow` is decided
 
 `slow` is applied at the granularity the measurement supports, not per module.

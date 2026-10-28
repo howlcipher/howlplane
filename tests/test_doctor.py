@@ -154,6 +154,21 @@ def test_check_control_plane_ledger(tmp_path):
     assert "line 3" in check_bad.message and "malformed" in check_bad.message
 
 
+def test_check_control_plane_ledger_validates_history_that_only_exists_in_archives(tmp_path):
+    ledger_file = tmp_path / "logs" / "control_plane" / "evidence_ledger.jsonl"
+    ledger = EvidenceLedger(str(ledger_file))
+    ledger.append_entry(EvidenceEntry(task_id="T1", agent_id="a", action="task_created"))
+    with open(ledger_file, "a", encoding="utf-8") as f:
+        f.write("{not json\n")
+    archive = ledger.rotate()
+    assert archive is not None and not ledger_file.exists()
+
+    check = check_control_plane_ledger(tmp_path)
+
+    assert check.status == "error"
+    assert f"line 2 of {archive.name}" in check.message
+
+
 def test_check_operating_mode():
     check_local = check_operating_mode({"operating_mode": "local_only"})
     assert check_local.status == "ok"

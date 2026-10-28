@@ -207,7 +207,7 @@ def test_orchestrator_stage5_parks_when_independent_review_unavailable(tmp_path:
         enable_howlframe_audit=False,
         preserve_independent_review=True,
     )
-    orch = GovernedTaskOrchestrator(target_repo=repo, config=config)
+    orch = GovernedTaskOrchestrator(target_repo=repo, control_plane_root=tmp_path / "control_plane", config=config)
     res = orch.run(task)
 
     assert res.final_state == "awaiting_human"

@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import pytest
 
+from howlplane.control_plane.evidence_ledger import EvidenceLedger
 from howlplane.control_plane.git_env import GIT_REPOSITORY_SELECTION_ENV_VARS
 from tests._provider_isolation import path_without, provider_binaries
 
@@ -242,6 +243,45 @@ def _fail_on_factory_worktrees_in_the_real_data_home(tmp_path_factory):
     assert not created, (
         f"The test suite prepared {len(created)} factory worktree(s) in the real data home: "
         + ", ".join(created[:10]) + ". A test ran factory preparation without isolated XDG paths."
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _keep_evidence_out_of_real_ledgers():
+    """Fail any test that appends evidence outside the temporary directory.
+
+    Code not given a ledger writes `logs/control_plane/evidence_ledger.jsonl` under
+    the control plane root: this checkout for an orchestrator built without
+    `control_plane_root`, and the operator's configured HowlPlane (through
+    ~/.config/howlplane/config.toml) for a CLI command run without `--ledger-file`.
+    Tests relying on those defaults put roughly 400 MB of fixture records,
+    including fake approvals and rejections, into real ledgers. A snapshot of the
+    file could not tell those apart from the operator's own concurrent sessions,
+    so the write itself is refused. Code under test that swallows the refusal
+    still fails the run here, with the test named.
+    """
+    allowed = Path(tempfile.gettempdir()).resolve()
+    append_entry = EvidenceLedger.append_entry
+    refused = {}  # test id -> first refused append
+
+    def append_under_tmp_only(self, entry):
+        target = self.ledger_file.resolve()
+        if not target.is_relative_to(allowed):
+            test = os.environ.get("PYTEST_CURRENT_TEST", "?").split(" ")[0]
+            refused.setdefault(test, f"{entry.task_id} {entry.action} -> {target}")
+            raise AssertionError(
+                f"a test appended evidence ({entry.task_id} {entry.action}) to {target}, outside "
+                f"{allowed}; give the code under test a ledger_file, --ledger-file or "
+                "control_plane_root under tmp_path"
+            )
+        return append_entry(self, entry)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(EvidenceLedger, "append_entry", append_under_tmp_only)
+        yield
+    assert not refused, (
+        f"{len(refused)} test(s) appended evidence outside {allowed}:\n"
+        + "\n".join(f"  {test}: {first}" for test, first in sorted(refused.items())[:30])
     )
 
 

@@ -936,7 +936,8 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     if diagnostics:
         print(
             f"warning: {len(diagnostics)} evidence record(s) are malformed or schema-invalid "
-            f"(first: line {diagnostics[0].line_number}, {diagnostics[0].kind}); run `howlplane doctor`.",
+            f"(first: line {diagnostics[0].line_number} of {diagnostics[0].source}, {diagnostics[0].kind}); "
+            "run `howlplane doctor`.",
             file=sys.stderr,
         )
     summary = MetricsCalculator.calculate(entries)

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from howlplane.control_plane.completion_gate import GATE_BLOCKED_ACTION, evaluate_completion_gate
-from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, EvidenceSchemaError
+from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, EvidenceSchemaError, is_ledger_file
 from howlplane.control_plane.git_env import run_git_in_repo
 from howlplane.control_plane.hygiene_policy import (
     PolicyChangeType,
@@ -604,7 +604,7 @@ def compute_repository_fingerprint(
                 path_part.startswith(".task_runs")
                 or path_part.startswith(".howlchangeops")
                 or path_part.startswith("logs/control_plane")
-                or path_part.endswith(".jsonl")
+                or is_ledger_file(path_part)
             ):
                 continue
             files.append(path_part)
@@ -943,6 +943,10 @@ class HumanLifecycleManager:
                     record_evidence=bool(ledger),
                 ),
             )
+            if ledger:
+                # Without this the verification evidence lands in the runner's
+                # default ledger, apart from the approval it continues.
+                runner.ledger = ledger
         status = runner.run_deterministic_verification(task_spec, run_dir=run_dir)
 
         if ledger:
@@ -1501,6 +1505,9 @@ class HumanLifecycleManager:
                     target_repo=target_repo,
                     control_plane_root=control_plane_root,
                 )
+                if ledger is not None:
+                    # The resumed run records into the ledger its gates read.
+                    orch.ledger = ledger
                 outcome = orch.run(task_spec, lock_ownership=task_lock.ownership)
             audit(
                 "resume_completed",

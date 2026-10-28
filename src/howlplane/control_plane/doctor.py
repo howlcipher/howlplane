@@ -215,16 +215,22 @@ def check_slopslint() -> DiagnosticCheck:
 
 def check_control_plane_ledger(repo_root: Path) -> DiagnosticCheck:
     ledger_file = repo_root / "logs" / "control_plane" / "evidence_ledger.jsonl"
-    if not ledger_file.exists():
-        return DiagnosticCheck(
-            name="Evidence Ledger",
-            status="ok",
-            message="No evidence ledger log file exists yet (clean state).",
-        )
+    clean = DiagnosticCheck(
+        name="Evidence Ledger",
+        status="ok",
+        message="No evidence ledger log file exists yet (clean state).",
+    )
+    # Checked before constructing the ledger, which would create the directory.
+    if not ledger_file.parent.is_dir():
+        return clean
     try:
         from howlplane.control_plane.evidence_ledger import EvidenceLedger
 
-        entries, diagnostics = EvidenceLedger(str(ledger_file)).read_entries()
+        ledger = EvidenceLedger(str(ledger_file))
+        # After a rotation the history can live entirely in archives.
+        if not ledger.segment_files():
+            return clean
+        entries, diagnostics = ledger.read_entries()
         if diagnostics:
             first = diagnostics[0]
             return DiagnosticCheck(
@@ -232,7 +238,7 @@ def check_control_plane_ledger(repo_root: Path) -> DiagnosticCheck:
                 status="error",
                 message=(
                     f"Evidence ledger has {len(diagnostics)} unclean record(s) "
-                    f"(first: line {first.line_number}, {first.kind}: {first.reason})."
+                    f"(first: line {first.line_number} of {first.source}, {first.kind}: {first.reason})."
                 ),
             )
         return DiagnosticCheck(

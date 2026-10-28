@@ -15,8 +15,18 @@ from howlplane.control_plane.agent_execution import FakeAgentBackend
 from howlplane.control_plane.launcher import cmd_work, cmd_status, build_parser
 from howlplane.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
 from howlplane.control_plane.task_spec import TaskSpec
+from tests._control_plane_home import private_control_plane
 from tests._git_test_helpers import git_in_repo, init_git_repo
 from tests._tia_helpers import record_valid_tia
+
+
+def _orchestrator(repo: Path, tmp_path: Path, **config) -> GovernedTaskOrchestrator:
+    """An orchestrator whose evidence and trajectories stay under tmp_path."""
+    return GovernedTaskOrchestrator(
+        target_repo=repo,
+        control_plane_root=tmp_path / "control_plane",
+        config=OrchestrationConfig(**config),
+    )
 
 
 def _init_test_git_repo(path: Path) -> Path:
@@ -140,15 +150,12 @@ findings:
         side_effect=initial_impl_side_effect,
     )
 
-    orchestrator = GovernedTaskOrchestrator(
-        target_repo=repo,
-        control_plane_root=tmp_path / "control_plane",
-        config=OrchestrationConfig(
-            custom_backend=impl_backend,
-            custom_reviewer_fn=reviewer_fn,
-            custom_remediation_fn=remediation_fn,
-            max_remediation_cycles=3,
-        ),
+    orchestrator = _orchestrator(
+        repo, tmp_path,
+        custom_backend=impl_backend,
+        custom_reviewer_fn=reviewer_fn,
+        custom_remediation_fn=remediation_fn,
+        max_remediation_cycles=3,
     )
     record_valid_tia(orchestrator.ledger, spec.task_id)  # the completion gate requires a TIA
 
@@ -210,12 +217,10 @@ def test_human_authority_boundary_blocks_complete(tmp_path):
         side_effect=impl_side_effect,
     )
 
-    orchestrator = GovernedTaskOrchestrator(
-        target_repo=repo,
-        config=OrchestrationConfig(
-            custom_backend=impl_backend,
-            custom_reviewer_fn=lambda role, diff, task: "findings: []",
-        ),
+    orchestrator = _orchestrator(
+        repo, tmp_path,
+        custom_backend=impl_backend,
+        custom_reviewer_fn=lambda role, diff, task: "findings: []",
     )
 
     res = orchestrator.run(spec, planned_actions=["terraform apply -auto-approve"])
@@ -251,10 +256,7 @@ def test_implementation_failure_transitions_to_failed(tmp_path):
         default_stderr="Internal compiler error in agent backend",
     )
 
-    orchestrator = GovernedTaskOrchestrator(
-        target_repo=repo,
-        config=OrchestrationConfig(custom_backend=failing_backend),
-    )
+    orchestrator = _orchestrator(repo, tmp_path, custom_backend=failing_backend)
 
     res = orchestrator.run(spec)
 
@@ -284,12 +286,10 @@ def test_verification_failure_blocks_completion(tmp_path):
         side_effect=broken_impl,
     )
 
-    orchestrator = GovernedTaskOrchestrator(
-        target_repo=repo,
-        config=OrchestrationConfig(
-            custom_backend=impl_backend,
-            custom_reviewer_fn=lambda role, diff, task: "findings: []",
-        ),
+    orchestrator = _orchestrator(
+        repo, tmp_path,
+        custom_backend=impl_backend,
+        custom_reviewer_fn=lambda role, diff, task: "findings: []",
     )
 
     res = orchestrator.run(spec)
@@ -326,13 +326,11 @@ findings:
 
     impl_backend = FakeAgentBackend(agent_id="claude_code")
 
-    orchestrator = GovernedTaskOrchestrator(
-        target_repo=repo,
-        config=OrchestrationConfig(
-            custom_backend=impl_backend,
-            custom_reviewer_fn=persistent_bad_reviewer,
-            max_remediation_cycles=2,
-        ),
+    orchestrator = _orchestrator(
+        repo, tmp_path,
+        custom_backend=impl_backend,
+        custom_reviewer_fn=persistent_bad_reviewer,
+        max_remediation_cycles=2,
     )
 
     res = orchestrator.run(spec)
@@ -420,14 +418,12 @@ findings:
         side_effect=impl_side_effect,
     )
 
-    orchestrator = GovernedTaskOrchestrator(
-        target_repo=repo,
-        config=OrchestrationConfig(
-            custom_backend=impl_backend,
-            custom_reviewer_fn=reviewer_fn,
-            custom_remediation_fn=remediation_fn,
-            max_remediation_cycles=2,
-        ),
+    orchestrator = _orchestrator(
+        repo, tmp_path,
+        custom_backend=impl_backend,
+        custom_reviewer_fn=reviewer_fn,
+        custom_remediation_fn=remediation_fn,
+        max_remediation_cycles=2,
     )
 
     res = orchestrator.run(spec)
@@ -459,6 +455,7 @@ def test_cli_work_execute_and_status(tmp_path, monkeypatch, capsys):
         classmethod(lambda cls, **kwargs: pool),
     )
     repo = _init_test_git_repo(tmp_path / "cli_repo")
+    private_control_plane(monkeypatch, tmp_path)
     parser = build_parser()
 
     # Test work dry-run mode (no --execute)
