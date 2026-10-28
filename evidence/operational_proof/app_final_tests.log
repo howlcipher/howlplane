@@ -1,0 +1,21 @@
+test_counts_groups_and_order (test_cli.CliTests.test_counts_groups_and_order) ... ok
+test_deep_json_is_rejected (test_cli.CliTests.test_deep_json_is_rejected) ... ok
+test_documented_edge_cases (test_cli.CliTests.test_documented_edge_cases) ... ok
+test_dot_api_key_labels (test_cli.CliTests.test_dot_api_key_labels) ... ok
+test_exact_types_and_required_fields (test_cli.CliTests.test_exact_types_and_required_fields) ... ok
+test_files_and_stdin (test_cli.CliTests.test_files_and_stdin) ... ok
+test_filters_individual_and_combined (test_cli.CliTests.test_filters_individual_and_combined) ... ok
+test_help_version (test_cli.CliTests.test_help_version) ... ok
+test_invalid_timestamps (test_cli.CliTests.test_invalid_timestamps) ... ok
+test_malformed_utf8_and_strict (test_cli.CliTests.test_malformed_utf8_and_strict) ... ok
+test_nonstandard_constants (test_cli.CliTests.test_nonstandard_constants) ... ok
+test_redaction_and_untrusted_content (test_cli.CliTests.test_redaction_and_untrusted_content) ... ok
+test_safe_usage_and_input_errors (test_cli.CliTests.test_safe_usage_and_input_errors) ... ok
+test_time_boundaries (test_cli.CliTests.test_time_boundaries) ... ok
+test_timezone (test_cli.CliTests.test_timezone) ... ok
+test_reproducible_build_and_clean_install (test_packaging.PackagingTests.test_reproducible_build_and_clean_install) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 7.375s
+
+OK

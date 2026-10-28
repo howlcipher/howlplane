@@ -1,0 +1,50 @@
+{
+  "ecosystem_name": "Howl",
+  "installer_version": "0.2.1",
+  "channel": "stable",
+  "installed_ecosystem_version": "0.2.0",
+  "target_ecosystem_version": "0.2.0",
+  "components": [
+    {
+      "name": "howlframe",
+      "display_name": "HowlFrame",
+      "installed": true,
+      "installed_version": "0.1.0",
+      "target_version": "0.1.0",
+      "up_to_date": true
+    },
+    {
+      "name": "howlchangeops",
+      "display_name": "HowlChangeOps",
+      "installed": true,
+      "installed_version": "0.2.0",
+      "target_version": "0.2.0",
+      "up_to_date": true
+    },
+    {
+      "name": "howlplane-engine",
+      "display_name": "HowlPlane Control-Plane Engine",
+      "installed": true,
+      "installed_version": "0.1.0",
+      "target_version": "0.1.0",
+      "up_to_date": true
+    },
+    {
+      "name": "howlplane",
+      "display_name": "HowlPlane",
+      "installed": true,
+      "installed_version": "0.1.0",
+      "target_version": "0.1.0",
+      "up_to_date": true
+    },
+    {
+      "name": "howlwriter",
+      "display_name": "HowlWriter",
+      "installed": true,
+      "installed_version": "0.1.0",
+      "target_version": "0.1.0",
+      "up_to_date": true
+    }
+  ],
+  "updates_available": false
+}

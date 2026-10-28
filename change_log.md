@@ -1126,3 +1126,7 @@ Combined installed Create intake exposed assessment-schema drift. The Python fal
 ## Operational proof baseline (2026-10-28)
 
 Recorded repository and release discovery, a bounded standalone log-CLI mission, and the initial integration matrix. No end-to-end success or protected release is claimed.
+
+## Operational proof execution (2026-10-28)
+
+Added a standard-library runner for existing deterministic component suites, bounded process-group cleanup and source-freshness receipts. Twenty regression tests cover failure, timeout, stale evidence and source-output collision protections. Independent review reproduced two false-success defects before their correction. Added real Factory worker/recovery evidence, a portable independently tested standalone log application, actual Frame/Board/installer boundary results and an explicitly partial mission assessment. Native independent provider review, protected authority deployment, Board atomic finalization and the strict warning-free completion gate remain unresolved. No production authority or release was enabled.

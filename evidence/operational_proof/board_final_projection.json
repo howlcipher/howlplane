@@ -1,0 +1,153 @@
+{
+  "classification": "actual supported offline import; actual API readback separately recorded in board_api_readback.json",
+  "command": [
+    "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/howlframe",
+    "-run-bc",
+    "-allow-caps",
+    "filesystem,database",
+    "-max-instructions",
+    "200000000",
+    "-max-memory-bytes",
+    "268435456",
+    "/run/media/system/tallgeese/dev/operational_missions/frame_board_20261028/ledger_import.hfbc",
+    "/run/media/system/tallgeese/dev/worktrees/howl_operational_proof/evidence/operational_proof/board_mission.jsonl",
+    "10"
+  ],
+  "exit_code": 0,
+  "stdout": "entries=4\nmissions=1\n",
+  "stderr": "",
+  "ledger_sha256": "b1c84af1cc88650a1c3ae3a4d0090f3881c85cf36f9454cb2b6da2ee899e6658",
+  "stores": {
+    "howlboard_timeline.json": {
+      "feed": {
+        "events": [
+          {
+            "action": "implementation_completed",
+            "actor": "operational_proof_coordinator",
+            "detail": "partial",
+            "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+            "mission_id": "INCIDENT-SIFT-001",
+            "recording_mode": "manual_coordinator_projection_of_observed_native_runs"
+          },
+          {
+            "action": "verification_completed",
+            "actor": "operational_proof_coordinator",
+            "detail": "passed",
+            "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+            "mission_id": "INCIDENT-SIFT-001",
+            "recording_mode": "manual_coordinator_projection_of_observed_native_runs"
+          },
+          {
+            "action": "verification_completed",
+            "actor": "operational_proof_coordinator",
+            "detail": "failed",
+            "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+            "mission_id": "INCIDENT-SIFT-001",
+            "recording_mode": "manual_coordinator_projection_of_observed_native_runs"
+          },
+          {
+            "action": "task_failed",
+            "actor": "operational_proof_coordinator",
+            "detail": "PARTIALLY VERIFIED overall. Native Factory BLOCKED at independent review: Cursor timed out180s; Devin failed exit1; acceptance did not run. App16 tests/install/build and separate sibling-worker review passed. HowlProof REJECT synthetic credential-shaped fixtures, human judgment unresolved. Governed release BLOCKED: independent Model B deployment unavailable. Board interrupted publication can partially mutate stores. Manual coordinator projection; no approval granted.",
+            "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+            "mission_id": "INCIDENT-SIFT-001",
+            "recording_mode": "manual_coordinator_projection_of_observed_native_runs"
+          }
+        ]
+      }
+    },
+    "howlboard_missions.json": {
+      "mission:INCIDENT-SIFT-001": {
+        "authority": {
+          "decision": "REQUIRE_APPROVAL",
+          "gates": []
+        },
+        "created_at": 0,
+        "description": "Projected from the HowlPlane control-plane evidence ledger.",
+        "evidence": [
+          {
+            "description": "Artifact recorded at implementation_completed",
+            "fingerprint": "OP-PROOF-20261028-1",
+            "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+            "recording_mode": "manual_coordinator_projection_of_observed_native_runs",
+            "ref": "evidence/operational_proof/application_manifest.json",
+            "source": "howlplane control plane",
+            "type": "custom"
+          },
+          {
+            "description": "Artifact recorded at verification_completed",
+            "fingerprint": "OP-PROOF-20261028-2",
+            "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+            "recording_mode": "manual_coordinator_projection_of_observed_native_runs",
+            "ref": "evidence/operational_proof/application_manifest.json",
+            "source": "howlplane control plane",
+            "type": "custom"
+          },
+          {
+            "description": "Artifact recorded at verification_completed",
+            "fingerprint": "OP-PROOF-20261028-3",
+            "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+            "recording_mode": "manual_coordinator_projection_of_observed_native_runs",
+            "ref": "evidence/operational_proof/application_manifest.json",
+            "source": "howlplane control plane",
+            "type": "custom"
+          },
+          {
+            "description": "Artifact recorded at task_failed",
+            "fingerprint": "OP-PROOF-20261028-4",
+            "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+            "recording_mode": "manual_coordinator_projection_of_observed_native_runs",
+            "ref": "evidence/operational_proof/application_manifest.json",
+            "source": "howlplane control plane",
+            "type": "custom"
+          }
+        ],
+        "evidence_total": 4,
+        "execution": {},
+        "executor": "operational_proof_coordinator",
+        "id": "INCIDENT-SIFT-001",
+        "is_override": null,
+        "ledger_recorded_at": "2026-10-28T15:30:12.501458+00:00",
+        "origin": "control_plane",
+        "outcome": "task_failed",
+        "override_reason": "",
+        "plan": [],
+        "priority": "NORMAL",
+        "project": "operational_missions/incident_sift_20261028",
+        "provenance": "LEDGER",
+        "reasoning": {},
+        "recommended_executor": "",
+        "recording_mode": "manual_coordinator_projection_of_observed_native_runs",
+        "risk_level": "",
+        "state": "FAILED",
+        "task_class": "",
+        "title": "INCIDENT-SIFT-001",
+        "updated_at": 0,
+        "verification": [
+          {
+            "exit_code": 0,
+            "name": "control-plane verification (verification_completed)",
+            "status": "passed",
+            "summary": {
+              "exit_code": 0,
+              "summary": "16 application tests, offline extracted-source install and reproducible build passed; separate independent sibling-worker review passed. Same-provider independence limitation. Real worker interruption preserved source; repaired dotted API-key and JSON constant defects."
+            }
+          },
+          {
+            "exit_code": 30,
+            "name": "control-plane verification (verification_completed)",
+            "status": "failed",
+            "summary": {
+              "exit_code": 30,
+              "summary": "HowlProof source scan REJECT: two literal synthetic credential-shaped test fixtures. Actual Plane reconciliation retains human judgment requirement; no acceptance exception or approval recorded."
+            }
+          }
+        ]
+      }
+    }
+  },
+  "store_sha256": {
+    "howlboard_timeline.json": "a7c283cb8ded566080988ba428cefda2c9d4fed2d498a34868026c86b60304d7",
+    "howlboard_missions.json": "985f85963a2dbaa4573aca20ade112e75529f954a1419be3a01ec000e8d4d968"
+  }
+}

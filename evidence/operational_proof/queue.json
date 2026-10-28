@@ -4,7 +4,7 @@
   "tasks": [
     {
       "id": "INCIDENT-SIFT-001",
-      "goal": "Implement the complete incident-sift standalone CLI specified in MISSION.md. All numbered acceptance criteria are mandatory. Build real working software and automated tests, run scripts/test.sh and scripts/build.sh. Update README.md and change_log.md. No commits/push/releases.",
+      "goal": "Recover the preserved partial incident-sift implementation after deliberate worker/coordinator interruption. Read MISSION.md and REVIEW_FINDINGS.md. Repair both confirmed redaction and strict-JSON defects with regression tests; finish pyproject console-script packaging, scripts/test.sh and reproducible scripts/build.sh, README CLI and clean-install instructions. Preserve correct existing source/tests. Execute all tests and build. No commits/push/network/releases.",
       "status": "APPROVED",
       "constraints": [
         "Only this isolated repository; no external network except configured remote coding worker transport.",
@@ -14,21 +14,21 @@
       "orchestrator": "codex",
       "agents": {
         "codex": "AUTO",
-        "claude_code": "AUTO",
+        "claude_code": "UNAVAILABLE",
         "cursor": "UNAVAILABLE",
         "agy": "UNAVAILABLE",
         "devin_cli": "UNAVAILABLE"
       },
-      "models": "planning:codex:gpt-6.1-sol,implementation:codex:gpt-6.1-sol,acceptance:codex:gpt-6.1-sol",
+      "models": "AUTO",
       "verify": [
         "bash",
         "scripts/test.sh"
       ],
       "execution_budget": [
-        "planning=300",
-        "implementation=900",
-        "review=600",
-        "acceptance=300"
+        "planning=180",
+        "implementation=600",
+        "review=180",
+        "acceptance=180"
       ]
     }
   ]

@@ -1,0 +1,27 @@
+# Review Reconciliation Report
+
+## Summary
+- **Total findings:** 2
+- **Confirmed findings:** 0
+- **Likely findings:** 0
+- **Disputed findings:** 0
+- **Requires human judgment:** 2
+- **False positives (dismissed with reason):** 0
+- **Out of scope (dismissed with reason):** 0
+- **Duplicates detected:** 0
+- **Overlapping findings:** 0
+- **Unresolved Blockers / Highs:** 2
+
+## Findings & Unique Signal by Reviewer Role
+| Reviewer Role | Total Findings | Unique Findings | Duplicates / Overlaps |
+| --- | --- | --- | --- |
+| `howlproof-security` | 2 | 2 | 0 |
+
+## Requires Human Judgment
+- **[BLOCKER] HP-SEC-0001**: Credential-shaped openai_key in tests/test_cli.py (howlproof-security)
+  - Reason for human review: Security-critical finding automatically routed for human verification.
+- **[BLOCKER] HP-SEC-0002**: Credential-shaped aws_access_key in tests/test_cli.py (howlproof-security)
+  - Reason for human review: Security-critical finding automatically routed for human verification.
+
+
+Saved report to /run/media/system/tallgeese/dev/operational_missions/proof_plane_final_handoff/reconciliation.md

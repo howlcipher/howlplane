@@ -1,0 +1,26 @@
+[
+  {
+    "source_log": "full_regression.log",
+    "source_sha256": "d7b796e14994588b64d75d4c0de7149a8537e98ba560561168dd401d5edcfe7a",
+    "published_log": "full_regression.redacted.log",
+    "published_sha256": "fa5846466c2b5ede653c018c51f9d480efcee077d1732ad7eff9868dda089be9",
+    "redacted_lines": 6,
+    "policy": "Bearer marker lines redacted where counted; published log trailing horizontal whitespace normalized for repository diff hygiene. Original hash and local original retained; outcomes unchanged."
+  },
+  {
+    "source_log": "final_full_regression.log",
+    "source_sha256": "8df1b1e427cd8670b3d3b8a9a7b841211cc54c213b4976d97dc57ece534d0ce1",
+    "published_log": "final_full_regression.redacted.log",
+    "published_sha256": "4639c036f6d9c043fa8d5bc7c780359c53116b5bfa5fb0e61c45c44395b7ec25",
+    "redacted_lines": 6,
+    "policy": "Bearer marker lines redacted where counted; published log trailing horizontal whitespace normalized for repository diff hygiene. Original hash and local original retained; outcomes unchanged."
+  },
+  {
+    "source_log": "/run/media/system/tallgeese/dev/operational_missions/raw_operational_logs/go_build_regression.log",
+    "source_sha256": "4bfbad7fe37e8bfcf4cb6979788b95e6f7a14de60bdb9f63bf195245ddfeafdf",
+    "published_log": "go_build_regression.log",
+    "redacted_lines": 0,
+    "published_sha256": "70aaca7db9ea4b8a455087d67ff1a761885da6bf995bb79f12debcbe713ad810",
+    "policy": "Bearer marker lines redacted where counted; published log trailing horizontal whitespace normalized for repository diff hygiene. Original hash and local original retained; outcomes unchanged."
+  }
+]

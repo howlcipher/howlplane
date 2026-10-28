@@ -1,0 +1,12 @@
+{
+  "kind": "real_source_fingerprint_boundary_with_simulated_mutation",
+  "command": [
+    "bash",
+    "scripts/test.sh"
+  ],
+  "verification_exit": 0,
+  "initial_receipt_valid": true,
+  "mutated_artifact_receipt_valid": false,
+  "exact_byte_restored_receipt_valid": true,
+  "receipt_is_approval": false
+}

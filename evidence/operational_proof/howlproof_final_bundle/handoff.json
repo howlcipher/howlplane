@@ -1,0 +1,35 @@
+{
+  "schema": "howlproof.handoff/v1",
+  "authority": "ADVISORY",
+  "run_id": "hp-20261028-152521-5f46c56f16ce",
+  "artifact": "incident-sift-operational-proof",
+  "commit": "02f9a2c0bfeef5eb0a621324ebdf6eb884c00705",
+  "branch": "mission/incident-sift",
+  "tree_digest": "c46891a7a95873f53b71fbaf8c09779368d96e1464fc41e4a5cce58d664f17bf",
+  "verdict": "REJECT",
+  "deciding_rule": "blocking_evidence",
+  "criteria_satisfied": 0,
+  "criteria_total": 2,
+  "blocking_finding_ids": [],
+  "finding_ids": [
+    "HP-SEC-0001",
+    "HP-SEC-0002"
+  ],
+  "unresolved_risks": [
+    "HP-SEC-0001 (BLOCKER): A string matching the openai_key credential format appears at tests/test_cli.py:122. The path suggests a fixture, so this may be intentional test data.",
+    "HP-SEC-0002 (BLOCKER): A string matching the aws_access_key credential format appears at tests/test_cli.py:123. The path suggests a fixture, so this may be intentional test data."
+  ],
+  "limitations": [],
+  "validation_modes": {
+    "REAL": [
+      "secrets.scan",
+      "docs.claims.absolutes"
+    ],
+    "SIMULATED": [],
+    "SKIPPED": [],
+    "UNAVAILABLE": [],
+    "NOT_APPLICABLE": [],
+    "ERROR": []
+  },
+  "note": "Advisory only. HowlProof does not promote, merge, deploy or approve. Promotion decisions belong to HowlPlane and HowlChangeOps."
+}

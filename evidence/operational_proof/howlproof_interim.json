@@ -1,0 +1,287 @@
+{
+  "schema": "howlproof.result/v1",
+  "run_id": "hp-20261028-151401-a85ebe1ba56a",
+  "authority": "ADVISORY",
+  "version": "0.2.0b1",
+  "artifact": "incident-sift-operational-proof",
+  "profiles": [
+    "secrets.scan",
+    "docs.claims"
+  ],
+  "adversaries": [
+    "FUNCTIONAL",
+    "SECURITY",
+    "RELIABILITY",
+    "AI",
+    "OPERATOR"
+  ],
+  "target": {
+    "root": "/run/media/system/tallgeese/dev/operational_missions/incident_sift_20261028",
+    "is_git": true,
+    "commit": "cdccf0c305267fe4f59922c09fa233a9067f6c3e",
+    "branch": "mission/incident-sift",
+    "dirty": false,
+    "file_count": 9,
+    "oversized_files_not_copied": [],
+    "tree_digest_before": "53e4a9952f5c4cdbba763f51622a7b59cb2faa4bd69cb2e56fe30f512f4860bd",
+    "tree_digest_after": "53e4a9952f5c4cdbba763f51622a7b59cb2faa4bd69cb2e56fe30f512f4860bd"
+  },
+  "started_at": "2026-10-28T15:14:01.209434+00:00",
+  "completed_at": "2026-10-28T15:14:01.328732+00:00",
+  "duration_ms": 119,
+  "verdict": "REJECT",
+  "verdict_definition": "Evidence demonstrates that the artifact violates acceptance criteria, security or reliability requirements, policy, or another blocking condition.",
+  "deciding_rule": "blocking_evidence",
+  "rationale": [
+    "SOURCE-SCAN violated: secrets.scan failed",
+    "HIGH-FINDINGS violated: 2 any findings at or above HIGH, limit 0"
+  ],
+  "criteria": [
+    {
+      "id": "SOURCE-SCAN",
+      "requirement": "checks_pass",
+      "outcome": "VIOLATED",
+      "detail": "secrets.scan failed",
+      "optional": false,
+      "evidence": {
+        "failed": [
+          "secrets.scan"
+        ]
+      }
+    },
+    {
+      "id": "HIGH-FINDINGS",
+      "requirement": "max_findings",
+      "outcome": "VIOLATED",
+      "detail": "2 any findings at or above HIGH, limit 0",
+      "optional": false,
+      "evidence": {
+        "finding_ids": [
+          "HP-SEC-0001",
+          "HP-SEC-0002"
+        ]
+      }
+    }
+  ],
+  "counts": {
+    "checks": 2,
+    "verified": 1,
+    "failed": 1,
+    "skipped": 0,
+    "unavailable": 0,
+    "not_applicable": 0,
+    "errored": 0,
+    "simulated": 0,
+    "findings": 2,
+    "blocking_findings": 0,
+    "criteria_satisfied": 0,
+    "criteria_total": 2,
+    "by_severity": {
+      "BLOCKER": 2,
+      "HIGH": 0,
+      "MEDIUM": 0,
+      "LOW": 0,
+      "INFORMATIONAL": 0
+    },
+    "by_adversary": {
+      "FUNCTIONAL": 0,
+      "SECURITY": 2,
+      "RELIABILITY": 0,
+      "AI": 0,
+      "OPERATOR": 0,
+      "INTEGRITY": 0
+    }
+  },
+  "checks": [
+    {
+      "check_id": "secrets.scan",
+      "checker": "secrets.scan/v1",
+      "adversary": "SECURITY",
+      "status": "FAILED",
+      "summary": "2 credential-shaped strings in 8 text files",
+      "limitation": "pattern matching over text files in the working tree; it does not inspect git history, binaries, or credentials held only in a runtime environment",
+      "reason": "",
+      "mode": "REAL",
+      "duration_ms": 0,
+      "evidence_refs": [
+        "evidence/secrets.scan/matches.json"
+      ],
+      "detail": {
+        "files_scanned": 8,
+        "hits": 2
+      }
+    },
+    {
+      "check_id": "docs.claims.absolutes",
+      "checker": "docs.claims/v1",
+      "adversary": "OPERATOR",
+      "status": "VERIFIED",
+      "summary": "the documentation makes no absolute claims",
+      "limitation": "it locates absolute claims and reports them for adversarial attention; it does not by itself decide whether each claim is true",
+      "reason": "",
+      "mode": "REAL",
+      "duration_ms": 0,
+      "evidence_refs": [
+        "evidence/docs.claims/absolute-claims.json"
+      ],
+      "detail": {
+        "count": 0,
+        "claims": []
+      }
+    }
+  ],
+  "findings": [
+    {
+      "check_id": "secrets.scan",
+      "adversary": "SECURITY",
+      "category": "security",
+      "title": "Credential-shaped openai_key in tests/test_cli.py",
+      "severity": "BLOCKER",
+      "confidence": "HIGH",
+      "summary": "A string matching the openai_key credential format appears at tests/test_cli.py:121. The path suggests a fixture, so this may be intentional test data.",
+      "evidence": ", 'api_key=\"hidden\"', 'API-KEY hidden',\n                   'sk-a...[25 chars redacted]', 'ghp_abcdefghijkl",
+      "recommended_remediation": "Remove the value from the tree, rotate it if it was ever real, and load it from the environment or a secret store instead.",
+      "location": "tests/test_cli.py:121",
+      "rule": "secrets.openai_key",
+      "state": "FOUND",
+      "reproduction": {
+        "summary": "Re-read the file and match the same pattern.",
+        "requires_service": false,
+        "notes": "",
+        "steps": [
+          {
+            "description": "Search tests/test_cli.py for the openai_key pattern.",
+            "kind": "file_probe",
+            "payload": {
+              "path": "tests/test_cli.py",
+              "pattern": "sk-[A-Za-z0-9]{20,}"
+            },
+            "expect": {
+              "matches": true
+            }
+          }
+        ]
+      },
+      "resolution_reason": null,
+      "id": "HP-SEC-0001",
+      "fingerprint_basis": null,
+      "fingerprint": "3ff60f742707791c0ff4f03cedc941c0ef7b6752b0d3d71df49c34bfd14f0b9b",
+      "first_seen_run": "hp-20261028-151401-a85ebe1ba56a",
+      "first_seen_commit": "cdccf0c305267fe4f59922c09fa233a9067f6c3e",
+      "last_seen_run": "hp-20261028-151401-a85ebe1ba56a",
+      "detail": {
+        "file": "tests/test_cli.py",
+        "line": 121,
+        "kind": "openai_key",
+        "pattern": "sk-[A-Za-z0-9]{20,}",
+        "severity": "BLOCKER",
+        "looks_like_fixture": true,
+        "excerpt": ", 'api_key=\"hidden\"', 'API-KEY hidden',\n                   'sk-a...[25 chars redacted]', 'ghp_abcdefghijkl"
+      },
+      "blocking": false
+    },
+    {
+      "check_id": "secrets.scan",
+      "adversary": "SECURITY",
+      "category": "security",
+      "title": "Credential-shaped aws_access_key in tests/test_cli.py",
+      "severity": "BLOCKER",
+      "confidence": "HIGH",
+      "summary": "A string matching the aws_access_key credential format appears at tests/test_cli.py:122. The path suggests a fixture, so this may be intentional test data.",
+      "evidence": "pqrstuv', 'ghp_abcdefghijklmnopqrstuv',\n                   'AKIA...[20 chars redacted]']\n        for secre",
+      "recommended_remediation": "Remove the value from the tree, rotate it if it was ever real, and load it from the environment or a secret store instead.",
+      "location": "tests/test_cli.py:122",
+      "rule": "secrets.aws_access_key",
+      "state": "FOUND",
+      "reproduction": {
+        "summary": "Re-read the file and match the same pattern.",
+        "requires_service": false,
+        "notes": "",
+        "steps": [
+          {
+            "description": "Search tests/test_cli.py for the aws_access_key pattern.",
+            "kind": "file_probe",
+            "payload": {
+              "path": "tests/test_cli.py",
+              "pattern": "AKIA[0-9A-Z]{16}"
+            },
+            "expect": {
+              "matches": true
+            }
+          }
+        ]
+      },
+      "resolution_reason": null,
+      "id": "HP-SEC-0002",
+      "fingerprint_basis": null,
+      "fingerprint": "af85a891e1219859b3274c99274a541884df83c567ea1bd411b8a7df6b7f05c2",
+      "first_seen_run": "hp-20261028-151401-a85ebe1ba56a",
+      "first_seen_commit": "cdccf0c305267fe4f59922c09fa233a9067f6c3e",
+      "last_seen_run": "hp-20261028-151401-a85ebe1ba56a",
+      "detail": {
+        "file": "tests/test_cli.py",
+        "line": 122,
+        "kind": "aws_access_key",
+        "pattern": "AKIA[0-9A-Z]{16}",
+        "severity": "BLOCKER",
+        "looks_like_fixture": true,
+        "excerpt": "pqrstuv', 'ghp_abcdefghijklmnopqrstuv',\n                   'AKIA...[20 chars redacted]']\n        for secre"
+      },
+      "blocking": false
+    }
+  ],
+  "unresolved_risks": [
+    "HP-SEC-0001 (BLOCKER): A string matching the openai_key credential format appears at tests/test_cli.py:121. The path suggests a fixture, so this may be intentional test data.",
+    "HP-SEC-0002 (BLOCKER): A string matching the aws_access_key credential format appears at tests/test_cli.py:122. The path suggests a fixture, so this may be intentional test data."
+  ],
+  "limitations": [],
+  "notes": [
+    "no service is declared, so live adversaries have nothing to attack"
+  ],
+  "validation_modes": {
+    "REAL": [
+      "secrets.scan",
+      "docs.claims.absolutes"
+    ],
+    "SIMULATED": [],
+    "SKIPPED": [],
+    "UNAVAILABLE": [],
+    "NOT_APPLICABLE": [],
+    "ERROR": []
+  },
+  "manifest": {
+    "schema": "howlproof.run/v1",
+    "run_id": "hp-20261028-151401-a85ebe1ba56a",
+    "authority": "ADVISORY",
+    "version": "0.2.0b1",
+    "implementation_hash": "819a77533d648c10b737f4f700213bfd770415c4cac589a82382fc0bbf6d2a41",
+    "artifact": "incident-sift-operational-proof",
+    "profiles": [
+      "secrets.scan",
+      "docs.claims"
+    ],
+    "started_at": "2026-10-28T15:14:01.209434+00:00",
+    "completed_at": "2026-10-28T15:14:01.328732+00:00",
+    "verdict": "REJECT",
+    "evaluators": [
+      "secrets.scan/v1",
+      "docs.claims/v1"
+    ],
+    "file_hashes": {
+      "checks.jsonl": "e2a135144dbdd495eb1f2d2cdd6d3ade5f5a7c520dd1d42746792a98a8b7ee44",
+      "config.json": "b07a8b84d75e41734258bd3f4fef5f5e46843d31745221c574efb890ae6e8678",
+      "environment.json": "0d08aaa238d45c925062f2340934f7e0bdd6e5137b9c24a47a402d6719ce1945",
+      "evidence/docs.claims/absolute-claims.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "evidence/secrets.scan/matches.json": "b2692d254f9174dd419ade6cf58932f2fdaf9144b6388a42cc13046334023bf2",
+      "findings/HP-SEC-0001.json": "96eaab4c5ef0fdcadd54dc6dfa191c39831d908f7170ba0f50ea760ab3d12a94",
+      "findings/HP-SEC-0002.json": "c731a2a2ee9d13df2aa3ee5b4bbb8f1bcce78ccc7e8fffa59d3b02a0c80399bf",
+      "handoff.json": "0697445be6e89d2be11a28e7f0a49175c9f367b9b4a9751920786a4ce439017a",
+      "reproductions/HP-SEC-0001/steps.json": "7638064223641dd0c5431f038d527e6c775ce6e2be06d85f2b147b0ef9ed1061",
+      "reproductions/HP-SEC-0002/steps.json": "59c18664a6df59858fc843960d93c3fac36c8975db4d263d7493ed33aa35d48d",
+      "result.json": "a3ff6bab8770a37e43a216efa9fdb47ef9617d3b602d681b8690531c41abf4e6",
+      "result.md": "ea7c73c079a3714dd75b29d6bbc0da40595d9dcdf5f661c5362ff106afd4774e",
+      "target.json": "b62807a65297bb10c4c06a954b714866b04320b3ca42eefd56b5b4194d3e3c63"
+    }
+  },
+  "path": "/run/media/system/tallgeese/dev/operational_missions/incident_sift_proof/hp-20261028-151401-a85ebe1ba56a"
+}

@@ -1,0 +1,93 @@
+{
+  "component": "howlchangeops",
+  "baseline": "df36af7b6b6b30fd34a1a775be80adf454f1717c",
+  "commit": "4f0ac30437e8e4816dc1fb484e6005f72c84c1fd",
+  "branch": "fix/operational-proof-model-b-fail-closed",
+  "pr": "https://github.com/howlcipher/howlchangeops/pull/24",
+  "merge_status": "not_merged_security_owner_approval_required",
+  "commit_signature": {
+    "local_verification": "passed against existing owner public SSH key",
+    "github_verification": "unknown_key; not verified by GitHub"
+  },
+  "before_fix_regressions": {
+    "model_b_execute_with_caller_ledger": "failed: DECISION_NOT_FOUND instead of INDEPENDENT_AUTHORIZATION_UNAVAILABLE",
+    "direct_authority_real_actions": "failed: approval file read instead of unavailable deployment refusal"
+  },
+  "after_fix": {
+    "model_b": "approve and execute unconditionally blocked",
+    "authority_execute": "only existing pure synthetic_action allowed; synthetic_protocol_only label",
+    "real_authority_actions": "blocked before approval or ledger read"
+  },
+  "checks": [
+    {
+      "command": "go test ./...",
+      "status": "passed"
+    },
+    {
+      "command": "go test -race ./...",
+      "status": "passed"
+    },
+    {
+      "command": "go vet ./...",
+      "status": "passed"
+    },
+    {
+      "command": "go build -o /tmp/howlchangeops-operational-proof ./adapter",
+      "status": "passed"
+    },
+    {
+      "command": "howlframe check src/howlchangeops.howl",
+      "status": "passed",
+      "kind": "real HowlFrame"
+    },
+    {
+      "command": "python3 scripts/test_seo.py",
+      "status": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed"
+    },
+    {
+      "command": "bash tests/integration_test.sh",
+      "status": "passed",
+      "kind": "real local Git/Go/HowlFrame; mocked GitHub and synthetic keys"
+    },
+    {
+      "command": "bash tests/adversarial_test.sh",
+      "status": "passed",
+      "kind": "real local runtime, synthetic credentials"
+    },
+    {
+      "command": "bash tests/authority_bypass_test.sh",
+      "status": "passed",
+      "kind": "real local runtime, synthetic credentials"
+    }
+  ],
+  "independent_review": {
+    "reviewer": "frame_board_boundary sibling agent, same Codex model/provider",
+    "result": "no new blockers",
+    "independent_test": "targeted CLI tests passed12.075s",
+    "limitation": "not different-provider independent review"
+  },
+  "related_baselines": {
+    "howlproof": {
+      "commit": "9e817cb",
+      "test": "283 passed,2 skipped117.66s",
+      "release": "no GitHub releases found",
+      "integration": "versioned file handoff to Plane/Board; no machine ChangeOps verdict ingest",
+      "isolation": "trusted local artifacts only; subprocess inherits environment, no OS sandbox"
+    },
+    "howlrelay": {
+      "commit": "725d4a7",
+      "test": "python -m pytest -q:76 passed2.03s; existing .venv failed collection missing declared jsonschema",
+      "release": "v0.1.1 wheel and sdist exist",
+      "checkpoint": "bounded schema-validated ingestion, provenance hashes, worker assertions explicitly not authority"
+    }
+  },
+  "remaining_blockers": [
+    "Independent authenticated owner/enrollment/protected credential custody and execution are not deployed",
+    "Protected CLI policy/fresh evidence revalidation remains unavailable; fail-closed release blocks use",
+    "Real protected release not run and not ready"
+  ]
+}

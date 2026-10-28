@@ -1,0 +1,40 @@
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+Initialized empty Git repository in /tmp/tmp.3TWyY3kssP/.git/
+go: creating new go.mod: module testrepo
+go: to add module requirements and sums:
+	go mod tidy
+[master (root-commit) f8052b5] add go mock profile
+ 3 files changed, 7 insertions(+)
+ create mode 100644 .gitignore
+ create mode 100644 go.mod
+ create mode 100644 main.go
+Built howlchangeops.hfbc
+Running go test ./...
+Running go build ./...
+Validation complete. evidence_digest=459e4a467243dfe5f8bc8fcdbd7b1655e8abc678a4a970aa1019fba5a97a1501
+Decision decision-2a47694 approved.
+PASS: modified action rejected
+PASS: modified repo rejected
+Executing first time...
+Executing action: create_release_candidate
+Created tag: howlchangeops/rc-f8052b5
+Verified: tag created successfully.
+Executing second time...
+PASS: Replay prevented
+Adversarial tests passed.
+=== Scenario: Path Traversal ===
+PASS: Path traversal rejected
+=== Scenario: Command Injection ===
+PASS: Command injection action rejected

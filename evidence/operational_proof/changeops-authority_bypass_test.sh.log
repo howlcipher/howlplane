@@ -1,0 +1,57 @@
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+Initialized empty Git repository in /tmp/howlchangeops-op-proof-k54y66bg/tests/testrepo/.git/
+Switched to a new branch 'main'
+go: creating new go.mod: module testrepo
+go: to add module requirements and sums:
+	go mod tidy
+[main (root-commit) 3278e7f] initial
+ 3 files changed, 5 insertions(+)
+ create mode 100644 .gitignore
+ create mode 100644 go.mod
+ create mode 100644 main.go
+Switched to a new branch 'feature-branch'
+Built howlchangeops.hfbc
+=== Authority Bypass Tests ===
+Test 1: Branch bypass
+  PASS: Stopped by branch policy
+Test 2: Action bypass
+Switched to branch 'main'
+  PASS: Stopped by action policy
+Test 3: Decision mutation bypass (repo transfer)
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+Initialized empty Git repository in /tmp/howlchangeops-op-proof-k54y66bg/tests/testrepo2/.git/
+Switched to a new branch 'main'
+go: creating new go.mod: module testrepo2
+go: to add module requirements and sums:
+	go mod tidy
+[main (root-commit) d6f0125] initial
+ 3 files changed, 5 insertions(+)
+ create mode 100644 .gitignore
+ create mode 100644 go.mod
+ create mode 100644 main.go
+  PASS: Decision mutation caught. Output: DENIED: Decision modified
+ALL PASSED

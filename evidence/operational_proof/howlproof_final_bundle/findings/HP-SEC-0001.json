@@ -1,0 +1,49 @@
+{
+  "check_id": "secrets.scan",
+  "adversary": "SECURITY",
+  "category": "security",
+  "title": "Credential-shaped openai_key in tests/test_cli.py",
+  "severity": "BLOCKER",
+  "confidence": "HIGH",
+  "summary": "A string matching the openai_key credential format appears at tests/test_cli.py:122. The path suggests a fixture, so this may be intentional test data.",
+  "evidence": ", '[REDACTED]\"', 'API-KEY hidden',\n                   'sk-a...[25 chars redacted]', '[REDACTED]",
+  "recommended_remediation": "Remove the value from the tree, rotate it if it was ever real, and load it from the environment or a secret store instead.",
+  "location": "tests/test_cli.py:122",
+  "rule": "secrets.openai_key",
+  "state": "FOUND",
+  "reproduction": {
+    "summary": "Re-read the file and match the same pattern.",
+    "requires_service": false,
+    "notes": "",
+    "steps": [
+      {
+        "description": "Search tests/test_cli.py for the openai_key pattern.",
+        "kind": "file_probe",
+        "payload": {
+          "path": "tests/test_cli.py",
+          "pattern": "sk-[A-Za-z0-9]{20,}"
+        },
+        "expect": {
+          "matches": true
+        }
+      }
+    ]
+  },
+  "resolution_reason": null,
+  "id": "HP-SEC-0001",
+  "fingerprint_basis": null,
+  "fingerprint": "3ff60f742707791c0ff4f03cedc941c0ef7b6752b0d3d71df49c34bfd14f0b9b",
+  "first_seen_run": "hp-20261028-151401-a85ebe1ba56a",
+  "first_seen_commit": "cdccf0c305267fe4f59922c09fa233a9067f6c3e",
+  "last_seen_run": "hp-20261028-152521-5f46c56f16ce",
+  "detail": {
+    "file": "tests/test_cli.py",
+    "line": 122,
+    "kind": "openai_key",
+    "pattern": "sk-[A-Za-z0-9]{20,}",
+    "severity": "BLOCKER",
+    "looks_like_fixture": true,
+    "excerpt": ", '[REDACTED]\"', 'API-KEY hidden',\n                   'sk-a...[25 chars redacted]', '[REDACTED]"
+  },
+  "blocking": false
+}

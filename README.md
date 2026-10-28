@@ -592,3 +592,5 @@ handlers receive database authority, and health handlers receive no effect grant
 A real-VM test rejects out-of-scope reads.
 
 Operational integration evidence for the 2026-10-28 mission is tracked in [HOWL_ECOSYSTEM_OPERATIONAL_PROOF.md](HOWL_ECOSYSTEM_OPERATIONAL_PROOF.md). Its status distinguishes execution from verified success.
+
+The explicit inference-free ecosystem test runner is `python scripts/run_operational_proof.py --root /path/to/checkouts --plane /path/to/howlplane --output /outside/checkouts/receipt.json`. Use repeatable `--group` to select existing component suites; `--check RECEIPT` checks recorded status and source freshness, not independent authenticity or approval. Receipts must be outside measured repositories. The operational-proof report records actual live workflow failures and the remaining warning-free completion gate.

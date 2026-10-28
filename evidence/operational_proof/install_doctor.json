@@ -1,0 +1,228 @@
+{
+  "timestamp": "2026-10-28T15:06:18Z",
+  "summary": "DEGRADED",
+  "checks": [
+    {
+      "category": "Environment",
+      "name": "OS / Architecture",
+      "status": "PASS",
+      "message": "Bazzite (amd64)"
+    },
+    {
+      "category": "Environment",
+      "name": "Installation directory writable",
+      "status": "PASS",
+      "message": "/home/howlcipher/.local/share/howl"
+    },
+    {
+      "category": "Dependencies",
+      "name": "python3",
+      "status": "PASS",
+      "message": "Python 3.14.8"
+    },
+    {
+      "category": "Optional Capabilities",
+      "name": "ollama",
+      "status": "WARN",
+      "message": "not installed; local-inference unavailable"
+    },
+    {
+      "category": "Manifest",
+      "name": "ecosystem release manifest",
+      "status": "PASS",
+      "message": "valid (ecosystem 0.2.0, channel stable)"
+    },
+    {
+      "category": "Compatibility",
+      "name": "installed component versions",
+      "status": "PASS",
+      "message": "compatible"
+    },
+    {
+      "category": "Lock",
+      "name": "installation lock",
+      "status": "PASS",
+      "message": "not held"
+    },
+    {
+      "category": "State",
+      "name": "interrupted operation",
+      "status": "PASS",
+      "message": "none"
+    },
+    {
+      "category": "Component Health",
+      "name": "howlframe",
+      "status": "PASS",
+      "message": "healthy"
+    },
+    {
+      "category": "Component Health",
+      "name": "howlchangeops",
+      "status": "PASS",
+      "message": "healthy"
+    },
+    {
+      "category": "Component Health",
+      "name": "howlplane-engine",
+      "status": "PASS",
+      "message": "healthy"
+    },
+    {
+      "category": "Component Health",
+      "name": "howlplane",
+      "status": "PASS",
+      "message": "healthy"
+    },
+    {
+      "category": "Component Health",
+      "name": "howlwriter",
+      "status": "PASS",
+      "message": "healthy"
+    },
+    {
+      "category": "Interop",
+      "name": "howlframe descriptor",
+      "status": "WARN",
+      "message": "publishes no interop descriptor (`interop --json` failed: descriptor command failed: exit status 1); its edges cannot be checked until it is updated"
+    },
+    {
+      "category": "Interop",
+      "name": "howlchangeops descriptor",
+      "status": "PASS",
+      "message": "howlchangeops 0.2.0: 13 commands, runs 2 of other components'"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane descriptor",
+      "status": "PASS",
+      "message": "howlplane 0.1.0: 73 commands, runs 20 of other components'"
+    },
+    {
+      "category": "Interop",
+      "name": "howlwriter descriptor",
+      "status": "PASS",
+      "message": "howlwriter 0.1.0: 87 commands, runs 0 of other components'"
+    },
+    {
+      "category": "Interop",
+      "name": "howl -\u003e howlplane orchestrate",
+      "status": "PASS",
+      "message": "`howlplane orchestrate` matches howlplane 0.1.0"
+    },
+    {
+      "category": "Interop",
+      "name": "howl -\u003e howlplane agents doctor",
+      "status": "PASS",
+      "message": "`howlplane agents doctor` matches howlplane 0.1.0"
+    },
+    {
+      "category": "Interop",
+      "name": "howl -\u003e howlplane factory prepare",
+      "status": "PASS",
+      "message": "`howlplane factory prepare` matches howlplane 0.1.0"
+    },
+    {
+      "category": "Interop",
+      "name": "howl -\u003e howlframe check",
+      "status": "WARN",
+      "message": "cannot check `howlframe check`: howlframe publishes no interop descriptor (`interop --json` failed: descriptor command failed: exit status 1)"
+    },
+    {
+      "category": "Interop",
+      "name": "howl -\u003e howlframe build",
+      "status": "WARN",
+      "message": "cannot check `howlframe build`: howlframe publishes no interop descriptor (`interop --json` failed: descriptor command failed: exit status 1)"
+    },
+    {
+      "category": "Interop",
+      "name": "howlchangeops -\u003e howlframe",
+      "status": "WARN",
+      "message": "cannot check `howlframe`: howlframe publishes no interop descriptor (`interop --json` failed: descriptor command failed: exit status 1)"
+    },
+    {
+      "category": "Interop",
+      "name": "howlchangeops -\u003e howlframe run",
+      "status": "WARN",
+      "message": "cannot check `howlframe run`: howlframe publishes no interop descriptor (`interop --json` failed: descriptor command failed: exit status 1)"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlchangeops evaluate",
+      "status": "PASS",
+      "message": "`howlchangeops evaluate` matches howlchangeops 0.2.0"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlchangeops approve",
+      "status": "PASS",
+      "message": "`howlchangeops approve` matches howlchangeops 0.2.0"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlchangeops execute",
+      "status": "PASS",
+      "message": "`howlchangeops execute` matches howlchangeops 0.2.0"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlframe run",
+      "status": "WARN",
+      "message": "cannot check `howlframe run`: howlframe publishes no interop descriptor (`interop --json` failed: descriptor command failed: exit status 1)"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlframe build",
+      "status": "WARN",
+      "message": "cannot check `howlframe build`: howlframe publishes no interop descriptor (`interop --json` failed: descriptor command failed: exit status 1)"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlframe",
+      "status": "WARN",
+      "message": "cannot check `howlframe`: howlframe publishes no interop descriptor (`interop --json` failed: descriptor command failed: exit status 1)"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlwriter",
+      "status": "PASS",
+      "message": "`howlwriter` matches howlwriter 0.1.0"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlwriter writer",
+      "status": "PASS",
+      "message": "`howlwriter writer` matches howlwriter 0.1.0"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlwriter project draft",
+      "status": "PASS",
+      "message": "`howlwriter project draft` matches howlwriter 0.1.0"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlwriter humanize",
+      "status": "PASS",
+      "message": "`howlwriter humanize` matches howlwriter 0.1.0"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlwriter lint",
+      "status": "PASS",
+      "message": "`howlwriter lint` matches howlwriter 0.1.0"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlwriter native request",
+      "status": "PASS",
+      "message": "`howlwriter native request` matches howlwriter 0.1.0"
+    },
+    {
+      "category": "Interop",
+      "name": "howlplane -\u003e howlwriter native write",
+      "status": "PASS",
+      "message": "`howlwriter native write` matches howlwriter 0.1.0"
+    }
+  ]
+}
