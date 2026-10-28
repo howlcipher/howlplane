@@ -590,3 +590,5 @@ runtime: runners permit reads under `static/` and `data/`, and writes only under
 Static and CRUD handlers explicitly inherit that filesystem subset; only CRUD
 handlers receive database authority, and health handlers receive no effect grants.
 A real-VM test rejects out-of-scope reads.
+
+Operational integration evidence for the 2026-10-28 mission is tracked in [HOWL_ECOSYSTEM_OPERATIONAL_PROOF.md](HOWL_ECOSYSTEM_OPERATIONAL_PROOF.md). Its status distinguishes execution from verified success.
