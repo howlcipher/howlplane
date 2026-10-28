@@ -261,6 +261,9 @@ def test_approval_evidence_survives_a_failed_verification(tmp_path):
     assert "human_approval" in actions
     assert "verification_executed_on_resume" in actions
     assert "resume_blocked_on_verification" in actions
+    # The verification run itself is recorded beside the approval, not in the
+    # default ledger of the runner the resume path builds for it.
+    assert "verification_started" in actions and "verification_completed" in actions
     # The task was never recorded complete.
     assert "task_completed" not in actions
 

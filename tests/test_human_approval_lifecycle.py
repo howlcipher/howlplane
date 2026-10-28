@@ -319,7 +319,9 @@ def test_scenario_10_status_ux_and_cli_dispatch(tmp_path: Path, capsys):
     assert "howlplane reject TASK-110" in out
 
     # Test CLI approve command
-    opts_appr = parser.parse_args(["approve", "TASK-110", "--repo", str(tmp_path), "--reason", "LGTM"])
+    opts_appr = parser.parse_args(
+        ["approve", "TASK-110", "--repo", str(tmp_path), "--reason", "LGTM", "--ledger-file", str(ledger_file)]
+    )
     ret_appr = cmd_approve(opts_appr)
     assert ret_appr == 0
     out_appr = capsys.readouterr().out
@@ -390,7 +392,10 @@ def test_cli_reject_command(tmp_path: Path, capsys):
     _create_awaiting_human_task_run(tmp_path, "TASK-113")
 
     parser = build_parser()
-    opts_rej = parser.parse_args(["reject", "TASK-113", "--repo", str(tmp_path), "--reason", "Not ready", "--json"])
+    opts_rej = parser.parse_args(
+        ["reject", "TASK-113", "--repo", str(tmp_path), "--reason", "Not ready", "--json",
+         "--ledger-file", str(tmp_path / "ledger.jsonl")]
+    )
     ret = cmd_reject(opts_rej)
     assert ret == 0
 

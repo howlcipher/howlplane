@@ -33,6 +33,7 @@ from howlplane.control_plane.launcher import (
 )
 from howlplane.control_plane.cli import _select_factory_authority
 from howlplane.control_plane.task_spec import TaskSpec
+from tests._control_plane_home import private_control_plane
 
 
 # ============================================================================
@@ -303,6 +304,7 @@ def test_ai_status_subcommand(tmp_path, capsys):
 
 def test_ai_work_subcommand_creates_run_artifacts(tmp_path, monkeypatch, capsys):
     _use_connected_test_pool(monkeypatch)
+    private_control_plane(monkeypatch, tmp_path)
     repo_dir = _make_test_repo(tmp_path / "work_project", {"go.mod": "module workproj\n"})
     code = launcher_main([
         "work",
@@ -331,6 +333,7 @@ def test_ai_work_subcommand_creates_run_artifacts(tmp_path, monkeypatch, capsys)
 
 def test_ai_work_human_boundary_awaiting_human(tmp_path, monkeypatch, capsys):
     _use_connected_test_pool(monkeypatch)
+    private_control_plane(monkeypatch, tmp_path)
     repo_dir = _make_test_repo(tmp_path / "infra_project")
     code = launcher_main([
         "work",
@@ -358,7 +361,8 @@ def test_ai_non_git_failure_ux(tmp_path, capsys):
     assert "ERROR: no target Git repository found" in err_out
 
 
-def test_ai_howlframe_audit_subcommand(tmp_path, capsys):
+def test_ai_howlframe_audit_subcommand(tmp_path, monkeypatch, capsys):
+    private_control_plane(monkeypatch, tmp_path)
     repo_dir = _make_test_repo(tmp_path / "audit_project", {
         "AGENTS.md": "# Context\n",
         "go.mod": "module auditproj\n",

@@ -17,6 +17,7 @@ from howlplane.control_plane.factory.campaign import resolve_campaign
 from howlplane.control_plane.factory.oplog import OperationalLog
 from howlplane.control_plane.factory.work_item import WorkItemState
 from howlplane.control_plane.locking import get_process_create_time
+from tests._control_plane_home import private_control_plane
 from tests._factory_test_helpers import make_git_repo, make_supervisor, ready_work_item, set_xdg_paths
 
 WORKERS = [
@@ -35,6 +36,7 @@ class Product:
         self.capsys, self.monkeypatch = capsys, monkeypatch
         self.repo = make_git_repo(tmp_path, "grocery-optimizer")
         set_xdg_paths(monkeypatch, tmp_path)
+        self.control_plane = private_control_plane(monkeypatch, tmp_path)
         monkeypatch.chdir(self.repo)
         self.trust = "READY"
         monkeypatch.setattr(agent_readiness, "evaluate", lambda *a, **k: WORKERS)

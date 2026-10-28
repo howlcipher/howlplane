@@ -39,6 +39,7 @@ from howlplane.control_plane.progress import (
 )
 from howlplane.control_plane.task_spec import TaskSpec
 from howlplane.control_plane.verification import VerificationPlan
+from tests._control_plane_home import private_control_plane
 from tests._git_test_helpers import init_git_repo
 
 
@@ -510,6 +511,7 @@ def test_cli_progress_modes_and_stream_isolation(tmp_path, monkeypatch, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_test_git_repo(repo)
+    private_control_plane(monkeypatch, tmp_path)
 
     parser = build_parser()
 

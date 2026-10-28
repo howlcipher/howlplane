@@ -39,7 +39,7 @@ def test_failed_remediation_preserves_evidence_restores_baseline_and_stops(
 
     backend = Backend(agent_id='claude_code')
     spec = TaskSpec(task_id='REM-FAIL', repository='fixture', objective='Fix a real defect')
-    orchestrator = GovernedTaskOrchestrator(repo, config=OrchestrationConfig(
+    orchestrator = GovernedTaskOrchestrator(repo, control_plane_root=tmp_path / "control_plane", config=OrchestrationConfig(
         custom_backend=backend,
         provider_pool=ProviderPoolManager(probe_on_start=False) if with_pool else None,
         custom_reviewer_fn=lambda role, diff, task: 'findings:\n  - id: F1\n    title: Still broken\n    severity: high\n    category: correctness\n',

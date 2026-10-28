@@ -61,6 +61,24 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- The test suite no longer writes into real evidence ledgers. Orchestrators built
+  without `control_plane_root` recorded into this checkout's ledger, and commands
+  run without `--ledger-file` recorded into the operator's configured HowlPlane
+  through `~/.config/howlplane/config.toml`: over 300 fixture records per full
+  run, fake approvals and rejections included. The operator ledger had reached
+  422 MB, 99% of it fixtures. `tests/conftest.py` now refuses evidence appends
+  outside the temporary directory and names the test, and the leaking tests use
+  temporary ledgers or a private install (`tests/_control_plane_home.py`).
+
+- `HumanLifecycleManager.resume` records into the ledger it was given. The
+  orchestrators it builds to run a skipped verification or to continue the task
+  wrote to their own default ledger instead (for an installed wheel, a `logs/`
+  directory inside the virtual environment), so `verification_started`,
+  `verification_completed` and the continued run's evidence landed apart from
+  the approval and the TIA the completion gate reads. Repository fingerprints
+  also leave rotated ledger segments out (`is_ledger_file`), so a ledger kept
+  inside a repository never reads as drift.
+
 - `howlplane write` fixes from its first runs against a real local model: a local
   model named only in `HOWLWRITER_LOCAL_MODEL` is now recorded in the run and the
   audit (it was `null`) and passed as `--local-model`; compose passes
@@ -87,6 +105,21 @@ All notable changes to this project will be documented in this file.
   from recovery routing.
 
 ### Added
+
+- The evidence ledger rotates. An append that leaves
+  `logs/control_plane/evidence_ledger.jsonl` at or above 64 MiB compresses it into
+  `evidence_ledger.jsonl.<UTC timestamp>.gz` beside it, and the next append starts a
+  new file. No history is dropped: every read (`read_entries`, `list_all_entries`,
+  `get_task_entries`, and so the completion gate, `metrics` and `doctor`) returns
+  the archives oldest first, then the active file. Appends and reads hold a shared
+  `flock` on the ledger's directory and rotation holds it exclusively, so a
+  concurrent writer never loses an entry and a reader never sees a segment move;
+  a crash during rotation is finished by the next one without losing or
+  duplicating an entry. A rotation that fails is logged and never fails the
+  append that triggered it. `EvidenceLedger.rotate()` archives on demand and
+  `rotate_bytes=0` disables rotation; without `flock` (Windows) the ledger does
+  not rotate. Diagnostics name the segment (`line N of <file>`), and `doctor`
+  validates history that lives only in archives.
 
 - `howlplane write {run,resume,status}` (`write_pipeline.py`, schemas `howlplane.write_run/v1` and `howlplane.write_audit/v1`) hands a writing prompt to the `howlwriter` CLI as a governed, resumable run: compose, `project draft`, or humanize, chosen from the inputs, then HowlWriter's deterministic `lint` check and an audit. HowlWriter's exit codes are kept (3 not ready, 4 awaiting the owner, 2 needs input) and `write resume` retries the blocked stage. Plane never relays `--owner-confirmed` or `--allow-remote`, passes the prompt so it cannot become an option, runs HowlWriter with stdin closed and without inherited model choices, and refuses `--provider claude` inside a Claude Code session unless `--allow-nested`. Authorized by the §1.1.2 carve-out in `documentation/CONTROL_PLANE.md` (ADR 0008).
 

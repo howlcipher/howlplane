@@ -387,6 +387,7 @@ def _run_task_with_backend(
     pool = ProviderPoolManager(probe_on_start=False)
     orch = GovernedTaskOrchestrator(
         target_repo=repo,
+        control_plane_root=repo.parent / "control_plane",
         config=OrchestrationConfig(
             custom_backend=backend,
             provider_pool=pool,
@@ -496,6 +497,7 @@ def test_partial_changes_not_presented_as_reviewed_or_verified(tmp_path):
 
     orch = GovernedTaskOrchestrator(
         target_repo=repo,
+        control_plane_root=tmp_path / "control_plane",
         config=OrchestrationConfig(
             custom_backend=backend,
             acquire_locks=False,

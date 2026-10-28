@@ -118,7 +118,9 @@ def test_interrupted_implementation_clean_rerun_when_no_changes(tmp_path):
         raise KeyboardInterrupt("Crash before write")
 
     backend1 = MockFailingBackend(fail_hook=crash)
-    orch1 = GovernedTaskOrchestrator(target_repo=tmp_path, config=OrchestrationConfig(custom_backend=backend1))
+    orch1 = GovernedTaskOrchestrator(
+        target_repo=tmp_path, control_plane_root=tmp_path / "cp", config=OrchestrationConfig(custom_backend=backend1)
+    )
     with pytest.raises(KeyboardInterrupt):
         orch1.run(spec)
 
@@ -128,7 +130,9 @@ def test_interrupted_implementation_clean_rerun_when_no_changes(tmp_path):
 
     # Resuming with healthy backend runs implementation cleanly
     backend2 = MockFailingBackend(mutate_fn=lambda p: (p / "out.txt").write_text("ok", encoding="utf-8"))
-    orch2 = GovernedTaskOrchestrator(target_repo=tmp_path, config=OrchestrationConfig(custom_backend=backend2))
+    orch2 = GovernedTaskOrchestrator(
+        target_repo=tmp_path, control_plane_root=tmp_path / "cp", config=OrchestrationConfig(custom_backend=backend2)
+    )
     res = orch2.run(spec)
     assert res.exit_code == 0
     assert (tmp_path / "out.txt").read_text() == "ok"
@@ -146,7 +150,9 @@ def test_interrupted_implementation_recovers_delta_without_blind_rerun(tmp_path)
         raise RuntimeError("Killed after disk write")
 
     backend1 = MockFailingBackend(mutate_fn=mutate_and_crash)
-    orch1 = GovernedTaskOrchestrator(target_repo=tmp_path, config=OrchestrationConfig(custom_backend=backend1))
+    orch1 = GovernedTaskOrchestrator(
+        target_repo=tmp_path, control_plane_root=tmp_path / "cp", config=OrchestrationConfig(custom_backend=backend1)
+    )
     with pytest.raises(RuntimeError):
         orch1.run(spec)
 
@@ -787,7 +793,7 @@ def test_unlock_refuses_a_live_lock(tmp_path):
     lock_path = _write_task_lock(tmp_path, "TASK-BUSY", pid=owner.pid)
 
     args = argparse.Namespace(
-        repo_dir=str(tmp_path), task_id="TASK-BUSY", ledger_file=None, json=False,
+        repo_dir=str(tmp_path), task_id="TASK-BUSY", ledger_file=str(tmp_path / "ledger.jsonl"), json=False,
     )
     try:
         assert cmd_unlock(args) == 1

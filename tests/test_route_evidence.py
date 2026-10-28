@@ -26,7 +26,7 @@ def test_recompute_reviewers_persists_effective_and_initial_route(tmp_path):
     repo = init_git_repo(tmp_path / "route_repo", files={"README.md": "hello"})
     pool = ProviderPoolManager(operating_mode="connected")
     config = OrchestrationConfig(provider_pool=pool)
-    orch = GovernedTaskOrchestrator(target_repo=repo, config=config)
+    orch = GovernedTaskOrchestrator(target_repo=repo, control_plane_root=tmp_path / "control_plane", config=config)
 
     task = TaskSpec(
         task_id="TASK-ROUTE-01",
@@ -81,7 +81,7 @@ def test_unaccepted_route_never_claims_an_accepted_implementer(tmp_path):
     repo = init_git_repo(tmp_path / "route_repo_hop", files={"README.md": "hello"})
     pool = ProviderPoolManager(operating_mode="connected")
     orch = GovernedTaskOrchestrator(
-        target_repo=repo, config=OrchestrationConfig(provider_pool=pool)
+        target_repo=repo, control_plane_root=tmp_path / "control_plane", config=OrchestrationConfig(provider_pool=pool)
     )
     task = TaskSpec(
         task_id="TASK-ROUTE-02",
