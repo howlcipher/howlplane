@@ -126,7 +126,7 @@ A real published Howl v0.2.1 archive matched SHA256SUMS. A read-only-root bubble
 
 | Owner | Change / source commit | PR / disposition |
 | --- | --- | --- |
-| Plane | Mission report/evidence, inference-free component test runner and20 behavioral tests; baseline commits `aa1690f`, `87abcd7` | [PR #187](https://github.com/howlcipher/howlplane/pull/187) is draft. Six final deterministic component groups pass. Strict warning-free completion gate and CI lint network verification remain unresolved; no merge claimed |
+| Plane | Mission report/evidence, inference-free component test runner and20 behavioral tests; baseline commits `aa1690f`, `87abcd7` | [PR #187](https://github.com/howlcipher/howlplane/pull/187) is draft. Six final deterministic component groups pass. All GitHub checks passed on implementation/evidence commit `2e892ab`; its first lint attempt hit an upstream checksum-service transport error and the retry passed. The full regression still emits one external warning, so no warning-free completion or merge is claimed |
 | Provider-core | Generic inference-denial alias fix, signed `c3328e126e55caf916eaa9de5d8b9ae698b2c4d0` | [PR9](https://github.com/howlcipher/howl-provider-core/pull/9), CI Python3.11–3.14 pass; **unmerged, security owner approval required** |
 | ChangeOps | Fail-closed undeployed Model B, signed `4f0ac30437e8e4816dc1fb484e6005f72c84c1fd` | [PR24](https://github.com/howlcipher/howlchangeops/pull/24), CI pass; **unmerged, security owner approval required** |
 | Standalone application | Worker-authored app, signed final commit `02f9a2c0bfeef5eb0a621324ebdf6eb884c00705` | Local isolated repository plus portable Git bundle/archive; no release or remote publication |
