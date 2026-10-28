@@ -1122,3 +1122,13 @@ missing optional CLI into generic unavailability.
 Invalid stored orchestration state exits1 without dispatch or manifest rewriting (F9). Frame global version probe is declared (F12). Optional Dream Python API is pinned and exercised by an ordinary offline CI job, with advisory-only output and simulated generation labeled (F15).
 
 Combined installed Create intake exposed assessment-schema drift. The Python fallback and Frame evaluator now emit the current advisory assessment contract; bytecode and packaged copy are synchronized. No schema validation was relaxed.
+
+## Operational proof baseline (2026-10-28)
+
+Recorded repository and release discovery, a bounded standalone log-CLI mission, and the initial integration matrix. No end-to-end success or protected release is claimed.
+
+## Operational proof execution (2026-10-28)
+
+Added a standard-library runner for existing deterministic component suites, bounded process-group cleanup and source-freshness receipts. Twenty regression tests cover failure, timeout, stale evidence and source-output collision protections. Independent review reproduced two false-success defects before their correction. Added real Factory worker/recovery evidence, a portable independently tested standalone log application, actual Frame/Board/installer boundary results and an explicitly partial mission assessment. Native independent provider review, protected authority deployment, Board atomic finalization and the strict warning-free completion gate remain unresolved. No production authority or release was enabled.
+
+The final six-group deterministic component matrix passed with unchanged source fingerprints. ChangeOps used a mode-0700 runtime home because this host's ordinary `/home` ancestry is rejected by its protected-ledger guard. GitHub PR #187's first lint attempt failed while downloading/verifying an upstream Go module checksum (sum.golang.org HTTP/2 stream error); the retry passed, as did all other checks on implementation/evidence commit `2e892ab`. Its full regression still reports one external ChromaDB deprecation warning, so no warning-free completion or merge is claimed.
