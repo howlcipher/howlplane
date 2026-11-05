@@ -30,6 +30,7 @@ if git diff --cached --name-only | grep -qE "^\\.agents/(skills|skill_commands)/
     fi
     if "$PYTHON_BIN" scripts/generate_skills_manifest.py; then
         git add AGENTS.md .agents/skills.json .claude/skills
+        "$PYTHON_BIN" scripts/generate_global_rules.py && git add AGENTS.global.md
     else
         echo "ERROR: skills manifest regeneration failed. Commit aborted."
         exit 1

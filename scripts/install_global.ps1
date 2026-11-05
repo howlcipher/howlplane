@@ -108,7 +108,7 @@ Write-Host "Registering library rulebook in global Claude memory"
 $ClaudeMemory = Join-Path -Path $ClaudeDir -ChildPath "CLAUDE.md"
 $MarkerStart = "<!-- ai_knowledge_library:start -->"
 $MarkerEnd = "<!-- ai_knowledge_library:end -->"
-$ImportLine = "@" + (Join-Path -Path $RepoRoot -ChildPath "AGENTS.md")
+$ImportLine = "@" + (Join-Path -Path $RepoRoot -ChildPath "AGENTS.global.md")
 $Block = "$MarkerStart`n$ImportLine`n$MarkerEnd"
 
 if (Test-Path -Path $ClaudeMemory) {
@@ -144,7 +144,7 @@ if (-not (Test-Path -Path $CodexDir)) {
 
 Write-Host "Registering library rulebook in global Codex guidance"
 $CodexAgents = Join-Path -Path $CodexDir -ChildPath "AGENTS.md"
-$CanonicalRules = Get-Content -Path (Join-Path -Path $RepoRoot -ChildPath "AGENTS.md") -Raw
+$CanonicalRules = Get-Content -Path (Join-Path -Path $RepoRoot -ChildPath "AGENTS.global.md") -Raw
 $CodexBlock = "$MarkerStart`n$CanonicalRules"
 if (-not $CanonicalRules.EndsWith("`n")) {
     $CodexBlock += "`n"
@@ -185,7 +185,7 @@ Write-Host "Linking command skills (/work_next_item, /resume_task, /groom_backlo
 Link-Skills -SourceDir $SourceSkillCommands -TargetDir (Join-Path -Path $DevinDir -ChildPath "skills")
 
 Write-Host "Registering library rulebook in global Devin CLI configuration"
-$CanonicalRules = Get-Content -Path (Join-Path -Path $RepoRoot -ChildPath "AGENTS.md") -Raw
+$CanonicalRules = Get-Content -Path (Join-Path -Path $RepoRoot -ChildPath "AGENTS.global.md") -Raw
 $DevinBlock = "$MarkerStart`n$CanonicalRules"
 if (-not $CanonicalRules.EndsWith("`n")) {
     $DevinBlock += "`n"
