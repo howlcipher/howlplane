@@ -38,6 +38,7 @@ def test_test_falsifier_owns_duplicate_and_obsolete_test_review():
 
 GUIDANCE = [
     "AGENTS.md",
+    "AGENTS.global.md",
     ".agents/skills/test_and_verify/SKILL.md",
     ".agents/skills/quality_assurance/SKILL.md",
     ".agents/skills/defensive_debugging/SKILL.md",
