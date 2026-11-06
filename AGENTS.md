@@ -1,5 +1,6 @@
 # Global Engineering Context
 
+<!-- GLOBAL_RULES_START -->
 You are operating within my local development environment. You must strictly adhere to the rules outlined in this document and the attached skills directory. These rules apply to every AI agent working in this repository (Claude Code, Codex, Gemini CLI, Antigravity, Devin CLI, or any other assistant).
 
 ## Core Directives
@@ -51,6 +52,8 @@ When a conflict is detected:
 2. Use the live evidence for the current response.
 3. Flag it as a library update candidate and suggest a sync or manual correction.
 
+<!-- GLOBAL_RULES_END -->
+
 ## Domain Routing
 
 * **Active Projects:** Check `projects/` for ongoing software development tasks and repositories.
@@ -64,6 +67,8 @@ When a conflict is detected:
 ## Agent Entry Points
 
 This file is the single canonical rulebook. The per-agent context files (`GEMINI.md` for Gemini CLI / Antigravity, `CLAUDE.md` for Claude Code, `DEVIN.md` for Devin CLI) import this file; edit `AGENTS.md` only, never the thin entry-point files, so the rules never drift between agents.
+
+Global installs load `AGENTS.global.md`, the part of this file between the `GLOBAL_RULES` markers that applies outside this repository. `scripts/generate_global_rules.py` generates it; never edit it by hand. Keep repository-only guidance, such as routing tables and the skills manifest, outside the markers.
 
 * **Skills:** All agents load domain skills from `.agents/skills/<skill_name>/SKILL.md`. Codex discovers that directory natively in the repository and uses per-entry links in `~/.agents/skills/` after global installation. Claude Code additionally discovers the skills and command skills below through `.claude/skills/`, a set of per-entry symlinks rebuilt by `scripts/generate_skills_manifest.py` — never edit its contents by hand. Devin CLI reads `AGENTS.md` automatically and loads project skills from `.devin/skills/<skill_name>/SKILL.md` and `.agents/skills/<skill_name>/SKILL.md`.
 * **Rules:** All agents must honor every file in `.agents/rules/`.

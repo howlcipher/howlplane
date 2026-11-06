@@ -501,6 +501,8 @@ chmod +x scripts/install_global.sh
 .\scripts\install_global.ps1
 ```
 
+On Linux and macOS, the script creates a stable `~/.howlplane` link and routes global skills, rules, and imports through it. If the repository moves or its mount path changes, run the script again. Global installs load `AGENTS.global.md`, which is generated from the marked part of `AGENTS.md`.
+
 ### Option 3: Developer / Source Install
 ```bash
 go build -o build/howlplane ./cmd/howlplane
