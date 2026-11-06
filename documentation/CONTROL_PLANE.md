@@ -404,6 +404,8 @@ Install the global launcher to `~/.local/bin/ai`:
 # Run global installer from HowlPlane
 bash scripts/install_global.sh
 ```
+To give implementation workers your private working context, see [CONTEXT_LIBRARY.md](CONTEXT_LIBRARY.md).
+
 Or configure user configuration at `~/.config/howlplane/config.toml` (canonical) or `~/.config/ai-control-plane/config.toml` (legacy):
 ```toml
 [control_plane]
