@@ -105,3 +105,39 @@ def test_the_base_is_passed_to_the_fast_check(harness):
     assert run(BRANCH).returncode == 0
     assert "PUSH_BASE=" in calls(log)[0]
     assert len(calls(log)[0].split("PUSH_BASE=")[1].split("|")[0]) == 40
+
+
+def test_real_git_pushes_reach_the_gate_through_the_installed_hook(harness, tmp_path):
+    """Real Git supplies the refs on stdin, including through the hook's exec, and marks deletions."""
+    run, log, repo = harness
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") and k != "HOWLPLANE_PUSH_GATE"}
+    env.update(
+        PATH=f"{tmp_path / 'bin'}{os.pathsep}{env['PATH']}",
+        GIT_CONFIG_GLOBAL=os.devnull,
+        GIT_CONFIG_SYSTEM=os.devnull,
+    )
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, env=env, capture_output=True, text=True, check=True)
+
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], env=env, check=True)
+    git("remote", "add", "origin", str(remote))
+    scripts = repo / "scripts"
+    scripts.mkdir()
+    (scripts / "pre_push_gate.sh").write_text(GATE.read_text(encoding="utf-8"), encoding="utf-8")
+    hook = repo / ".git" / "hooks" / "pre-push"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text("#!/usr/bin/env bash\nexec bash scripts/pre_push_gate.sh\n", encoding="utf-8")
+    hook.chmod(0o755)
+
+    git("push", "-q", "origin", "main")
+    assert calls(log)[-1].startswith("test lint build docs")
+
+    git("checkout", "-q", "-b", "feat/x")
+    git("push", "-q", "origin", "feat/x")
+    assert calls(log)[-1].startswith("push-check")
+
+    count = len(calls(log))
+    git("push", "-q", "origin", "--delete", "feat/x")
+    assert len(calls(log)) == count
