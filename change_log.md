@@ -75,6 +75,13 @@ All notable changes to this project will be documented in this file.
   its pinned commit. `documentation/CLI_COMPOSITION.md` no longer recommends the
   `howl plane` command tree Howl removed.
 
+### Changed
+
+- A branch push now runs a fast pre-push check of lint and affected tests, stopping
+  at the first failure, instead of the full suite. Pushes targeting `main` and
+  `HOWLPLANE_PUSH_GATE=full` still run everything, and CI runs the full regression
+  on every pull request. Re-run `scripts/install_pre_push_hook.py` to adopt it.
+
 ### Fixed
 
 - The test suite no longer writes into real evidence ledgers. Orchestrators built

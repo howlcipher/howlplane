@@ -104,3 +104,13 @@ def test_generated_hook_drops_inherited_git_repository_selection(tmp_path: pathl
         assert name in scrubbed, f"Generated hook does not unset {name}"
     # The unset must precede the suite it protects.
     assert hook_content.index("unset ") < hook_content.index("make test")
+
+
+def test_generated_hook_delegates_to_the_tracked_gate_with_a_full_fallback(tmp_path: pathlib.Path):
+    """Gate changes arrive by pull request, and a checkout without the gate still runs everything."""
+    (tmp_path / ".git" / "hooks").mkdir(parents=True, exist_ok=True)
+    script_path = _copy_script_to_tmp(tmp_path)
+    subprocess.run([sys.executable, str(script_path)], cwd=str(tmp_path), capture_output=True, text=True, check=True)
+    hook_content = (tmp_path / ".git" / "hooks" / "pre-push").read_text(encoding="utf-8")
+    assert hook_content.index("unset ") < hook_content.index("exec bash scripts/pre_push_gate.sh")
+    assert hook_content.index("exec bash scripts/pre_push_gate.sh") < hook_content.index("make test lint build docs")

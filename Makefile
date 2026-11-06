@@ -1,4 +1,4 @@
-.PHONY: check-tools install test test-changed test-fast test-fast-python test-unit test-contract test-integration test-acceptance test-slow test-live test-full test-coverage lint format clean coverage build docs sync
+.PHONY: check-tools install test push-check test-changed test-fast test-fast-python test-unit test-contract test-integration test-acceptance test-slow test-live test-full test-coverage lint format clean coverage build docs sync
 
 # Environment and Setup
 install:
@@ -39,6 +39,14 @@ test-full:
 test-changed:
 	@echo "Selecting tests relevant to the current change set..."
 	PYTHONPATH=. $(PYTHON) scripts/select_relevant_tests.py
+
+# The pre-push fast check. CI judges the pull request with the full regression.
+push-check:
+	$(FLAKE8) src/ scripts/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+	PYTHONPATH=. $(PYTHON) scripts/select_relevant_tests.py --push-gate $(if $(PUSH_BASE),--from-ref $(PUSH_BASE),)
+	@if [ -n "$(PUSH_BASE)" ] && git diff --name-only "$(PUSH_BASE)...HEAD" | grep -qE '(\.go|go\.mod|go\.sum)$$'; then \
+		echo "Running Go tests..."; go test ./...; \
+	fi
 
 check-tools:
 	@PYTHONPATH=. $(PYTHON) scripts/check_test_tools.py --tier full

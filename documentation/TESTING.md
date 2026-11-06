@@ -104,6 +104,7 @@ move.
 | Tier-specific checks | `make test-unit`, `make test-contract`, `make test-integration`, `make test-acceptance` |
 | Measured expensive checks | `make test-slow` |
 | Full PR or final gate | `make test-full` |
+| Pre-push fast check | `make push-check PUSH_BASE=origin/main` |
 | Branch coverage | `make test-coverage` |
 | Runtime visibility | `python -m pytest --durations=25` |
 
@@ -210,6 +211,24 @@ Final reported regression results must correspond to the final working-tree
 state. Any source, test, test configuration, CI, or testing-policy modification
 after the final regression invalidates that result and requires the applicable
 final verification gate to be rerun.
+
+## Pre-push gate
+
+`scripts/install_pre_push_hook.py` installs a hook that runs the tracked
+`scripts/pre_push_gate.sh`. It gives quick feedback before a push, without
+replacing the full regression:
+
+| Push | Runs |
+| --- | --- |
+| A branch | `make push-check`: flake8 syntax checks, affected tests without measured slow tests, and Go tests when Go files changed. It stops at the first failure. |
+| A branch, where the selection is above 30 test files | The same, keeping only tests with direct evidence |
+| A branch, where the selector would fall back to everything, or direct evidence is still above 30 files | The same, with the unit tier in place of affected tests |
+| Targeting `main`, or with `HOWLPLANE_PUSH_GATE=full` | The full gate: `make test lint build docs` |
+| Only deleting a branch | Nothing |
+
+The fast check can miss what the selector can't see. That risk is accepted
+because the `main-protection` ruleset requires CI to pass before a merge. A green
+fast check never means a pull request is ready; the full CI result decides that.
 
 ## CI and runtime governance
 

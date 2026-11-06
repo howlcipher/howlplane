@@ -426,6 +426,42 @@ def print_selection(changed: list[str], selection: Selection) -> None:
                 print(f"    because: {reason}")
 
 
+# A push gate selection above this many test files stops being quick feedback.
+PUSH_GATE_MAX_TEST_FILES = 30
+TRANSITIVE_REASON = ", which imports "
+
+
+def _push_gate_targets(selected: dict[str, list[str]]) -> Optional[list[str]]:
+    """Return test files small enough for a push, or None to use the unit tier.
+
+    A widely imported module can select most of the suite through transitive
+    imports, so a broad selection keeps only tests with direct evidence.
+    """
+    if len(selected) <= PUSH_GATE_MAX_TEST_FILES:
+        return list(selected)
+    direct = [test for test, reasons in selected.items()
+              if any(TRANSITIVE_REASON not in reason for reason in reasons)]
+    return direct if 0 < len(direct) <= PUSH_GATE_MAX_TEST_FILES else None
+
+
+def pytest_arguments(selection: Selection, push_gate: bool = False) -> list[str]:
+    """Return pytest arguments for a selection, or an empty list when nothing should run.
+
+    The push gate favors quick feedback, because CI runs the full regression on
+    the pull request: it skips measured slow tests, stops at the first failure,
+    and uses the unit tier where the normal selection would fall back to everything.
+    """
+    if not push_gate:
+        return ["tests/"] if selection.fallback_reason else list(selection.selected)
+    unit_tier = ["tests/", "-m", "unit and not slow and not live", "-x"]
+    if selection.fallback_reason:
+        return unit_tier
+    if not selection.selected:
+        return []
+    targets = _push_gate_targets(selection.selected)
+    return [*targets, "-m", "not slow and not live", "-x"] if targets else unit_tier
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -436,6 +472,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--strict", action="store_true", help="exit non-zero when a source has no targeted mapping"
+    )
+    parser.add_argument(
+        "--push-gate", action="store_true",
+        help="quick feedback before a push: no slow tests, stop at the first failure, unit tier on fallback",
     )
     args = parser.parse_args()
 
@@ -453,13 +493,16 @@ def main() -> int:
     if args.dry_run:
         return 1 if args.strict and selection.uncovered else 0
 
-    pytest_args = ["tests/"] if selection.fallback_reason else list(selection.selected)
+    pytest_args = pytest_arguments(selection, args.push_gate)
     if not pytest_args:
         return 1 if args.strict and selection.uncovered else 0
     # executable and paths are controlled here.
     rc = subprocess.call(  # nosec B603
-        [sys.executable, "-m", "pytest", "-v", *pytest_args], cwd=REPO_ROOT
+        [sys.executable, "-m", "pytest", "-q" if args.push_gate else "-v", *pytest_args], cwd=REPO_ROOT
     )
+    # pytest exits 5 when markers leave nothing to run, which is not a push failure.
+    if args.push_gate and rc == 5:
+        return 0
     if rc == 0 and args.strict and selection.uncovered:
         return 1
     return rc
