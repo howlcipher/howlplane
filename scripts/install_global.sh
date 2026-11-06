@@ -26,11 +26,27 @@ if ! "$PIP_BIN" install "$REPO_ROOT"; then
   exit 1
 fi
 
+# Everything global goes through one stable link, so a changed mount path means
+# re-pointing one link instead of every skill, rule, and import.
+LINK_ROOT="$HOME/.howlplane"
+GLOBAL_RULES="AGENTS.global.md"
+
+if [ -e "$LINK_ROOT" ] && [ ! -L "$LINK_ROOT" ]; then
+  echo "Error: $LINK_ROOT exists and is not a symlink; refusing to replace it." >&2
+  exit 1
+fi
+ln -sfn "$REPO_ROOT" "$LINK_ROOT"
+
+# stable_path PATH: the same path under the stable link.
+stable_path() {
+  echo "$LINK_ROOT${1#"$REPO_ROOT"}"
+}
+
 MARKER_START="<!-- ai_knowledge_library:start -->"
 MARKER_END="<!-- ai_knowledge_library:end -->"
 
 # refresh_block FILE MODE: refresh the managed marker block in FILE in place.
-# MODE is "ref" (single @import line) or "inline" (full AGENTS.md contents).
+# MODE is "ref" (single @import line) or "inline" (full global rules contents).
 # Aborts without modifying FILE if MARKER_END is missing after MARKER_START.
 refresh_block() {
   local file="$1" mode="$2" tmp
@@ -44,13 +60,13 @@ refresh_block() {
     exit 1
   fi
   tmp=$(mktemp)
-  awk -v start="$MARKER_START" -v end="$MARKER_END" -v repo="$REPO_ROOT" -v mode="$mode" '
+  awk -v start="$MARKER_START" -v end="$MARKER_END" -v repo="$REPO_ROOT" -v rules_name="$GLOBAL_RULES" -v mode="$mode" '
     $0 == start {
       print
       if (mode == "ref") {
-        print "@" repo "/AGENTS.md"
+        print "@~/.howlplane/" rules_name
       } else {
-        rules = repo "/AGENTS.md"
+        rules = repo "/" rules_name
         while ((getline line < rules) > 0) print line
         close(rules)
       }
@@ -67,13 +83,13 @@ refresh_block() {
 # --- Global Control Plane Configuration & Launcher ---
 mkdir -p "$HOME/.config/howlplane"
 HP_CONFIG="$HOME/.config/howlplane/config.toml"
-if [ -f "$HP_CONFIG" ] && grep -qxF "path = \"$REPO_ROOT\"" "$HP_CONFIG"; then
-  echo "Keeping existing $HP_CONFIG (already points at $REPO_ROOT)"
+if [ -f "$HP_CONFIG" ] && grep -qxF "path = \"$LINK_ROOT\"" "$HP_CONFIG"; then
+  echo "Keeping existing $HP_CONFIG (already points at $LINK_ROOT)"
 else
   cat << EOF > "$HP_CONFIG"
 # HowlPlane Engineering Control Plane Configuration
 [control_plane]
-path = "$REPO_ROOT"
+path = "$LINK_ROOT"
 EOF
 fi
 
@@ -82,19 +98,19 @@ mkdir -p "$HOME/.config/ai-control-plane"
 cat << EOF > "$HOME/.config/ai-control-plane/config.toml"
 # HowlPlane (legacy fallback path)
 [control_plane]
-path = "$REPO_ROOT"
+path = "$LINK_ROOT"
 EOF
 
 mkdir -p "$HOME/.local/bin"
 if [ -f "$REPO_ROOT/bin/ai" ]; then
   chmod +x "$REPO_ROOT/bin/ai"
-  ln -sf "$REPO_ROOT/bin/ai" "$HOME/.local/bin/ai"
+  ln -sf "$LINK_ROOT/bin/ai" "$HOME/.local/bin/ai"
   echo "Installed 'ai' global launcher to $HOME/.local/bin/ai"
 fi
 
 if [ -f "$REPO_ROOT/bin/howlplane" ]; then
   chmod +x "$REPO_ROOT/bin/howlplane"
-  ln -sf "$REPO_ROOT/bin/howlplane" "$HOME/.local/bin/howlplane"
+  ln -sf "$LINK_ROOT/bin/howlplane" "$HOME/.local/bin/howlplane"
   echo "Installed 'howlplane' global launcher to $HOME/.local/bin/howlplane"
 fi
 
@@ -107,21 +123,21 @@ mkdir -p "$AGY_DIR/rules"
 echo "Linking skills to global AGY configuration"
 for skill in "$REPO_ROOT/.agents/skills"/*; do
   if [ -d "$skill" ]; then
-    ln -sfn "$skill" "$AGY_DIR/skills/$(basename "$skill")"
+    ln -sfn "$(stable_path "$skill")" "$AGY_DIR/skills/$(basename "$skill")"
   fi
 done
 
 echo "Linking rules to global AGY configuration"
 for rule in "$REPO_ROOT/.agents/rules"/*; do
   if [ -f "$rule" ]; then
-    ln -sf "$rule" "$AGY_DIR/rules/"
+    ln -sf "$(stable_path "$rule")" "$AGY_DIR/rules/"
   fi
 done
 
 echo "Linking command skills to global AGY configuration"
 for skill in "$REPO_ROOT/.agents/skill_commands"/*; do
   if [ -d "$skill" ]; then
-    ln -sfn "$skill" "$AGY_DIR/skills/$(basename "$skill")"
+    ln -sfn "$(stable_path "$skill")" "$AGY_DIR/skills/$(basename "$skill")"
   fi
 done
 
@@ -133,14 +149,14 @@ mkdir -p "$CLAUDE_DIR/skills"
 echo "Linking skills to global Claude Code configuration"
 for skill in "$REPO_ROOT/.agents/skills"/*; do
   if [ -d "$skill" ]; then
-    ln -sfn "$skill" "$CLAUDE_DIR/skills/$(basename "$skill")"
+    ln -sfn "$(stable_path "$skill")" "$CLAUDE_DIR/skills/$(basename "$skill")"
   fi
 done
 
 echo "Linking command skills (/work_next_item, /resume_task, /groom_backlogs) to global Claude Code configuration"
 for skill in "$REPO_ROOT/.agents/skill_commands"/*; do
   if [ -d "$skill" ]; then
-    ln -sfn "$skill" "$CLAUDE_DIR/skills/$(basename "$skill")"
+    ln -sfn "$(stable_path "$skill")" "$CLAUDE_DIR/skills/$(basename "$skill")"
   fi
 done
 
@@ -153,7 +169,7 @@ else
   {
     echo ""
     echo "$MARKER_START"
-    echo "@$REPO_ROOT/AGENTS.md"
+    echo "@~/.howlplane/$GLOBAL_RULES"
     echo "$MARKER_END"
   } >> "$CLAUDE_MEMORY"
 fi
@@ -175,7 +191,7 @@ for skill in "$REPO_ROOT/.agents/skills"/*; do
     if [ -e "$target" ] && [ ! -L "$target" ]; then
       echo "Warning: preserving existing Codex skill directory $target"
     else
-      ln -sfn "$skill" "$target"
+      ln -sfn "$(stable_path "$skill")" "$target"
     fi
   fi
 done
@@ -187,7 +203,7 @@ for skill in "$REPO_ROOT/.agents/skill_commands"/*; do
     if [ -e "$target" ] && [ ! -L "$target" ]; then
       echo "Warning: preserving existing Codex skill directory $target"
     else
-      ln -sfn "$skill" "$target"
+      ln -sfn "$(stable_path "$skill")" "$target"
     fi
   fi
 done
@@ -199,7 +215,7 @@ else
   {
     echo ""
     echo "$MARKER_START"
-    cat "$REPO_ROOT/AGENTS.md"
+    cat "$REPO_ROOT/$GLOBAL_RULES"
     echo "$MARKER_END"
   } >> "$CODEX_AGENTS"
 fi
@@ -216,14 +232,14 @@ mkdir -p "$DEVIN_DIR/skills"
 echo "Linking skills to global Devin CLI configuration"
 for skill in "$REPO_ROOT/.agents/skills"/*; do
   if [ -d "$skill" ]; then
-    ln -sfn "$skill" "$DEVIN_DIR/skills/$(basename "$skill")"
+    ln -sfn "$(stable_path "$skill")" "$DEVIN_DIR/skills/$(basename "$skill")"
   fi
 done
 
 echo "Linking command skills (/work_next_item, /resume_task, /groom_backlogs) to global Devin CLI configuration"
 for skill in "$REPO_ROOT/.agents/skill_commands"/*; do
   if [ -d "$skill" ]; then
-    ln -sfn "$skill" "$DEVIN_DIR/skills/$(basename "$skill")"
+    ln -sfn "$(stable_path "$skill")" "$DEVIN_DIR/skills/$(basename "$skill")"
   fi
 done
 
@@ -236,7 +252,7 @@ else
   {
     echo ""
     echo "$MARKER_START"
-    cat "$REPO_ROOT/AGENTS.md"
+    cat "$REPO_ROOT/$GLOBAL_RULES"
     echo "$MARKER_END"
   } >> "$DEVIN_AGENTS"
 fi
