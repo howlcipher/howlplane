@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [0.1.1]
 
 - Generated HTTP products use explicit child filesystem inheritance and database authority only for CRUD. Runners bound filesystem access to reads in static/ and data/ and writes in data/; this preserves portability without embedding build-machine paths. Existing real acceptance tests and a new actual-VM out-of-scope read denial verify the migration.
+### Changed
+
+- A branch push now runs a fast pre-push check of lint and affected tests, stopping
+  at the first failure, instead of the full suite. Pushes targeting `main` and
+  `HOWLPLANE_PUSH_GATE=full` still run everything, and CI runs the full regression
+  on every pull request. Re-run `scripts/install_pre_push_hook.py` to adopt it.
+
 ### Security
 
 - HowlPlane no longer signs the HowlChangeOps approval it waits for (issues.md #20).

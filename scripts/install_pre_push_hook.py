@@ -28,7 +28,11 @@ def main():
         "# Drop inherited Git repository-selection variables so nothing this\n"
         "# hook runs can be redirected away from its own working directory.\n"
         + HOOK_ENV_SCRUB
-        + "echo 'Running pre-push regression test suite...'\n"
+        + "# The tracked gate decides what to run; an older checkout runs everything.\n"
+        "if [ -f scripts/pre_push_gate.sh ]; then\n"
+        "    exec bash scripts/pre_push_gate.sh\n"
+        "fi\n"
+        "echo 'Running pre-push regression test suite...'\n"
         "make test lint build docs\n"
         "if [ $? -ne 0 ]; then\n"
         "    echo 'Regression tests failed! Push aborted.'\n"
