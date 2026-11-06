@@ -43,11 +43,13 @@ def test_posix_installer_registers_codex_globally(tmp_path):
         )
 
     installed = codex_agents.read_text(encoding="utf8")
-    canonical = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf8")
+    canonical = (REPO_ROOT / "AGENTS.global.md").read_text(encoding="utf8")
     assert installed.startswith("# Existing personal guidance")
     assert installed.count("<!-- ai_knowledge_library:start -->") == 1
     assert installed.count("<!-- ai_knowledge_library:end -->") == 1
     assert canonical in installed
+    assert "## Domain Routing" not in installed
+    assert "SKILLS_MANIFEST_START" not in installed
 
     user_skills = home / ".agents" / "skills"
     assert not existing_skill.is_symlink()
@@ -55,6 +57,15 @@ def test_posix_installer_registers_codex_globally(tmp_path):
     command_link = user_skills / "work_next_item"
     assert command_link.is_symlink()
     assert (command_link / "SKILL.md").is_file()
+
+    # A changed mount path must only require re-pointing the one stable link.
+    stable = home / ".howlplane"
+    assert stable.is_symlink() and stable.resolve() == REPO_ROOT
+    assert os.readlink(command_link).startswith(f"{stable}/")
+    claude_memory = (home / ".claude" / "CLAUDE.md").read_text(encoding="utf8")
+    assert "@~/.howlplane/AGENTS.global.md" in claude_memory
+    assert str(REPO_ROOT) not in claude_memory
+    assert f'path = "{stable}"' in (home / ".config" / "howlplane" / "config.toml").read_text(encoding="utf8")
 
 
 def test_posix_installer_aborts_on_unterminated_marker_and_links_launcher(tmp_path):

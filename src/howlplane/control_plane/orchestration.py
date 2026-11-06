@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, TextIO
 
 from howlplane.control_plane import agent_readiness, workspace_trust
+from howlplane.control_plane.context_library import apply_to_prompt as apply_context_library
 from howlplane.control_plane.agent_execution import AgentBackendRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
 from howlplane.control_plane.git_env import guarded_git_args
@@ -1389,6 +1390,7 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         # Built-in CLI backends apply the session's trust policy; a custom
         # backend with a fixed signature keeps its bounded contract.
         extra["workspace_trust_policy"] = session_trust_policy(doc)
+    instructions = apply_context_library(instructions, agent) if is_mutating_role(role) else instructions
     return backend.execute(task, repo, role=role, prompt_override=instructions,
                            timeout_seconds=execution_budget(doc, role), model_id=model, **extra)
 

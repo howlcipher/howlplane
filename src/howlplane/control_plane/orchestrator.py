@@ -59,6 +59,7 @@ from howlplane.control_plane.project_adapter import ProjectAdapter, ProjectConte
 from howlplane.control_plane.reconciliation import ReviewFinding, ReconciliationResult, ReviewReconciler
 from howlplane.control_plane.recovery import CrashRecoveryEngine
 from howlplane.control_plane.review_runner import ReviewRunner, ReviewCycleResult, SingleReviewResult
+from howlplane.control_plane.context_library import apply_to_prompt as apply_context_library
 from howlplane.control_plane.reviewers import get_reviewer_role, build_skill_context
 from howlplane.control_plane.router import TaskRouter, RoutingDecision
 from howlplane.control_plane.progress import (
@@ -2658,7 +2659,7 @@ class GovernedTaskOrchestrator:
                             "task": task_spec,
                             "cwd": self.target_repo,
                             "role": "implementation",
-                            "prompt_override": impl_prompt,
+                            "prompt_override": apply_context_library(impl_prompt, impl_agent_id),
                             "timeout_seconds": self.config.timeout_seconds,
                         }
                         # Third-party/test adapters predate streamed execution.
@@ -3440,7 +3441,7 @@ class GovernedTaskOrchestrator:
                         task=task_spec,
                         cwd=self.target_repo,
                         role="remediation",
-                        prompt_override=rem_prompt,
+                        prompt_override=apply_context_library(rem_prompt, rem_resource_id),
                         timeout_seconds=remediation_timeout,
                     )
                     (rem_cycle_dir / "result.json").write_text(rem_res.to_json(), encoding="utf-8")
