@@ -340,3 +340,26 @@ def test_push_gate_uses_the_unit_tier_instead_of_everything():
 
 def test_push_gate_runs_nothing_for_a_documentation_only_change():
     assert pytest_arguments(_selection(), push_gate=True) == []
+
+
+def test_push_gate_narrows_a_broad_selection_to_direct_evidence():
+    selected = {f"tests/test_t{i}.py": ["imports or exercises a, which imports b"] for i in range(40)}
+    selected["tests/test_direct.py"] = ["direct module mapping for b"]
+    selected["tests/test_both.py"] = ["imports or exercises a, which imports b", "imports or exercises b"]
+    args = pytest_arguments(_selection(selected), push_gate=True)
+    assert args == ["tests/test_direct.py", "tests/test_both.py", "-m", "not slow and not live", "-x"]
+
+
+def test_push_gate_keeps_a_small_selection_including_transitive_evidence():
+    selected = {"tests/test_t.py": ["imports or exercises a, which imports b"]}
+    assert pytest_arguments(_selection(selected), push_gate=True)[0] == "tests/test_t.py"
+
+
+def test_push_gate_uses_the_unit_tier_when_even_direct_evidence_is_broad():
+    selected = {f"tests/test_t{i}.py": ["imports or exercises b"] for i in range(40)}
+    assert pytest_arguments(_selection(selected), push_gate=True)[:3] == ["tests/", "-m", "unit and not slow and not live"]
+
+
+def test_push_gate_uses_the_unit_tier_when_a_broad_selection_has_no_direct_evidence():
+    selected = {f"tests/test_t{i}.py": ["imports or exercises a, which imports b"] for i in range(40)}
+    assert pytest_arguments(_selection(selected), push_gate=True)[0] == "tests/"

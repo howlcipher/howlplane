@@ -221,7 +221,8 @@ replacing the full regression:
 | Push | Runs |
 | --- | --- |
 | A branch | `make push-check`: flake8 syntax checks, affected tests without measured slow tests, and Go tests when Go files changed. It stops at the first failure. |
-| A branch, where the selector would fall back to everything | The same, with the unit tier in place of affected tests |
+| A branch, where the selection is above 30 test files | The same, keeping only tests with direct evidence |
+| A branch, where the selector would fall back to everything, or direct evidence is still above 30 files | The same, with the unit tier in place of affected tests |
 | Targeting `main`, or with `HOWLPLANE_PUSH_GATE=full` | The full gate: `make test lint build docs` |
 | Only deleting a branch | Nothing |
 
