@@ -145,6 +145,15 @@
                     <a class="function" href="#print_selection">print_selection</a>
             </li>
             <li>
+                    <a class="variable" href="#PUSH_GATE_MAX_TEST_FILES">PUSH_GATE_MAX_TEST_FILES</a>
+            </li>
+            <li>
+                    <a class="variable" href="#TRANSITIVE_REASON">TRANSITIVE_REASON</a>
+            </li>
+            <li>
+                    <a class="function" href="#pytest_arguments">pytest_arguments</a>
+            </li>
+            <li>
                     <a class="function" href="#main">main</a>
             </li>
     </ul>
@@ -605,47 +614,90 @@ all fall back to the full Python suite rather than risking a false negative.</p>
 </span><span id="L-426"><a href="#L-426"><span class="linenos">426</span></a>                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"    because: </span><span class="si">{</span><span class="n">reason</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </span><span id="L-427"><a href="#L-427"><span class="linenos">427</span></a>
 </span><span id="L-428"><a href="#L-428"><span class="linenos">428</span></a>
-</span><span id="L-429"><a href="#L-429"><span class="linenos">429</span></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-</span><span id="L-430"><a href="#L-430"><span class="linenos">430</span></a>    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">)</span>
-</span><span id="L-431"><a href="#L-431"><span class="linenos">431</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
-</span><span id="L-432"><a href="#L-432"><span class="linenos">432</span></a>        <span class="s2">"--from-ref"</span><span class="p">,</span> <span class="s2">"--base"</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">"base"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"diff against this Git ref instead of the working tree"</span>
-</span><span id="L-433"><a href="#L-433"><span class="linenos">433</span></a>    <span class="p">)</span>
-</span><span id="L-434"><a href="#L-434"><span class="linenos">434</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
-</span><span id="L-435"><a href="#L-435"><span class="linenos">435</span></a>        <span class="s2">"--dry-run"</span><span class="p">,</span> <span class="s2">"--list"</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">"dry_run"</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">"store_true"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"print selection without running tests"</span>
-</span><span id="L-436"><a href="#L-436"><span class="linenos">436</span></a>    <span class="p">)</span>
-</span><span id="L-437"><a href="#L-437"><span class="linenos">437</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
-</span><span id="L-438"><a href="#L-438"><span class="linenos">438</span></a>        <span class="s2">"--strict"</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">"store_true"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"exit non-zero when a source has no targeted mapping"</span>
-</span><span id="L-439"><a href="#L-439"><span class="linenos">439</span></a>    <span class="p">)</span>
-</span><span id="L-440"><a href="#L-440"><span class="linenos">440</span></a>    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
-</span><span id="L-441"><a href="#L-441"><span class="linenos">441</span></a>
-</span><span id="L-442"><a href="#L-442"><span class="linenos">442</span></a>    <span class="n">changed</span> <span class="o">=</span> <span class="n">changed_files</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">base</span><span class="p">)</span>
-</span><span id="L-443"><a href="#L-443"><span class="linenos">443</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">changed</span><span class="p">:</span>
-</span><span id="L-444"><a href="#L-444"><span class="linenos">444</span></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Changed files: none"</span><span class="p">)</span>
-</span><span id="L-445"><a href="#L-445"><span class="linenos">445</span></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Conservative fallback: no"</span><span class="p">)</span>
-</span><span id="L-446"><a href="#L-446"><span class="linenos">446</span></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Selected tests: none"</span><span class="p">)</span>
-</span><span id="L-447"><a href="#L-447"><span class="linenos">447</span></a>        <span class="k">return</span> <span class="mi">0</span>
-</span><span id="L-448"><a href="#L-448"><span class="linenos">448</span></a>
-</span><span id="L-449"><a href="#L-449"><span class="linenos">449</span></a>    <span class="n">selection</span> <span class="o">=</span> <span class="n">select_tests_with_reasons</span><span class="p">(</span>
-</span><span id="L-450"><a href="#L-450"><span class="linenos">450</span></a>        <span class="n">changed</span><span class="p">,</span> <span class="n">load_test_sources</span><span class="p">(),</span> <span class="n">load_source_modules</span><span class="p">()</span>
-</span><span id="L-451"><a href="#L-451"><span class="linenos">451</span></a>    <span class="p">)</span>
-</span><span id="L-452"><a href="#L-452"><span class="linenos">452</span></a>    <span class="n">print_selection</span><span class="p">(</span><span class="n">changed</span><span class="p">,</span> <span class="n">selection</span><span class="p">)</span>
-</span><span id="L-453"><a href="#L-453"><span class="linenos">453</span></a>    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">dry_run</span><span class="p">:</span>
-</span><span id="L-454"><a href="#L-454"><span class="linenos">454</span></a>        <span class="k">return</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">strict</span> <span class="ow">and</span> <span class="n">selection</span><span class="o">.</span><span class="n">uncovered</span> <span class="k">else</span> <span class="mi">0</span>
-</span><span id="L-455"><a href="#L-455"><span class="linenos">455</span></a>
-</span><span id="L-456"><a href="#L-456"><span class="linenos">456</span></a>    <span class="n">pytest_args</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"tests/"</span><span class="p">]</span> <span class="k">if</span> <span class="n">selection</span><span class="o">.</span><span class="n">fallback_reason</span> <span class="k">else</span> <span class="nb">list</span><span class="p">(</span><span class="n">selection</span><span class="o">.</span><span class="n">selected</span><span class="p">)</span>
-</span><span id="L-457"><a href="#L-457"><span class="linenos">457</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">pytest_args</span><span class="p">:</span>
-</span><span id="L-458"><a href="#L-458"><span class="linenos">458</span></a>        <span class="k">return</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">strict</span> <span class="ow">and</span> <span class="n">selection</span><span class="o">.</span><span class="n">uncovered</span> <span class="k">else</span> <span class="mi">0</span>
-</span><span id="L-459"><a href="#L-459"><span class="linenos">459</span></a>    <span class="c1"># executable and paths are controlled here.</span>
-</span><span id="L-460"><a href="#L-460"><span class="linenos">460</span></a>    <span class="n">rc</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">call</span><span class="p">(</span>  <span class="c1"># nosec B603</span>
-</span><span id="L-461"><a href="#L-461"><span class="linenos">461</span></a>        <span class="p">[</span><span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span> <span class="s2">"-m"</span><span class="p">,</span> <span class="s2">"pytest"</span><span class="p">,</span> <span class="s2">"-v"</span><span class="p">,</span> <span class="o">*</span><span class="n">pytest_args</span><span class="p">],</span> <span class="n">cwd</span><span class="o">=</span><span class="n">REPO_ROOT</span>
-</span><span id="L-462"><a href="#L-462"><span class="linenos">462</span></a>    <span class="p">)</span>
-</span><span id="L-463"><a href="#L-463"><span class="linenos">463</span></a>    <span class="k">if</span> <span class="n">rc</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">args</span><span class="o">.</span><span class="n">strict</span> <span class="ow">and</span> <span class="n">selection</span><span class="o">.</span><span class="n">uncovered</span><span class="p">:</span>
-</span><span id="L-464"><a href="#L-464"><span class="linenos">464</span></a>        <span class="k">return</span> <span class="mi">1</span>
-</span><span id="L-465"><a href="#L-465"><span class="linenos">465</span></a>    <span class="k">return</span> <span class="n">rc</span>
-</span><span id="L-466"><a href="#L-466"><span class="linenos">466</span></a>
-</span><span id="L-467"><a href="#L-467"><span class="linenos">467</span></a>
-</span><span id="L-468"><a href="#L-468"><span class="linenos">468</span></a><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
-</span><span id="L-469"><a href="#L-469"><span class="linenos">469</span></a>    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</span><span id="L-429"><a href="#L-429"><span class="linenos">429</span></a><span class="c1"># A push gate selection above this many test files stops being quick feedback.</span>
+</span><span id="L-430"><a href="#L-430"><span class="linenos">430</span></a><span class="n">PUSH_GATE_MAX_TEST_FILES</span> <span class="o">=</span> <span class="mi">30</span>
+</span><span id="L-431"><a href="#L-431"><span class="linenos">431</span></a><span class="n">TRANSITIVE_REASON</span> <span class="o">=</span> <span class="s2">", which imports "</span>
+</span><span id="L-432"><a href="#L-432"><span class="linenos">432</span></a>
+</span><span id="L-433"><a href="#L-433"><span class="linenos">433</span></a>
+</span><span id="L-434"><a href="#L-434"><span class="linenos">434</span></a><span class="k">def</span><span class="w"> </span><span class="nf">_push_gate_targets</span><span class="p">(</span><span class="n">selected</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+</span><span id="L-435"><a href="#L-435"><span class="linenos">435</span></a><span class="w">    </span><span class="sd">"""Return test files small enough for a push, or None to use the unit tier.</span>
+</span><span id="L-436"><a href="#L-436"><span class="linenos">436</span></a>
+</span><span id="L-437"><a href="#L-437"><span class="linenos">437</span></a><span class="sd">    A widely imported module can select most of the suite through transitive</span>
+</span><span id="L-438"><a href="#L-438"><span class="linenos">438</span></a><span class="sd">    imports, so a broad selection keeps only tests with direct evidence.</span>
+</span><span id="L-439"><a href="#L-439"><span class="linenos">439</span></a><span class="sd">    """</span>
+</span><span id="L-440"><a href="#L-440"><span class="linenos">440</span></a>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">selected</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">PUSH_GATE_MAX_TEST_FILES</span><span class="p">:</span>
+</span><span id="L-441"><a href="#L-441"><span class="linenos">441</span></a>        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">selected</span><span class="p">)</span>
+</span><span id="L-442"><a href="#L-442"><span class="linenos">442</span></a>    <span class="n">direct</span> <span class="o">=</span> <span class="p">[</span><span class="n">test</span> <span class="k">for</span> <span class="n">test</span><span class="p">,</span> <span class="n">reasons</span> <span class="ow">in</span> <span class="n">selected</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+</span><span id="L-443"><a href="#L-443"><span class="linenos">443</span></a>              <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">TRANSITIVE_REASON</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">reason</span> <span class="k">for</span> <span class="n">reason</span> <span class="ow">in</span> <span class="n">reasons</span><span class="p">)]</span>
+</span><span id="L-444"><a href="#L-444"><span class="linenos">444</span></a>    <span class="k">return</span> <span class="n">direct</span> <span class="k">if</span> <span class="mi">0</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">direct</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">PUSH_GATE_MAX_TEST_FILES</span> <span class="k">else</span> <span class="kc">None</span>
+</span><span id="L-445"><a href="#L-445"><span class="linenos">445</span></a>
+</span><span id="L-446"><a href="#L-446"><span class="linenos">446</span></a>
+</span><span id="L-447"><a href="#L-447"><span class="linenos">447</span></a><span class="k">def</span><span class="w"> </span><span class="nf">pytest_arguments</span><span class="p">(</span><span class="n">selection</span><span class="p">:</span> <span class="n">Selection</span><span class="p">,</span> <span class="n">push_gate</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+</span><span id="L-448"><a href="#L-448"><span class="linenos">448</span></a><span class="w">    </span><span class="sd">"""Return pytest arguments for a selection, or an empty list when nothing should run.</span>
+</span><span id="L-449"><a href="#L-449"><span class="linenos">449</span></a>
+</span><span id="L-450"><a href="#L-450"><span class="linenos">450</span></a><span class="sd">    The push gate favors quick feedback, because CI runs the full regression on</span>
+</span><span id="L-451"><a href="#L-451"><span class="linenos">451</span></a><span class="sd">    the pull request: it skips measured slow tests, stops at the first failure,</span>
+</span><span id="L-452"><a href="#L-452"><span class="linenos">452</span></a><span class="sd">    and uses the unit tier where the normal selection would fall back to everything.</span>
+</span><span id="L-453"><a href="#L-453"><span class="linenos">453</span></a><span class="sd">    """</span>
+</span><span id="L-454"><a href="#L-454"><span class="linenos">454</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">push_gate</span><span class="p">:</span>
+</span><span id="L-455"><a href="#L-455"><span class="linenos">455</span></a>        <span class="k">return</span> <span class="p">[</span><span class="s2">"tests/"</span><span class="p">]</span> <span class="k">if</span> <span class="n">selection</span><span class="o">.</span><span class="n">fallback_reason</span> <span class="k">else</span> <span class="nb">list</span><span class="p">(</span><span class="n">selection</span><span class="o">.</span><span class="n">selected</span><span class="p">)</span>
+</span><span id="L-456"><a href="#L-456"><span class="linenos">456</span></a>    <span class="n">unit_tier</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"tests/"</span><span class="p">,</span> <span class="s2">"-m"</span><span class="p">,</span> <span class="s2">"unit and not slow and not live"</span><span class="p">,</span> <span class="s2">"-x"</span><span class="p">]</span>
+</span><span id="L-457"><a href="#L-457"><span class="linenos">457</span></a>    <span class="k">if</span> <span class="n">selection</span><span class="o">.</span><span class="n">fallback_reason</span><span class="p">:</span>
+</span><span id="L-458"><a href="#L-458"><span class="linenos">458</span></a>        <span class="k">return</span> <span class="n">unit_tier</span>
+</span><span id="L-459"><a href="#L-459"><span class="linenos">459</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">selection</span><span class="o">.</span><span class="n">selected</span><span class="p">:</span>
+</span><span id="L-460"><a href="#L-460"><span class="linenos">460</span></a>        <span class="k">return</span> <span class="p">[]</span>
+</span><span id="L-461"><a href="#L-461"><span class="linenos">461</span></a>    <span class="n">targets</span> <span class="o">=</span> <span class="n">_push_gate_targets</span><span class="p">(</span><span class="n">selection</span><span class="o">.</span><span class="n">selected</span><span class="p">)</span>
+</span><span id="L-462"><a href="#L-462"><span class="linenos">462</span></a>    <span class="k">return</span> <span class="p">[</span><span class="o">*</span><span class="n">targets</span><span class="p">,</span> <span class="s2">"-m"</span><span class="p">,</span> <span class="s2">"not slow and not live"</span><span class="p">,</span> <span class="s2">"-x"</span><span class="p">]</span> <span class="k">if</span> <span class="n">targets</span> <span class="k">else</span> <span class="n">unit_tier</span>
+</span><span id="L-463"><a href="#L-463"><span class="linenos">463</span></a>
+</span><span id="L-464"><a href="#L-464"><span class="linenos">464</span></a>
+</span><span id="L-465"><a href="#L-465"><span class="linenos">465</span></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+</span><span id="L-466"><a href="#L-466"><span class="linenos">466</span></a>    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">)</span>
+</span><span id="L-467"><a href="#L-467"><span class="linenos">467</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+</span><span id="L-468"><a href="#L-468"><span class="linenos">468</span></a>        <span class="s2">"--from-ref"</span><span class="p">,</span> <span class="s2">"--base"</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">"base"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"diff against this Git ref instead of the working tree"</span>
+</span><span id="L-469"><a href="#L-469"><span class="linenos">469</span></a>    <span class="p">)</span>
+</span><span id="L-470"><a href="#L-470"><span class="linenos">470</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+</span><span id="L-471"><a href="#L-471"><span class="linenos">471</span></a>        <span class="s2">"--dry-run"</span><span class="p">,</span> <span class="s2">"--list"</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">"dry_run"</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">"store_true"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"print selection without running tests"</span>
+</span><span id="L-472"><a href="#L-472"><span class="linenos">472</span></a>    <span class="p">)</span>
+</span><span id="L-473"><a href="#L-473"><span class="linenos">473</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+</span><span id="L-474"><a href="#L-474"><span class="linenos">474</span></a>        <span class="s2">"--strict"</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">"store_true"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"exit non-zero when a source has no targeted mapping"</span>
+</span><span id="L-475"><a href="#L-475"><span class="linenos">475</span></a>    <span class="p">)</span>
+</span><span id="L-476"><a href="#L-476"><span class="linenos">476</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+</span><span id="L-477"><a href="#L-477"><span class="linenos">477</span></a>        <span class="s2">"--push-gate"</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">"store_true"</span><span class="p">,</span>
+</span><span id="L-478"><a href="#L-478"><span class="linenos">478</span></a>        <span class="n">help</span><span class="o">=</span><span class="s2">"quick feedback before a push: no slow tests, stop at the first failure, unit tier on fallback"</span><span class="p">,</span>
+</span><span id="L-479"><a href="#L-479"><span class="linenos">479</span></a>    <span class="p">)</span>
+</span><span id="L-480"><a href="#L-480"><span class="linenos">480</span></a>    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+</span><span id="L-481"><a href="#L-481"><span class="linenos">481</span></a>
+</span><span id="L-482"><a href="#L-482"><span class="linenos">482</span></a>    <span class="n">changed</span> <span class="o">=</span> <span class="n">changed_files</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">base</span><span class="p">)</span>
+</span><span id="L-483"><a href="#L-483"><span class="linenos">483</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">changed</span><span class="p">:</span>
+</span><span id="L-484"><a href="#L-484"><span class="linenos">484</span></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Changed files: none"</span><span class="p">)</span>
+</span><span id="L-485"><a href="#L-485"><span class="linenos">485</span></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Conservative fallback: no"</span><span class="p">)</span>
+</span><span id="L-486"><a href="#L-486"><span class="linenos">486</span></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Selected tests: none"</span><span class="p">)</span>
+</span><span id="L-487"><a href="#L-487"><span class="linenos">487</span></a>        <span class="k">return</span> <span class="mi">0</span>
+</span><span id="L-488"><a href="#L-488"><span class="linenos">488</span></a>
+</span><span id="L-489"><a href="#L-489"><span class="linenos">489</span></a>    <span class="n">selection</span> <span class="o">=</span> <span class="n">select_tests_with_reasons</span><span class="p">(</span>
+</span><span id="L-490"><a href="#L-490"><span class="linenos">490</span></a>        <span class="n">changed</span><span class="p">,</span> <span class="n">load_test_sources</span><span class="p">(),</span> <span class="n">load_source_modules</span><span class="p">()</span>
+</span><span id="L-491"><a href="#L-491"><span class="linenos">491</span></a>    <span class="p">)</span>
+</span><span id="L-492"><a href="#L-492"><span class="linenos">492</span></a>    <span class="n">print_selection</span><span class="p">(</span><span class="n">changed</span><span class="p">,</span> <span class="n">selection</span><span class="p">)</span>
+</span><span id="L-493"><a href="#L-493"><span class="linenos">493</span></a>    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">dry_run</span><span class="p">:</span>
+</span><span id="L-494"><a href="#L-494"><span class="linenos">494</span></a>        <span class="k">return</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">strict</span> <span class="ow">and</span> <span class="n">selection</span><span class="o">.</span><span class="n">uncovered</span> <span class="k">else</span> <span class="mi">0</span>
+</span><span id="L-495"><a href="#L-495"><span class="linenos">495</span></a>
+</span><span id="L-496"><a href="#L-496"><span class="linenos">496</span></a>    <span class="n">pytest_args</span> <span class="o">=</span> <span class="n">pytest_arguments</span><span class="p">(</span><span class="n">selection</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">push_gate</span><span class="p">)</span>
+</span><span id="L-497"><a href="#L-497"><span class="linenos">497</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">pytest_args</span><span class="p">:</span>
+</span><span id="L-498"><a href="#L-498"><span class="linenos">498</span></a>        <span class="k">return</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">strict</span> <span class="ow">and</span> <span class="n">selection</span><span class="o">.</span><span class="n">uncovered</span> <span class="k">else</span> <span class="mi">0</span>
+</span><span id="L-499"><a href="#L-499"><span class="linenos">499</span></a>    <span class="c1"># executable and paths are controlled here.</span>
+</span><span id="L-500"><a href="#L-500"><span class="linenos">500</span></a>    <span class="n">rc</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">call</span><span class="p">(</span>  <span class="c1"># nosec B603</span>
+</span><span id="L-501"><a href="#L-501"><span class="linenos">501</span></a>        <span class="p">[</span><span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span> <span class="s2">"-m"</span><span class="p">,</span> <span class="s2">"pytest"</span><span class="p">,</span> <span class="s2">"-q"</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">push_gate</span> <span class="k">else</span> <span class="s2">"-v"</span><span class="p">,</span> <span class="o">*</span><span class="n">pytest_args</span><span class="p">],</span> <span class="n">cwd</span><span class="o">=</span><span class="n">REPO_ROOT</span>
+</span><span id="L-502"><a href="#L-502"><span class="linenos">502</span></a>    <span class="p">)</span>
+</span><span id="L-503"><a href="#L-503"><span class="linenos">503</span></a>    <span class="c1"># pytest exits 5 when markers leave nothing to run, which is not a push failure.</span>
+</span><span id="L-504"><a href="#L-504"><span class="linenos">504</span></a>    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">push_gate</span> <span class="ow">and</span> <span class="n">rc</span> <span class="o">==</span> <span class="mi">5</span><span class="p">:</span>
+</span><span id="L-505"><a href="#L-505"><span class="linenos">505</span></a>        <span class="k">return</span> <span class="mi">0</span>
+</span><span id="L-506"><a href="#L-506"><span class="linenos">506</span></a>    <span class="k">if</span> <span class="n">rc</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">args</span><span class="o">.</span><span class="n">strict</span> <span class="ow">and</span> <span class="n">selection</span><span class="o">.</span><span class="n">uncovered</span><span class="p">:</span>
+</span><span id="L-507"><a href="#L-507"><span class="linenos">507</span></a>        <span class="k">return</span> <span class="mi">1</span>
+</span><span id="L-508"><a href="#L-508"><span class="linenos">508</span></a>    <span class="k">return</span> <span class="n">rc</span>
+</span><span id="L-509"><a href="#L-509"><span class="linenos">509</span></a>
+</span><span id="L-510"><a href="#L-510"><span class="linenos">510</span></a>
+</span><span id="L-511"><a href="#L-511"><span class="linenos">511</span></a><span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+</span><span id="L-512"><a href="#L-512"><span class="linenos">512</span></a>    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
 </span></pre></div>
 
 
@@ -677,7 +729,7 @@ all fall back to the full Python suite rather than risking a false negative.</p>
                 <section id="FULL_SUITE_PATHS">
                     <div class="attr variable">
             <span class="name">FULL_SUITE_PATHS</span>        =
-<span class="default_value">{&#39;tests/conftest.py&#39;, &#39;Makefile&#39;, &#39;pyproject.toml&#39;}</span>
+<span class="default_value">{&#39;pyproject.toml&#39;, &#39;Makefile&#39;, &#39;tests/conftest.py&#39;}</span>
 
         
     </div>
@@ -702,7 +754,7 @@ all fall back to the full Python suite rather than risking a false negative.</p>
                     <div class="attr variable">
             <span class="name">CENTRAL_CONTROL_PLANE_MODULES</span>        =
 <input id="CENTRAL_CONTROL_PLANE_MODULES-view-value" class="view-value-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
-            <label class="view-value-button pdoc-button" for="CENTRAL_CONTROL_PLANE_MODULES-view-value"></label><span class="default_value">{&#39;src/howlplane/control_plane/agent_registry.py&#39;, &#39;src/control_plane/launcher.py&#39;, &#39;src/howlplane/control_plane/config_loader.py&#39;, &#39;src/howlplane/control_plane/authority_envelope.py&#39;, &#39;src/howlplane/control_plane/launcher.py&#39;, &#39;src/control_plane/authority_envelope.py&#39;, &#39;src/howlplane/control_plane/human_boundary.py&#39;, &#39;src/control_plane/orchestrator.py&#39;, &#39;src/howlplane/control_plane/orchestrator.py&#39;, &#39;src/control_plane/human_boundary.py&#39;, &#39;src/howlplane/control_plane/task_spec.py&#39;, &#39;src/control_plane/task_spec.py&#39;, &#39;src/control_plane/durable_store.py&#39;, &#39;src/howlplane/control_plane/durable_store.py&#39;, &#39;src/control_plane/agent_registry.py&#39;}</span>
+            <label class="view-value-button pdoc-button" for="CENTRAL_CONTROL_PLANE_MODULES-view-value"></label><span class="default_value">{&#39;src/howlplane/control_plane/agent_registry.py&#39;, &#39;src/control_plane/orchestrator.py&#39;, &#39;src/howlplane/control_plane/human_boundary.py&#39;, &#39;src/control_plane/launcher.py&#39;, &#39;src/howlplane/control_plane/durable_store.py&#39;, &#39;src/control_plane/human_boundary.py&#39;, &#39;src/control_plane/authority_envelope.py&#39;, &#39;src/control_plane/task_spec.py&#39;, &#39;src/control_plane/durable_store.py&#39;, &#39;src/howlplane/control_plane/launcher.py&#39;, &#39;src/howlplane/control_plane/config_loader.py&#39;, &#39;src/howlplane/control_plane/authority_envelope.py&#39;, &#39;src/howlplane/control_plane/task_spec.py&#39;, &#39;src/control_plane/agent_registry.py&#39;, &#39;src/howlplane/control_plane/orchestrator.py&#39;}</span>
 
         
     </div>
@@ -726,7 +778,7 @@ all fall back to the full Python suite rather than risking a false negative.</p>
                 <section id="DOCUMENTATION_FILES">
                     <div class="attr variable">
             <span class="name">DOCUMENTATION_FILES</span>        =
-<span class="default_value">{&#39;LICENSE&#39;, &#39;README.md&#39;, &#39;change_log.md&#39;, &#39;CHANGELOG.md&#39;}</span>
+<span class="default_value">{&#39;LICENSE&#39;, &#39;change_log.md&#39;, &#39;CHANGELOG.md&#39;, &#39;README.md&#39;}</span>
 
         
     </div>
@@ -750,7 +802,7 @@ all fall back to the full Python suite rather than risking a false negative.</p>
                 <section id="AGENT_POLICY_FILES">
                     <div class="attr variable">
             <span class="name">AGENT_POLICY_FILES</span>        =
-<span class="default_value">{&#39;AGENTS.md&#39;, &#39;GEMINI.md&#39;, &#39;CLAUDE.md&#39;, &#39;DEVIN.md&#39;}</span>
+<span class="default_value">{&#39;AGENTS.md&#39;, &#39;DEVIN.md&#39;, &#39;GEMINI.md&#39;, &#39;CLAUDE.md&#39;}</span>
 
         
     </div>
@@ -1509,6 +1561,69 @@ importers, transitively -- are matched too.</p>
 
 
                 </section>
+                <section id="PUSH_GATE_MAX_TEST_FILES">
+                    <div class="attr variable">
+            <span class="name">PUSH_GATE_MAX_TEST_FILES</span>        =
+<span class="default_value">30</span>
+
+        
+    </div>
+    <a class="headerlink" href="#PUSH_GATE_MAX_TEST_FILES"></a>
+    
+    
+
+                </section>
+                <section id="TRANSITIVE_REASON">
+                    <div class="attr variable">
+            <span class="name">TRANSITIVE_REASON</span>        =
+<span class="default_value">&#39;, which imports &#39;</span>
+
+        
+    </div>
+    <a class="headerlink" href="#TRANSITIVE_REASON"></a>
+    
+    
+
+                </section>
+                <section id="pytest_arguments">
+                            <input id="pytest_arguments-view-source" class="view-source-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
+<div class="attr function">
+            
+        <span class="def">def</span>
+        <span class="name">pytest_arguments</span><span class="signature pdoc-code multiline">(<span class="param">	<span class="n">selection</span><span class="p">:</span> <span class="n"><a href="#Selection">Selection</a></span>,</span><span class="param">	<span class="n">push_gate</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span></span><span class="return-annotation">) -> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>:</span></span>
+
+                <label class="view-source-button" for="pytest_arguments-view-source"><span>View Source</span></label>
+
+    </div>
+    <a class="headerlink" href="#pytest_arguments"></a>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="pytest_arguments-448"><a href="#pytest_arguments-448"><span class="linenos">448</span></a><span class="k">def</span><span class="w"> </span><span class="nf">pytest_arguments</span><span class="p">(</span><span class="n">selection</span><span class="p">:</span> <span class="n">Selection</span><span class="p">,</span> <span class="n">push_gate</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+</span><span id="pytest_arguments-449"><a href="#pytest_arguments-449"><span class="linenos">449</span></a><span class="w">    </span><span class="sd">"""Return pytest arguments for a selection, or an empty list when nothing should run.</span>
+</span><span id="pytest_arguments-450"><a href="#pytest_arguments-450"><span class="linenos">450</span></a>
+</span><span id="pytest_arguments-451"><a href="#pytest_arguments-451"><span class="linenos">451</span></a><span class="sd">    The push gate favors quick feedback, because CI runs the full regression on</span>
+</span><span id="pytest_arguments-452"><a href="#pytest_arguments-452"><span class="linenos">452</span></a><span class="sd">    the pull request: it skips measured slow tests, stops at the first failure,</span>
+</span><span id="pytest_arguments-453"><a href="#pytest_arguments-453"><span class="linenos">453</span></a><span class="sd">    and uses the unit tier where the normal selection would fall back to everything.</span>
+</span><span id="pytest_arguments-454"><a href="#pytest_arguments-454"><span class="linenos">454</span></a><span class="sd">    """</span>
+</span><span id="pytest_arguments-455"><a href="#pytest_arguments-455"><span class="linenos">455</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">push_gate</span><span class="p">:</span>
+</span><span id="pytest_arguments-456"><a href="#pytest_arguments-456"><span class="linenos">456</span></a>        <span class="k">return</span> <span class="p">[</span><span class="s2">"tests/"</span><span class="p">]</span> <span class="k">if</span> <span class="n">selection</span><span class="o">.</span><span class="n">fallback_reason</span> <span class="k">else</span> <span class="nb">list</span><span class="p">(</span><span class="n">selection</span><span class="o">.</span><span class="n">selected</span><span class="p">)</span>
+</span><span id="pytest_arguments-457"><a href="#pytest_arguments-457"><span class="linenos">457</span></a>    <span class="n">unit_tier</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"tests/"</span><span class="p">,</span> <span class="s2">"-m"</span><span class="p">,</span> <span class="s2">"unit and not slow and not live"</span><span class="p">,</span> <span class="s2">"-x"</span><span class="p">]</span>
+</span><span id="pytest_arguments-458"><a href="#pytest_arguments-458"><span class="linenos">458</span></a>    <span class="k">if</span> <span class="n">selection</span><span class="o">.</span><span class="n">fallback_reason</span><span class="p">:</span>
+</span><span id="pytest_arguments-459"><a href="#pytest_arguments-459"><span class="linenos">459</span></a>        <span class="k">return</span> <span class="n">unit_tier</span>
+</span><span id="pytest_arguments-460"><a href="#pytest_arguments-460"><span class="linenos">460</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">selection</span><span class="o">.</span><span class="n">selected</span><span class="p">:</span>
+</span><span id="pytest_arguments-461"><a href="#pytest_arguments-461"><span class="linenos">461</span></a>        <span class="k">return</span> <span class="p">[]</span>
+</span><span id="pytest_arguments-462"><a href="#pytest_arguments-462"><span class="linenos">462</span></a>    <span class="n">targets</span> <span class="o">=</span> <span class="n">_push_gate_targets</span><span class="p">(</span><span class="n">selection</span><span class="o">.</span><span class="n">selected</span><span class="p">)</span>
+</span><span id="pytest_arguments-463"><a href="#pytest_arguments-463"><span class="linenos">463</span></a>    <span class="k">return</span> <span class="p">[</span><span class="o">*</span><span class="n">targets</span><span class="p">,</span> <span class="s2">"-m"</span><span class="p">,</span> <span class="s2">"not slow and not live"</span><span class="p">,</span> <span class="s2">"-x"</span><span class="p">]</span> <span class="k">if</span> <span class="n">targets</span> <span class="k">else</span> <span class="n">unit_tier</span>
+</span></pre></div>
+
+
+            <div class="docstring"><p>Return pytest arguments for a selection, or an empty list when nothing should run.</p>
+
+<p>The push gate favors quick feedback, because CI runs the full regression on
+the pull request: it skips measured slow tests, stops at the first failure,
+and uses the unit tier where the normal selection would fall back to everything.</p>
+</div>
+
+
+                </section>
                 <section id="main">
                             <input id="main-view-source" class="view-source-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
 <div class="attr function">
@@ -1520,43 +1635,50 @@ importers, transitively -- are matched too.</p>
 
     </div>
     <a class="headerlink" href="#main"></a>
-            <div class="pdoc-code codehilite"><pre><span></span><span id="main-430"><a href="#main-430"><span class="linenos">430</span></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-</span><span id="main-431"><a href="#main-431"><span class="linenos">431</span></a>    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">)</span>
-</span><span id="main-432"><a href="#main-432"><span class="linenos">432</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
-</span><span id="main-433"><a href="#main-433"><span class="linenos">433</span></a>        <span class="s2">"--from-ref"</span><span class="p">,</span> <span class="s2">"--base"</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">"base"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"diff against this Git ref instead of the working tree"</span>
-</span><span id="main-434"><a href="#main-434"><span class="linenos">434</span></a>    <span class="p">)</span>
-</span><span id="main-435"><a href="#main-435"><span class="linenos">435</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
-</span><span id="main-436"><a href="#main-436"><span class="linenos">436</span></a>        <span class="s2">"--dry-run"</span><span class="p">,</span> <span class="s2">"--list"</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">"dry_run"</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">"store_true"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"print selection without running tests"</span>
-</span><span id="main-437"><a href="#main-437"><span class="linenos">437</span></a>    <span class="p">)</span>
-</span><span id="main-438"><a href="#main-438"><span class="linenos">438</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
-</span><span id="main-439"><a href="#main-439"><span class="linenos">439</span></a>        <span class="s2">"--strict"</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">"store_true"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"exit non-zero when a source has no targeted mapping"</span>
-</span><span id="main-440"><a href="#main-440"><span class="linenos">440</span></a>    <span class="p">)</span>
-</span><span id="main-441"><a href="#main-441"><span class="linenos">441</span></a>    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
-</span><span id="main-442"><a href="#main-442"><span class="linenos">442</span></a>
-</span><span id="main-443"><a href="#main-443"><span class="linenos">443</span></a>    <span class="n">changed</span> <span class="o">=</span> <span class="n">changed_files</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">base</span><span class="p">)</span>
-</span><span id="main-444"><a href="#main-444"><span class="linenos">444</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">changed</span><span class="p">:</span>
-</span><span id="main-445"><a href="#main-445"><span class="linenos">445</span></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Changed files: none"</span><span class="p">)</span>
-</span><span id="main-446"><a href="#main-446"><span class="linenos">446</span></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Conservative fallback: no"</span><span class="p">)</span>
-</span><span id="main-447"><a href="#main-447"><span class="linenos">447</span></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Selected tests: none"</span><span class="p">)</span>
-</span><span id="main-448"><a href="#main-448"><span class="linenos">448</span></a>        <span class="k">return</span> <span class="mi">0</span>
-</span><span id="main-449"><a href="#main-449"><span class="linenos">449</span></a>
-</span><span id="main-450"><a href="#main-450"><span class="linenos">450</span></a>    <span class="n">selection</span> <span class="o">=</span> <span class="n">select_tests_with_reasons</span><span class="p">(</span>
-</span><span id="main-451"><a href="#main-451"><span class="linenos">451</span></a>        <span class="n">changed</span><span class="p">,</span> <span class="n">load_test_sources</span><span class="p">(),</span> <span class="n">load_source_modules</span><span class="p">()</span>
-</span><span id="main-452"><a href="#main-452"><span class="linenos">452</span></a>    <span class="p">)</span>
-</span><span id="main-453"><a href="#main-453"><span class="linenos">453</span></a>    <span class="n">print_selection</span><span class="p">(</span><span class="n">changed</span><span class="p">,</span> <span class="n">selection</span><span class="p">)</span>
-</span><span id="main-454"><a href="#main-454"><span class="linenos">454</span></a>    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">dry_run</span><span class="p">:</span>
-</span><span id="main-455"><a href="#main-455"><span class="linenos">455</span></a>        <span class="k">return</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">strict</span> <span class="ow">and</span> <span class="n">selection</span><span class="o">.</span><span class="n">uncovered</span> <span class="k">else</span> <span class="mi">0</span>
-</span><span id="main-456"><a href="#main-456"><span class="linenos">456</span></a>
-</span><span id="main-457"><a href="#main-457"><span class="linenos">457</span></a>    <span class="n">pytest_args</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"tests/"</span><span class="p">]</span> <span class="k">if</span> <span class="n">selection</span><span class="o">.</span><span class="n">fallback_reason</span> <span class="k">else</span> <span class="nb">list</span><span class="p">(</span><span class="n">selection</span><span class="o">.</span><span class="n">selected</span><span class="p">)</span>
-</span><span id="main-458"><a href="#main-458"><span class="linenos">458</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">pytest_args</span><span class="p">:</span>
-</span><span id="main-459"><a href="#main-459"><span class="linenos">459</span></a>        <span class="k">return</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">strict</span> <span class="ow">and</span> <span class="n">selection</span><span class="o">.</span><span class="n">uncovered</span> <span class="k">else</span> <span class="mi">0</span>
-</span><span id="main-460"><a href="#main-460"><span class="linenos">460</span></a>    <span class="c1"># executable and paths are controlled here.</span>
-</span><span id="main-461"><a href="#main-461"><span class="linenos">461</span></a>    <span class="n">rc</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">call</span><span class="p">(</span>  <span class="c1"># nosec B603</span>
-</span><span id="main-462"><a href="#main-462"><span class="linenos">462</span></a>        <span class="p">[</span><span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span> <span class="s2">"-m"</span><span class="p">,</span> <span class="s2">"pytest"</span><span class="p">,</span> <span class="s2">"-v"</span><span class="p">,</span> <span class="o">*</span><span class="n">pytest_args</span><span class="p">],</span> <span class="n">cwd</span><span class="o">=</span><span class="n">REPO_ROOT</span>
-</span><span id="main-463"><a href="#main-463"><span class="linenos">463</span></a>    <span class="p">)</span>
-</span><span id="main-464"><a href="#main-464"><span class="linenos">464</span></a>    <span class="k">if</span> <span class="n">rc</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">args</span><span class="o">.</span><span class="n">strict</span> <span class="ow">and</span> <span class="n">selection</span><span class="o">.</span><span class="n">uncovered</span><span class="p">:</span>
-</span><span id="main-465"><a href="#main-465"><span class="linenos">465</span></a>        <span class="k">return</span> <span class="mi">1</span>
-</span><span id="main-466"><a href="#main-466"><span class="linenos">466</span></a>    <span class="k">return</span> <span class="n">rc</span>
+            <div class="pdoc-code codehilite"><pre><span></span><span id="main-466"><a href="#main-466"><span class="linenos">466</span></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+</span><span id="main-467"><a href="#main-467"><span class="linenos">467</span></a>    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">)</span>
+</span><span id="main-468"><a href="#main-468"><span class="linenos">468</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+</span><span id="main-469"><a href="#main-469"><span class="linenos">469</span></a>        <span class="s2">"--from-ref"</span><span class="p">,</span> <span class="s2">"--base"</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">"base"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"diff against this Git ref instead of the working tree"</span>
+</span><span id="main-470"><a href="#main-470"><span class="linenos">470</span></a>    <span class="p">)</span>
+</span><span id="main-471"><a href="#main-471"><span class="linenos">471</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+</span><span id="main-472"><a href="#main-472"><span class="linenos">472</span></a>        <span class="s2">"--dry-run"</span><span class="p">,</span> <span class="s2">"--list"</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">"dry_run"</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">"store_true"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"print selection without running tests"</span>
+</span><span id="main-473"><a href="#main-473"><span class="linenos">473</span></a>    <span class="p">)</span>
+</span><span id="main-474"><a href="#main-474"><span class="linenos">474</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+</span><span id="main-475"><a href="#main-475"><span class="linenos">475</span></a>        <span class="s2">"--strict"</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">"store_true"</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">"exit non-zero when a source has no targeted mapping"</span>
+</span><span id="main-476"><a href="#main-476"><span class="linenos">476</span></a>    <span class="p">)</span>
+</span><span id="main-477"><a href="#main-477"><span class="linenos">477</span></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+</span><span id="main-478"><a href="#main-478"><span class="linenos">478</span></a>        <span class="s2">"--push-gate"</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">"store_true"</span><span class="p">,</span>
+</span><span id="main-479"><a href="#main-479"><span class="linenos">479</span></a>        <span class="n">help</span><span class="o">=</span><span class="s2">"quick feedback before a push: no slow tests, stop at the first failure, unit tier on fallback"</span><span class="p">,</span>
+</span><span id="main-480"><a href="#main-480"><span class="linenos">480</span></a>    <span class="p">)</span>
+</span><span id="main-481"><a href="#main-481"><span class="linenos">481</span></a>    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+</span><span id="main-482"><a href="#main-482"><span class="linenos">482</span></a>
+</span><span id="main-483"><a href="#main-483"><span class="linenos">483</span></a>    <span class="n">changed</span> <span class="o">=</span> <span class="n">changed_files</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">base</span><span class="p">)</span>
+</span><span id="main-484"><a href="#main-484"><span class="linenos">484</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">changed</span><span class="p">:</span>
+</span><span id="main-485"><a href="#main-485"><span class="linenos">485</span></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Changed files: none"</span><span class="p">)</span>
+</span><span id="main-486"><a href="#main-486"><span class="linenos">486</span></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Conservative fallback: no"</span><span class="p">)</span>
+</span><span id="main-487"><a href="#main-487"><span class="linenos">487</span></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Selected tests: none"</span><span class="p">)</span>
+</span><span id="main-488"><a href="#main-488"><span class="linenos">488</span></a>        <span class="k">return</span> <span class="mi">0</span>
+</span><span id="main-489"><a href="#main-489"><span class="linenos">489</span></a>
+</span><span id="main-490"><a href="#main-490"><span class="linenos">490</span></a>    <span class="n">selection</span> <span class="o">=</span> <span class="n">select_tests_with_reasons</span><span class="p">(</span>
+</span><span id="main-491"><a href="#main-491"><span class="linenos">491</span></a>        <span class="n">changed</span><span class="p">,</span> <span class="n">load_test_sources</span><span class="p">(),</span> <span class="n">load_source_modules</span><span class="p">()</span>
+</span><span id="main-492"><a href="#main-492"><span class="linenos">492</span></a>    <span class="p">)</span>
+</span><span id="main-493"><a href="#main-493"><span class="linenos">493</span></a>    <span class="n">print_selection</span><span class="p">(</span><span class="n">changed</span><span class="p">,</span> <span class="n">selection</span><span class="p">)</span>
+</span><span id="main-494"><a href="#main-494"><span class="linenos">494</span></a>    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">dry_run</span><span class="p">:</span>
+</span><span id="main-495"><a href="#main-495"><span class="linenos">495</span></a>        <span class="k">return</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">strict</span> <span class="ow">and</span> <span class="n">selection</span><span class="o">.</span><span class="n">uncovered</span> <span class="k">else</span> <span class="mi">0</span>
+</span><span id="main-496"><a href="#main-496"><span class="linenos">496</span></a>
+</span><span id="main-497"><a href="#main-497"><span class="linenos">497</span></a>    <span class="n">pytest_args</span> <span class="o">=</span> <span class="n">pytest_arguments</span><span class="p">(</span><span class="n">selection</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">push_gate</span><span class="p">)</span>
+</span><span id="main-498"><a href="#main-498"><span class="linenos">498</span></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">pytest_args</span><span class="p">:</span>
+</span><span id="main-499"><a href="#main-499"><span class="linenos">499</span></a>        <span class="k">return</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">strict</span> <span class="ow">and</span> <span class="n">selection</span><span class="o">.</span><span class="n">uncovered</span> <span class="k">else</span> <span class="mi">0</span>
+</span><span id="main-500"><a href="#main-500"><span class="linenos">500</span></a>    <span class="c1"># executable and paths are controlled here.</span>
+</span><span id="main-501"><a href="#main-501"><span class="linenos">501</span></a>    <span class="n">rc</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">call</span><span class="p">(</span>  <span class="c1"># nosec B603</span>
+</span><span id="main-502"><a href="#main-502"><span class="linenos">502</span></a>        <span class="p">[</span><span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span> <span class="s2">"-m"</span><span class="p">,</span> <span class="s2">"pytest"</span><span class="p">,</span> <span class="s2">"-q"</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">push_gate</span> <span class="k">else</span> <span class="s2">"-v"</span><span class="p">,</span> <span class="o">*</span><span class="n">pytest_args</span><span class="p">],</span> <span class="n">cwd</span><span class="o">=</span><span class="n">REPO_ROOT</span>
+</span><span id="main-503"><a href="#main-503"><span class="linenos">503</span></a>    <span class="p">)</span>
+</span><span id="main-504"><a href="#main-504"><span class="linenos">504</span></a>    <span class="c1"># pytest exits 5 when markers leave nothing to run, which is not a push failure.</span>
+</span><span id="main-505"><a href="#main-505"><span class="linenos">505</span></a>    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">push_gate</span> <span class="ow">and</span> <span class="n">rc</span> <span class="o">==</span> <span class="mi">5</span><span class="p">:</span>
+</span><span id="main-506"><a href="#main-506"><span class="linenos">506</span></a>        <span class="k">return</span> <span class="mi">0</span>
+</span><span id="main-507"><a href="#main-507"><span class="linenos">507</span></a>    <span class="k">if</span> <span class="n">rc</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">args</span><span class="o">.</span><span class="n">strict</span> <span class="ow">and</span> <span class="n">selection</span><span class="o">.</span><span class="n">uncovered</span><span class="p">:</span>
+</span><span id="main-508"><a href="#main-508"><span class="linenos">508</span></a>        <span class="k">return</span> <span class="mi">1</span>
+</span><span id="main-509"><a href="#main-509"><span class="linenos">509</span></a>    <span class="k">return</span> <span class="n">rc</span>
 </span></pre></div>
 
 
