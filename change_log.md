@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [0.1.1]
 
 - Generated HTTP products use explicit child filesystem inheritance and database authority only for CRUD. Runners bound filesystem access to reads in static/ and data/ and writes in data/; this preserves portability without embedding build-machine paths. Existing real acceptance tests and a new actual-VM out-of-scope read denial verify the migration.
+### Added
+
+- An optional `[context_library]` config section points implementation and
+  remediation workers at an operator's private context library. It is off by
+  default, excludes reviewers and the local model, grants no authority, and
+  `howlplane doctor` reports its status. See `documentation/CONTEXT_LIBRARY.md`.
+
 ### Security
 
 - HowlPlane no longer signs the HowlChangeOps approval it waits for (issues.md #20).
