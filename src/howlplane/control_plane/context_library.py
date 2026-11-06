@@ -11,6 +11,7 @@ A bad configuration never blocks work: the worker runs without the section, and
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,7 +101,9 @@ def _inline_text(library: ContextLibrary) -> str:
     raw = (library.root / library.index).read_bytes()
     if len(raw) > library.max_bytes:
         raise ValueError(f"{library.index} is larger than max_bytes ({library.max_bytes})")
-    return redact_sensitive_data(raw.decode("utf-8"))
+    text = redact_sensitive_data(raw.decode("utf-8"))
+    # Library text must not be able to close its own delimiter and pose as instructions.
+    return re.sub(r"(?i)</?\s*operator_context\s*>", "[operator_context tag removed]", text)
 
 
 def prompt_section(library: ContextLibrary) -> str:
