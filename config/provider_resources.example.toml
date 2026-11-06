@@ -70,3 +70,8 @@ cooldown_seconds = 300
 # decision_roles = ["implementation", "remediation"]
 # strict = false              # true blocks routing on an untrusted semantic result
 # allow_in_local_only = false # HowlInstinct may use a remote provider, so off in local_only
+
+# Optional private context for implementation workers. See documentation/CONTEXT_LIBRARY.md.
+# [context_library]
+# path = "~/context-library"
+# mode = "pointer"

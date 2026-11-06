@@ -23,6 +23,13 @@ All notable changes to this project will be documented in this file.
   Bounded execution never calls `approve`: without an approval it stops with the
   exact commands to run and the task stays resumable.
 
+### Added
+
+- An optional `[context_library]` config section points implementation and
+  remediation workers at an operator's private context library. It is off by
+  default, excludes reviewers and the local model, grants no authority, and
+  `howlplane doctor` reports its status. See `documentation/CONTEXT_LIBRARY.md`.
+
 ### Changed
 
 - Compile portable candidate-assessment and unchanged project-context sources

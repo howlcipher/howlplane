@@ -287,6 +287,13 @@ def check_operating_mode(cfg: Optional[Dict] = None) -> DiagnosticCheck:
         )
 
 
+def check_context_library() -> DiagnosticCheck:
+    """Reports the optional operator context library, without reading it into any prompt."""
+    from howlplane.control_plane.context_library import diagnostic
+
+    return DiagnosticCheck(**diagnostic())
+
+
 def check_ai_resources(provider_pool: Optional[Any] = None) -> List[DiagnosticCheck]:
     """Reports configured resource readiness without consuming generation."""
     try:
@@ -401,6 +408,7 @@ def run_diagnostics(
         check_operating_mode(),
     ]
     checks.extend(check_ai_resources(provider_pool))
+    checks.append(check_context_library())
     checks.append(check_state_dir())
     checks.append(check_disk_space())
     linger = check_linger()
