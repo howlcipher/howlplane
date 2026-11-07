@@ -845,3 +845,19 @@ def test_saved_auth_required_is_not_cleared_by_a_readiness_recheck(tmp_path):
 
     assert backend.probe_calls == 0
     assert decision.exclusion_for("expired").reason == "AUTH_REQUIRED"
+
+
+def test_launch_recorded_missing_executable_is_rechecked_once_reinstalled(tmp_path):
+    """A launch that found no binary records the status, not the readiness
+    (issues.md #22); the resource must not stay excluded after reinstalling."""
+    reinstalled = CountingBackend("resource", ReadinessStatus.READY)
+    pool = make_pool([make_profile("resource")], backends={"resource": reinstalled},
+                     state_path=tmp_path / "capacity.json")
+    state = pool.get_resource_status("resource")
+    state.status = ProviderAvailabilityStatus.MISSING_EXECUTABLE
+    assert state.readiness == ReadinessStatus.READY
+
+    decision = pool.select_resource(make_task(), role="implementation")
+
+    assert reinstalled.probe_calls == 2  # once on start, once to recheck
+    assert decision.selected is not None and decision.selected.resource_id == "resource"
