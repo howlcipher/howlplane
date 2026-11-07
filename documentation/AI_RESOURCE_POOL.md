@@ -153,8 +153,19 @@ diversity does not weaken required review.
 Headless CLI providers (such as Claude Code) require explicit tool permissions
 to perform unattended implementation or remediation work without waiting for an
 interactive terminal prompt. HowlPlane derives these per-invocation permissions
-from the target project's discovered test/build/lint verification commands and
-read-only Git commands.
+from the target project's discovered test/build/lint verification commands,
+read-only Git commands, and `howlplane tia record`, which the implementation
+prompt requires before a task can complete. Claude's prompt names the exact
+shell commands it holds.
+
+Review roles hold file tools only (Read, Glob, Grep) and are told so. A
+reviewer refused a command it was never granted keeps its answer, and the
+refused commands are recorded as `read_only_role_denials`; the review parser
+still decides whether the answer is a valid verdict. Mutating roles still fail
+closed on a refusal.
+
+With an explicit agent (`--agent X`), failover stays on X: once X is attempted,
+the other workers are reported as `EXPLICIT_AGENT_REQUESTED` rather than tried.
 
 Operators can configure overrides under `[ai_resources.providers.<name>.execution_profile]`:
 * `extra_allowed_bash`: list of additional command patterns to permit (e.g. `["pytest -q:*"]`).

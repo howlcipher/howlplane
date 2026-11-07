@@ -89,6 +89,37 @@ def test_status_before_start_has_machine_readable_not_started(product):
     assert document["operator"]["next_action"]["command"] == "howlplane start"
 
 
+def _seed_task_run(repo, task_id, state):
+    from howlplane.control_plane.task_spec import TaskSpec
+    run_dir = repo / ".task_runs" / task_id
+    run_dir.mkdir(parents=True)
+    TaskSpec(task_id=task_id, repository=str(repo), objective="Fix divide",
+             current_state=state).save_to_file(run_dir / "task.yaml")
+
+
+def test_status_surfaces_a_work_task_waiting_on_the_owner(product):
+    # A `howlplane work` run that hit the human gate lives in .task_runs/, not Factory
+    # state; status must not report READY over it.
+    _seed_task_run(product.repo, "OBJ-1", "awaiting_human")
+    _seed_task_run(product.repo, "OBJ-0", "complete")
+    code, out, _ = product.run("status")
+    assert code == 0 and "OWNER REQUIRED" in out and "READY" not in out.replace("OWNER REQUIRED", "")
+    assert "howlplane approve OBJ-1" in out and "howlplane reject OBJ-1" in out
+    assert "OBJ-0" not in out and "howlplane logs" not in out
+    code, out, _ = product.run("status", "--json")
+    operator = json.loads(out)["operator"]
+    assert operator["owner_required"] is True and operator["reason_code"] == "OWNER_REQUIRED"
+    assert operator["next_action"]["command"] == "howlplane approve OBJ-1"
+    code, out, _ = product.run()
+    assert "howlplane approve OBJ-1" in out
+
+
+def test_status_ignores_finished_work_task_runs(product):
+    _seed_task_run(product.repo, "OBJ-0", "complete")
+    code, out, _ = product.run("status", "--json")
+    assert json.loads(out)["operator"]["reason_code"] == "NOT_STARTED"
+
+
 def test_status_verbose_keeps_the_project_diagnostics(product):
     code, out, _ = product.run("status", "--verbose")
     assert code == 0 and "PROJECT STATUS" in out and "Repository Path:" in out

@@ -197,6 +197,47 @@ _PERMISSION_BLOCK_MARKERS = (
 )
 
 
+READ_ONLY_ROLE_NOTE = (
+    "You have read-only file tools (Read, Glob, Grep) and no shell in this role. "
+    "Do not try to run commands, tests or git: review from the change shown above and "
+    "the repository files. HowlPlane runs the verification plan itself."
+)
+
+def _tool_bounds_note(profile: ProviderExecutionProfile) -> str:
+    """Tells Claude the tool bounds it actually holds, so it does not spend a run on refusals.
+
+    Without this a reviewer tried to run the tests and an implementer chained `cat`
+    calls; each refusal failed the run (Objective 1 dogfood, issues.md #25).
+    """
+    if not profile.bash_specifiers:
+        return READ_ONLY_ROLE_NOTE
+    commands = ", ".join(
+        f"`{spec[len('Bash('):-1].replace(':*', ' ...')}`" for spec in profile.bash_specifiers
+    )
+    return (
+        "Use Read, Glob and Grep to read files, never `cat`, `ls` or `head`. Your shell is "
+        f"limited to: {commands}. Any other command is refused, and a refusal fails the task."
+    )
+
+
+# Metadata key for commands a read-only role asked for and was refused, recorded
+# while its verdict is kept.
+READ_ONLY_DENIALS_KEY = "read_only_role_denials"
+
+
+def _verdict_survives_denial(role: str, text: Any, envelope: Dict[str, Any]) -> bool:
+    """True when a refused tool call does not invalidate a read-only role's answer.
+
+    Mutating roles keep failing closed: there a denial means work was not done. A
+    read-only role was never granted the command, so the refusal is the boundary
+    working; what matters is whether it still returned an answer. Whether that
+    answer is a valid verdict is decided downstream by the review parser.
+    """
+    if is_mutating_role(role) or envelope.get("is_error") is True:
+        return False
+    return isinstance(text, str) and bool(text.strip())
+
+
 def _parse_claude_result_envelope(stdout: str) -> Optional[Dict[str, Any]]:
     """Returns the `--output-format json` result object, or None if absent."""
     text = (stdout or "").strip()
@@ -856,6 +897,7 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
         **kwargs,
     ) -> List[str]:
         profile = self.build_execution_profile(task, cwd, role)
+        prompt = f"{prompt}\n\n{_tool_bounds_note(profile)}"
         cmd = ["claude", "-p", prompt, "--output-format", "json"]
         allowed = profile.allowed_tools()
         if allowed:
@@ -931,6 +973,13 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
             # a permission failure rather than a silent empty success.
             denied_tools = ["unreported"]
 
+        if denied_tools and _verdict_survives_denial(role, text, envelope):
+            # A read-only role was refused a command it was never granted, yet still
+            # returned its verdict. The refusal is evidence, not a provider failure:
+            # failing here discarded every Claude review and benched Claude from
+            # review roles (Objective 1 dogfood, 2026-11-07).
+            result.metadata[READ_ONLY_DENIALS_KEY] = denied_commands or denied_tools
+            denied_tools = []
         if denied_tools:
             result.metadata[TOOL_PERMISSION_KEY] = TOOL_PERMISSION_DENIED
             result.metadata["denied_tools"] = denied_tools

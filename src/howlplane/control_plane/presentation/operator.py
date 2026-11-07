@@ -410,6 +410,24 @@ def not_started_status(ready: bool, project: Optional[str] = None, next_command:
         next_action=OperatorAction(next_message or "Prepare this repository first.", next_command or "howlplane setup"))
 
 
+def awaiting_task_status(task_ids: List[str]) -> OperatorStatus:
+    """The operator view when `howlplane work` task runs wait on an owner decision.
+
+    These runs live in the repository's ``.task_runs/`` rather than in Factory
+    state, so without this view ``status`` would report READY over a pending gate.
+    """
+    first = task_ids[0]
+    subject = f"task {first}" if len(task_ids) == 1 else f"{len(task_ids)} tasks"
+    return OperatorStatus(
+        state="awaiting_human", label="OWNER REQUIRED", severity=Severity.ATTENTION,
+        summary=f"{subject[0].upper()}{subject[1:]} {'is' if len(task_ids) == 1 else 'are'} waiting for your decision.",
+        reason_code=ReasonCode.OWNER_REQUIRED, owner_required=True, recovery="manual",
+        current_work=first, blockers=[f"{t}: awaiting human approval" for t in task_ids],
+        next_action=OperatorAction(
+            f"Read .task_runs/{first}/decision_packet.md, then decide:",
+            f"howlplane approve {first}", alternatives=[f"howlplane reject {first}"]))
+
+
 _HEALTH = {Severity.OK: "Healthy", Severity.INFO: "Healthy", Severity.ATTENTION: "Needs attention",
            Severity.ERROR: "Unhealthy"}
 

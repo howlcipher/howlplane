@@ -444,7 +444,8 @@ findings:
 # 7. CLI Integration: `ai work --execute` and `ai status`
 # ============================================================================
 
-def test_cli_work_execute_and_status(tmp_path, monkeypatch, capsys):
+def _use_unprobed_pool(monkeypatch):
+    """Route CLI commands through a pool that never probes the real agent CLIs."""
     from howlplane.control_plane import launcher as launcher_module
     from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 
@@ -454,6 +455,10 @@ def test_cli_work_execute_and_status(tmp_path, monkeypatch, capsys):
         "from_config",
         classmethod(lambda cls, **kwargs: pool),
     )
+
+
+def test_cli_work_execute_and_status(tmp_path, monkeypatch, capsys):
+    _use_unprobed_pool(monkeypatch)
     repo = _init_test_git_repo(tmp_path / "cli_repo")
     private_control_plane(monkeypatch, tmp_path)
     parser = build_parser()
@@ -472,3 +477,20 @@ def test_cli_work_execute_and_status(tmp_path, monkeypatch, capsys):
     out_status = capsys.readouterr().out
     assert "AI CONTROL PLANE — PROJECT STATUS" in out_status
     assert "ACTIVE TASK RUNS (1):" in out_status
+
+
+def test_cli_work_dry_run_with_agent_override_reports_the_override(tmp_path, monkeypatch, capsys):
+    """`work --agent X --dry-run` must print the override note, not crash."""
+    _use_unprobed_pool(monkeypatch)
+    repo = _init_test_git_repo(tmp_path / "override_repo")
+    private_control_plane(monkeypatch, tmp_path)
+    parser = build_parser()
+
+    args = parser.parse_args(
+        ["work", "Improve auth logging", "--repo", str(repo), "--agent", "codex", "--dry-run", "--skip-doctor"]
+    )
+    ret = cmd_work(args)
+    out = capsys.readouterr().out
+    assert ret == 0, out
+    assert "Override Note:" in out
+    assert "(`codex`)" in out

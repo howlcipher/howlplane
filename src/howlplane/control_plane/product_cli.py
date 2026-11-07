@@ -98,9 +98,35 @@ def _not_started(args: argparse.Namespace) -> Tuple[Any, Dict[str, Any], Optiona
                                    "This directory is not a Git repository.",
                                    "Go into the repository you want HowlPlane to work on, then run:"),
                 {"state": "not_started"}, None)
+    awaiting = _awaiting_task_runs(args)
+    if awaiting:
+        from howlplane.control_plane.presentation.operator import awaiting_task_status
+        return awaiting_task_status(awaiting), {**status, "state": "awaiting_human"}, workers
     if blocked is not None or report["needs_preparation"] or report["factory"] == "blocked":
         return not_started_status(False), status, workers
     return not_started_status(True), status, workers
+
+
+def _awaiting_task_runs(args: argparse.Namespace) -> list:
+    """IDs of `howlplane work` task runs in this repository waiting on an owner decision."""
+    from howlplane.control_plane.factory.campaign import CampaignError, discover_repository
+    from howlplane.control_plane.task_spec import TaskSpec
+    try:
+        root = discover_repository(_repo_start(args)).root
+    except CampaignError:
+        return []
+    runs_dir = Path(root) / ".task_runs"
+    if not runs_dir.is_dir():
+        return []
+    awaiting = []
+    for spec_file in sorted(runs_dir.glob("*/task.yaml")):
+        try:
+            spec = TaskSpec.load_from_file(spec_file)
+        except Exception:
+            continue  # an unreadable run is reported by `status --verbose`, not guessed at here
+        if spec.current_state == "awaiting_human":
+            awaiting.append(spec.task_id)
+    return awaiting
 
 
 def _collect(args: argparse.Namespace):
@@ -143,6 +169,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     details = ["howlplane status --verbose",
                "howlplane logs --errors" if operator.severity.value in ("attention", "error")
                else "howlplane logs --follow"]
+    if operator.state == "awaiting_human":
+        details = ["howlplane status --verbose"]  # `work` task runs keep no Factory logs
     print("\n".join(render_operator_text(operator, status, _style(), title="HowlPlane", details=details)))
     return 0
 

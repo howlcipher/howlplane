@@ -466,6 +466,14 @@ def _print_orchestration_summary(
         non_independent = set(getattr(last_cycle, "non_independent_roles", []) or [])
         for role_id in decision.recommended_reviewers:
             role_res = last_cycle.reviewer_results.get(role_id)
+            earlier = False
+            if role_res is None:
+                # Re-review cycles only re-run roles that still had findings, so a role that
+                # came back clean earlier has its verdict in an earlier cycle, not "not run".
+                for cycle in reversed(res.review_cycles[:-1]):
+                    if role_id in cycle.reviewer_results:
+                        role_res, earlier = cycle.reviewer_results[role_id], True
+                        break
             role_label = role_id.replace("-reviewer", "").capitalize()
             if role_res is None:
                 status_text = "NOT RUN"
@@ -476,6 +484,8 @@ def _print_orchestration_summary(
                 status_text = f"{sev_summary} → REMEDIATED" if res.final_state == "complete" and res.remediation_cycles_count > 0 else f"{sev_summary} ({len(role_res.findings)} findings)"
             else:
                 status_text = "PASS"
+            if earlier:
+                status_text = f"{status_text} (earlier cycle, not re-reviewed)"
             if role_id in non_independent:
                 status_text = f"{status_text} ⚠ SELF-REVIEW (implementer)"
             print(f"  {role_label:<17} {status_text}")
@@ -590,7 +600,7 @@ def cmd_work(args: argparse.Namespace) -> int:
     print(f"Risk Level:           {spec.risk_level.upper()}")
     print(f"Reasoning Tier:       {decision.reasoning_tier}")
     if decision.is_override:
-        print(f"Override Note:        {decision.override_reason}")
+        print(f"Override Note:        {decision.rationale}")
     if df_mode == "shadow" and shadow_audit_res:
         print("-" * 60)
         print("HOWLFRAME SHADOW AUDIT (DOGFOODING):")

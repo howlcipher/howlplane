@@ -171,3 +171,41 @@ def test_howlframe_persisted_audit_file_preferred(tmp_path, capsys):
     out = _render_summary(res, capsys)
     assert "HowlFrame:       PASS" in out
     assert "MISMATCH" not in out
+
+
+def test_review_summary_keeps_an_earlier_clean_verdict_for_a_role_not_re_reviewed(capsys):
+    """Re-review cycles only re-run roles that still had findings. A role that was clean
+    in an earlier cycle must show that verdict, not "NOT RUN" (seen dogfooding OBJ1-AGY)."""
+    from howlplane.control_plane.reconciliation import ReviewFinding
+    from howlplane.control_plane.review_runner import ReviewCycleResult, SingleReviewResult
+
+    def result(role, findings=()):
+        return SingleReviewResult(reviewer_role=role, reviewer_name=role, status="clean" if not findings else "has_findings",
+                                  findings=list(findings))
+
+    nit = ReviewFinding(id="F1", reviewer_role="test-falsifier", title="nit", severity="low",
+                        category="test", description="d")
+    first = ReviewCycleResult(cycle_index=1, reviewer_results={
+        "correctness-reviewer": result("correctness-reviewer"),
+        "test-falsifier": result("test-falsifier", [nit]),
+        "simplicity-reviewer": result("simplicity-reviewer"),
+    })
+    last = ReviewCycleResult(cycle_index=2, reviewer_results={
+        "correctness-reviewer": result("correctness-reviewer"),
+        "test-falsifier": result("test-falsifier", [nit]),
+    })
+    res = OrchestrationResult(
+        task_id="TASK-REV-01",
+        task_spec=TaskSpec(task_id="TASK-REV-01", repository="test_repo", objective="x"),
+        final_state="awaiting_human", exit_code=2, review_cycles=[first, last],
+    )
+    ctx = ProjectContext(project_root=".", name="test_repo")
+    decision = RoutingDecision(selected_agent_id="agy", selected_agent_name="AGY", reasoning_tier="tier_2",
+                               rationale="test", recommended_reviewers=[
+                                   "correctness-reviewer", "test-falsifier", "simplicity-reviewer", "security-reviewer"])
+    _print_orchestration_summary(res, ctx, res.task_spec, decision)
+    out = capsys.readouterr().out
+    assert "Simplicity        PASS (earlier cycle, not re-reviewed)" in out
+    assert "Correctness       PASS\n" in out
+    assert "Test-falsifier    LOW (1 findings)" in out
+    assert "Security          NOT RUN" in out  # a role that never ran still says so

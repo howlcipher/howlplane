@@ -11,6 +11,8 @@ from unittest.mock import patch
 import pytest
 
 from howlplane.control_plane.agent_execution import (
+    READ_ONLY_DENIALS_KEY,
+    READ_ONLY_ROLE_NOTE,
     TOOL_PERMISSION_DENIED,
     TOOL_PERMISSION_KEY,
     ClaudeCodeBackend,
@@ -20,6 +22,7 @@ from howlplane.control_plane.orchestrator import (
     GovernedTaskOrchestrator,
 )
 from howlplane.control_plane.provider_execution_profile import (
+    HOWLPLANE_EVIDENCE_SPECIFIERS,
     MUTATION_PERMISSION_MODE,
     READ_ONLY_GIT_SPECIFIERS,
     READ_ONLY_TOOLS,
@@ -421,6 +424,67 @@ def test_denial_without_command_detail_still_reports_the_tool(tmp_path):
     assert "Bash" in res.error_message
 
 
+@pytest.mark.parametrize("role", ["review", "correctness-reviewer", "test-falsifier"])
+def test_read_only_role_keeps_its_verdict_when_refused_a_command_it_was_not_granted(tmp_path, role):
+    """A reviewer asking for pytest and being refused is the boundary working.
+
+    Failing the run discarded every Claude review and benched Claude from review
+    roles (57 consecutive failures, Objective 1 dogfood 2026-11-07).
+    """
+    verdict = "I could not run pytest (requires approval). From the diff:\n```yaml\nfindings: []\n```"
+    res = _execute_with_envelope(
+        _denial_envelope(verdict, "Bash", "python3 -m pytest -q"), tmp_path, role=role
+    )
+
+    assert res.success is True
+    assert TOOL_PERMISSION_KEY not in res.metadata
+    assert res.metadata[READ_ONLY_DENIALS_KEY] == ["python3 -m pytest -q"]
+    assert "findings: []" in res.stdout
+
+
+def test_read_only_role_still_fails_on_a_terminal_error_or_an_empty_answer(tmp_path):
+    error = json.dumps({"type": "result", "result": "Usage limit reached", "is_error": True,
+                        "permission_denials": [{"tool_name": "Bash"}]})
+    assert _execute_with_envelope(error, tmp_path, role="review").success is False
+    empty = _denial_envelope("", "Bash", "pytest")
+    res = _execute_with_envelope(empty, tmp_path, role="review")
+    assert res.success is False
+    assert res.metadata.get(TOOL_PERMISSION_KEY) == TOOL_PERMISSION_DENIED
+
+
+def test_mutating_role_denial_still_fails_closed(tmp_path):
+    res = _execute_with_envelope(
+        _denial_envelope("Done, but pytest was refused.", "Bash", "pytest"), tmp_path, role="remediation"
+    )
+    assert res.success is False
+    assert READ_ONLY_DENIALS_KEY not in res.metadata
+
+
+def test_only_a_shell_less_role_is_told_it_has_no_shell(tmp_path):
+    backend = ClaudeCodeBackend()
+    review = backend.build_command(_sample_task(), tmp_path, "correctness-reviewer", "PROMPT")
+    implementation = backend.build_command(_sample_task(), tmp_path, "implementation", "PROMPT")
+    assert READ_ONLY_ROLE_NOTE in review[2]
+    assert READ_ONLY_ROLE_NOTE not in implementation[2]
+
+
+@pytest.mark.parametrize("role", ["implementation", "remediation"])
+def test_mutating_roles_may_run_the_tia_command_their_prompt_requires(tmp_path, role):
+    """The implementation prompt says the task cannot complete without
+    `howlplane tia record`; refusing it failed every Claude implementation."""
+    profile = _profile_for(tmp_path, role)
+    assert "Bash(howlplane tia record:*)" in profile.bash_specifiers
+    assert not _admitting_rules(profile, "howlplane approve TASK-1")
+    assert "Bash(howlplane tia record:*)" not in _profile_for(tmp_path, "review").bash_specifiers
+
+
+def test_an_implementer_is_told_exactly_which_shell_commands_it_holds(tmp_path):
+    prompt = ClaudeCodeBackend().build_command(_sample_task(), tmp_path, "implementation", "PROMPT")[2]
+    assert "never `cat`" in prompt
+    assert "`howlplane tia record ...`" in prompt and "`git diff ...`" in prompt
+    assert READ_ONLY_ROLE_NOTE not in prompt
+
+
 def test_mixed_named_and_unnamed_bash_denials_keep_both_evidence_kinds(tmp_path):
     backend = ClaudeCodeBackend()
     envelope = json.dumps({
@@ -795,7 +859,7 @@ def test_task_verification_command_is_granted_to_mutating_roles_through_the_deny
         assert granted in implementation.bash_specifiers
         assert "task_verification" in implementation.derivation["bash_sources"]
     else:
-        assert implementation.bash_specifiers == READ_ONLY_GIT_SPECIFIERS
+        assert implementation.bash_specifiers == READ_ONLY_GIT_SPECIFIERS + HOWLPLANE_EVIDENCE_SPECIFIERS
     assert review.bash_specifiers == ()
 
 

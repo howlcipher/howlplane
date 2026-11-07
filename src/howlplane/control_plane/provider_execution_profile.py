@@ -67,6 +67,13 @@ READ_ONLY_GIT_SPECIFIERS: Tuple[str, ...] = (
     "Bash(git show:*)",
 )
 
+# HowlPlane's own evidence commands that the implementation prompt requires a
+# worker to run. Granting fewer made the prompt demand a command the profile
+# refused, which failed every Claude implementation (Objective 1 dogfood).
+HOWLPLANE_EVIDENCE_SPECIFIERS: Tuple[str, ...] = (
+    "Bash(howlplane tia record:*)",
+)
+
 # Permission modes an operator may select. `bypassPermissions` is intentionally
 # absent -- HowlPlane keeps explicit capability boundaries.
 ALLOWED_PERMISSION_MODES: Tuple[str, ...] = ("acceptEdits", "plan", "manual", "dontAsk")
@@ -327,7 +334,7 @@ def build_execution_profile(
             if specifier and specifier not in bash:
                 bash.append(specifier)
                 derived_from.append("task_verification")
-        for specifier in READ_ONLY_GIT_SPECIFIERS:
+        for specifier in READ_ONLY_GIT_SPECIFIERS + HOWLPLANE_EVIDENCE_SPECIFIERS:
             if specifier not in bash:
                 bash.append(specifier)
         for extra in _operator_value(operator_settings, "extra_allowed_bash", []):
