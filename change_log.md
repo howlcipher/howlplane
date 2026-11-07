@@ -6,6 +6,33 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Found by dogfooding a real task through every local agent (Objective 1):
+  - `howlplane work --agent X` without `--execute` crashed with `AttributeError:
+    'RoutingDecision' object has no attribute 'override_reason'`. It now prints the
+    routing rationale as the override note.
+  - `howlplane status` and bare `howlplane` reported READY while a `howlplane work`
+    task waited at the human gate, because the operator view read only Factory
+    state. They now show OWNER REQUIRED with `howlplane approve <id>` (and reject),
+    in text and in the `howlplane.operator.status/v1` JSON.
+  - The task summary printed `NOT RUN` for a reviewer that came back clean in an
+    earlier cycle, because re-review cycles only re-run roles that still had
+    findings. It now shows that verdict, marked as from an earlier cycle.
+  - Claude Code could not serve as a reviewer. Review roles hold file tools only,
+    the prompt did not say so, and when Claude asked to run the tests the refusal
+    discarded its whole verdict and benched it from review (57 failures in a row).
+    A shell-less role is now told it has no shell, and a refused command no longer
+    voids an answer the review parser accepts; the refusal is recorded as
+    `read_only_role_denials`. No permission was widened (issues.md #25).
+  - Claude Code could not complete an implementation. The implementation prompt
+    requires `howlplane tia record`, but the Claude profile refused it, and Claude
+    also chained `cat` calls the profile never granted. Mutating roles now hold
+    `Bash(howlplane tia record:*)`, and Claude's prompt names the exact shell
+    commands it holds and tells it to read files with Read, Glob and Grep.
+  - With `--agent X`, failover after X is attempted reported "eligible: none" and
+    left the other healthy workers out of the exclusion list. The pin is kept (the
+    operator asked for X), and each passed-over worker is now listed as
+    `EXPLICIT_AGENT_REQUESTED` at stage `operator_override`. The same reason now
+    explains `howlplane route --agent <unknown>`.
 - A worker whose launch found no binary is no longer excluded forever. The launch
   recorded status `MISSING_EXECUTABLE` but left readiness `READY`, with no cooldown,
   and the selection recheck read only readiness, so reinstalling the CLI did not
