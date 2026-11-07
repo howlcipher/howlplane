@@ -669,6 +669,27 @@ def test_explicit_override_bypasses_recommendation_but_not_hard_policy():
     assert allowed.explicit_override is True
     assert blocked.status == ResourceSelectionStatus.BLOCKED
     assert blocked.exclusion_for("requested").reason == "AUTH_REQUIRED"
+    # The healthy resource the pin passed over is named, not silently dropped.
+    passed_over = blocked.exclusion_for("first")
+    assert passed_over.reason == "EXPLICIT_AGENT_REQUESTED"
+    assert passed_over.stage == "operator_override" and passed_over.detail == "requested"
+    assert blocked.eligible_resources == []
+
+
+def test_pinned_failover_names_the_workers_it_did_not_offer():
+    """`work --agent X`: once X is attempted, the others are reported as passed over
+    by the pin rather than vanishing (Objective 1 dogfood, OBJ1-CLAUDE)."""
+    pool = make_pool([make_profile("first"), make_profile("requested")])
+
+    decision = pool.select_resource(
+        make_task(preferred="requested"),
+        role="implementation",
+        exclude_resource_ids=["requested"],
+    )
+
+    assert decision.status == ResourceSelectionStatus.BLOCKED
+    assert decision.exclusion_for("requested").reason == "ALREADY_ATTEMPTED"
+    assert decision.exclusion_for("first").reason == "EXPLICIT_AGENT_REQUESTED"
 
 
 @pytest.mark.parametrize(

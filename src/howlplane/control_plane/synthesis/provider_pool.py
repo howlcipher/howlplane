@@ -1607,6 +1607,11 @@ class ProviderPoolManager:
                 None,
             )
             if selected is None:
+                # The request pins one resource, so the others are not offered. Say so:
+                # dropping them silently printed "eligible: none" next to two healthy
+                # workers, and hid that `--agent` also pins failover.
+                for profile in candidates:
+                    exclude(profile, "EXPLICIT_AGENT_REQUESTED", "operator_override", explicit_id)
                 candidates = []
         elif candidates:
             selected = candidates[0]

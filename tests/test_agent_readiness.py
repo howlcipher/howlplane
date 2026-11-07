@@ -68,6 +68,8 @@ def smoke_permission(agent):
 SMOKES = {
     "pass": smoke_pass,
     "permission": smoke_permission,
+    "denied_but_answered": lambda agent: (
+        f"printf '%s\\n' '{ENVELOPE % (readiness.SMOKE_TOKEN, '[{\"tool_name\":\"Bash\"}]')}'"),
     "failure": lambda agent: "echo 'unexpected internal failure' >&2; exit 1",
     "quota": lambda agent: "echo 'Error: quota exhausted for this account' >&2; exit 1",
     "rate": lambda agent: "echo 'HTTP 429 Too Many Requests' >&2; exit 1",
@@ -206,6 +208,13 @@ def test_permission_prompt_marks_the_cli_interactive_only(tmp_path, monkeypatch,
     assert summary["unattended_execution"] is False
     assert "BLOCKED — permission required" in readiness.render([summary])
     assert "INTERACTIVE_ONLY" in readiness.render([summary])
+
+
+def test_claude_refused_a_tool_but_answering_the_smoke_passes(tmp_path, monkeypatch):
+    """The smoke runs as a read-only role: a refusal alone no longer fails the run."""
+    install(tmp_path, monkeypatch, agents=["claude_code"], smoke="denied_but_answered")
+    summary = by_agent(readiness.evaluate(["claude_code"], live=True, smoke_timeout=10))["claude_code"]
+    assert summary["live_smoke"]["status"] == "PASS"
 
 
 @pytest.mark.parametrize("agent", AGENTS)

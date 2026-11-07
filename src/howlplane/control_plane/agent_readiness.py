@@ -375,8 +375,15 @@ def run_smoke(agent: str, timeout: int, at: datetime, workspace: str | None = No
             result, latency = invoke(scratch)
     text = f"{result.stdout}\n{result.stderr}"
     failure = None if result.success else ProviderPoolManager.classify_result(agent, result).value
+    from howlplane.control_plane.agent_execution import READ_ONLY_DENIALS_KEY
+
     if result.success and SMOKE_TOKEN in result.stdout:
         status = "PASS"
+    elif result.success and (result.metadata or {}).get(READ_ONLY_DENIALS_KEY):
+        # The smoke runs as a read-only role, where a refusal no longer fails the run
+        # by itself. An answer that is not the token, given after a refusal, is still
+        # a CLI that stops for approval.
+        status, failure = "BLOCKED_PERMISSION", "EXECUTION_PERMISSION_REQUIRED"
     elif result.success:
         status, failure = "FAIL", "MALFORMED_OUTPUT"
     elif failure == "WORKSPACE_TRUST_REQUIRED" or is_workspace_trust_refusal(text, agent):
