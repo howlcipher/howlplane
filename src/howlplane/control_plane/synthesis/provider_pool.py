@@ -735,16 +735,22 @@ class ProviderPoolManager:
         profile: AgentProfile,
         state: ProviderStatus,
     ) -> None:
-        """Re-probes a resource whose saved readiness says its executable is missing.
+        """Re-probes a resource whose saved state says its executable is missing.
 
-        Pools built without probing on start (``howlplane route``, Factory runs)
-        otherwise trust that record forever: nothing expires it, and a probe from a
-        process whose PATH lacked the CLIs, such as a test run, excluded every
-        worker. The readiness probe is local (executable lookup, local runtime
-        diagnostics) and never contacts a hosted provider. Callers apply egress
-        policy first. Authentication and capacity records are left alone.
+        Two records say so, and neither expires. A probe sets readiness: pools
+        built without probing on start (``howlplane route``, Factory runs) trusted
+        it forever, and a probe from a process whose PATH lacked the CLIs, such as a
+        test run, excluded every worker. A launch that found no binary sets the
+        status and leaves readiness ``READY`` (issues.md #22), so the worker stayed
+        excluded after it was reinstalled. The readiness probe is local (executable
+        lookup, local runtime diagnostics) and never contacts a hosted provider.
+        Callers apply egress policy first. Authentication and capacity records are
+        left alone.
         """
-        if state.readiness != ReadinessStatus.MISSING_EXECUTABLE:
+        if (
+            state.readiness != ReadinessStatus.MISSING_EXECUTABLE
+            and state.status != ProviderAvailabilityStatus.MISSING_EXECUTABLE
+        ):
             return
         self._apply_readiness(resource_id, profile, state)
         self._persist()

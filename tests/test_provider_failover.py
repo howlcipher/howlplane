@@ -28,6 +28,7 @@ from howlplane.control_plane.agent_execution import (
     FakeAgentBackend,
     LAUNCH_OUTCOME_KEY,
     LAUNCH_OUTCOME_LAUNCHED,
+    LAUNCH_OUTCOME_NOT_INSTALLED,
     TIMEOUT_SOURCE_HARNESS,
     TIMEOUT_SOURCE_KEY,
     TOOL_PERMISSION_DENIED,
@@ -2051,3 +2052,64 @@ def test_a_findings_free_cycle_still_writes_its_own_reconciliation(tmp_path: Pat
     assert recon_file.is_file(), "a findings-free cycle must still persist its reconciliation"
     assert safe_load_json(recon_file)["summary"]["total_findings"] == 0
     assert "no reviewer findings" in (run_dir / "reconciliation_report.md").read_text()
+
+
+def test_saved_ready_resource_whose_cli_is_gone_fails_over_and_is_marked_missing(tmp_path: Path):
+    """issues.md #22: selection does not re-probe a saved READY (it stays free of
+    capacity side effects), so a worker whose CLI was removed is still offered. The
+    launch must then read as MISSING_EXECUTABLE, fail over, and leave a record that
+    the next selection re-probes instead of trusting."""
+    from howlplane.control_plane.resource_models import (
+        AuthenticationStatus,
+        BackendReadiness,
+        ReadinessStatus,
+    )
+
+    repo = _init_test_repo(tmp_path / "repo")
+    resolver = _FakeBackendResolver({
+        "resource_a": {
+            "success": False,
+            "stderr": "Agent binary 'resource_a' is not installed or available on PATH.",
+            "metadata": {LAUNCH_OUTCOME_KEY: LAUNCH_OUTCOME_NOT_INSTALLED},
+        },
+        "resource_b": {"success": True, "side_effect": _edit_feature_to_true},
+    })
+    installed = {"resource_a": False}
+
+    def probe_resource_a() -> BackendReadiness:
+        present = installed["resource_a"]
+        return BackendReadiness(
+            status=ReadinessStatus.READY if present else ReadinessStatus.MISSING_EXECUTABLE,
+            installed=present,
+            reachable=present,
+            authentication=AuthenticationStatus.UNKNOWN,
+            reason=None if present else "MISSING_EXECUTABLE",
+        )
+
+    resolver("resource_a").probe_readiness = probe_resource_a
+    pool_holder: Dict[str, Any] = {}
+
+    def saved_ready(pool: ProviderPoolManager) -> None:
+        pool_holder["pool"] = pool
+        for resource_id in ("resource_a", "resource_b"):
+            state = pool.get_resource_status(resource_id)
+            state.readiness = ReadinessStatus.READY
+            state.status = ProviderAvailabilityStatus.AVAILABLE
+
+    res = _run_failover_task(repo, resolver, pool_hook=saved_ready)
+
+    assert res.final_state == "complete"
+    assert res.executing_provider == "resource_b"
+    first = res.implementation_attempts[0]
+    assert first["resource_id"] == "resource_a"
+    assert first["failure_class"] == ProviderFailureClass.MISSING_EXECUTABLE.value
+    marked = pool_holder["pool"].get_resource_status("resource_a")
+    assert marked.status == ProviderAvailabilityStatus.MISSING_EXECUTABLE
+
+    # Reinstalled: the next selection re-probes instead of excluding it forever.
+    installed["resource_a"] = True
+    again = pool_holder["pool"].select_resource(
+        _make_task("TEST-FAILOVER-02"), role="implementation", explicit_resource_id="resource_a"
+    )
+    assert again.selected is not None and again.selected.resource_id == "resource_a"
+
