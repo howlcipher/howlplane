@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 import hashlib
+import os
 import re
 import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
@@ -69,6 +70,19 @@ from howlplane.control_plane.config_loader import (
 
 PROVIDER_POOL_SCHEMA_VERSION = "howlplane.provider_pool/v2"
 PROVIDER_CAPACITY_SCHEMA_VERSION = "howlplane.provider_capacity/v1"
+
+
+def default_capacity_path() -> Path:
+    """Where the operator's shared provider capacity state lives.
+
+    ``HOWLPLANE_CAPACITY_PATH`` overrides it, the way ``HOWLPLANE_LOCAL_CONFIG``
+    overrides the local config file; the test suite uses it to keep the
+    operator's file out of reach. Otherwise ``~/.config/howlplane/provider_capacity.json``.
+    """
+    override = os.environ.get("HOWLPLANE_CAPACITY_PATH")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".config" / "howlplane" / "provider_capacity.json"
 
 LOCAL_PROVIDER_IDS = {"local_ollama", "ollama_local"}
 LOCAL_INELIGIBLE_TASK_CLASSES = {"security_patch", "infrastructure"}
@@ -536,10 +550,9 @@ class ProviderPoolManager:
         """Builds a pool from canonical plus operator-local configuration."""
         from howlplane.control_plane.config_loader import default_loader
 
-        capacity_path = Path.home() / ".config" / "howlplane" / "provider_capacity.json"
         return cls.from_settings(
             default_loader.settings,
-            state_path=capacity_path,
+            state_path=default_capacity_path(),
             read_only=read_only,
             probe_on_start=probe_on_start,
         )
@@ -715,6 +728,26 @@ class ProviderPoolManager:
                 else:
                     state.status = ProviderAvailabilityStatus.UNKNOWN
         return readiness
+
+    def _recheck_missing_executable(
+        self,
+        resource_id: str,
+        profile: AgentProfile,
+        state: ProviderStatus,
+    ) -> None:
+        """Re-probes a resource whose saved readiness says its executable is missing.
+
+        Pools built without probing on start (``howlplane route``, Factory runs)
+        otherwise trust that record forever: nothing expires it, and a probe from a
+        process whose PATH lacked the CLIs, such as a test run, excluded every
+        worker. The readiness probe is local (executable lookup, local runtime
+        diagnostics) and never contacts a hosted provider. Callers apply egress
+        policy first. Authentication and capacity records are left alone.
+        """
+        if state.readiness != ReadinessStatus.MISSING_EXECUTABLE:
+            return
+        self._apply_readiness(resource_id, profile, state)
+        self._persist()
 
     def _persist(self) -> None:
         if self._store and not self.read_only:
@@ -1475,6 +1508,7 @@ class ProviderPoolManager:
                 exclude(profile, "TASK_EGRESS_FORBIDDEN", "egress_policy")
                 continue
             self._recover_capacity_if_due(resource_id, profile, state)
+            self._recheck_missing_executable(resource_id, profile, state)
             if state.readiness in {
                 ReadinessStatus.MISSING_EXECUTABLE,
                 ReadinessStatus.AUTH_REQUIRED,

@@ -763,3 +763,85 @@ def test_legacy_settings_load_without_declaring_new_provider_authority():
 
     assert settings.providers == {}
     assert settings.provider_policy.allow_paid_api is False
+
+
+# -- saved MISSING_EXECUTABLE readiness is rechecked, not trusted forever ----------------
+
+
+def _save_missing_executable(path: Path, profile: AgentProfile) -> None:
+    missing = CountingBackend(profile.resource_id, ReadinessStatus.MISSING_EXECUTABLE)
+    make_pool([profile], backends={profile.resource_id: missing}, state_path=path)
+    saved = json.loads(path.read_text())["resources"][profile.resource_id]
+    assert saved["readiness"] == "MISSING_EXECUTABLE"
+
+
+def test_saved_missing_executable_is_rechecked_and_selectable_once_installed(tmp_path):
+    """A test run without the CLIs on PATH saved MISSING_EXECUTABLE for every worker,
+    and `howlplane route` (no probe on start) then excluded them all indefinitely."""
+    path = tmp_path / "capacity.json"
+    profile = make_profile("resource")
+    _save_missing_executable(path, profile)
+    saved_bytes = path.read_bytes()
+
+    installed = CountingBackend("resource", ReadinessStatus.READY)
+    registry = AgentRegistry(agents=[profile])
+    pool = ProviderPoolManager(
+        registry=registry,
+        resources={"resource": ProviderResourceSettings(enabled=True)},
+        backend_resolver=lambda _rid: installed,
+        state_path=path,
+        probe_on_start=False,
+        read_only=True,
+    )
+    decision = pool.select_resource(make_task(), role="implementation")
+
+    assert decision.selected is not None and decision.selected.resource_id == "resource"
+    assert installed.probe_calls == 1
+    assert path.read_bytes() == saved_bytes, "a read-only pool rewrote the capacity file"
+
+
+def test_saved_missing_executable_stays_excluded_when_recheck_confirms_it(tmp_path):
+    path = tmp_path / "capacity.json"
+    profile = make_profile("resource")
+    _save_missing_executable(path, profile)
+
+    still_missing = CountingBackend("resource", ReadinessStatus.MISSING_EXECUTABLE)
+    pool = make_pool(
+        [profile], backends={"resource": still_missing}, state_path=path, probe_on_start=False
+    )
+    decision = pool.select_resource(make_task(), role="implementation")
+
+    assert still_missing.probe_calls == 1
+    assert decision.status == ResourceSelectionStatus.BLOCKED
+    assert decision.exclusion_for("resource").reason == "MISSING_EXECUTABLE"
+
+
+def test_saved_missing_executable_is_not_probed_for_a_no_egress_task(tmp_path):
+    path = tmp_path / "capacity.json"
+    profile = make_profile("hosted")
+    _save_missing_executable(path, profile)
+
+    backend = CountingBackend("hosted", ReadinessStatus.READY)
+    pool = make_pool([profile], backends={"hosted": backend}, state_path=path, probe_on_start=False)
+    decision = pool.select_resource(make_task(no_egress=True), role="implementation")
+
+    assert backend.probe_calls == 0
+    assert decision.exclusion_for("hosted").reason == "TASK_EGRESS_FORBIDDEN"
+
+
+def test_saved_auth_required_is_not_cleared_by_a_readiness_recheck(tmp_path):
+    path = tmp_path / "capacity.json"
+    profile = make_profile("expired")
+    pool = make_pool([profile], state_path=path)
+    pool.record_result("expired", failed_result(
+        "expired", "Failed to authenticate: OAuth session expired and could not be refreshed"
+    ))
+
+    backend = CountingBackend("expired", ReadinessStatus.READY)
+    restarted = make_pool(
+        [profile], backends={"expired": backend}, state_path=path, probe_on_start=False
+    )
+    decision = restarted.select_resource(make_task(), role="implementation")
+
+    assert backend.probe_calls == 0
+    assert decision.exclusion_for("expired").reason == "AUTH_REQUIRED"
