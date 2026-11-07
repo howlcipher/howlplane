@@ -57,6 +57,7 @@ def smoke_pass(agent, extra=""):
 
 
 DENIED_ENVELOPE = ENVELOPE % ("I need approval to continue", '[{"tool_name":"Bash"}]')
+ANSWERED_AFTER_DENIAL = ENVELOPE % (readiness.SMOKE_TOKEN, '[{"tool_name":"Bash"}]')
 
 
 def smoke_permission(agent):
@@ -68,8 +69,7 @@ def smoke_permission(agent):
 SMOKES = {
     "pass": smoke_pass,
     "permission": smoke_permission,
-    "denied_but_answered": lambda agent: (
-        f"printf '%s\\n' '{ENVELOPE % (readiness.SMOKE_TOKEN, '[{\"tool_name\":\"Bash\"}]')}'"),
+    "denied_but_answered": lambda agent: f"printf '%s\\n' '{ANSWERED_AFTER_DENIAL}'",
     "failure": lambda agent: "echo 'unexpected internal failure' >&2; exit 1",
     "quota": lambda agent: "echo 'Error: quota exhausted for this account' >&2; exit 1",
     "rate": lambda agent: "echo 'HTTP 429 Too Many Requests' >&2; exit 1",
