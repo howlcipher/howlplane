@@ -286,6 +286,55 @@ def _keep_evidence_out_of_real_ledgers():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_provider_capacity(monkeypatch, tmp_path_factory):
+    """Point the shared provider capacity file at a per-test directory.
+
+    Tests hide the real agent CLIs from PATH, so a pool built through
+    `from_config` that probed and saved recorded MISSING_EXECUTABLE for every
+    worker in the operator's ~/.config/howlplane/provider_capacity.json, and
+    `howlplane route` then excluded them all. Tests that need a specific file
+    set HOWLPLANE_CAPACITY_PATH themselves or pass `state_path`.
+    """
+    home = tmp_path_factory.mktemp("capacity")
+    monkeypatch.setenv("HOWLPLANE_CAPACITY_PATH", str(home / "provider_capacity.json"))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _keep_capacity_out_of_real_config():
+    """Fail any test that saves provider capacity outside the temporary directory.
+
+    Defense in depth for `_isolate_provider_capacity`: a pool given an explicit
+    path, or code that builds its own, still cannot reach the operator's file.
+    """
+    from howlplane.control_plane.synthesis.provider_pool import ProviderCapacityStore
+
+    allowed = Path(tempfile.gettempdir()).resolve()
+    save = ProviderCapacityStore.save
+    refused = {}  # test id -> refused path
+
+    def save_under_tmp_only(self, states):
+        if not self.path.resolve().is_relative_to(allowed):
+            test = os.environ.get("PYTEST_CURRENT_TEST", "?").split(" ")[0]
+            refused.setdefault(test, str(self.path))
+            raise AssertionError(
+                f"a test saved provider capacity to {self.path}, outside {allowed}; "
+                "pass state_path under tmp_path or set HOWLPLANE_CAPACITY_PATH"
+            )
+        return save(self, states)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ProviderCapacityStore, "save", save_under_tmp_only)
+        yield
+    # The isolation test provokes one refusal on purpose.
+    expected = "tests/test_provider_capacity_isolation.py::"
+    unexpected = {t: p for t, p in refused.items() if not t.startswith(expected)}
+    assert not unexpected, (
+        f"{len(unexpected)} test(s) saved provider capacity outside {allowed}:\n"
+        + "\n".join(f"  {test}: {path}" for test, path in sorted(unexpected.items())[:30])
+    )
+
+
+@pytest.fixture(autouse=True)
 def _isolate_xdg_homes(monkeypatch, tmp_path_factory):
     """Point XDG data and state homes at per-test directories (DOG-024).
 

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.1]
 
+### Fixed
+
+- `howlplane route` and Factory runs no longer trust a saved `MISSING_EXECUTABLE`
+  forever. Pools built without probing on start kept it until an explicit probe, so
+  one bad record excluded every worker (`BLOCKED: NO_ELIGIBLE_AI_RESOURCE`) while
+  `howlplane doctor` reported them ready. Selection now re-probes such a resource
+  locally, after egress policy, and keeps saved authentication and capacity states.
+- The test suite can no longer write the operator's
+  `~/.config/howlplane/provider_capacity.json`. Tests hide the real agent CLIs from
+  PATH, and a probing pool built through `from_config` saved `MISSING_EXECUTABLE`
+  for every worker there. `HOWLPLANE_CAPACITY_PATH` now overrides the location, an
+  autouse fixture points it at a temporary file, and a session guard refuses any
+  save outside the temporary directory.
+
 - Generated HTTP products use explicit child filesystem inheritance and database authority only for CRUD. Runners bound filesystem access to reads in static/ and data/ and writes in data/; this preserves portability without embedding build-machine paths. Existing real acceptance tests and a new actual-VM out-of-scope read denial verify the migration.
 ### Changed
 

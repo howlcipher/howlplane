@@ -111,7 +111,13 @@ HowlPlane records no price, quota percentage, or reset time unless observed.
 Current states include `AVAILABLE`, `DEGRADED`, `RATE_LIMITED`,
 `SESSION_EXHAUSTED`, `QUOTA_EXHAUSTED`, `AUTH_REQUIRED`,
 `MISSING_EXECUTABLE`, `UNREACHABLE`, `UNAVAILABLE`, `DISABLED`, and `UNKNOWN`.
-They are atomically stored in `~/.config/howlplane/provider_capacity.json`.
+They are atomically stored in `~/.config/howlplane/provider_capacity.json`, or
+the path in `HOWLPLANE_CAPACITY_PATH` when set. The test suite sets it to a
+temporary file and refuses any save outside the temporary directory.
+A saved `MISSING_EXECUTABLE` is re-probed locally before selection excludes the
+resource, so pools built without probing on start (`howlplane route`, Factory)
+do not trust it forever. The probe runs after egress policy and never contacts a
+hosted provider. Saved authentication and capacity states are kept.
 Availability failures update that single state for implementation and review.
 Engineering failures, failed tests, review defects, malformed output, and
 verifier rejection do not become quota exhaustion. Temporary states recover
