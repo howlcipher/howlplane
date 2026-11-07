@@ -114,8 +114,9 @@ Current states include `AVAILABLE`, `DEGRADED`, `RATE_LIMITED`,
 They are atomically stored in `~/.config/howlplane/provider_capacity.json`, or
 the path in `HOWLPLANE_CAPACITY_PATH` when set. The test suite sets it to a
 temporary file and refuses any save outside the temporary directory.
-A saved `MISSING_EXECUTABLE` is re-probed locally before selection excludes the
-resource, so pools built without probing on start (`howlplane route`, Factory)
+A saved `MISSING_EXECUTABLE`, whether a probe recorded it as readiness or a launch
+that found no binary recorded it as status, is re-probed locally before selection
+excludes the resource, so pools built without probing on start (`howlplane route`, Factory)
 do not trust it forever. The probe runs after egress policy and never contacts a
 hosted provider. Saved authentication and capacity states are kept.
 Availability failures update that single state for implementation and review.

@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- A worker whose launch found no binary is no longer excluded forever. The launch
+  recorded status `MISSING_EXECUTABLE` but left readiness `READY`, with no cooldown,
+  and the selection recheck read only readiness, so reinstalling the CLI did not
+  bring the worker back. Selection now re-probes when either record says the
+  executable is missing (issues.md #22). Selection still does not re-probe a saved
+  `READY`, which would break its contract of leaving capacity state unchanged; a
+  wrong `READY` is caught at launch and fails over.
 - `howlplane route` and Factory runs no longer trust a saved `MISSING_EXECUTABLE`
   forever. Pools built without probing on start kept it until an explicit probe, so
   one bad record excluded every worker (`BLOCKED: NO_ELIGIBLE_AI_RESOURCE`) while
