@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.1]
 
+### Changed
+
+- The remediation limit no longer sends every low-risk task to the owner
+  (issues.md #23). Dogfooding showed the test-falsifier raising a new LOW nit on
+  every re-review, so 4 of 4 tasks escalated after the last cycle, before
+  verification had run.
+  - When only LOW or informational findings remain at the limit, and every
+    reviewer ran independently, they are written to `follow_ups.md` and
+    `follow_ups.yaml`, recorded as `findings_deferred_as_follow_ups`, listed in
+    `summary.md`, and the task continues to verification and the usual gates.
+  - Anything else at the limit (MEDIUM and above, a failed or non-independent
+    reviewer, a finding routed for human judgment) still reaches the owner, but
+    only after deterministic verification runs. The decision packet now carries the
+    verification result, each step's status, and every open finding with its
+    severity. Approve and resume reuse that recorded result.
+  - If verification fails at the limit, the task fails as any verification
+    failure does, and the error names the open review findings too. Approval could
+    not have overruled the failed gate.
+
 ### Fixed
 
 - Found by dogfooding a real task through every local agent (Objective 1):
