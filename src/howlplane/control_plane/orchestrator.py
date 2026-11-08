@@ -304,6 +304,47 @@ def compute_remediation_timeout(
 # must never be read as a verification result (issues.md #12).
 TERMINAL_VERIFICATION_STATUSES = frozenset({"passed", "failed", "partial"})
 
+# Severities a review may leave open at the remediation limit without asking
+# the owner. Reviewers can always find one more edge case; chasing LOW nits
+# past the limit escalated every low-risk task and pushed implementers into
+# scope creep (issues.md #23). MEDIUM and above still reach the owner.
+FOLLOW_UP_SEVERITIES = frozenset({"low", "informational"})
+
+
+def deferrable_follow_ups(cycle_res: "ReviewCycleResult") -> Optional[List[ReviewFinding]]:
+    """The findings to record as follow-ups instead of escalating, or None.
+
+    Only a review that completed cleanly in every other respect qualifies: every
+    reviewer ran, each was independent of the implementer, nothing was routed
+    for human judgment, and every finding still standing is LOW or
+    informational. Anything else is not ours to defer, so it returns None and
+    the owner decides.
+    """
+    reconciliation = cycle_res.reconciliation
+    if reconciliation is None or cycle_res.status == "review_failure" or cycle_res.non_independent_roles:
+        return None
+    if (
+        reconciliation.unresolved_blockers
+        or reconciliation.unresolved_highs
+        or reconciliation.requires_human_judgment
+    ):
+        return None
+    dismissed = {f.id for f in reconciliation.false_positives + reconciliation.out_of_scope}
+    standing = [f for f in reconciliation.findings if f.id not in dismissed]
+    if not standing or any(f.severity not in FOLLOW_UP_SEVERITIES for f in standing):
+        return None
+    return standing
+
+
+def _follow_up_lines(findings: List[ReviewFinding]) -> List[str]:
+    lines = []
+    for f in findings:
+        where = f" at `{f.location}`" if f.location else ""
+        lines.append(f"- [{f.severity.upper()}] {f.title} ({f.reviewer_role}){where}")
+        if f.suggested_fix:
+            lines.append(f"  - Suggested fix: {f.suggested_fix}")
+    return lines
+
 
 class VerificationPlanMissingError(RuntimeError):
     """Raised when verification is demanded for a task that has no plan."""
@@ -649,6 +690,43 @@ class GovernedTaskOrchestrator:
             decision_pkt.render_markdown(), encoding="utf-8"
         )
         self._record_human_boundary_events(task_spec, run_dir, reason=err_msg)
+
+    def _record_follow_ups(
+        self,
+        task_spec: TaskSpec,
+        run_dir: Path,
+        findings: List[ReviewFinding],
+        remediation_count: int,
+    ) -> None:
+        """Persists LOW findings left at the remediation limit as follow-ups.
+
+        They are not dropped: they stay in findings.yaml and reconciliation,
+        and are written here and into the evidence ledger, so a later task can
+        pick them up. The task itself continues to the verification gate.
+        """
+        (run_dir / "follow_ups.yaml").write_text(
+            yaml.dump({"follow_ups": [f.to_dict() for f in findings]}, sort_keys=False),
+            encoding="utf-8",
+        )
+        (run_dir / "follow_ups.md").write_text(
+            "# Follow-ups\n\n"
+            f"Review left these LOW findings open after {remediation_count} remediation "
+            "cycles. They did not block the task; take them up separately.\n\n"
+            + "\n".join(_follow_up_lines(findings)) + "\n",
+            encoding="utf-8",
+        )
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id="control_plane",
+            action="findings_deferred_as_follow_ups",
+            artifact=str(run_dir / "follow_ups.md"),
+            spec=task_spec,
+            metadata={
+                "cycle": remediation_count,
+                "finding_ids": [f.id for f in findings],
+                "severities": sorted({f.severity for f in findings}),
+            },
+        )
 
     def _get_scratch_base_path(self) -> Path:
         """Determines the root directory for external provider scratch workspaces.
@@ -3127,6 +3205,10 @@ class GovernedTaskOrchestrator:
         latest_reconciliation: Optional[ReconciliationResult] = None
         remediation_count = 0
         current_reviewers = list(routing.recommended_reviewers)
+        # Set when the remediation limit leaves findings the owner must judge.
+        pending_escalation: Optional[Tuple[str, HumanDecisionPacket]] = None
+        # LOW findings the limit left open, recorded rather than escalated.
+        follow_ups_recorded: List[ReviewFinding] = []
 
         def _make_parked_review_exit(park_msg: str) -> OrchestrationResult:
             return self._make_result(
@@ -3304,6 +3386,11 @@ class GovernedTaskOrchestrator:
 
             # If remediation required, check cycle bounds
             if remediation_count >= self.config.max_remediation_cycles:
+                follow_ups = deferrable_follow_ups(cycle_res)
+                if follow_ups is not None:
+                    self._record_follow_ups(task_spec, run_dir, follow_ups, remediation_count)
+                    follow_ups_recorded = follow_ups
+                    break
                 err_msg = (
                     f"Remediation limit reached ({self.config.max_remediation_cycles} cycles) with "
                     f"{findings_summary['blocker']} blockers and {findings_summary['high']} high findings remaining."
@@ -3316,7 +3403,13 @@ class GovernedTaskOrchestrator:
                 # (HOWLFRAM-BUG-50).
                 triggers: List[str] = []
                 risks: List[str] = []
-                evidence = [f.title for f in cycle_res.all_findings if f.severity in ("blocker", "high")]
+                # Every finding still standing, with its severity, so a packet left
+                # open by MEDIUM findings does not say "None recorded".
+                evidence = [
+                    f"[{f.severity.upper()}] {f.title} ({f.reviewer_role})"
+                    for f in cycle_res.all_findings
+                    if f.status not in ("false_positive", "out_of_scope")
+                ]
                 if findings_summary["high"] > 0 or findings_summary["blocker"] > 0:
                     triggers.append("security_policy_exception")
                     risks.append("Unresolved reviewer findings may indicate defects or security vulnerabilities.")
@@ -3356,14 +3449,11 @@ class GovernedTaskOrchestrator:
                     verification_status="unverified",
                     recommended_action="Review finding report in reconciliation_report.md and authorize override or manual remediation.",
                 )
-                self._park_awaiting_human(
-                    task_spec,
-                    run_dir,
-                    f"Max remediation cycles exceeded: {err_msg}",
-                    decision_pkt,
-                    progress,
-                )
-                return _make_parked_review_exit(err_msg)
+                # Not parked yet: the owner decides with the verification result
+                # in hand rather than "unverified" (issues.md #23). Stage 6 runs
+                # the same gate it always does, then parks with this packet.
+                pending_escalation = (err_msg, decision_pkt)
+                break
 
             remediation_count += 1
             CheckpointManager.start_stage(
@@ -3539,6 +3629,10 @@ class GovernedTaskOrchestrator:
         if verif_status != "passed":
             failed_steps = [s.name for s in verif_plan.steps if s.status == "failed" and s.required]
             err_msg = f"Deterministic verification failed on required steps: {', '.join(failed_steps)}"
+            if pending_escalation is not None:
+                # Approving could not overrule a failed gate (resume ends it
+                # failed), so the task fails here and says what else was open.
+                err_msg += f". Review also left findings open: {pending_escalation[0]}"
             # A salvaged candidate only ever existed on sufferance. Governance
             # has now rejected it, so the repository goes back to its pre-task
             # baseline rather than keeping a patch nothing stands behind. A
@@ -3587,6 +3681,21 @@ class GovernedTaskOrchestrator:
                 failure_class=FAILURE_CLASS_VERIFICATION,
                 timeout_candidate=timeout_candidate,
             )
+
+        if pending_escalation is not None:
+            esc_msg, decision_pkt = pending_escalation
+            decision_pkt.verification_status = verif_status
+            decision_pkt.evidence.extend(
+                f"verification {s.name}: {s.status}" for s in verif_plan.steps
+            )
+            self._park_awaiting_human(
+                task_spec,
+                run_dir,
+                f"Max remediation cycles exceeded: {esc_msg}",
+                decision_pkt,
+                progress,
+            )
+            return _make_parked_review_exit(esc_msg)
 
         # --------------------------------------------------------------------
         # Stage 7: Human Authority Boundary Gate (awaiting_human)
@@ -3719,6 +3828,7 @@ class GovernedTaskOrchestrator:
             verif_plan=verif_plan,
             remediation_count=remediation_count,
             hf_status=hf_audit_status,
+            follow_ups=follow_ups_recorded,
         )
         (run_dir / "summary.md").write_text(summary_md, encoding="utf-8")
 
@@ -4040,6 +4150,7 @@ class GovernedTaskOrchestrator:
         verif_plan: VerificationPlan,
         remediation_count: int,
         hf_status: Optional[str],
+        follow_ups: Optional[List[ReviewFinding]] = None,
     ) -> str:
         # One authoritative answer, not a per-line re-derivation. `actual_agent`
         # mirrors the effective implementer once implementation settles; the
@@ -4081,6 +4192,9 @@ class GovernedTaskOrchestrator:
             lines.append(f"- **Final Review Status:** `{last_cycle.status}`")
             for role, res in sorted(last_cycle.reviewer_results.items()):
                 lines.append(f"  - `{role}`: {res.status} ({len(res.findings)} findings)")
+        if follow_ups:
+            lines.extend(["", "## Follow-ups (LOW findings left at the remediation limit)"])
+            lines.extend(_follow_up_lines(follow_ups))
 
         lines.extend([
             "",

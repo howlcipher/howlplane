@@ -72,6 +72,7 @@
         "provider_scratch_relocated",
         "remediation_failed",
         "remediation_timeout_derived",
+        "findings_deferred_as_follow_ups",
         "repository_delta_captured",
         "resume_blocked_on_verification",
         "resume_completed",

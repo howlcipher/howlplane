@@ -494,3 +494,134 @@ def test_cli_work_dry_run_with_agent_override_reports_the_override(tmp_path, mon
     assert ret == 0, out
     assert "Override Note:" in out
     assert "(`codex`)" in out
+
+
+# ============================================================================
+# 8. Remediation limit policy (issues.md #23): LOW nits become follow-ups, and
+#    anything that still reaches the owner arrives with verification evidence.
+# ============================================================================
+
+def _new_nit_every_review(severity):
+    """A test-falsifier that raises a fresh finding on every review, as observed live."""
+    calls = {"n": 0}
+
+    def reviewer(role_id, diff, task):
+        if role_id != "test-falsifier":
+            return "findings: []\n"
+        calls["n"] += 1
+        return f"""
+findings:
+  - id: "NIT-{calls['n']}"
+    reviewer_role: "test-falsifier"
+    title: "Edge case {calls['n']} untested"
+    severity: "{severity}"
+    category: "test_gap"
+    location: "tests/test_auth.py"
+    claim: "One more input is not pinned"
+    evidence: "no assertion for input {calls['n']}"
+    suggested_fix: "Add a test for input {calls['n']}"
+"""
+    return reviewer
+
+
+def _run_at_the_limit(tmp_path, task_id, severity, impl=None):
+    repo = _init_test_git_repo(tmp_path / task_id)
+    spec = TaskSpec(task_id=task_id, repository="auth_service", objective="Tighten auth input checks")
+    orchestrator = _orchestrator(
+        repo, tmp_path,
+        custom_backend=FakeAgentBackend(agent_id="claude_code", side_effect=impl),
+        custom_reviewer_fn=_new_nit_every_review(severity),
+        custom_remediation_fn=lambda task, cwd, findings: None,
+        max_remediation_cycles=2,
+    )
+    record_valid_tia(orchestrator.ledger, task_id)
+    res = orchestrator.run(spec)
+    res.ledger = orchestrator.ledger  # for tests that continue to approve and resume
+    return res, repo / ".task_runs" / task_id
+
+
+def _touch_auth(task, cwd, prompt):
+    (cwd / "src" / "auth.py").write_text(
+        "def authenticate(username, token):\n    return bool(username) and False\n", encoding="utf-8"
+    )
+
+
+def test_low_nits_left_at_the_remediation_limit_become_follow_ups_and_the_task_completes(tmp_path):
+    res, run_dir = _run_at_the_limit(tmp_path, "LIMIT-LOW", "low", impl=_touch_auth)
+    assert res.final_state == "complete", res.error_message
+    assert res.remediation_cycles_count == 2
+    assert res.verification_plan.overall_status == "passed"
+    follow_ups = (run_dir / "follow_ups.md").read_text(encoding="utf-8")
+    assert "[LOW] Edge case 3 untested" in follow_ups and "Add a test for input 3" in follow_ups
+    assert "Follow-ups" in (run_dir / "summary.md").read_text(encoding="utf-8")
+    assert not (run_dir / "decision_packet.md").exists()
+
+
+def test_a_medium_finding_at_the_limit_reaches_the_owner_with_verification_evidence(tmp_path):
+    res, run_dir = _run_at_the_limit(tmp_path, "LIMIT-MED", "medium", impl=_touch_auth)
+    assert res.final_state == "awaiting_human" and res.exit_code == 2
+    assert "Remediation limit reached" in (res.error_message or "")
+    packet = (run_dir / "decision_packet.md").read_text(encoding="utf-8")
+    assert "**Automated Verification:** `passed`" in packet
+    assert "[MEDIUM] Edge case 3 untested (test-falsifier)" in packet
+    assert "None recorded" not in packet.split("## Key Evidence")[1].split("##")[0]
+    # Persisted as terminal, so approve + resume uses this result instead of re-running.
+    import json
+    assert json.loads((run_dir / "verification_plan.json").read_text())["overall_status"] == "passed"
+    assert not (run_dir / "follow_ups.md").exists()
+
+
+def test_failing_verification_at_the_limit_fails_the_task_instead_of_asking_the_owner(tmp_path):
+    def broken(task, cwd, prompt):
+        (cwd / "src" / "auth.py").write_text("SYNTAX ERROR :::\n", encoding="utf-8")
+
+    res, run_dir = _run_at_the_limit(tmp_path, "LIMIT-FAIL", "medium", impl=broken)
+    assert res.final_state == "failed" and res.exit_code == 1
+    assert res.verification_plan.overall_status == "failed"
+    assert "Review also left findings open" in (res.error_message or "")
+
+
+def _cycle(*findings, status="has_findings", non_independent=()):
+    from howlplane.control_plane.reconciliation import ReviewReconciler
+    from howlplane.control_plane.review_runner import ReviewCycleResult
+    return ReviewCycleResult(
+        cycle_index=3, all_findings=list(findings),
+        reconciliation=ReviewReconciler.reconcile(list(findings)),
+        status=status, requires_remediation=True, non_independent_roles=list(non_independent),
+    )
+
+
+def _finding(fid, severity, category="test_gap", **extra):
+    from howlplane.control_plane.reconciliation import ReviewFinding
+    return ReviewFinding(id=fid, reviewer_role="test-falsifier", title=fid, severity=severity,
+                         category=category, description="d", **extra)
+
+
+def test_only_a_clean_low_only_review_is_deferred_to_follow_ups():
+    from howlplane.control_plane.orchestrator import deferrable_follow_ups
+    low, info = _finding("L", "low"), _finding("I", "informational")
+    assert [f.id for f in deferrable_follow_ups(_cycle(low, info))] == ["L", "I"]
+    # Anything the owner must judge is never deferred.
+    assert deferrable_follow_ups(_cycle(_finding("L", "low"), _finding("M", "medium"))) is None
+    assert deferrable_follow_ups(_cycle(_finding("H", "high"))) is None
+    assert deferrable_follow_ups(_cycle(_finding("L", "low"), status="review_failure")) is None
+    assert deferrable_follow_ups(_cycle(_finding("L", "low"), non_independent=["test-falsifier"])) is None
+    assert deferrable_follow_ups(_cycle(_finding("S", "high", category="security"))) is None
+    # A dismissed MEDIUM does not hold the task; a dismissed-only review has nothing to defer.
+    dismissed = _finding("D", "medium", status="false_positive")
+    assert [f.id for f in deferrable_follow_ups(_cycle(_finding("L", "low"), dismissed))] == ["L"]
+    assert deferrable_follow_ups(_cycle(_finding("D", "medium", status="false_positive"))) is None
+
+
+def test_approving_a_verified_escalation_completes_without_rerunning_the_gate(tmp_path):
+    from howlplane.control_plane.human_boundary import HumanLifecycleManager
+    res, run_dir = _run_at_the_limit(tmp_path, "LIMIT-OK", "medium", impl=_touch_auth)
+    assert res.final_state == "awaiting_human"
+    repo, ledger = run_dir.parent.parent, res.ledger
+    HumanLifecycleManager.approve(target_repo=repo, task_id="LIMIT-OK", reason="LOW-risk nit",
+                                  operator_source="cli", ledger=ledger)
+    resumed = HumanLifecycleManager.resume(target_repo=repo, task_id="LIMIT-OK", ledger=ledger)
+    assert resumed.final_state == "complete", resumed
+    actions = [e.action for e in ledger.read_entries()[0] if e.task_id == "LIMIT-OK"]
+    assert actions.count("verification_completed") == 1
+    assert "verification_executed_on_resume" not in actions
