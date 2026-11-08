@@ -392,6 +392,26 @@ release, then `~/.local/bin`.
 | 3 | blocked by a boundary, readiness or verification gate |
 | 4 | `write`: an owner-only decision HowlPlane will not relay |
 
+### Driving HowlPlane from an agent
+
+`howlplane work --execute --json` prints one `howlplane.work_result/v1` document
+on stdout; progress goes to stderr. An agent reads `final_state` and runs
+`next_action.command` (then `next_action.then`), or reads `next_action.detail`
+when there is no command:
+
+| `final_state` | `next_action` |
+| --- | --- |
+| `complete` | none: review the change and commit it |
+| `awaiting_human` | `howlplane approve <id>`, then `howlplane resume <id>`; alternative `howlplane reject <id>`. Read `decision_packet` first |
+| `failed` | none: the evidence is in `run_dir` |
+| `prepared` | dry run only: rerun with `--execute` |
+
+The document also carries `changes`, each reviewer's verdict in `reviews`,
+`verification` with every step, `follow_ups` (LOW findings left at the
+remediation limit) and `error`. `howlplane resume --json` prints the same
+document under `work_result`, alongside its existing output. Additive changes
+keep `v1`; removing or renaming a key needs `v2`.
+
 ---
 
 ## Native Creative Pipeline (HowlDream -> HowlWriter -> HowlCreate)

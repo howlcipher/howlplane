@@ -145,6 +145,25 @@ def cmd_reject(args: argparse.Namespace) -> int:
     return _cli()._handle_decision(args, "rejected")
 
 
+def _resume_document(res) -> dict:
+    """The result exactly as before, plus the howlplane.work_result/v1 document.
+
+    `resume --json` has always printed the internal result, whose own `schema`
+    is howlplane.orchestrator/v1. Overwriting that would silently break a
+    strict reader, so the contract `work --json` prints sits under one new key,
+    `work_result`, and nothing existing changes.
+    """
+    from howlplane.control_plane.presentation.work_result import work_result_document
+
+    routing = getattr(res, "routing_decision", None)
+    roles = list(getattr(routing, "recommended_reviewers", None) or [])
+    if not roles:
+        roles = sorted({r for c in (res.review_cycles or []) for r in c.reviewer_results})
+    document = res.to_dict()
+    document["work_result"] = work_result_document(res, roles)
+    return document
+
+
 def cmd_resume(args: argparse.Namespace) -> int:
     target_repo = str(_cli()._resolve_repo(args))
     ledger_file = _cli()._resolve_ledger_file(args)
@@ -156,7 +175,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     )
     if getattr(args, "json", False):
         import json
-        print(json.dumps(res.to_dict(), indent=2))
+        print(json.dumps(_resume_document(res), indent=2))
     else:
         print(f"Task '{res.task_id}' RESUMED. Final state: {res.final_state.upper()} (Exit {res.exit_code}).")
     return res.exit_code

@@ -29,6 +29,16 @@ from howlplane.control_plane.agent_registry import AgentRegistry
 from howlplane.control_plane.atomic_io import safe_load_json
 from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger, EvidenceSchemaError
 from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
+from howlplane.control_plane.presentation.work_result import (
+    VERDICT_FAILED,
+    VERDICT_FINDINGS,
+    VERDICT_NOT_RUN,
+    WORK_RESULT_SCHEMA,
+    next_action as work_next_action,
+    prepared_document,
+    role_verdicts,
+    work_result_document,
+)
 from howlplane.control_plane.git_env import run_git_in_repo
 from howlplane.control_plane.locking import get_repo_lock_path, get_task_lock_path, is_process_alive
 from howlplane.control_plane.recovery import CrashRecoveryEngine
@@ -462,31 +472,21 @@ def _print_orchestration_summary(
     _print_failover_accounting(res)
     print("Review:")
     if res.review_cycles:
-        last_cycle = res.review_cycles[-1]
-        non_independent = set(getattr(last_cycle, "non_independent_roles", []) or [])
-        for role_id in decision.recommended_reviewers:
-            role_res = last_cycle.reviewer_results.get(role_id)
-            earlier = False
-            if role_res is None:
-                # Re-review cycles only re-run roles that still had findings, so a role that
-                # came back clean earlier has its verdict in an earlier cycle, not "not run".
-                for cycle in reversed(res.review_cycles[:-1]):
-                    if role_id in cycle.reviewer_results:
-                        role_res, earlier = cycle.reviewer_results[role_id], True
-                        break
-            role_label = role_id.replace("-reviewer", "").capitalize()
-            if role_res is None:
+        # The same verdicts `work --json` reports, so text and JSON cannot disagree.
+        for v in role_verdicts(res.review_cycles, decision.recommended_reviewers):
+            role_label = v["role"].replace("-reviewer", "").capitalize()
+            if v["verdict"] == VERDICT_NOT_RUN:
                 status_text = "NOT RUN"
-            elif role_res.status == "reviewer_failure":
+            elif v["verdict"] == VERDICT_FAILED:
                 status_text = "FAILED (no verdict)"
-            elif role_res.findings:
-                sev_summary = f"{role_res.findings[0].severity.upper()}"
-                status_text = f"{sev_summary} → REMEDIATED" if res.final_state == "complete" and res.remediation_cycles_count > 0 else f"{sev_summary} ({len(role_res.findings)} findings)"
+            elif v["verdict"] == VERDICT_FINDINGS:
+                sev_summary = v["highest_severity"].upper()
+                status_text = f"{sev_summary} → REMEDIATED" if res.final_state == "complete" and res.remediation_cycles_count > 0 else f"{sev_summary} ({v['finding_count']} findings)"
             else:
                 status_text = "PASS"
-            if earlier:
+            if v["earlier_cycle"]:
                 status_text = f"{status_text} (earlier cycle, not re-reviewed)"
-            if role_id in non_independent:
+            if v["self_review"]:
                 status_text = f"{status_text} ⚠ SELF-REVIEW (implementer)"
             print(f"  {role_label:<17} {status_text}")
     else:
@@ -536,6 +536,20 @@ def _print_orchestration_summary(
 TERMINAL_TASK_STATES = frozenset({"complete", "cancelled", "failed"})
 
 
+def _preflight_failed(args: argparse.Namespace, what: str, message: str) -> int:
+    """Reports a failed preflight; as howlplane.error/v1 when --json is set."""
+    if getattr(args, "json", False):
+        raise OperatorFailure(OperatorError(
+            code="PREFLIGHT_FAILED",
+            message=f"The {what} preflight failed: {message}",
+            why="howlplane work checks its dependencies and the target repository before routing.",
+            next_action="Fix the reported problem, or rerun with --force to proceed anyway.",
+            command="howlplane doctor",
+        ))
+    print(f"ERROR: {what} preflight failed: {message}", file=sys.stderr)
+    return 1
+
+
 def cmd_work(args: argparse.Namespace) -> int:
     """Executes the governed work command from any target repository."""
     target_repo = _resolve_repo(args)
@@ -545,12 +559,10 @@ def cmd_work(args: argparse.Namespace) -> int:
         from howlplane.control_plane.doctor import check_dependencies, check_git_status
         dep_res = check_dependencies()
         if dep_res.status == "error" and not getattr(args, "force", False):
-            print(f"ERROR: control-plane preflight failed: {dep_res.message}", file=sys.stderr)
-            return 1
+            return _preflight_failed(args, "control-plane", dep_res.message)
         git_res = check_git_status(target_repo)
         if git_res.status == "error" and not getattr(args, "force", False):
-            print(f"ERROR: target repository preflight failed: {git_res.message}", file=sys.stderr)
-            return 1
+            return _preflight_failed(args, "target repository", git_res.message)
 
     ctx = ProjectAdapter.discover(target_repo)
     resource_pool = ProviderPoolManager.from_config()
@@ -559,6 +571,7 @@ def cmd_work(args: argparse.Namespace) -> int:
     )
 
     planned_actions = getattr(args, "actions", None) or []
+    as_json = getattr(args, "json", False)
     progress_mode = getattr(args, "progress", "auto")
     if getattr(args, "quiet", False):
         progress_mode = "never"
@@ -576,16 +589,32 @@ def cmd_work(args: argparse.Namespace) -> int:
 
     if getattr(args, "execute", False):
         res = orchestrator.run(spec, planned_actions=planned_actions)
-        _print_orchestration_summary(res, ctx, spec, decision)
+        if as_json:
+            print(json.dumps(work_result_document(res, decision.recommended_reviewers), indent=2))
+        else:
+            _print_orchestration_summary(res, ctx, spec, decision)
         return res.exit_code
 
     # Dry run / task preparation mode (default when --execute is omitted)
     ctx, decision, plan, run_dir, shadow_audit_res = orchestrator.prepare_task_plan(spec, planned_actions)
     boundary_res = HumanBoundaryGate.evaluate(spec, planned_actions=planned_actions, verification=plan)
     if not decision.selected_agent_id and not boundary_res.requires_human_approval:
-        print(json.dumps(decision.metadata["blocked_outcome"], indent=2))
+        blocked = decision.metadata["blocked_outcome"]
+        if as_json:
+            blocked = {"schema": WORK_RESULT_SCHEMA, "task_id": spec.task_id, "final_state": "blocked",
+                       "exit_code": 3, "run_dir": str(run_dir), "blocked_outcome": blocked,
+                       "next_action": work_next_action(spec.task_id, "blocked", run_dir)}
+        print(json.dumps(blocked, indent=2))
         return 3
     launch_cmd = format_agent_launch_command(decision.selected_agent_id, spec, run_dir, target_repo)
+    exit_code = 2 if boundary_res.requires_human_approval else 0
+    dp_path = run_dir / "decision_packet.md"
+    if boundary_res.requires_human_approval and boundary_res.decision_packet:
+        dp_path.write_text(boundary_res.decision_packet.render_markdown(), encoding="utf-8")
+    if as_json:
+        print(json.dumps(prepared_document(spec, decision, plan, boundary_res, run_dir,
+                                           launch_cmd, exit_code), indent=2))
+        return exit_code
     df_mode = get_dogfood_mode()
 
     print("=" * 60)
@@ -628,8 +657,6 @@ def cmd_work(args: argparse.Namespace) -> int:
         for b in boundary_res.triggered_boundaries:
             print(f"     - Boundary: {b}")
         if boundary_res.decision_packet:
-            dp_path = run_dir / "decision_packet.md"
-            dp_path.write_text(boundary_res.decision_packet.render_markdown(), encoding="utf-8")
             print(f"     - Decision packet written to: {dp_path}")
     else:
         print("  ✓ All actions within Autonomous Operating Authority")
@@ -645,7 +672,7 @@ def cmd_work(args: argparse.Namespace) -> int:
     print(f"  {launch_cmd}")
     print("=" * 60)
 
-    return 2 if boundary_res.requires_human_approval else 0
+    return exit_code
 
 
 def cmd_route(args: argparse.Namespace) -> int:
@@ -1297,6 +1324,11 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_work.add_argument("--dry-run", action="store_true", help="Generate plan without launching")
     p_work.add_argument("--skip-doctor", action="store_true", help="Skip preflight diagnostics")
     p_work.add_argument("--force", action="store_true", help="Proceed even if preflight has warnings")
+    p_work.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the howlplane.work_result/v1 document instead of the summary",
+    )
     p_work.add_argument(
         "--progress",
         choices=["auto", "always", "never"],

@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.1]
 
+### Added
+
+- `howlplane work --json` prints a versioned `howlplane.work_result/v1` document,
+  so an agent can drive HowlPlane without parsing the terminal summary. It carries
+  the final state, exit code, run directory, implementer, changes, each reviewer's
+  verdict, verification steps, follow-ups, the decision packet path, any error,
+  and `next_action` with the exact next command (`approve` then `resume`, or
+  none). A dry run reports `prepared`, and a failed preflight is a
+  `howlplane.error/v1` object on stderr. `resume --json` adds the same document
+  under `work_result` and leaves its existing output unchanged. The terminal
+  summary now reads the same reviewer verdicts, which removed a duplicated block
+  (slopslint `python_src` ceiling 10 to 9).
+
 ### Changed
 
 - The remediation limit no longer sends every low-risk task to the owner
