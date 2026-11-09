@@ -407,6 +407,7 @@ class ProviderStatus(DataClassSerializationMixin):
     unattended_mutation_capable: Optional[bool] = None
     capability_reason: Optional[str] = None
     role_exclusions: Dict[str, str] = field(default_factory=dict)
+    role_exclusion_set_at: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ProviderStatus":
@@ -426,6 +427,11 @@ class ProviderStatus(DataClassSerializationMixin):
         exclusions = payload.get("role_exclusions")
         if not isinstance(exclusions, dict):
             payload["role_exclusions"] = {}
+        timestamps = payload.get("role_exclusion_set_at")
+        timestamps = dict(timestamps) if isinstance(timestamps, dict) else {}
+        for role in payload.get("role_exclusions", {}):
+            timestamps.setdefault(role, payload.get("last_failure_at") or "")
+        payload["role_exclusion_set_at"] = timestamps
         valid = cls.__dataclass_fields__
         return cls(**{key: value for key, value in payload.items() if key in valid})
 
@@ -480,7 +486,11 @@ class ProviderPoolManager:
         read_only: bool = False,
         semantic_recommender: Optional[SemanticRecommender] = None,
         semantic_settings: Optional[SemanticRecommendationSettings] = None,
+        role_exclusion_cooldown_seconds: float = 24 * 60 * 60,
     ):
+        if not 0 <= role_exclusion_cooldown_seconds < float("inf"):
+            raise ValueError("Role exclusion cooldown must be finite and nonnegative.")
+        self.role_exclusion_cooldown_seconds = role_exclusion_cooldown_seconds
         self.registry = registry or AgentRegistry()
         self.avoid_provider = avoid_provider
         self.fallback_provider = fallback_provider
@@ -1043,8 +1053,12 @@ class ProviderPoolManager:
             state.last_checked = now.isoformat()
             state.observed_at = now.isoformat()
             state.retry_after = None
-            if role and role in state.role_exclusions:
-                state.role_exclusions.pop(role, None)
+            cleared_roles = {role} if role else set()
+            if role and self._is_review_role(role):
+                cleared_roles.add("review")
+            for cleared_role in cleared_roles:
+                state.role_exclusions.pop(cleared_role, None)
+                state.role_exclusion_set_at.pop(cleared_role, None)
             self._persist()
             return ProviderFailureClass.UNKNOWN
 
@@ -1058,6 +1072,11 @@ class ProviderPoolManager:
             self._persist()
             return failure_class
 
+        # Freeze legacy clocks before an unrelated failure changes the fallback.
+        for excluded_role in state.role_exclusions:
+            state.role_exclusion_set_at.setdefault(
+                excluded_role, state.last_failure_at or ""
+            )
         state.consecutive_failures += 1
         state.last_failure_at = now.isoformat()
         state.last_checked = now.isoformat()
@@ -1068,8 +1087,10 @@ class ProviderPoolManager:
         if failure_class is ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED:
             target_role = role or "unknown"
             state.role_exclusions[target_role] = failure_class.value
-            if self._is_review_role(target_role):
+            state.role_exclusion_set_at[target_role] = now.isoformat()
+            if target_role != "review" and self._is_review_role(target_role):
                 state.role_exclusions["review"] = failure_class.value
+                state.role_exclusion_set_at["review"] = now.isoformat()
             self._persist()
             return failure_class
 
@@ -1193,6 +1214,7 @@ class ProviderPoolManager:
         state.reset_at = datetime.now(timezone.utc).isoformat()
         state.unavailable_reason = None
         state.role_exclusions.clear()
+        state.role_exclusion_set_at.clear()
         if reprobe and not self._egress_forbidden(profile):
             self._apply_readiness(normalized, profile, state)
         self._persist()
@@ -1256,6 +1278,22 @@ class ProviderPoolManager:
         }
         return status.value if status in blocked else None
 
+    def _role_exclusion_active(self, state: ProviderStatus, role: str) -> bool:
+        """Offer expired roles again without changing permission or failure facts."""
+        if role not in state.role_exclusions:
+            return False
+        set_at = state.role_exclusion_set_at.get(role)
+        if not set_at:
+            return False
+        try:
+            observed = datetime.fromisoformat(set_at)
+            if observed.tzinfo is None:
+                observed = observed.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            return False
+        age = (datetime.now(timezone.utc) - observed).total_seconds()
+        return 0 <= age < self.role_exclusion_cooldown_seconds
+
     def check_capacity_exclusion(
         self,
         resource_id: str,
@@ -1270,9 +1308,13 @@ class ProviderPoolManager:
         if general:
             return general
         if role:
-            if role in state.role_exclusions:
+            if self._role_exclusion_active(state, role):
                 return f"ROLE_EXCLUDED:{state.role_exclusions[role]}"
-            if self._is_review_role(role) and "review" in state.role_exclusions:
+            if (
+                role != "review"
+                and self._is_review_role(role)
+                and self._role_exclusion_active(state, "review")
+            ):
                 return f"ROLE_EXCLUDED:{state.role_exclusions['review']}"
         return None
 
@@ -1540,15 +1582,9 @@ class ProviderPoolManager:
             if role in LOCAL_INELIGIBLE_REVIEWER_ROLES and profile.locality == ResourceLocality.LOCAL.value:
                 exclude(profile, "LOCAL_REVIEW_AUTHORITY_FORBIDDEN", "authority")
                 continue
-            capacity_reason = self._capacity_exclusion(state.status)
+            capacity_reason = self.check_capacity_exclusion(resource_id, role)
             if capacity_reason:
                 exclude(profile, capacity_reason, "capacity")
-                continue
-            if role in state.role_exclusions:
-                exclude(profile, f"ROLE_EXCLUDED:{state.role_exclusions[role]}", "capacity")
-                continue
-            if self._is_review_role(role) and "review" in state.role_exclusions:
-                exclude(profile, f"ROLE_EXCLUDED:{state.role_exclusions['review']}", "capacity")
                 continue
             if resource_id in excluded_ids:
                 exclude(profile, "ALREADY_ATTEMPTED", "failover_policy")

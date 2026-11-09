@@ -46,6 +46,7 @@ from howlplane.control_plane.synthesis.provider_pool import (
     ProviderAvailabilityStatus,
     ProviderConfigurationError,
     ProviderPoolManager,
+    ProviderStatus,
 )
 from howlplane.control_plane.task_spec import TaskSpec
 from howlplane.control_plane.config_loader import (
@@ -134,6 +135,7 @@ def make_pool(
     operating_mode: str = "connected",
     state_path: Path | None = None,
     probe_on_start: bool = True,
+    role_exclusion_cooldown_seconds: float | None = None,
 ) -> ProviderPoolManager:
     registry = AgentRegistry(agents=profiles)
     configured = enabled or {p.resource_id: True for p in profiles}
@@ -152,6 +154,8 @@ def make_pool(
         backend_resolver=lambda resource_id: backend_map[resource_id],
         state_path=state_path,
         probe_on_start=probe_on_start,
+        **({"role_exclusion_cooldown_seconds": role_exclusion_cooldown_seconds}
+           if role_exclusion_cooldown_seconds is not None else {}),
     )
 
 
@@ -882,3 +886,233 @@ def test_launch_recorded_missing_executable_is_rechecked_once_reinstalled(tmp_pa
 
     assert reinstalled.probe_calls == 2  # once on start, once to recheck
     assert decision.selected is not None and decision.selected.resource_id == "resource"
+
+
+@pytest.mark.parametrize("role", ["implementation", "correctness-reviewer"])
+def test_role_exclusion_expires_and_success_clears_it(role):
+    pool = make_pool([make_profile("resource")])
+    result = failed_result("resource", "permission denied")
+    pool.record_result("resource", result, role=role)
+    state = pool._provider_states["resource"]
+    assert role in state.role_exclusions
+    assert state.role_exclusion_set_at[role] == state.last_failure_at
+    assert pool.check_capacity_exclusion("resource", role) is not None
+    assert pool.select_resource(make_task(), role=role).selected is None
+    for excluded_role in state.role_exclusions:
+        state.role_exclusion_set_at[excluded_role] = (
+            datetime.now(timezone.utc) - timedelta(hours=25)
+        ).isoformat()
+    assert pool.check_capacity_exclusion("resource", role) is None
+    assert pool.select_resource(make_task(), role=role).selected.resource_id == "resource"
+    result.success = True
+    pool.record_result("resource", result, role=role)
+    assert not state.role_exclusions
+    assert not state.role_exclusion_set_at
+
+
+@pytest.mark.parametrize("role", ["review", "correctness-reviewer", "test-falsifier"])
+def test_review_success_clears_umbrella_exclusion(role):
+    pool = make_pool([make_profile("resource")])
+    state = pool._provider_states["resource"]
+    state.role_exclusions = {"review": "EXECUTION_PERMISSION_REQUIRED"}
+    state.role_exclusion_set_at = {"review": datetime.now(timezone.utc).isoformat()}
+    result = failed_result("resource", "")
+    result.success = True
+    pool.record_result("resource", result, role=role)
+    assert not state.role_exclusions
+    assert not state.role_exclusion_set_at
+
+
+@pytest.mark.parametrize("age_hours,blocked", [(1, True), (25, False), (None, False)])
+def test_old_capacity_role_exclusion_uses_failure_time(tmp_path, age_hours, blocked):
+    path = tmp_path / "capacity.json"
+    state = {
+        "agent_id": "resource", "name": "resource",
+        "status": "AVAILABLE", "readiness": "READY",
+        "role_exclusions": {"implementation": "EXECUTION_PERMISSION_REQUIRED"},
+    }
+    if age_hours is not None:
+        state["last_failure_at"] = (
+            datetime.now(timezone.utc) - timedelta(hours=age_hours)
+        ).isoformat()
+    path.write_text(json.dumps({
+        "schema": "howlplane.provider_capacity/v1",
+        "resources": {"resource": state},
+    }))
+    pool = make_pool([make_profile("resource")], state_path=path, probe_on_start=False)
+    assert (pool.check_capacity_exclusion("resource", "implementation") is not None) == blocked
+    decision = pool.select_resource(make_task(), role="implementation")
+    assert (decision.selected is None) == blocked
+
+
+@pytest.mark.parametrize("cooldown,blocked", [(60, False), (7200, True)])
+def test_role_exclusion_cooldown_and_timestamp_survive_restart(tmp_path, cooldown, blocked):
+    path = tmp_path / "capacity.json"
+    profiles = [make_profile("resource")]
+    pool = make_pool(profiles, state_path=path)
+    pool.record_result("resource", failed_result("resource", "permission denied"),
+                       role="implementation")
+    state = pool._provider_states["resource"]
+    timestamp = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    state.role_exclusion_set_at["implementation"] = timestamp
+    pool._persist()
+    # A different failure must not restart an existing role's cooldown.
+    pool.record_result("resource", failed_result("resource", "tests failed"))
+    restarted = make_pool(profiles, state_path=path, probe_on_start=False,
+                          role_exclusion_cooldown_seconds=cooldown)
+    assert restarted._provider_states["resource"].role_exclusion_set_at == {
+        "implementation": timestamp,
+    }
+    assert (restarted.select_resource(make_task(), role="implementation").selected is None) == blocked
+
+
+@pytest.mark.parametrize("age_hours,blocked", [(23, True), (25, False), (-240, False)])
+def test_default_role_cooldown(age_hours, blocked):
+    pool = make_pool([make_profile("resource")])
+    assert pool.role_exclusion_cooldown_seconds == 86400
+    state = pool._provider_states["resource"]
+    state.role_exclusions = {"implementation": "EXECUTION_PERMISSION_REQUIRED"}
+    state.role_exclusion_set_at = {"implementation": (
+        datetime.now(timezone.utc) - timedelta(hours=age_hours)
+    ).isoformat()}
+    assert (pool.check_capacity_exclusion("resource", "implementation") is not None) == blocked
+    assert (pool.select_resource(make_task(), role="implementation").selected is None) == blocked
+
+
+@pytest.mark.parametrize("last_failure", [None, "2000-01-01T00:00:00+00:00"])
+@pytest.mark.parametrize("set_at", [None, {"review": "2000-01-01T00:00:00+00:00"}, []])
+def test_legacy_exclusion_not_revived_by_unrelated_failure(tmp_path, last_failure, set_at):
+    path = tmp_path / "capacity.json"
+    payload = {
+        "agent_id": "resource", "name": "resource", "status": "AVAILABLE",
+        "readiness": "READY", "last_failure_at": last_failure,
+        "role_exclusions": {"implementation": "EXECUTION_PERMISSION_REQUIRED"},
+        "role_exclusion_set_at": set_at,
+    }
+    path.write_text(json.dumps({
+        "schema": "howlplane.provider_capacity/v1",
+        "resources": {"resource": payload},
+    }))
+    pool = make_pool([make_profile("resource")], state_path=path, probe_on_start=False)
+    assert pool.check_capacity_exclusion("resource", "implementation") is None
+    pool.record_result("resource", failed_result("resource", "unit tests failed"), role="review")
+    assert pool.check_capacity_exclusion("resource", "implementation") is None
+    restarted = make_pool([make_profile("resource")], state_path=path, probe_on_start=False)
+    assert restarted.check_capacity_exclusion("resource", "implementation") is None
+
+
+@pytest.mark.parametrize("timestamp,blocked", [
+    ("garbage", False), (123, False), ("2999-01-01T00:00:00", False),
+    (None, False), ("", False),
+])
+def test_invalid_role_timestamp_expires(timestamp, blocked):
+    pool = make_pool([make_profile("resource")])
+    state = pool._provider_states["resource"]
+    state.role_exclusions = {"implementation": "EXECUTION_PERMISSION_REQUIRED"}
+    state.last_failure_at = datetime.now(timezone.utc).isoformat()
+    state.role_exclusion_set_at = {"implementation": timestamp}
+    assert (pool.check_capacity_exclusion("resource", "implementation") is not None) == blocked
+
+
+def test_naive_role_timestamp_assumes_utc():
+    pool = make_pool([make_profile("resource")])
+    state = pool._provider_states["resource"]
+    state.role_exclusions = {"implementation": "EXECUTION_PERMISSION_REQUIRED"}
+    state.role_exclusion_set_at = {"implementation": (
+        datetime.now(timezone.utc) - timedelta(hours=23)
+    ).replace(tzinfo=None).isoformat()}
+    assert pool.check_capacity_exclusion("resource", "implementation") is not None
+
+
+@pytest.mark.parametrize("cooldown", [-1, float("nan"), float("inf"), -float("inf")])
+def test_invalid_role_cooldown_rejected(cooldown):
+    with pytest.raises(ValueError):
+        make_pool([make_profile("resource")], role_exclusion_cooldown_seconds=cooldown)
+
+
+def test_zero_role_cooldown_never_blocks():
+    pool = make_pool([make_profile("resource")], role_exclusion_cooldown_seconds=0)
+    pool.record_result("resource", failed_result("resource", "permission denied"), role="implementation")
+    assert pool.check_capacity_exclusion("resource", "implementation") is None
+
+
+def test_permission_refailure_restarts_expired_role_cooldown():
+    pool = make_pool([make_profile("resource")])
+    result = failed_result("resource", "permission denied")
+    pool.record_result("resource", result, role="implementation")
+    state = pool._provider_states["resource"]
+    old = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+    state.role_exclusion_set_at["implementation"] = old
+    assert pool.check_capacity_exclusion("resource", "implementation") is None
+    before = datetime.now(timezone.utc)
+    pool.record_result("resource", result, role="implementation")
+    assert datetime.fromisoformat(state.role_exclusion_set_at["implementation"]) >= before
+    assert pool.check_capacity_exclusion("resource", "implementation") is not None
+
+
+@pytest.mark.parametrize("review_age,role_age,expected", [(25, 1, "specific"), (1, 25, "umbrella"), (25, 25, None)])
+def test_review_exclusions_have_independent_clocks(review_age, role_age, expected):
+    pool = make_pool([make_profile("resource")])
+    state = pool._provider_states["resource"]
+    state.role_exclusions = {"review": "umbrella", "correctness-reviewer": "specific"}
+    state.role_exclusion_set_at = {
+        role: (datetime.now(timezone.utc) - timedelta(hours=age)).isoformat()
+        for role, age in [("review", review_age), ("correctness-reviewer", role_age)]
+    }
+    reason = pool.check_capacity_exclusion("resource", "correctness-reviewer")
+    assert reason == (f"ROLE_EXCLUDED:{expected}" if expected else None)
+    assert (pool.select_resource(make_task(), role="correctness-reviewer").selected is None) == bool(expected)
+
+
+def test_implementation_success_preserves_review_exclusion():
+    pool = make_pool([make_profile("resource")])
+    pool.record_result("resource", failed_result("resource", "permission denied"), role="review")
+    state = pool._provider_states["resource"]
+    timestamps = dict(state.role_exclusion_set_at)
+    result = failed_result("resource", "")
+    result.success = True
+    pool.record_result("resource", result, role="implementation")
+    assert state.role_exclusion_set_at == timestamps
+    assert pool.check_capacity_exclusion("resource", "review") is not None
+
+
+def test_reset_clears_role_exclusions_and_timestamps():
+    pool = make_pool([make_profile("resource")])
+    pool.record_result("resource", failed_result("resource", "permission denied"), role="review")
+    state = pool.reset_resource("resource", reprobe=False)
+    assert state.role_exclusions == {}
+    assert state.role_exclusion_set_at == {}
+
+
+def test_status_normalizes_invalid_timestamp_map():
+    state = ProviderStatus.from_dict({
+        "agent_id": "resource", "name": "resource", "role_exclusion_set_at": [],
+    })
+    assert state.role_exclusion_set_at == {}
+
+
+@pytest.mark.parametrize("age_hours,blocked", [(1, True), (25, False)])
+def test_partial_legacy_timestamp_map_uses_original_failure(age_hours, blocked):
+    timestamp = (datetime.now(timezone.utc) - timedelta(hours=age_hours)).isoformat()
+    state = ProviderStatus.from_dict({
+        "agent_id": "resource", "name": "resource", "status": "AVAILABLE",
+        "role_exclusions": {"implementation": "EXECUTION_PERMISSION_REQUIRED"},
+        "role_exclusion_set_at": {"review": "2000-01-01T00:00:00+00:00"},
+        "last_failure_at": timestamp,
+    })
+    pool = make_pool([make_profile("resource")])
+    pool._provider_states["resource"] = state
+    assert state.role_exclusion_set_at["implementation"] == timestamp
+    pool.record_result("resource", failed_result("resource", "tests failed"), role="review")
+    assert state.role_exclusion_set_at["implementation"] == timestamp
+    assert (pool.check_capacity_exclusion("resource", "implementation") is not None) == blocked
+
+
+@pytest.mark.parametrize("last_failure", [None, "2000-01-01T00:00:00+00:00"])
+def test_runtime_legacy_exclusion_not_refreshed(last_failure):
+    pool = make_pool([make_profile("resource")])
+    state = pool._provider_states["resource"]
+    state.role_exclusions = {"implementation": "EXECUTION_PERMISSION_REQUIRED"}
+    state.last_failure_at = last_failure
+    pool.record_result("resource", failed_result("resource", "tests failed"), role="review")
+    assert pool.check_capacity_exclusion("resource", "implementation") is None

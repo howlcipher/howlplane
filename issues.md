@@ -12,9 +12,12 @@ Pending bugs carry the same diminishing-returns score defined in `improvements.m
 
 | # | Bug | Status | Score (V×D÷E) | Claude model | Gemini model | ROI rationale |
 | --- | --- | --- | --- | --- | --- | --- |
+| 28 | [Verification steps are capped at a hard-coded 300 seconds, so HowlPlane cannot verify its own 16-minute suite](#28-verification-steps-are-capped-at-a-hard-coded-300-seconds-so-howlplane-cannot-verify-its-own-16-minute-suite) | Pending | 4.0 (8×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Every self-hosted task fails verification on a timeout, not a defect, and the resume result shows no steps and no error, so the operator cannot see why. |
+| 29 | [A task parked as "independent review unavailable" escalates to the owner before verification runs](#29-a-task-parked-as-independent-review-unavailable-escalates-to-the-owner-before-verification-runs) | Pending | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | The #23 fix covered only the remediation limit. The owner is asked to approve without verification evidence, the gap #23 closed. |
+| 30 | [Smaller gaps from the first self-hosted run (HP-SELF-25)](#30-smaller-gaps-from-the-first-self-hosted-run-hp-self-25) | Pending | 1.5 (3×1.0÷2) | Sonnet 5.5 | Gemini 3.8 Flash | Each one cost a review or a diagnosis in the run, and none blocks a task outright. |
 | 27 | [`howlplane work` routes review to AGY, which `orchestrate` skips because AGY's review mode is not read-only](#27-howlplane-work-routes-review-to-agy-which-orchestrate-skips-because-agys-review-mode-is-not-read-only) | Pending | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | With Devin off, AGY is one of only two non-implementer reviewers, so `work` assigns it review often. DOG-037 showed it rewriting tracked files as a reviewer. |
 | 26 | [Rejecting a `work` task leaves its changes in the working tree without saying so](#26-rejecting-a-work-task-leaves-its-changes-in-the-working-tree-without-saying-so) | Pending | 1.5 (3×1.0÷2) | Sonnet 5.5 | Gemini 3.8 Flash | The next task starts on top of rejected work, including build artifacts the agent created. |
-| 25 | [A shell-less Claude reviewer that asked to run tests had its whole verdict discarded, and was then benched from review for good](#25-a-shell-less-claude-reviewer-that-asked-to-run-tests-had-its-whole-verdict-discarded-and-was-then-benched-from-review-for-good) | Done (2026-11-07), bench lifetime open | 4.0 (8×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Claude had failed 57 reviews in a row since 2026-10-25, so with Devin and Cursor off only Codex and agy could review. |
+| 25 | [A shell-less Claude reviewer that asked to run tests had its whole verdict discarded, and was then benched from review for good](#25-a-shell-less-claude-reviewer-that-asked-to-run-tests-had-its-whole-verdict-discarded-and-was-then-benched-from-review-for-good) | Done (2026-11-08) | 4.0 (8×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Claude had failed 57 reviews in a row since 2026-10-25, so with Devin and Cursor off only Codex and agy could review. |
 | 24 | [Three `howlplane work` operator-view defects found dogfooding](#24-three-howlplane-work-operator-view-defects-found-dogfooding) | Done (2026-11-07) | 2.0 (4×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Each one broke the basic single-task path for a first-time operator: a crash on `--agent`, a READY status over a pending gate, and a clean reviewer shown as not run. |
 | 23 | [One LOW finding left after the remediation limit escalates to the owner before verification runs](#23-one-low-finding-left-after-the-remediation-limit-escalates-to-the-owner-before-verification-runs) | Done | 2.0 (4×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Owner approved 2026-11-07: verify before escalating, LOW leftovers become follow-ups. MEDIUM-and-above still escalates. |
 | 22 | [Saved positive or `NOT_PROBED` readiness passes route's readiness filter unchecked](#22-saved-positive-or-not_probed-readiness-passes-routes-readiness-filter-unchecked) | Done (2026-11-07) | 2.0 (4×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Re-probing saved `READY` at selection broke 26 tests that pin selection as free of capacity side effects, so it was dropped. The real defect was downstream: a launch that found no binary marked the status `MISSING_EXECUTABLE`, left readiness `READY`, and excluded the worker forever. |
@@ -487,7 +490,11 @@ Review roles deliberately hold only `Read`, `Glob` and `Grep` (`tests/test_provi
 
 The same session showed the implementer side (`OBJ1-CLAUDE`): Claude made the edit, then was refused `cat ... ; ls; cat AGENTS.md` and `howlplane tia record ...`, which HowlPlane's own implementation prompt tells every worker to run ("The task cannot complete without a valid Test Impact Assessment"). Fixed by granting mutating roles `Bash(howlplane tia record:*)` (`HOWLPLANE_EVIDENCE_SPECIFIERS`) and naming the held shell commands in Claude's prompt; an implementer that is refused still fails closed. Tests: `test_mutating_roles_may_run_the_tia_command_their_prompt_requires`, `test_an_implementer_is_told_exactly_which_shell_commands_it_holds`. Failover from a pinned `--agent` also dropped the healthy workers without a reason; they are now reported as `EXPLICIT_AGENT_REQUESTED` (`tests/test_ai_resource_pool.py::test_pinned_failover_names_the_workers_it_did_not_offer`).
 
-**Still open:** a role exclusion has no expiry. Any provider benched from a role stays benched until an operator reset, because exclusion prevents the success that would clear it. A cooldown or periodic re-trial would fix this.
+**Bench lifetime resolved 2026-11-08** (HP-SELF-25, the first task HowlPlane ran on itself: Codex implemented, then independent review, then the owner approved). A role exclusion now expires after `role_exclusion_cooldown_seconds` (24 hours by default). Each exclusion's start time is stored in `role_exclusion_set_at`, and the `role_exclusions` reason mapping is unchanged. Expiry only offers the role again under the existing permission gates. A success clears the role, and a success in any review role also clears the umbrella `review` exclusion. Older capacity files fall back to `last_failure_at`. A missing, future or unparseable timestamp counts as expired. A failure in another role never refreshes an existing exclusion. Tests are in `tests/test_ai_resource_pool.py`. Open LOW follow-ups:
+- The cooldown boundary (`<` against `<=`) is untested.
+- The umbrella-clear test does not go through a real failure followed by a success.
+- A success with `role=None` is not covered.
+- The legacy backfill in `record_result` is redundant.
 
 ### 26. Rejecting a `work` task leaves its changes in the working tree without saying so
 
@@ -498,4 +505,37 @@ Smaller note from the same run: `status` reports "5 workers available" while the
 ### 27. `howlplane work` routes review to AGY, which `orchestrate` skips because AGY's review mode is not read-only
 
 **Found** 2026-11-07 dogfooding Objective 1. `documentation/ORCHESTRATE.md` says AUTO routing skips AGY for planning, review and acceptance, because AGY's `--mode plan` does not enforce read-only operation: as a reviewer it ran the project's CLI, used the network and rewrote tracked files (DOG-037). The `howlplane work` path has no such rule. In `OBJ1-CODEX` and `OBJ1-CLAUDE2` it assigned AGY as a reviewer in every cycle. Nothing visibly went wrong in these runs, but nothing in the `work` path checked either. Needs: confirm whether `work` checks a read-only attempt's repository delta the way `orchestrate` does, then either apply the same AGY review exclusion to the pool's review selection or document why `work` differs. With Devin and Cursor disabled, excluding AGY leaves Codex and Claude as the only reviewers, so the independence rules need checking against that pool.
+
+**Seen live 2026-11-08** in HP-SELF-25: agy reviewer attempts launched with `--mode accept-edits`.
+
+### 28. Verification steps are capped at a hard-coded 300 seconds, so HowlPlane cannot verify its own 16-minute suite
+
+**Found** 2026-11-08 in HP-SELF-25. After owner approval, `resume` ran the plan:
+- `make lint` passed.
+- `make build` passed.
+- `make test` was killed with `Command '['make', 'test']' timed out after 300 seconds`, exit -1.
+- The hygiene step never ran.
+
+The task ended FAILED. The same tree passed the full suite run directly: 2814 passed, 1 skipped, in 994 s. The timeout is a literal `timeout=300` in `verification.py`, so a repository cannot declare a longer budget for a slow step.
+
+`resume --json` also reported `verification: none` with no steps and `error: null`, although `verification_result.json` held all four steps. An operator cannot tell a timeout from a defect without opening the run directory.
+
+Needs:
+- a per-step timeout from the verification plan or repository config;
+- a timeout recorded as its own failure class;
+- the result document loading the persisted plan and naming the failing step.
+
+### 29. A task parked as "independent review unavailable" escalates to the owner before verification runs
+
+**Found** 2026-11-08 in HP-SELF-25. The regression-reviewer re-review failed on both candidates: agy hit its budget, and Claude returned output that could not be parsed. The orchestrator parked the task `awaiting_human` with verification `unverified`. #23 moved verification ahead of escalation only at the remediation limit. The `independent_review_unavailable` parking path still asks the owner first. Needs: run the deterministic plan before parking on this path as well, so the decision packet carries its result.
+
+### 30. Smaller gaps from the first self-hosted run (HP-SELF-25)
+
+**Found** 2026-11-08.
+- **Reviewer output is lost:** the attempt was recorded as malformed with `output_present: false` and an empty transcript file, so the parse failure cannot be diagnosed.
+- **agy's limits are too tight for this repository:**
+  - the implementation attempt was marked `PROVIDER_STALLED` after about 2 minutes while still producing output, and failed over to Codex;
+  - its regression review ran out its 587 s budget.
+- **Wrong skill routing:** the task was routed with `howlframe-app-development`, so reviewer prompts carried HowlFrame `.howl` rules for a pure Python change.
+- **No tool and target isolation:** running HowlPlane on its own repository means the tool imports the code it is editing. The run needed a hand-pinned worktree of main on `PYTHONPATH`, which should be built in. Separately, the global venv's editable install still records the stale `/run/media/system/...` mount path.
 
