@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Added the self hosting isolation module for issues.md #30 (HP-SELF-30A2).
+  It prepares detached committed tool worktrees, prunes only registered pins
+  belonging to the target repository, preserves the original state root and
+  child import environment, and reports uncommitted tool paths. Real Git tests
+  cover recovery, reuse, pruning boundaries, and bootstrap imports. CLI wiring
+  remains a separate task.
+
 - `howlplane work --json` prints a versioned `howlplane.work_result/v1` document,
   so an agent can drive HowlPlane without parsing the terminal summary. It carries
   the final state, exit code, run directory, implementer, changes, each reviewer's
