@@ -38,6 +38,14 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- The provider stall watchdog no longer kills Claude and agy for being quiet
+  (issues.md #30). Neither CLI prints progress until it exits, so the stall
+  check could only misfire on them: in HP-SELF-30 it killed Claude mid-edit and
+  agy after two minutes. Backends now declare `streams_progress_events`, and the
+  stall check runs only for those that do. Terminal signals and the
+  implementation deadline still apply. A poll with no new output also no longer
+  counts as output activity.
+
 - Verification steps no longer share a hard-coded 300-second limit
   (issues.md #28). A repository sets per-category timeouts in
   `[tool.howlplane.verification.timeouts]` or a manifest's

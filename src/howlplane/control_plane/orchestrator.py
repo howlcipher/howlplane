@@ -2727,6 +2727,7 @@ class GovernedTaskOrchestrator:
                         impl_agent_id,
                         self.config.provider_stall_timeout_seconds,
                         repository_fingerprint,
+                        streams_progress_events=getattr(impl_backend, "streams_progress_events", True),
                     )
 
                     with progress.operation(

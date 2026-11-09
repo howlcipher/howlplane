@@ -6,6 +6,10 @@ from pathlib import Path
 
 from howlplane.control_plane.agent_execution import (
     PROVIDER_RETRY_AFTER_SECONDS_KEY,
+    STALL_DETECTION_SILENT_OUTPUT_MODE,
+    AgyBackend,
+    ClaudeCodeBackend,
+    CodexBackend,
     WATCHDOG_TERMINATION_KEY,
     WATCHDOG_TERMINATION_EXHAUSTION,
     WATCHDOG_TERMINATION_STALL,
@@ -136,6 +140,48 @@ def test_semantic_output_and_source_delta_reset_stall_timer():
     source[0] = "feature-delta"
     assert observer("", "", 170) is None
     assert observer.last_meaningful_progress_at == 170.0
+
+
+def test_no_output_is_not_reported_as_raw_output_activity():
+    """HP-SELF-30 reported raw_output=yes for an agy run that printed nothing."""
+    now = [0.0]
+    observer = ProviderStreamObserver("agy", 120, lambda: "clean", clock=lambda: now[0])
+    for second in (30, 60, 90):
+        now[0] = float(second)
+        assert observer("", "", now[0]) is None
+    now[0] = 120.0
+    result = observer("", "", now[0])
+    assert result["reason"] == WATCHDOG_TERMINATION_STALL
+    assert result["diagnostics"]["raw_output_activity"] is False
+    assert observer.last_output_activity_at == 0.0
+
+
+def test_a_silent_output_mode_provider_is_never_reported_as_stalled():
+    now = [0.0]
+    observer = ProviderStreamObserver(
+        "claude_code", 120, lambda: "clean", clock=lambda: now[0], streams_progress_events=False,
+    )
+    for second in (120, 600, 3600):
+        now[0] = float(second)
+        assert observer("", "", now[0]) is None
+    assert observer._diagnostics(now[0])["stall_detection"] == STALL_DETECTION_SILENT_OUTPUT_MODE
+
+
+def test_a_silent_output_mode_provider_still_stops_on_a_terminal_signal():
+    now = [0.0]
+    observer = ProviderStreamObserver(
+        "agy", 120, lambda: "clean", clock=lambda: now[0], streams_progress_events=False,
+    )
+    result = observer("", "session limit reached", 5)
+    assert result is not None
+    assert result["reason"] == WATCHDOG_TERMINATION_EXHAUSTION
+
+
+def test_only_backends_whose_cli_prints_nothing_until_exit_skip_stall_detection():
+    assert ClaudeCodeBackend.streams_progress_events is False
+    assert AgyBackend.streams_progress_events is False
+    assert CodexBackend.streams_progress_events is True
+    assert SubprocessAgentBackend.streams_progress_events is True
 
 
 def test_control_plane_only_activity_does_not_reset_semantic_timer():
