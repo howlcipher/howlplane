@@ -38,6 +38,12 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Provider role exclusions expire after a configurable cooldown (24 hours by
+  default), allowing a retry under existing permission gates (issues.md #25).
+  Per-role timestamps preserve the saved reason mapping; old capacity files use
+  the last failure time or count as expired when no time is available. Review
+  success also clears the umbrella review exclusion.
+
 - Found by dogfooding a real task through every local agent (Objective 1):
   - `howlplane work --agent X` without `--execute` crashed with `AttributeError:
     'RoutingDecision' object has no attribute 'override_reason'`. It now prints the
