@@ -13,6 +13,7 @@ Pending bugs carry the same diminishing-returns score defined in `improvements.m
 | # | Bug | Status | Score (V×D÷E) | Claude model | Gemini model | ROI rationale |
 | --- | --- | --- | --- | --- | --- | --- |
 | 28 | [Verification steps are capped at a hard-coded 300 seconds, so HowlPlane cannot verify its own 16-minute suite](#28-verification-steps-are-capped-at-a-hard-coded-300-seconds-so-howlplane-cannot-verify-its-own-16-minute-suite) | Done (2026-11-08) | 4.0 (8×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Every self-hosted task fails verification on a timeout, not a defect, and the resume result shows no steps and no error, so the operator cannot see why. |
+| 32 | [Claude never received the operator's `execution_profile` grants, so self-hosted remediation could only run the full suite](#32-claude-never-received-the-operators-execution_profile-grants-so-self-hosted-remediation-could-only-run-the-full-suite) | Done (2026-11-09) | 8.0 (8×1.0÷1) | Opus 5.5 | Gemini 3.8 Flash | Every Claude remediation of HP-SELF-30A ran the 16-minute suite, and the third ran out of time. Fixed directly as a self-hosting bootstrap blocker. |
 | 29 | [A task parked as "independent review unavailable" escalates to the owner before verification runs](#29-a-task-parked-as-independent-review-unavailable-escalates-to-the-owner-before-verification-runs) | Pending | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | The #23 fix covered only the remediation limit. The owner is asked to approve without verification evidence, the gap #23 closed. |
 | 31 | [The 10-minute implementation limit is hard-coded, and a parked review skips remediation](#31-the-10-minute-implementation-limit-is-hard-coded-and-a-parked-review-skips-remediation) | Pending | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | In the second HP-SELF-30 run both implementers ran out the limit and HIGH-finding partial work went to review, then straight to the owner. |
 | 30 | [Smaller gaps from the first self-hosted run (HP-SELF-25)](#30-smaller-gaps-from-the-first-self-hosted-run-hp-self-25) | Pending | 1.5 (3×1.0÷2) | Sonnet 5.5 | Gemini 3.8 Flash | Each one cost a review or a diagnosis in the run, and none blocks a task outright. |
@@ -575,3 +576,13 @@ Needs:
 - an implementation timeout from config or a `work` flag, like #28's step timeouts;
 - remediation of concrete findings before parking on independence.
 
+### 32. Claude never received the operator's `execution_profile` grants, so self-hosted remediation could only run the full suite
+
+**Found** 2026-11-09 in HP-SELF-30A, which failed after 2 h 22 min when its third remediation ran out its 13.5-minute limit.
+- **Cause:** `AgentBackendRegistry` built its shared `ClaudeCodeBackend()` with no operator settings, and nothing set them later. The `[ai_resources.providers.claude_code.execution_profile]` grants in `~/.config/howlplane/config.toml`, including `pytest:*` added on 2026-10-11, never reached Claude. The prompt then told the agent its shell held only `make test` and a few read-only commands, and that any other command fails the task. So each remediation ran the 16-minute full suite, although the task said to run only its own test file.
+- **Fix (direct, as a self-hosting bootstrap blocker):** the registry instance now passes `FROM_OPERATOR_CONFIG`, and the backend reads the operator config each time it builds a profile. An unreadable config grants nothing extra. A directly built backend still uses only the settings it is given. Tests: `tests/test_claude_operator_execution_profile.py`.
+
+Also found in that run, still open:
+- `howlplane resume` on a FAILED task reports `INTERNAL_ERROR` ("likely a HowlPlane bug") instead of a clean refusal that names the re-run command.
+- A timed-out `work --json` result carries `exit_code: -1`, which the shell sees as 255, outside the documented 0 to 3 exit codes.
+- Task constraints such as "run only this test file" are prompt text only. Nothing checks them against the commands the agent is granted, so a contradiction is not reported before the run.
