@@ -16,7 +16,11 @@ import tomllib
 import yaml
 
 from howlplane.control_plane.hygiene_policy import HygienePolicyClassifier
-from howlplane.control_plane.verification import VerificationPlan
+from howlplane.control_plane.verification import (
+    VALID_STEP_CATEGORIES,
+    VerificationPlan,
+    valid_timeout_seconds,
+)
 
 
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
@@ -40,6 +44,39 @@ class ProjectContext(DataClassSerializationMixin):
     has_manifest: bool = False
     has_agents_md: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Verification step timeouts in seconds, by step category (issues.md #28).
+    step_timeouts: Dict[str, float] = field(default_factory=dict)
+
+
+def _read_step_timeouts(root: Path, manifest_data: Dict[str, Any], metadata: Dict[str, Any]) -> Dict[str, float]:
+    """Per-category verification timeouts the repository declares.
+
+    `[tool.howlplane.verification.timeouts]` in pyproject.toml is read first,
+    then a manifest's `verification.timeouts`, which wins per category. A value
+    that is not a finite positive number, or a category HowlPlane does not
+    run, is ignored and listed under `metadata["invalid_step_timeouts"]`, so
+    the step keeps its default instead of running unbounded.
+    """
+    declared: Dict[str, Any] = {}
+    pyproject = root / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            with open(pyproject, "rb") as f:
+                tool = tomllib.load(f).get("tool", {}).get("howlplane", {})
+            declared.update(((tool.get("verification") or {}).get("timeouts")) or {})
+        except (OSError, tomllib.TOMLDecodeError, AttributeError):
+            pass
+    try:
+        declared.update(((manifest_data.get("verification") or {}).get("timeouts")) or {})
+    except AttributeError:
+        pass
+    timeouts: Dict[str, float] = {}
+    for category, seconds in declared.items():
+        if category in VALID_STEP_CATEGORIES and valid_timeout_seconds(seconds):
+            timeouts[category] = seconds
+        else:
+            metadata.setdefault("invalid_step_timeouts", {})[str(category)] = seconds
+    return timeouts
 
 
 IGNORED_SCAN_DIRS = {
@@ -118,6 +155,7 @@ class ProjectAdapter:
         metadata: Dict[str, Any] = {}
         has_manifest = False
         has_agents_md = (root / "AGENTS.md").exists()
+        manifest_data: Dict[str, Any] = {}
 
         def _extract_manifest_cmds(cmds: Dict[str, Any]) -> None:
             for k in ("test", "build", "lint", "format", "fmt"):
@@ -144,6 +182,7 @@ class ProjectAdapter:
             has_manifest = True
             with open(ai_toml, "rb") as f:
                 data = tomllib.load(f)
+            manifest_data = data
             name = data.get("name", name)
             project_types = data.get("project_type", [])
             skills = data.get("skills", [])
@@ -158,6 +197,7 @@ class ProjectAdapter:
             has_manifest = True
             with open(manifest_yaml, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
+            manifest_data = data if isinstance(data, dict) else {}
             name = data.get("name", name)
             project_types = data.get("project_types", [])
             skills = data.get("skills", [])
@@ -359,6 +399,7 @@ class ProjectAdapter:
             has_manifest=has_manifest,
             has_agents_md=has_agents_md,
             metadata=metadata,
+            step_timeouts=_read_step_timeouts(root, manifest_data, metadata),
         )
 
     @classmethod
@@ -409,4 +450,6 @@ class ProjectAdapter:
             )
             idx += 1
 
+        for step in plan.steps:
+            step.timeout_seconds = context.step_timeouts.get(step.category)
         return plan

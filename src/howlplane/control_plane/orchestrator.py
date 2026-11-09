@@ -71,7 +71,11 @@ from howlplane.control_plane.progress import (
 from howlplane.control_plane.proposed_action import ProposedAction, infer_proposed_actions
 from howlplane.control_plane.resource_models import ProviderFailureClass
 from howlplane.control_plane.task_spec import TaskSpec
-from howlplane.control_plane.verification import VerificationPlan, VerificationStep
+from howlplane.control_plane.verification import (
+    FAILURE_CLASS_TIMEOUT,
+    VerificationPlan,
+    VerificationStep,
+)
 from howlplane.control_plane.verification_view import (
     VERIFICATION_VIEW_SCHEMA_VERSION,
     VerificationViewError,
@@ -3627,7 +3631,13 @@ class GovernedTaskOrchestrator:
         )
         verif_summary = {s.name: s.status for s in verif_plan.steps}
         if verif_status != "passed":
-            failed_steps = [s.name for s in verif_plan.steps if s.status == "failed" and s.required]
+            failed_steps = [
+                s.name + (
+                    f" (timed out after {s.metadata['timeout_seconds']:g}s)"
+                    if s.metadata.get("failure_class") == FAILURE_CLASS_TIMEOUT else ""
+                )
+                for s in verif_plan.steps if s.status == "failed" and s.required
+            ]
             err_msg = f"Deterministic verification failed on required steps: {', '.join(failed_steps)}"
             if pending_escalation is not None:
                 # Approving could not overrule a failed gate (resume ends it

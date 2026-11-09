@@ -38,6 +38,16 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Verification steps no longer share a hard-coded 300-second limit
+  (issues.md #28). A repository sets per-category timeouts in
+  `[tool.howlplane.verification.timeouts]` or a manifest's
+  `[verification.timeouts]`, and HowlPlane gives its own suite 2400 seconds.
+  - A timeout is recorded as `failure_class: timeout`.
+  - The step's whole process group is killed, so a timed-out `make test` no
+    longer leaves pytest running.
+  - A resumed task that fails verification names the failing step, in its
+    error and in `resume --json`.
+
 - Provider role exclusions expire after a configurable cooldown (24 hours by
   default), allowing a retry under existing permission gates (issues.md #25).
   Per-role timestamps preserve the saved reason mapping; old capacity files use

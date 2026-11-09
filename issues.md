@@ -12,7 +12,7 @@ Pending bugs carry the same diminishing-returns score defined in `improvements.m
 
 | # | Bug | Status | Score (V×D÷E) | Claude model | Gemini model | ROI rationale |
 | --- | --- | --- | --- | --- | --- | --- |
-| 28 | [Verification steps are capped at a hard-coded 300 seconds, so HowlPlane cannot verify its own 16-minute suite](#28-verification-steps-are-capped-at-a-hard-coded-300-seconds-so-howlplane-cannot-verify-its-own-16-minute-suite) | Pending | 4.0 (8×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Every self-hosted task fails verification on a timeout, not a defect, and the resume result shows no steps and no error, so the operator cannot see why. |
+| 28 | [Verification steps are capped at a hard-coded 300 seconds, so HowlPlane cannot verify its own 16-minute suite](#28-verification-steps-are-capped-at-a-hard-coded-300-seconds-so-howlplane-cannot-verify-its-own-16-minute-suite) | Done (2026-11-08) | 4.0 (8×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Every self-hosted task fails verification on a timeout, not a defect, and the resume result shows no steps and no error, so the operator cannot see why. |
 | 29 | [A task parked as "independent review unavailable" escalates to the owner before verification runs](#29-a-task-parked-as-independent-review-unavailable-escalates-to-the-owner-before-verification-runs) | Pending | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | The #23 fix covered only the remediation limit. The owner is asked to approve without verification evidence, the gap #23 closed. |
 | 30 | [Smaller gaps from the first self-hosted run (HP-SELF-25)](#30-smaller-gaps-from-the-first-self-hosted-run-hp-self-25) | Pending | 1.5 (3×1.0÷2) | Sonnet 5.5 | Gemini 3.8 Flash | Each one cost a review or a diagnosis in the run, and none blocks a task outright. |
 | 27 | [`howlplane work` routes review to AGY, which `orchestrate` skips because AGY's review mode is not read-only](#27-howlplane-work-routes-review-to-agy-which-orchestrate-skips-because-agys-review-mode-is-not-read-only) | Pending | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | With Devin off, AGY is one of only two non-implementer reviewers, so `work` assigns it review often. DOG-037 showed it rewriting tracked files as a reviewer. |
@@ -524,6 +524,13 @@ Needs:
 - a per-step timeout from the verification plan or repository config;
 - a timeout recorded as its own failure class;
 - the result document loading the persisted plan and naming the failing step.
+
+**Resolved 2026-11-08.**
+- **Per-step limit:** each verification step has a `timeout_seconds`. A repository sets it per step category in `[tool.howlplane.verification.timeouts]` in `pyproject.toml`, or in a manifest's `[verification.timeouts]`, which wins. Unset categories keep 300 seconds. HowlPlane declares `unit_test = 2400` for itself.
+- **Timeouts are their own failure:** a timeout is recorded as `failure_class: timeout` with its limit and whatever output arrived. The Stage 6 error says "timed out after Ns".
+- **Leftover processes:** the run also showed that `subprocess.run` killed only `make`, so the pytest it had started kept running and loading the host. Each step now runs in its own process group, and the whole group is killed on a timeout or an interrupt.
+- **Resume reports the failure:** a resumed task that fails verification now carries the executed plan, and an error that names each failed step. `work_result/v1` adds `failure_class` and `timeout_seconds` to each step.
+- **Tests:** `tests/test_verification_step_timeout.py`.
 
 ### 29. A task parked as "independent review unavailable" escalates to the owner before verification runs
 

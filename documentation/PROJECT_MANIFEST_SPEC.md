@@ -74,6 +74,7 @@ exactly.
 | `commands` | table | No | Named project commands. See 3.3. |
 | `security` | table | No | Capability grants. See 3.4. |
 | `routing` | table | No | Provider preferences per task type. See 3.5. |
+| `verification` | table | No | How HowlPlane runs the verification steps. See 3.6. |
 
 Unknown top-level fields are **allowed**. The schema sets
 `additionalProperties: true` at the top level and the parser does not reject
@@ -154,6 +155,29 @@ Entries are **preferences, not executable definitions**. They name providers the
 framework already knows how to run; the manifest never specifies binaries,
 flags, model IDs, or credentials. A named provider that is unavailable is
 skipped in favor of the next entry.
+
+### 3.6 `[verification]`
+
+| Field | Type | Required | Semantics |
+| --- | --- | --- | --- |
+| `timeouts` | table of numbers | No | Seconds a verification step of each category may run, keyed by step category: `build`, `lint`, `repository_hygiene`, `unit_test`, `integration_test`, `security_check`, `policy_check` or `custom`. |
+
+```toml
+[verification.timeouts]
+unit_test = 2400
+```
+
+A step whose category is not listed gets 300 seconds. A step that runs past its
+limit fails with `failure_class: timeout` in the verification plan, and its
+whole process group is killed, so a test runner started by `make test` does not
+keep running. A repository without a manifest can declare the same table in
+`pyproject.toml` as `[tool.howlplane.verification.timeouts]`. A manifest value
+wins over `pyproject.toml` for the same category.
+
+`[verification]` and `timeouts` are closed tables. The schema rejects an
+unknown category or a value that is not a positive number. HowlPlane's planner
+ignores such an entry, records it under `invalid_step_timeouts` in the project
+context, and keeps the default for that category (issues.md #28).
 
 ---
 

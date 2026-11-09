@@ -58,6 +58,14 @@
           },
           "required": {
             "type": "boolean"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "timeout_seconds": {
+            "type": ["number", "null"],
+            "exclusiveMinimum": 0,
+            "description": "Seconds the step may run before it fails with failure_class 'timeout'. Null means the default of 300."
           }
         },
         "required": ["step_id", "name", "command", "category", "status", "required"],

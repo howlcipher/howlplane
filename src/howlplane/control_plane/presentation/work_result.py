@@ -73,7 +73,9 @@ def _verification(plan: Any) -> Dict[str, Any]:
         "status": plan.overall_status,
         "steps": [
             {"name": s.name, "category": s.category, "status": s.status,
-             "exit_code": s.exit_code, "required": s.required}
+             "exit_code": s.exit_code, "required": s.required,
+             "failure_class": (s.metadata or {}).get("failure_class"),
+             "timeout_seconds": s.effective_timeout_seconds}
             for s in plan.steps
         ],
     }
