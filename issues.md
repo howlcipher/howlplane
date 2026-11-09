@@ -543,6 +543,16 @@ Needs:
 - **agy's limits are too tight for this repository:**
   - the implementation attempt was marked `PROVIDER_STALLED` after about 2 minutes while still producing output, and failed over to Codex;
   - its regression review ran out its 587 s budget.
+
+  **Stall half resolved 2026-11-08.** HP-SELF-30 showed the cause:
+  - agy was killed at 2 minutes having printed nothing. Its `raw_output=yes` was false: the observer joined stdout and stderr with a separator, so every poll looked like output.
+  - Claude was killed at 4.5 minutes, two quiet minutes after its last edit. `--output-format json` prints nothing until exit.
+
+  Neither provider streams progress events, so the semantic stall check could only ever misfire on them. Codex had no session left, so the task failed with nothing reviewed. Changes:
+  - Backends now declare `streams_progress_events`. Claude and agy declare `False`, so the stall check is off for them, and their diagnostics say so (`stall_detection: disabled_silent_output_mode`). Terminal signals and the overall implementation deadline still apply.
+  - Only text a provider actually printed counts as output.
+
+  Tests: `tests/test_provider_watchdog.py` and `tests/test_provider_failover.py::test_a_provider_that_is_silent_until_it_exits_is_not_killed_as_stalled`. The review budget remains open.
 - **Wrong skill routing:** the task was routed with `howlframe-app-development`, so reviewer prompts carried HowlFrame `.howl` rules for a pure Python change.
 - **No tool and target isolation:** running HowlPlane on its own repository means the tool imports the code it is editing. The run needed a hand-pinned worktree of main on `PYTHONPATH`, which should be built in. Separately, the global venv's editable install still records the stale `/run/media/system/...` mount path.
 

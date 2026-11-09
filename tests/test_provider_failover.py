@@ -867,6 +867,35 @@ def test_semantically_stalled_noisy_provider_fails_over_to_healthy_provider(tmp_
     assert _read_file(repo, "src/feature.py").endswith("True\n")
 
 
+class _SilentUntilExitBackend(SubprocessAgentBackend):
+    """Like Claude's json mode or agy -p: no output at all until it exits."""
+
+    streams_progress_events = False
+
+
+def test_a_provider_that_is_silent_until_it_exits_is_not_killed_as_stalled(tmp_path: Path):
+    """HP-SELF-30: Claude was killed mid-edit after two quiet minutes (issues.md #30)."""
+    repo = _init_test_repo(tmp_path / "repo")
+    silent = _SilentUntilExitBackend(
+        "resource_a", sys.executable,
+        lambda *_args, **_kwargs: [
+            sys.executable, "-u", "-c",
+            "import pathlib,time\ntime.sleep(.6)\n"
+            "pathlib.Path('src/feature.py').write_text('def run():\\n    return True\\n')",
+        ],
+    )
+
+    result = _run_failover_task(
+        repo, lambda _resource_id: silent, max_attempts=1,
+        provider_stall_timeout_seconds=0.2,
+        provider_watchdog_interval_seconds=0.05,
+    )
+
+    assert result.final_state == "complete"
+    assert [attempt["resource_id"] for attempt in result.implementation_attempts] == ["resource_a"]
+    assert _read_file(repo, "src/feature.py").endswith("True\n")
+
+
 def test_recovered_first_provider_does_not_dead_end_failover(tmp_path: Path):
     """The exact live condition: attempt 1's cooldown lapses during attempt 2."""
     repo = _init_test_repo(tmp_path / "repo")

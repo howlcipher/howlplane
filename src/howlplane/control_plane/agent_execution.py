@@ -144,11 +144,26 @@ def normalize_terminal_text(text: str) -> str:
     return "\n".join(" ".join(line.split()) for line in reduced.splitlines() if line.strip())
 
 
+STALL_DETECTION_ACTIVE = "active"
+STALL_DETECTION_SILENT_OUTPUT_MODE = "disabled_silent_output_mode"
+
+
 class ProviderStreamObserver:
-    """Separates process and output liveness from engineering progress."""
+    """Separates process and output liveness from engineering progress.
+
+    A provider whose output mode prints nothing until it exits (Claude with
+    ``--output-format json``, agy ``-p``) gives the observer no progress events
+    to see, so silence there is not evidence of a stall. For those providers
+    ``streams_progress_events=False`` keeps terminal-signal detection and the
+    caller's overall deadline but never reports a stall: HP-SELF-30 had Claude
+    killed mid-edit after two quiet minutes, and agy after two minutes of no
+    output at all (issues.md #30).
+    """
     def __init__(self, provider_id: str, stall_timeout_seconds: float,
-                 repository_fingerprint: Callable[[], str], clock: Callable[[], float] = time.monotonic) -> None:
+                 repository_fingerprint: Callable[[], str], clock: Callable[[], float] = time.monotonic,
+                 streams_progress_events: bool = True) -> None:
         self.provider_id, self.stall_timeout_seconds, self.repository_fingerprint, self.clock = provider_id, stall_timeout_seconds, repository_fingerprint, clock
+        self.streams_progress_events = streams_progress_events
         now = clock()
         self.last_process_activity_at = self.last_output_activity_at = self.last_meaningful_progress_at = now
         self.last_semantic_event, self._stdout_length, self._stderr_length = "provider_started", 0, 0
@@ -157,12 +172,16 @@ class ProviderStreamObserver:
         self._terminal_buffer: Deque[str] = deque(maxlen=32)
 
     def _diagnostics(self, now: float) -> Dict[str, Any]:
-        return {"last_process_activity_at": self.last_process_activity_at, "last_output_activity_at": self.last_output_activity_at, "last_meaningful_progress_at": self.last_meaningful_progress_at, "semantic_stall_age_seconds": round(now - self.last_meaningful_progress_at, 3), "last_semantic_event": self.last_semantic_event, "raw_output_activity": self.last_output_activity_at > self.last_meaningful_progress_at}
+        return {"last_process_activity_at": self.last_process_activity_at, "last_output_activity_at": self.last_output_activity_at, "last_meaningful_progress_at": self.last_meaningful_progress_at, "semantic_stall_age_seconds": round(now - self.last_meaningful_progress_at, 3), "last_semantic_event": self.last_semantic_event, "raw_output_activity": self.last_output_activity_at > self.last_meaningful_progress_at, "stall_detection": STALL_DETECTION_ACTIVE if self.streams_progress_events else STALL_DETECTION_SILENT_OUTPUT_MODE}
 
     def __call__(self, stdout: str, stderr: str, _elapsed: float) -> Optional[Dict[str, Any]]:
         now = self.clock(); self.last_process_activity_at = now
-        new_text = stdout[self._stdout_length:] + "\n" + stderr[self._stderr_length:]
+        new_stdout, new_stderr = stdout[self._stdout_length:], stderr[self._stderr_length:]
         self._stdout_length, self._stderr_length = len(stdout), len(stderr)
+        # Only text the provider actually wrote counts as output. Joining the
+        # two streams with a separator made every poll look like output, so a
+        # provider that printed nothing was reported with raw_output=yes.
+        new_text = new_stdout + "\n" + new_stderr if (new_stdout or new_stderr) else ""
         if new_text:
             self.last_output_activity_at = now
             normalized = normalize_terminal_text(new_text)
@@ -176,7 +195,7 @@ class ProviderStreamObserver:
         repository_state = self.repository_fingerprint()
         if repository_state != self._repository_state:
             self._repository_state = repository_state; self.last_meaningful_progress_at = now; self.last_semantic_event = "source_delta_changed"
-        if now - self.last_meaningful_progress_at >= self.stall_timeout_seconds:
+        if self.streams_progress_events and now - self.last_meaningful_progress_at >= self.stall_timeout_seconds:
             return {"reason": WATCHDOG_TERMINATION_STALL, "diagnostics": self._diagnostics(now)}
         return None
 
@@ -477,6 +496,11 @@ class AgentExecutionResult(DataClassSerializationMixin):
 
 class AgentBackend(ABC):
     """Abstract base class for all agent execution backends."""
+
+    # Whether the provider's output mode streams progress (tool calls, edits)
+    # while it works. A backend whose CLI prints nothing until it exits sets
+    # this False, so the stall watchdog does not read silence as a stall.
+    streams_progress_events: bool = True
 
     def probe_readiness(self) -> BackendReadiness:
         """Checks safe runtime readiness without consuming generation capacity."""
@@ -838,6 +862,9 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
     `--permission-mode bypassPermissions` are never emitted.
     """
 
+    # `--output-format json` prints one result object at exit, nothing before.
+    streams_progress_events = False
+
     def __init__(self, operator_settings: Optional[Any] = None):
         super().__init__("claude_code", "claude")
         self.operator_settings = operator_settings
@@ -1043,6 +1070,10 @@ AGY_PRINT_TIMEOUT_HEADROOM_SECONDS = 15
 
 
 class AgyBackend(SubprocessAgentBackend):
+    # `agy -p` prints its answer at the end; HP-SELF-30 captured no stdout at
+    # all in two minutes of a healthy run.
+    streams_progress_events = False
+
     def __init__(self):
         def _agy_cmd(t, c, r, p, timeout_seconds: int = 300, **kwargs):
             print_timeout = max(1, timeout_seconds - AGY_PRINT_TIMEOUT_HEADROOM_SECONDS)
