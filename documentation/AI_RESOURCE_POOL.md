@@ -125,6 +125,21 @@ verifier rejection do not become quota exhaustion. Temporary states recover
 through observed retry/cooldown, targeted reset/re-probe, or later success; no
 resource is permanently blacklisted.
 
+Role exclusions retain their `role_exclusions` reason mapping and store each
+exclusion's timestamp separately in `role_exclusion_set_at`. Both selection and
+capacity checks ignore exclusions once their cooldown elapses (24 hours by
+default). Callers can configure `ProviderPoolManager` with
+`role_exclusion_cooldown_seconds` (a finite, nonnegative number of seconds).
+Expiry offers the role again under the existing permission gates; it does not
+grant execution permission. A success clears that role's exclusion and timestamp;
+a success in any review role also clears the umbrella `review` exclusion.
+Resource reset clears all role exclusions and timestamps. Older capacity files
+without a per-role timestamp snapshot `last_failure_at` when loaded; without
+either timestamp, the exclusion counts as expired. Invalid or future timestamps
+also count as expired; timestamps without a timezone are interpreted as UTC.
+Later failures in other roles never refresh an existing exclusion. A new
+permission failure in the same role restarts its cooldown.
+
 Configured model overrides apply only to adapters that declare model selection
 support. The selected and inventoried identity then records that configured
 model; unobserved hosted CLI models remain JSON `null`. Marathon failover also
