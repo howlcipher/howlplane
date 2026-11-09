@@ -124,6 +124,12 @@ include = ["howlplane", "howlplane.*"]
     "data/integrations/howlframe/*.hfbc",
 ]
 
+# Seconds each HowlPlane verification step category may run (issues.md #28).
+# The full suite takes about 17 minutes locally; other steps keep the
+# 300-second default.
+[tool.howlplane.verification.timeouts]
+unit_test = 2400
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "src"]

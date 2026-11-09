@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -34,6 +35,78 @@ VALID_STEP_CATEGORIES = {
     "custom",
 }
 VALID_OVERALL_STATUSES = {"unverified", "passed", "failed", "partial"}
+
+# A step with no timeout of its own gets this many seconds. A repository whose
+# suite needs longer declares it per category (project_adapter.py reads
+# `[tool.howlplane.verification.timeouts]` and the manifests), not by editing
+# this value (issues.md #28).
+DEFAULT_STEP_TIMEOUT_SECONDS = 300
+FAILURE_CLASS_TIMEOUT = "timeout"
+
+
+def valid_timeout_seconds(value: Any) -> bool:
+    """A usable step timeout: a finite, positive number that is not a bool."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return value == value and 0 < value < float("inf")
+
+
+def failed_steps_summary(plan: Optional["VerificationPlan"]) -> Optional[str]:
+    """One line naming each failed step and why, or None if no step failed."""
+    if plan is None:
+        return None
+    parts = []
+    for step in plan.steps:
+        if step.status != "failed":
+            continue
+        why = (step.stderr or "").strip().splitlines()
+        detail = why[-1] if why else f"exit {step.exit_code}"
+        parts.append(f"{step.name}: {detail}")
+    return "; ".join(parts) or None
+
+
+def _text(value: Any) -> Optional[str]:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _run_bounded(cmd_args: List[str], cwd: Optional[str], env: Dict[str, str],
+                 timeout: float) -> subprocess.CompletedProcess:
+    """Runs a step in its own process group and kills the whole group on timeout.
+
+    subprocess.run kills only the direct child, so a `make test` that timed
+    out left its pytest running unsupervised and loading the host after the
+    step had already failed (issues.md #28). Killing the group also stops the
+    step's children if HowlPlane itself is interrupted.
+    """
+    use_group = os.name == "posix"
+    proc = subprocess.Popen(
+        cmd_args, cwd=cwd, env=env, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        start_new_session=use_group,
+    )
+
+    def _kill_group() -> None:
+        try:
+            if use_group:
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:
+                proc.kill()
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_group()
+        stdout, stderr = proc.communicate()
+        raise subprocess.TimeoutExpired(cmd_args, timeout, output=stdout, stderr=stderr)
+    except BaseException:
+        _kill_group()
+        proc.wait()
+        raise
+    return subprocess.CompletedProcess(cmd_args, proc.returncode, stdout, stderr)
 
 
 class VerificationError(ValueError):
@@ -108,13 +181,22 @@ class VerificationStep(DataClassSerializationMixin):
     interpreter: Optional[str] = None
     required: bool = True
     metadata: Dict[str, Any] = field(default_factory=dict)
+    timeout_seconds: Optional[float] = None
 
     def __post_init__(self):
         self.validate()
 
+    @property
+    def effective_timeout_seconds(self) -> float:
+        return self.timeout_seconds if self.timeout_seconds is not None else DEFAULT_STEP_TIMEOUT_SECONDS
+
     def validate(self) -> None:
         if not self.step_id or not isinstance(self.step_id, str):
             raise VerificationError("step_id must be a non-empty string.")
+        if self.timeout_seconds is not None and not valid_timeout_seconds(self.timeout_seconds):
+            raise VerificationError(
+                f"timeout_seconds must be a finite positive number, got {self.timeout_seconds!r}."
+            )
         if self.category not in VALID_STEP_CATEGORIES:
             raise VerificationError(
                 f"category '{self.category}' invalid. Allowed: {sorted(VALID_STEP_CATEGORIES)}"
@@ -156,6 +238,7 @@ class VerificationPlan(DataClassSerializationMixin):
         required: bool = True,
         interpreter: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        timeout_seconds: Optional[float] = None,
     ) -> None:
         step = VerificationStep(
             step_id=step_id,
@@ -166,6 +249,7 @@ class VerificationPlan(DataClassSerializationMixin):
             required=required,
             interpreter=interpreter,
             metadata=metadata or {},
+            timeout_seconds=timeout_seconds,
         )
         self.steps.append(step)
 
@@ -242,14 +326,7 @@ class VerificationPlan(DataClassSerializationMixin):
                 details=cmd_display,
                 role="verification",
             ):
-                res = subprocess.run(
-                    cmd_args,
-                    cwd=cwd,
-                    capture_output=True,
-                    text=True,
-                    env=env,
-                    timeout=300,
-                )
+                res = _run_bounded(cmd_args, cwd, env, step.effective_timeout_seconds)
 
             step.duration_seconds = round(time.time() - start_time, 3)
             step.exit_code = res.returncode
@@ -261,6 +338,24 @@ class VerificationPlan(DataClassSerializationMixin):
                 step.status = "verified"
             else:
                 step.status = "failed"
+
+        except subprocess.TimeoutExpired as e:
+            # A timeout says nothing about the change, so it is recorded as its
+            # own failure class with whatever output arrived, not as an
+            # anonymous exit -1 (issues.md #28).
+            limit = step.effective_timeout_seconds
+            step.duration_seconds = round(time.time() - start_time, 3)
+            step.exit_code = -1
+            step.stdout = _text(e.stdout)
+            step.stderr = (
+                (_text(e.stderr) or "")
+                + f"\nStep timed out after {limit:g} seconds. If this step legitimately "
+                f"needs longer, set a '{step.category}' timeout under "
+                f"[tool.howlplane.verification.timeouts] in pyproject.toml."
+            ).lstrip("\n")
+            step.metadata["failure_class"] = FAILURE_CLASS_TIMEOUT
+            step.metadata["timeout_seconds"] = limit
+            step.status = "failed"
 
         except Exception as e:
             step.duration_seconds = round(time.time() - start_time, 3)

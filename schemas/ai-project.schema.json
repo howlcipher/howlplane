@@ -68,6 +68,21 @@
         "description": "Ordered preferences of providers for a specific task type."
       },
       "description": "Provider preferences grouped by task type."
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "timeouts": {
+          "type": "object",
+          "propertyNames": {
+            "enum": ["build", "lint", "repository_hygiene", "unit_test", "integration_test", "security_check", "policy_check", "custom"]
+          },
+          "additionalProperties": { "type": "number", "exclusiveMinimum": 0 },
+          "description": "Seconds a verification step of each category may run before it fails as a timeout. Unlisted categories keep the 300-second default."
+        }
+      },
+      "additionalProperties": false,
+      "description": "How HowlPlane runs this project's deterministic verification steps."
     }
   },
   "required": ["schema_version", "name"],

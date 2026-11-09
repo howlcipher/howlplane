@@ -27,7 +27,7 @@ from howlplane.control_plane.proposed_action import (
 )
 from howlplane.control_plane.reconciliation import ReconciliationResult
 from howlplane.control_plane.task_spec import DataClassSerializationMixin, TaskSpec
-from howlplane.control_plane.verification import VerificationPlan
+from howlplane.control_plane.verification import VerificationPlan, failed_steps_summary
 
 # The only verification status that may stand behind an ordinary verified
 # completion. Approval authorizes the workflow to continue; this is what says
@@ -1013,6 +1013,19 @@ class HumanLifecycleManager:
             f"reported '{verif_status}', so this task cannot be recorded as "
             f"verified-complete."
         )
+        # The plan that just ran is on disk. Carry it and the failing steps
+        # into the result, so `resume --json` names what failed instead of
+        # reporting no steps and no error (issues.md #28).
+        plan = None
+        plan_file = run_dir / "verification_plan.json"
+        if plan_file.is_file():
+            try:
+                plan = VerificationPlan.from_dict(json.loads(plan_file.read_text(encoding="utf-8")))
+            except Exception:
+                plan = None
+        failed = failed_steps_summary(plan)
+        if failed:
+            reason += f" Failed: {failed}"
         return cls._resumed_terminal_result(
             task_id=task_id,
             task_spec=task_spec,
@@ -1025,6 +1038,8 @@ class HumanLifecycleManager:
             result=verif_status,
             metadata={"verification_status": verif_status},
             summary_extra=f"- **Deterministic Verification:** `{verif_status}`\n",
+            verification_plan=plan,
+            error_message=reason,
         )
 
     @classmethod
@@ -1041,6 +1056,8 @@ class HumanLifecycleManager:
         result: str,
         metadata: Dict[str, Any],
         summary_extra: str = "",
+        verification_plan: Optional[Any] = None,
+        error_message: Optional[str] = None,
     ) -> Any:
         """Ends a resumed task in a non-complete terminal state, with summary and evidence."""
         from howlplane.control_plane.orchestrator import OrchestrationResult
@@ -1079,7 +1096,10 @@ class HumanLifecycleManager:
             final_state=terminal,
             exit_code=1,
             run_dir=str(run_dir),
-            error_message=reason if terminal == "blocked" and action == GATE_BLOCKED_ACTION else None,
+            error_message=error_message or (
+                reason if terminal == "blocked" and action == GATE_BLOCKED_ACTION else None
+            ),
+            verification_plan=verification_plan,
         )
 
     @classmethod
