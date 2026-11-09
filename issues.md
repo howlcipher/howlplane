@@ -14,6 +14,7 @@ Pending bugs carry the same diminishing-returns score defined in `improvements.m
 | --- | --- | --- | --- | --- | --- | --- |
 | 28 | [Verification steps are capped at a hard-coded 300 seconds, so HowlPlane cannot verify its own 16-minute suite](#28-verification-steps-are-capped-at-a-hard-coded-300-seconds-so-howlplane-cannot-verify-its-own-16-minute-suite) | Done (2026-11-08) | 4.0 (8×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Every self-hosted task fails verification on a timeout, not a defect, and the resume result shows no steps and no error, so the operator cannot see why. |
 | 29 | [A task parked as "independent review unavailable" escalates to the owner before verification runs](#29-a-task-parked-as-independent-review-unavailable-escalates-to-the-owner-before-verification-runs) | Pending | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | The #23 fix covered only the remediation limit. The owner is asked to approve without verification evidence, the gap #23 closed. |
+| 31 | [The 10-minute implementation limit is hard-coded, and a parked review skips remediation](#31-the-10-minute-implementation-limit-is-hard-coded-and-a-parked-review-skips-remediation) | Pending | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | In the second HP-SELF-30 run both implementers ran out the limit and HIGH-finding partial work went to review, then straight to the owner. |
 | 30 | [Smaller gaps from the first self-hosted run (HP-SELF-25)](#30-smaller-gaps-from-the-first-self-hosted-run-hp-self-25) | Pending | 1.5 (3×1.0÷2) | Sonnet 5.5 | Gemini 3.8 Flash | Each one cost a review or a diagnosis in the run, and none blocks a task outright. |
 | 27 | [`howlplane work` routes review to AGY, which `orchestrate` skips because AGY's review mode is not read-only](#27-howlplane-work-routes-review-to-agy-which-orchestrate-skips-because-agys-review-mode-is-not-read-only) | Pending | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | With Devin off, AGY is one of only two non-implementer reviewers, so `work` assigns it review often. DOG-037 showed it rewriting tracked files as a reviewer. |
 | 26 | [Rejecting a `work` task leaves its changes in the working tree without saying so](#26-rejecting-a-work-task-leaves-its-changes-in-the-working-tree-without-saying-so) | Pending | 1.5 (3×1.0÷2) | Sonnet 5.5 | Gemini 3.8 Flash | The next task starts on top of rejected work, including build artifacts the agent created. |
@@ -555,4 +556,22 @@ Needs:
   Tests: `tests/test_provider_watchdog.py` and `tests/test_provider_failover.py::test_a_provider_that_is_silent_until_it_exits_is_not_killed_as_stalled`. The review budget remains open.
 - **Wrong skill routing:** the task was routed with `howlframe-app-development`, so reviewer prompts carried HowlFrame `.howl` rules for a pure Python change.
 - **No tool and target isolation:** running HowlPlane on its own repository means the tool imports the code it is editing. The run needed a hand-pinned worktree of main on `PYTHONPATH`, which should be built in. Separately, the global venv's editable install still records the stale `/run/media/system/...` mount path.
+
+  **Second HP-SELF-30 run, 2026-11-08 (rejected by the owner).** agy and then Claude each ran out the 10-minute implementation limit. The salvaged 405-line candidate drew HIGH findings:
+  - the pinned `PYTHONPATH` leaked into verification and agents, so the checks would test the pinned commit;
+  - the control-plane root resolved into the disposable worktree;
+  - a pinned worktree deleted by hand could not be recreated;
+  - the tests were mocked so heavily that broken re-exec code passed.
+
+  The work is being redone through HowlPlane as two smaller tasks: the `self_host` module, then the CLI wiring. Those findings are written into their criteria. The re-exec passes the pinned `src` as an argument to a bootstrap, not through the environment.
+
+### 31. The 10-minute implementation limit is hard-coded, and a parked review skips remediation
+
+**Found** 2026-11-08 in the second HP-SELF-30 run.
+- **The limit is fixed:** `OrchestrationConfig.timeout_seconds = 600`, and `work` has no flag or config to change it. Both implementers hit it on a two-file feature, so HowlPlane salvaged partial work.
+- **Review independence decides too early:** with Codex out of quota only Claude and agy could review. Two of the four reviews came from the implementer's family, and the task parked as "independent review unavailable" right after cycle 1. Remediation never ran, although the cycle-1 findings were concrete, and the owner was asked to decide on code with HIGH findings and no verification (see #29).
+
+Needs:
+- an implementation timeout from config or a `work` flag, like #28's step timeouts;
+- remediation of concrete findings before parking on independence.
 
