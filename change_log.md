@@ -38,6 +38,12 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Claude now receives the operator's `[ai_resources.providers.claude_code.execution_profile]`
+  grants and denials (issues.md #32). The shared backend was built without them,
+  so a configured `pytest:*` never applied and the prompt told the agent it could
+  run only `make test`. In HP-SELF-30A every remediation ran the 16-minute full
+  suite, and the third ran out of time. The config is read each time a profile is
+  built, and an unreadable config grants nothing extra.
 - The provider stall watchdog no longer kills Claude and agy for being quiet
   (issues.md #30). Neither CLI prints progress until it exits, so the stall
   check could only misfire on them: in HP-SELF-30 it killed Claude mid-edit and

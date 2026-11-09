@@ -216,6 +216,10 @@ _PERMISSION_BLOCK_MARKERS = (
 )
 
 
+# Tells a backend to read its execution profile from the operator config
+# (`[ai_resources.providers.<id>.execution_profile]`) each time it builds one.
+FROM_OPERATOR_CONFIG = object()
+
 READ_ONLY_ROLE_NOTE = (
     "You have read-only file tools (Read, Glob, Grep) and no shell in this role. "
     "Do not try to run commands, tests or git: review from the change shown above and "
@@ -869,6 +873,22 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
         super().__init__("claude_code", "claude")
         self.operator_settings = operator_settings
 
+    def _operator_settings(self) -> Optional[Any]:
+        """Returns the settings to apply, reading the operator config for the shared instance.
+
+        The registry builds this backend once, at import, so it passes
+        FROM_OPERATOR_CONFIG and the config is read when a profile is built. An
+        unreadable config grants nothing extra rather than failing the run.
+        """
+        if self.operator_settings is not FROM_OPERATOR_CONFIG:
+            return self.operator_settings
+        try:
+            from howlplane.control_plane import config_loader
+
+            return config_loader.get_default_loader().settings.providers.get(self.agent_id)
+        except Exception:
+            return None
+
     def build_execution_profile(
         self,
         task: Optional[TaskSpec] = None,
@@ -896,7 +916,7 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
             task=task,
             project_context=project_context,
             verification_plan=verification_plan,
-            operator_settings=self.operator_settings,
+            operator_settings=self._operator_settings(),
         )
 
     def probe_readiness(self) -> BackendReadiness:
@@ -1471,7 +1491,7 @@ class AgentBackendRegistry:
     """Registry providing backend instances by agent_id."""
 
     _instances: Dict[str, AgentBackend] = {
-        "claude_code": ClaudeCodeBackend(),
+        "claude_code": ClaudeCodeBackend(operator_settings=FROM_OPERATOR_CONFIG),
         "codex": CodexBackend(),
         "gemini_cli": GeminiCLIBackend(),
         "agy": AgyBackend(),
