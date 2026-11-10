@@ -2662,11 +2662,69 @@ def cmd_home(args: argparse.Namespace) -> int:
     return product_cli.cmd_home(args)
 
 
+def _package_dir() -> Path:
+    """Directory of the imported howlplane package (tests replace this)."""
+    import howlplane
+    return Path(howlplane.__file__).resolve().parent
+
+
+def _data_dir() -> Path:
+    """XDG data home; pins live under <data dir>/howlplane/tool/ (tests replace this)."""
+    xdg = os.environ.get("XDG_DATA_HOME")
+    return Path(xdg) if xdg else Path.home() / ".local" / "share"
+
+
+def _run_pinned_if_needed(parsed_args: argparse.Namespace, argv: List[str]) -> Optional[int]:
+    """Re-execute from a pinned copy of HEAD when working on HowlPlane itself.
+
+    Returns the child's exit code, or None when this process should run the command.
+    """
+    from howlplane.control_plane import self_host
+    command = getattr(parsed_args, "subcommand", None) or ""
+    if command not in self_host.ISOLATED_COMMANDS:
+        return None  # skip repository discovery for commands that never isolate
+    try:
+        target_repo = _resolve_repo(parsed_args)
+    except Exception:
+        return None  # the handler reports an unusable repository as before
+    if not self_host.should_isolate(command, target_repo, _package_dir(), os.environ):
+        return None
+    try:
+        cp_root = find_control_plane_root(getattr(parsed_args, "control_plane_dir", None))
+        data_dir = _data_dir()
+        pinned_src = self_host.ensure_pinned_tool(target_repo, data_dir)
+        self_host.prune_pinned_tools(target_repo, data_dir, current=pinned_src.parent)
+        sha = pinned_src.parent.name  # the pin directory is named by the full HEAD sha
+        changed = self_host.uncommitted_tool_changes(target_repo)
+    except self_host.SelfHostError as err:
+        raise OperatorFailure(OperatorError(
+            code="self_host_failed",
+            message=f"Could not prepare the pinned HowlPlane copy: {err}",
+            why="HowlPlane will not run from the working tree while it edits its own repository.",
+            next_action="Fix the Git problem named above, then rerun the command.",
+        ))
+    print(f"HowlPlane is running from commit {sha}.", file=sys.stderr)
+    if changed:
+        print(
+            f"{len(changed)} file(s) under src/howlplane have uncommitted changes "
+            "that the pinned copy will not use.",
+            file=sys.stderr,
+        )
+    sys.stderr.flush()
+    sys.stdout.flush()
+    command_line = self_host.reexec_command(sys.executable, pinned_src, argv)
+    # The child must use the root resolved here, not a conflicting inherited home.
+    base_env = {**os.environ, "HOWLPLANE_HOME": str(cp_root)}
+    env = self_host.reexec_environment(base_env, sha, cp_root)
+    return subprocess.run(command_line, env=env, check=False).returncode
+
+
 def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> int:
     """Runs the canonical HowlPlane control plane launcher."""
     if args is None:
         args = sys.argv[1:]
     global _COLOR_MODE
+    original_args = list(args)
     args, debug, _COLOR_MODE = _extract_global_flags(list(args))
     if _COLOR_MODE is not None and _COLOR_MODE not in ("auto", "always", "never"):
         print("--color must be one of: auto, always, never", file=sys.stderr)
@@ -2701,6 +2759,9 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
         # `config` explains invalid values itself, so it must be reachable when they are wrong.
         if parsed_args.subcommand != "config":
             workspace_trust.resolve_policy()
+        isolated = _run_pinned_if_needed(parsed_args, original_args)
+        if isolated is not None:
+            return isolated
         return handler(parsed_args)
     except BrokenPipeError:
         # The reader went away (`howlplane logs | head`). That is not a HowlPlane

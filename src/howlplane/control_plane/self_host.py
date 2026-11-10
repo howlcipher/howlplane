@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from pathlib import Path
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -14,6 +15,9 @@ BOOTSTRAP = (
     "sys.argv[0] = 'howlplane'; "
     "from howlplane.control_plane.cli import main; sys.exit(main())"
 )
+
+
+ISOLATED_COMMANDS = frozenset({'work', 'resume', 'orchestrate', 'verify'})
 
 
 class SelfHostError(RuntimeError):
@@ -50,7 +54,7 @@ def should_isolate(command: str, target_repo: Path, package_dir: Path,
                    env: Mapping[str, str]) -> bool:
     """Only isolate commands running the exact target package checkout."""
     return (
-        command in {'work', 'resume', 'orchestrate', 'verify'}
+        command in ISOLATED_COMMANDS
         and 'HOWLPLANE_PINNED_TOOL' not in env
         and Path(package_dir).resolve()
         == (Path(target_repo).resolve() / 'src' / 'howlplane').resolve()
@@ -64,25 +68,34 @@ def ensure_pinned_tool(target_repo: Path, data_dir: Path) -> Path:
     pin = _tool_root(repo, data_dir) / sha
     if pin.exists() and pin in _worktrees(repo):
         _git(pin, 'checkout', '--detach', '--force', sha)
-        return pin / 'src'
-    _git(repo, 'worktree', 'prune')
-    pin.parent.mkdir(parents=True, exist_ok=True)
-    _git(repo, 'worktree', 'add', '--detach', str(pin), sha)
+    else:
+        _git(repo, 'worktree', 'prune')
+        pin.parent.mkdir(parents=True, exist_ok=True)
+        _git(repo, 'worktree', 'add', '--detach', str(pin), sha)
+    # Reuse counts as use: pruning keeps the newest pins, so the pin in use survives.
+    os.utime(pin)
     return pin / 'src'
 
 
-def prune_pinned_tools(target_repo: Path, data_dir: Path, keep: int = 3) -> None:
-    """Remove oldest registered pins belonging to this repository only."""
+def prune_pinned_tools(target_repo: Path, data_dir: Path, keep: int = 3,
+                       current: Path | None = None) -> None:
+    """Remove oldest registered pins belonging to this repository only.
+
+    The ``current`` pin is never removed; it counts toward ``keep``.
+    """
     if keep < 0:
         raise ValueError('keep must be nonnegative')
     repo = Path(target_repo).resolve()
     root = _tool_root(repo, data_dir)
+    current_pin = Path(current).resolve() if current is not None else None
     pins = [
         path for path in _worktrees(repo)
         if path.is_dir() and path != root and path.is_relative_to(root)
     ]
-    pins.sort(key=lambda path: (path.stat().st_mtime, str(path)))
-    for pin in pins[:max(0, len(pins) - keep)]:
+    candidates = [path for path in pins if path != current_pin]
+    candidates.sort(key=lambda path: (path.stat().st_mtime, str(path)))
+    excess = max(0, len(pins) - keep)
+    for pin in candidates[:min(excess, len(candidates))]:
         try:
             _git(repo, 'worktree', 'remove', '--force', str(pin))
         except SelfHostError as exc:

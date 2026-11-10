@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Wired self hosting into the CLI (issues.md #30, HP-SELF-30B). `work`, `resume`,
+  `orchestrate` and `verify` now re-execute from a pinned copy of the last commit
+  when they run against the repository holding the imported package. The parent
+  prints the commit sha and any uncommitted `src/howlplane` count on stderr,
+  returns the child's exit code, and exits 1 if the pin cannot be prepared.
+  Reusing a pin refreshes its modification time so the pin in use is never
+  pruned. Added tests for the pruning, hand-deleted pin and removal-failure gaps.
+
 - Added the self hosting isolation module for issues.md #30 (HP-SELF-30A2).
   It prepares detached committed tool worktrees, prunes only registered pins
   belonging to the target repository, preserves the original state root and
