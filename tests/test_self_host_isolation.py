@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -289,6 +290,327 @@ def test_prune_negative_keep_preserves_pins(repo, tmp_path):
     with pytest.raises(ValueError, match='keep must be nonnegative'):
         prune_pinned_tools(repo, data, keep=-1)
     assert (src / 'howlplane/tool.py').read_text() == 'original'
+
+
+def commit_pin(repo, data, number):
+    (repo / 'version').write_text(str(number))
+    git(repo, 'add', '.')
+    git(repo, '-c', 'commit.gpgsign=false', 'commit', '-m', 'feature: version')
+    return ensure_pinned_tool(repo, data).parent
+
+
+def test_prune_removes_exactly_the_oldest_beyond_keep(repo, tmp_path):
+    data = tmp_path / 'data'
+    pins = [commit_pin(repo, data, number) for number in range(5)]
+    # Modification order is the reverse of creation order, to show mtime decides.
+    for number, pin in enumerate(reversed(pins)):
+        os.utime(pin, (100 + number, 100 + number))
+    prune_pinned_tools(repo, data, keep=2)
+    assert [p.exists() for p in reversed(pins)] == [False, False, False, True, True]
+
+
+def test_hand_deleted_registered_pin_does_not_raise(repo, tmp_path):
+    data = tmp_path / 'data'
+    old = commit_pin(repo, data, 0)
+    current = commit_pin(repo, data, 1)
+    shutil.rmtree(old)
+    assert str(old) in git(repo, 'worktree', 'list', '--porcelain')
+    prune_pinned_tools(repo, data, keep=0)
+    assert not current.exists()
+    git(repo, 'reset', '--hard', 'HEAD~1')
+    src = ensure_pinned_tool(repo, data)
+    assert src == old / 'src'
+    assert (src / 'howlplane/tool.py').read_text() == 'original'
+    shutil.rmtree(old)
+    prune_pinned_tools(repo, data, keep=3)
+    assert ensure_pinned_tool(repo, data) == src and src.is_dir()
+
+
+def test_remove_failure_is_debug_logged_and_removal_continues(repo, tmp_path, caplog):
+    data = tmp_path / 'data'
+    pins = [commit_pin(repo, data, number) for number in range(3)]
+    for number, pin in enumerate(pins):
+        os.utime(pin, (100 + number, 100 + number))
+    git(repo, 'worktree', 'lock', str(pins[0]))  # the oldest cannot be removed
+    with caplog.at_level(logging.DEBUG):
+        prune_pinned_tools(repo, data, keep=0)
+    assert pins[0].exists()
+    assert not pins[1].exists() and not pins[2].exists()
+    failures = [r for r in caplog.records if str(pins[0]) in r.getMessage()]
+    assert failures and all(r.levelno == logging.DEBUG for r in failures)
+
+
+def test_reused_pin_is_refreshed_so_pruning_keeps_it(repo, tmp_path):
+    data = tmp_path / 'data'
+    pins = [commit_pin(repo, data, number) for number in range(4)]
+    for number, pin in enumerate(pins):
+        os.utime(pin, (100 + number, 100 + number))  # the current pin is the oldest
+    git(repo, 'reset', '--hard', 'HEAD~3')
+    assert ensure_pinned_tool(repo, data).parent == pins[0]
+    prune_pinned_tools(repo, data, keep=3)
+    assert [p.exists() for p in pins] == [True, False, True, True]
+
+
+def test_prune_never_removes_current_pin_even_with_future_unused_pins(repo, tmp_path):
+    data = tmp_path / 'data'
+    pins = [commit_pin(repo, data, number) for number in range(4)]
+    future = time.time() + 10 * 86400
+    for number, pin in enumerate(pins[1:]):
+        os.utime(pin, (future + number, future + number))
+    git(repo, 'reset', '--hard', 'HEAD~3')
+    assert ensure_pinned_tool(repo, data).parent == pins[0]
+    prune_pinned_tools(repo, data, keep=3, current=pins[0])
+    assert [p.exists() for p in pins] == [True, False, True, True]
+
+
+# --- CLI wiring -------------------------------------------------------------
+
+STUB_CLI = '''\
+import json, os, sys
+
+
+RAW_JSON = '{ "raw":   [1,\\n 2] }  '
+
+
+def main():
+    code = int(os.environ.get('STUB_EXIT', '7'))
+    if '--json' in sys.argv:
+        sys.stdout.write(RAW_JSON)  # deliberate whitespace, no trailing newline
+        return code
+    print(json.dumps({
+        'file': __file__, 'argv': sys.argv[1:],
+        'pinned': os.environ.get('HOWLPLANE_PINNED_TOOL'),
+        'home': os.environ.get('HOWLPLANE_HOME'),
+        'pythonpath': os.environ.get('PYTHONPATH'),
+    }))
+    return code
+'''
+
+
+@pytest.fixture
+def stub(tmp_path, monkeypatch):
+    from howlplane.control_plane import cli
+    path = tmp_path / 'stubrepo'
+    package = path / 'src/howlplane'
+    (package / 'control_plane').mkdir(parents=True)
+    (package / '__init__.py').write_text('')
+    (package / 'control_plane/__init__.py').write_text('')
+    (package / 'control_plane/cli.py').write_text(STUB_CLI)
+    git(path, 'init')
+    git(path, 'config', 'user.name', 'Test')
+    git(path, 'config', 'user.email', 'test@example.test')
+    git(path, 'add', '.')
+    git(path, '-c', 'commit.gpgsign=false', 'commit', '-m', 'feature: stub')
+    home = tmp_path / 'home'
+    home.mkdir()
+    (home / 'AGENTS.md').write_text('rules')
+    data = tmp_path / 'data'
+    monkeypatch.delenv('HOWLPLANE_PINNED_TOOL', raising=False)
+    monkeypatch.delenv('HOWLPLANE_DIR', raising=False)
+    monkeypatch.setenv('HOWLPLANE_HOME', str(home))
+    monkeypatch.setenv('PYTHONPATH', 'original-path')
+    real_data_dir = cli._data_dir
+    monkeypatch.setattr(cli, '_package_dir', lambda: package)
+    monkeypatch.setattr(cli, '_data_dir', lambda: data)
+    parent_calls = []
+    for name in ('work', 'resume', 'orchestrate', 'verify', 'status'):
+        monkeypatch.setitem(
+            cli.HANDLERS, name,
+            lambda parsed, name=name: parent_calls.append(name) or 3,
+        )
+    return type('Stub', (), dict(
+        cli=cli, repo=path, home=home, data=data, calls=parent_calls,
+        real_data_dir=staticmethod(real_data_dir),
+        sha=git(path, 'rev-parse', 'HEAD'),
+    ))
+
+
+def test_cli_reexecutes_from_pin_and_returns_child_exit_code(stub, capfd):
+    argv = ['verify', '--repo', str(stub.repo), '--task-id', 'two words']
+    assert stub.cli.main(argv) == 7
+    out, err = capfd.readouterr()
+    child = json.loads(out)
+    assert out == json.dumps(child) + '\n'  # nothing added by the parent
+    pin = stub.data / 'howlplane/tool'
+    assert Path(child['file']).is_relative_to(pin.resolve())
+    assert Path(child['file']).parts[-5] == stub.sha
+    assert child['argv'] == argv
+    assert child['pinned'] == stub.sha
+    assert child['pythonpath'] == 'original-path'
+    assert child['home'] == str(stub.home)
+    assert stub.calls == []
+    assert err.splitlines() == [f'HowlPlane is running from commit {stub.sha}.']
+
+
+@pytest.mark.parametrize('code', [0, 1, 7, 42])
+def test_cli_returns_the_childs_exit_code_unchanged(stub, monkeypatch, capfd, code):
+    monkeypatch.setenv('STUB_EXIT', str(code))
+    assert stub.cli.main(['verify', '--repo', str(stub.repo)]) == code
+    assert json.loads(capfd.readouterr().out)['argv'][0] == 'verify'
+    assert stub.calls == []
+
+
+@pytest.mark.parametrize('argv', [
+    ['work', 'an objective'],
+    ['resume', 'T-1'],
+    ['orchestrate', 'a goal'],
+    ['verify', '--task-id', 'T-1'],
+], ids=['work', 'resume', 'orchestrate', 'verify'])
+def test_cli_isolates_every_required_command(stub, capfd, argv):
+    argv = argv + ['--repo', str(stub.repo)]
+    assert stub.cli.main(argv) == 7
+    out, err = capfd.readouterr()
+    child = json.loads(out)
+    assert Path(child['file']).parts[-5] == stub.sha
+    assert Path(child['file']).is_relative_to((stub.data / 'howlplane/tool').resolve())
+    assert child['argv'] == argv
+    assert child['pinned'] == stub.sha
+    assert stub.calls == []
+    assert err.splitlines() == [f'HowlPlane is running from commit {stub.sha}.']
+
+
+def test_cli_passes_resolved_control_plane_root_to_child(stub, tmp_path, monkeypatch, capfd):
+    root = tmp_path / 'cproot'
+    root.mkdir()
+    (root / 'AGENTS.md').write_text('rules')
+    monkeypatch.delenv('HOWLPLANE_HOME')
+    monkeypatch.delenv('AI_KNOWLEDGE_LIBRARY', raising=False)
+    argv = ['verify', '--repo', str(stub.repo), '--control-plane-dir', str(root)]
+    assert stub.cli.main(argv) == 7
+    child = json.loads(capfd.readouterr().out)
+    assert child['home'] == str(root.resolve())
+
+
+def test_cli_json_success_output_is_the_childs_exact_bytes(stub, capfd):
+    argv = ['resume', 'T-1', '--repo', str(stub.repo), '--json']
+    assert stub.cli.main(argv) == 7
+    out, _ = capfd.readouterr()
+    assert out == '{ "raw":   [1,\n 2] }  '
+    assert stub.calls == []
+
+
+def test_cli_data_dir_default_uses_xdg_data_home(stub, tmp_path, monkeypatch, capfd):
+    xdg = tmp_path / 'xdg'
+    monkeypatch.setenv('XDG_DATA_HOME', str(xdg))
+    monkeypatch.setattr(stub.cli, '_data_dir', stub.real_data_dir)
+    assert stub.cli.main(['verify', '--repo', str(stub.repo)]) == 7
+    assert Path(json.loads(capfd.readouterr().out)['file']).is_relative_to(
+        (xdg / 'howlplane/tool').resolve())
+    assert not stub.data.exists()
+
+
+def test_cli_data_dir_default_falls_back_to_home_local_share(stub, tmp_path, monkeypatch, capfd):
+    fake_home = tmp_path / 'userhome'
+    fake_home.mkdir()
+    monkeypatch.delenv('XDG_DATA_HOME', raising=False)
+    monkeypatch.setenv('HOME', str(fake_home))
+    monkeypatch.setattr(stub.cli, '_data_dir', stub.real_data_dir)
+    assert stub.cli.main(['verify', '--repo', str(stub.repo)]) == 7
+    assert Path(json.loads(capfd.readouterr().out)['file']).is_relative_to(
+        (fake_home / '.local/share/howlplane/tool').resolve())
+    assert not stub.data.exists()
+
+
+@pytest.mark.parametrize('count', [1, 2, 3])
+def test_cli_passes_original_flags_and_warns_with_the_actual_change_count(
+        stub, capfd, count):
+    package = stub.repo / 'src/howlplane'
+    (package / '__init__.py').write_text('changed')
+    for number in range(count - 1):
+        (package / f'new{number}.py').write_text('x')
+    argv = ['--debug', 'resume', 'T-1', '--repo', str(stub.repo)]
+    assert stub.cli.main(argv) == 7
+    out, err = capfd.readouterr()
+    assert json.loads(out)['argv'] == argv
+    assert err.splitlines() == [
+        f'HowlPlane is running from commit {stub.sha}.',
+        f'{count} file(s) under src/howlplane have uncommitted changes '
+        'that the pinned copy will not use.',
+    ]
+
+
+def test_cli_conflicting_home_is_replaced_by_the_resolved_root(
+        stub, tmp_path, capfd):
+    root = tmp_path / 'cproot'
+    root.mkdir()
+    (root / 'AGENTS.md').write_text('rules')
+    # HOWLPLANE_HOME still points at stub.home, which differs from the override.
+    argv = ['verify', '--repo', str(stub.repo), '--control-plane-dir', str(root)]
+    assert stub.cli.main(argv) == 7
+    child = json.loads(capfd.readouterr().out)
+    assert child['home'] == str(root.resolve())
+    assert child['home'] != str(stub.home)
+
+
+def test_cli_prune_keeps_current_pin_despite_future_unused_pins(stub, capfd):
+    shas = [stub.sha]
+    for number in range(3):
+        (stub.repo / 'n').write_text(str(number))
+        git(stub.repo, 'add', '.')
+        git(stub.repo, '-c', 'commit.gpgsign=false', 'commit', '-m', 'feature: n')
+        shas.append(git(stub.repo, 'rev-parse', 'HEAD'))
+    tool = stub.data / 'howlplane/tool'
+    for sha in shas:
+        git(stub.repo, 'reset', '--hard', sha)
+        ensure_pinned_tool(stub.repo, stub.data)
+    pins = {sha: next(tool.glob(f'*/{sha}')) for sha in shas}
+    future = time.time() + 10 * 86400
+    for number, sha in enumerate(shas[1:]):
+        os.utime(pins[sha], (future + number, future + number))
+    git(stub.repo, 'reset', '--hard', shas[0])
+    assert stub.cli.main(['work', 'an objective', '--repo', str(stub.repo)]) == 7
+    child = json.loads(capfd.readouterr().out)
+    assert Path(child['file']).parts[-5] == shas[0]
+    assert pins[shas[0]].exists()
+    assert not pins[shas[1]].exists()  # oldest unused pin
+    assert pins[shas[2]].exists() and pins[shas[3]].exists()
+
+
+def test_cli_prunes_to_three_pins(stub, capfd):
+    for number in range(4):
+        (stub.repo / 'n').write_text(str(number))
+        git(stub.repo, 'add', '.')
+        git(stub.repo, '-c', 'commit.gpgsign=false', 'commit', '-m', 'feature: n')
+        assert stub.cli.main(['work', 'an objective', '--repo', str(stub.repo)]) == 7
+    pins = [p for p in (stub.data / 'howlplane/tool').glob('*/*') if p.is_dir()]
+    assert len(pins) == 3
+
+
+@pytest.mark.parametrize('case', ['other_command', 'other_repo', 'pinned_env', 'pinned_empty'])
+def test_cli_does_not_reexecute(stub, tmp_path, monkeypatch, capfd, case):
+    repo = stub.repo
+    command = 'verify'
+    if case == 'other_command':
+        command = 'status'
+    elif case == 'other_repo':
+        repo = tmp_path / 'elsewhere'
+        repo.mkdir()
+        git(repo, 'init')
+    else:
+        monkeypatch.setenv('HOWLPLANE_PINNED_TOOL', '' if case == 'pinned_empty' else 'sha')
+    assert stub.cli.main([command, '--repo', str(repo)]) == 3
+    out, err = capfd.readouterr()
+    assert stub.calls == [command]
+    assert (out, err) == ('', '')
+    assert not stub.data.exists()
+
+
+@pytest.mark.parametrize('as_json', [False, True])
+def test_cli_pin_failure_exits_1_without_running_anything(
+        tmp_path, stub, monkeypatch, capfd, as_json):
+    empty = tmp_path / 'emptyrepo'
+    (empty / 'src/howlplane').mkdir(parents=True)
+    git(empty, 'init')
+    monkeypatch.setattr(stub.cli, '_package_dir', lambda: empty / 'src/howlplane')
+    argv = ['resume', 'T-1', '--repo', str(empty)] + (['--json'] if as_json else [])
+    assert stub.cli.main(argv) == 1
+    out, err = capfd.readouterr()
+    assert out == '' and stub.calls == []
+    assert 'fatal:' in err and 'Could not prepare' in err
+    if as_json:
+        document = json.loads(err.strip().splitlines()[-1])
+        assert document['schema'] == 'howlplane.error/v1'
+        assert 'fatal:' in document['message']
 
 
 def test_prune_preserves_registered_cache_root(repo, tmp_path):
