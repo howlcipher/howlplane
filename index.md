@@ -412,6 +412,21 @@ remediation limit) and `error`. `howlplane resume --json` prints the same
 document under `work_result`, alongside its existing output. Additive changes
 keep `v1`; removing or renaming a key needs `v2`.
 
+#### Working on HowlPlane itself
+
+When `work`, `resume`, `orchestrate` or `verify` runs against the repository that
+contains the imported `howlplane` package, HowlPlane re-executes itself from a
+pinned copy of that repository's last commit, so edits made during the run cannot
+change the tool that is running. Pins are detached Git worktrees under
+`$XDG_DATA_HOME/howlplane/tool/` (`~/.local/share/howlplane/tool/` when unset);
+at most 3 are kept, and the one in use is never removed. Stderr names the commit
+sha it runs from. Uncommitted changes under `src/howlplane` are not used: a second
+stderr line warns about them and says how many files are affected. The child runs
+with `HOWLPLANE_PINNED_TOOL` set, which marks an already pinned run (any value,
+including empty, stops further re-execution). If the pin cannot be prepared the
+command exits 1 and never falls back to the working tree. Every other command or
+repository runs as before.
+
 ---
 
 ## Native Creative Pipeline (HowlDream -> HowlWriter -> HowlCreate)
