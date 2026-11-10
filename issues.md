@@ -566,6 +566,14 @@ Needs:
 
   The work is being redone through HowlPlane as two smaller tasks: the `self_host` module, then the CLI wiring. Those findings are written into their criteria. The re-exec passes the pinned `src` as an argument to a bootstrap, not through the environment.
 
+  **Isolation half resolved 2026-11-10.** Both tasks ran through HowlPlane and were approved by the owner: HP-SELF-30A2 (PR #201, the `self_host` module) and HP-SELF-30B (PR #202, the CLI wiring). `work`, `resume`, `orchestrate` and `verify` now re-execute from a detached worktree of HEAD under `~/.local/share/howlplane/tool/<repo hash>/<sha>` when HowlPlane targets its own repository. Checked from merged main through the real `howlplane` entry point with nothing injected: the pinned-sha line on stderr, the pin created, `--json` stdout parsed, and `status` created nothing.
+
+  Still open from HP-SELF-30B's test-falsifier, both test gaps and not known defects:
+  - **HIGH:** every CLI test replaces `cli._package_dir`, so a broken real package lookup would pass the suite and silently turn isolation off. Needs a test that isolates from a temporary checkout through the real lookup.
+  - **MEDIUM:** every CLI test passes an explicit argument list, so `main()` reading `sys.argv` is unprotected. Needs a test that sets `sys.argv`, calls `cli.main()` with no arguments, and checks the child receives them.
+
+  Also seen while shipping: a full suite run without `HOWLPLANE_HOME` set inherits the stale `/run/media/system/...` value from the shell profile and fails 9 unrelated tests. This is the same stale mount path as above.
+
 ### 31. The 10-minute implementation limit is hard-coded, and a parked review skips remediation
 
 **Found** 2026-11-08 in the second HP-SELF-30 run.
