@@ -234,6 +234,20 @@ howlplane verify
 
 Direct vendor commands (`claude`, `codex`, `agy`) remain available as escape hatches when full multi-agent orchestration is not desired; `howlplane work` remains the governed default.
 
+`howlplane work --implementation-timeout SECONDS` sets the implementation time
+limit for that one run. It is a whole number of seconds from 1 to 1800 (the
+orchestration execution budget maximum); the default is 600 when the flag is
+omitted. A value outside that range, zero, a negative number or a non-integer is
+refused with exit code 1 and a usage error (`USAGE_ERROR` under `--json`) before
+any repository, provider or run directory is touched; it is never clamped. The
+remediation limit is derived from it and keeps its existing ceilings (three times
+the limit, and the bounded-run ceiling), so a long implementation limit cannot
+produce an unbounded remediation limit. The limit applies to the `work`
+invocation that set it. It is recorded in the run directory as
+`execution_limits.json` and printed as `implementation_timeout_seconds` by
+`work --json` (including `--dry-run`) and by `resume --json`, for diagnosis only:
+a resume does not re-run implementation and rebuilds its own configuration.
+
 ### CLI Ownership and Migration
 
 | Command | Owner | Status |
