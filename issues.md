@@ -592,9 +592,17 @@ Needs:
 - **The limit is fixed:** `OrchestrationConfig.timeout_seconds = 600`, and `work` has no flag or config to change it. Both implementers hit it on a two-file feature, so HowlPlane salvaged partial work.
 - **Review independence decides too early:** with Codex out of quota only Claude and agy could review. Two of the four reviews came from the implementer's family, and the task parked as "independent review unavailable" right after cycle 1. Remediation never ran, although the cycle-1 findings were concrete, and the owner was asked to decide on code with HIGH findings and no verification (see #29).
 
-Needs:
-- an implementation timeout from config or a `work` flag, like #28's step timeouts;
-- remediation of concrete findings before parking on independence.
+**Part 1 fixed** 2026-11-11 (PR #208, HP-SELF-31A3): `howlplane work --implementation-timeout SECONDS` (integer 1 to 1800, never clamped, validated before any pinned re-exec). The limit appears in the execute, dry-run and blocked JSON, is recorded in `execution_limits.json` in the run directory, and `resume --json` reports it. Review, verification and authority logic are unchanged.
+
+Open test-strength follow-ups from the self-review (the task parked because independent review was unavailable):
+- the `resume` fallback paths (missing or malformed `execution_limits.json`, non-JSON output) are untested;
+- the timed-out test asserts only a non-zero exit code;
+- the remediation ceiling is not checked through the CLI path;
+- parser edge cases ("+5", surrounding whitespace, "1e3") are untested;
+- the refusal tests run only under `--dry-run`.
+
+Still needs (part 2, HP-SELF-31B):
+- remediation of concrete findings before parking on independence. This touches authority-adjacent control flow, so the design goes to the owner first.
 
 ### 32. Claude never received the operator's `execution_profile` grants, so self-hosted remediation could only run the full suite
 
