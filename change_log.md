@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.1]
 
+### Added
+
+- `howlplane work --implementation-timeout SECONDS` lets the operator set the
+  implementation time limit of one run, 1 to 1800 seconds (issues.md #31, first
+  half, HP-SELF-31A3). Omitted, it stays 600. Invalid values are refused with
+  exit 1 and `USAGE_ERROR` before anything is created, and are never clamped.
+  The remediation limit derived from it keeps its ceilings. The applied limit is
+  recorded in the run directory (`execution_limits.json`) and reported as
+  `implementation_timeout_seconds` by `work --json`, `work --dry-run --json` and
+  `resume --json`.
+
 ### Fixed
 
 - A task whose independent review is unavailable now runs the deterministic
