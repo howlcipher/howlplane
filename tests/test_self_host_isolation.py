@@ -4,13 +4,16 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import shutil
+import site
 import subprocess
 import sys
 import time
 
 import pytest
 
+import howlplane
 from howlplane.control_plane.self_host import (
     BOOTSTRAP, SelfHostError, ensure_pinned_tool, prune_pinned_tools, reexec_command,
     reexec_environment, should_isolate, uncommitted_tool_changes,
@@ -611,6 +614,104 @@ def test_cli_pin_failure_exits_1_without_running_anything(
         document = json.loads(err.strip().splitlines()[-1])
         assert document['schema'] == 'howlplane.error/v1'
         assert 'fatal:' in document['message']
+
+
+# --- Real entry points ------------------------------------------------------
+
+def test_package_dir_is_the_imported_howlplane_package():
+    from howlplane.control_plane import cli
+    imported = Path(howlplane.__file__).resolve().parent
+    assert cli._package_dir() == imported
+    assert cli._package_dir() == Path(cli.__file__).resolve().parents[1]
+    assert (cli._package_dir() / 'control_plane/cli.py').is_file()
+
+
+def copy_package(destination):
+    """Copy the imported howlplane package (this checkout's src/howlplane)."""
+    shutil.copytree(
+        Path(howlplane.__file__).resolve().parent, destination,
+        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'),
+    )
+
+
+ENTRY_SCRIPT = (
+    'import os, sys\n'
+    'src = sys.argv.pop(1)\n'
+    'sys.path.insert(0, src)\n'
+    'import howlplane\n'
+    'if not os.path.realpath(howlplane.__file__).startswith(os.path.realpath(src) + os.sep):\n'
+    '    sys.exit(99)\n'
+    'from howlplane.control_plane import cli\n'
+    'sys.exit(cli.main(sys.argv[1:]))\n'
+)
+
+
+def test_real_entry_runs_the_command_in_the_pinned_child(tmp_path):
+    """No seam is replaced: package lookup, pinning and re-execution are all real."""
+    repo = tmp_path / 'selfhost'
+    package = repo / 'src/howlplane'
+    repo.mkdir()
+    git(repo, 'init')
+    git(repo, 'config', 'user.name', 'Test')
+    git(repo, 'config', 'user.email', 'test@example.test')
+    copy_package(package)
+    git(repo, 'add', '.')
+    git(repo, '-c', 'commit.gpgsign=false', 'commit', '-m', 'feature: self host copy')
+    sha = git(repo, 'rev-parse', 'HEAD')
+    dirs = {
+        name: tmp_path / name
+        for name in ('home', 'userhome', 'data', 'state', 'diagnostics')
+    }
+    for path in dirs.values():
+        path.mkdir()
+    (dirs['home'] / 'AGENTS.md').write_text('rules')
+    env = {
+        key: value for key, value in os.environ.items()
+        if key not in ('HOWLPLANE_PINNED_TOOL', 'HOWLPLANE_DEBUG', 'HOWLPLANE_DIR',
+                       'AI_KNOWLEDGE_LIBRARY', 'PYTHONPATH')
+    }
+    env.update(
+        # A temporary HOME keeps stray writes out of the real one; the user base
+        # keeps packages installed with `pip install --user` importable.
+        HOME=str(dirs['userhome']), PYTHONUSERBASE=site.getuserbase(), HOWLPLANE_HOME=str(dirs['home']),
+        XDG_DATA_HOME=str(dirs['data']), XDG_STATE_HOME=str(dirs['state']),
+        HOWLPLANE_DIAGNOSTICS_DIR=str(dirs['diagnostics']),
+    )
+    command = [
+        sys.executable, '-c', ENTRY_SCRIPT, str(repo / 'src'),
+        '--debug', 'resume', 'NO-SUCH-TASK', '--repo', str(repo),
+    ]
+    result = subprocess.run(
+        command, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode != 99, 'the subprocess imported the wrong howlplane'
+    key = hashlib.sha256(str(repo.resolve()).encode()).hexdigest()[:16]
+    pin = dirs['data'].resolve() / 'howlplane/tool' / key / sha
+    assert f'HowlPlane is running from commit {sha}.' in result.stderr.splitlines()
+    assert pin.is_dir() and (pin / 'src/howlplane/control_plane/cli.py').is_file()
+    assert 'TaskRunNotFoundError' in result.stderr
+    named = [Path(name).resolve() for name in re.findall(r'File "([^"]+)"', result.stderr)]
+    assert [p for p in named if p.is_relative_to(pin / 'src')], result.stderr
+    assert not [p for p in named if p.is_relative_to((repo / 'src').resolve())], result.stderr
+    assert result.returncode == 1
+    diagnostics = list(dirs['diagnostics'].glob('HP-*.txt'))
+    assert len(diagnostics) == 1
+    text = diagnostics[0].read_text()
+    assert 'TaskRunNotFoundError' in text and 'NO-SUCH-TASK' in text
+
+
+def test_main_without_arguments_reads_sys_argv(stub, monkeypatch, capfd):
+    argv = ['howlplane', '--debug', 'resume', 'two words', '--repo', str(stub.repo)]
+    monkeypatch.setattr(stub.cli, 'cmd_home', lambda parsed: stub.calls.append('home') or 3)
+    monkeypatch.setenv('STUB_EXIT', '5')
+    monkeypatch.setattr(sys, 'argv', argv)
+    assert stub.cli.main() == 5
+    out, err = capfd.readouterr()
+    child = json.loads(out)
+    assert child['argv'] == argv[1:]
+    assert child['pinned'] == stub.sha
+    assert stub.calls == []
+    assert err.splitlines() == [f'HowlPlane is running from commit {stub.sha}.']
 
 
 def test_prune_preserves_registered_cache_root(repo, tmp_path):
