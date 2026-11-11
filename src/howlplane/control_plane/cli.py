@@ -7,7 +7,9 @@ Consolidates all control plane subcommands and configuration resolution (HOWL-CA
 """
 
 import argparse
+import contextlib
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -550,8 +552,68 @@ def _preflight_failed(args: argparse.Namespace, what: str, message: str) -> int:
     return 1
 
 
+DEFAULT_IMPLEMENTATION_TIMEOUT_SECONDS = 600
+EXECUTION_LIMITS_FILE = "execution_limits.json"
+
+
+def parse_implementation_timeout(value: Any) -> int:
+    """Validates --implementation-timeout: a whole number of seconds, never clamped.
+
+    Accepts a str (command line) or an int (programmatic callers); a bool, a
+    non-integer or a value outside 1..MAX_EXECUTION_BUDGET_SECONDS is refused.
+    """
+    from howlplane.control_plane.orchestration import MAX_EXECUTION_BUDGET_SECONDS
+    seconds: Optional[int] = None
+    if isinstance(value, int) and not isinstance(value, bool):
+        seconds = value
+    elif isinstance(value, str) and re.fullmatch(r"[+-]?[0-9]+", value.strip()):
+        seconds = int(value.strip())
+    if seconds is None or not 1 <= seconds <= MAX_EXECUTION_BUDGET_SECONDS:
+        raise OperatorFailure(OperatorError(
+            code="USAGE_ERROR",
+            message=(f"--implementation-timeout must be a whole number of seconds from 1 to "
+                     f"{MAX_EXECUTION_BUDGET_SECONDS}, got {value!r}."),
+            why="The implementation time limit is bounded so a run cannot be left unbounded.",
+            next_action=f"Rerun with --implementation-timeout between 1 and {MAX_EXECUTION_BUDGET_SECONDS}, "
+                        f"or omit it for the default of {DEFAULT_IMPLEMENTATION_TIMEOUT_SECONDS}.",
+        ))
+    return seconds
+
+
+def _with_timeout(document: Dict[str, Any], seconds: Optional[int]) -> Dict[str, Any]:
+    document["implementation_timeout_seconds"] = seconds
+    return document
+
+
+def cmd_resume_with_limit(args: argparse.Namespace) -> int:
+    """`resume`, whose --json work_result also names the limit recorded by `work`."""
+    if not getattr(args, "json", False):
+        return cmd_resume(args)
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = cmd_resume(args)
+    text = buffer.getvalue()
+    try:
+        document = json.loads(text)
+        work_result = document["work_result"]
+        recorded = None
+        if work_result.get("run_dir"):
+            record = Path(work_result["run_dir"]) / EXECUTION_LIMITS_FILE
+            if record.is_file():
+                recorded = json.loads(record.read_text(encoding="utf-8")).get("implementation_timeout_seconds")
+        _with_timeout(work_result, recorded)
+        text = json.dumps(document, indent=2) + "\n"
+    except (ValueError, KeyError, TypeError, OSError):
+        pass  # not the expected document: pass the original output through untouched
+    sys.stdout.write(text)
+    return code
+
+
 def cmd_work(args: argparse.Namespace) -> int:
     """Executes the governed work command from any target repository."""
+    timeout_arg = getattr(args, "implementation_timeout", None)
+    timeout_seconds = (DEFAULT_IMPLEMENTATION_TIMEOUT_SECONDS if timeout_arg is None
+                       else parse_implementation_timeout(timeout_arg))
     target_repo = _resolve_repo(args)
     cp_root = find_control_plane_root(getattr(args, "control_plane_dir", None))
 
@@ -584,13 +646,16 @@ def cmd_work(args: argparse.Namespace) -> int:
             skip_doctor=getattr(args, "skip_doctor", False),
             provider_pool=resource_pool,
             progress_mode=progress_mode,
+            timeout_seconds=timeout_seconds,
+            persist_implementation_timeout=True,
         ),
     )
 
     if getattr(args, "execute", False):
         res = orchestrator.run(spec, planned_actions=planned_actions)
         if as_json:
-            print(json.dumps(work_result_document(res, decision.recommended_reviewers), indent=2))
+            document = work_result_document(res, decision.recommended_reviewers)
+            print(json.dumps(_with_timeout(document, timeout_seconds), indent=2))
         else:
             _print_orchestration_summary(res, ctx, spec, decision)
         return res.exit_code
@@ -603,7 +668,8 @@ def cmd_work(args: argparse.Namespace) -> int:
         if as_json:
             blocked = {"schema": WORK_RESULT_SCHEMA, "task_id": spec.task_id, "final_state": "blocked",
                        "exit_code": 3, "run_dir": str(run_dir), "blocked_outcome": blocked,
-                       "next_action": work_next_action(spec.task_id, "blocked", run_dir)}
+                       "next_action": work_next_action(spec.task_id, "blocked", run_dir),
+                       "implementation_timeout_seconds": timeout_seconds}
         print(json.dumps(blocked, indent=2))
         return 3
     launch_cmd = format_agent_launch_command(decision.selected_agent_id, spec, run_dir, target_repo)
@@ -612,8 +678,8 @@ def cmd_work(args: argparse.Namespace) -> int:
     if boundary_res.requires_human_approval and boundary_res.decision_packet:
         dp_path.write_text(boundary_res.decision_packet.render_markdown(), encoding="utf-8")
     if as_json:
-        print(json.dumps(prepared_document(spec, decision, plan, boundary_res, run_dir,
-                                           launch_cmd, exit_code), indent=2))
+        prepared = prepared_document(spec, decision, plan, boundary_res, run_dir, launch_cmd, exit_code)
+        print(json.dumps(_with_timeout(prepared, timeout_seconds), indent=2))
         return exit_code
     df_mode = get_dogfood_mode()
 
@@ -1322,6 +1388,13 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     p_work.add_argument("--actions", nargs="*", help="Planned actions for authority boundary checks")
     p_work.add_argument("--execute", "-x", action="store_true", help="Launch recommended agent CLI and execute closed loop")
     p_work.add_argument("--dry-run", action="store_true", help="Generate plan without launching")
+    p_work.add_argument(
+        "--implementation-timeout",
+        metavar="SECONDS",
+        default=None,
+        help=(f"Implementation time limit for this run, a whole number from 1 to 1800 "
+              f"(default {DEFAULT_IMPLEMENTATION_TIMEOUT_SECONDS}); it also scales the remediation limit"),
+    )
     p_work.add_argument("--skip-doctor", action="store_true", help="Skip preflight diagnostics")
     p_work.add_argument("--force", action="store_true", help="Proceed even if preflight has warnings")
     p_work.add_argument(
@@ -2627,7 +2700,7 @@ HANDLERS = {
     "howlframe-audit": cmd_howlframe_audit,
     "approve": cmd_approve,
     "reject": cmd_reject,
-    "resume": cmd_resume,
+    "resume": cmd_resume_with_limit,
     "cancel": cmd_cancel,
     "create": cmd_create,
     "run": cmd_run_product,
@@ -2751,6 +2824,9 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
         return 1
 
     try:
+        # Validated first: a refusal must precede every pin, worktree, run directory and repository read.
+        if parsed_args.subcommand == "work" and getattr(parsed_args, "implementation_timeout", None) is not None:
+            parse_implementation_timeout(parsed_args.implementation_timeout)
         # One resolution point: an explicit --workspace-trust overrides config for
         # this process and every agent, session, and service it launches.
         from howlplane.control_plane import workspace_trust

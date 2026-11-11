@@ -166,6 +166,7 @@ CONTROL_PLANE_RUN_ARTIFACTS = frozenset({
     "decision_packet.md",
     "diff.patch",
     "effective_route.json",
+    "execution_limits.json",
     "execution_receipt.json",
     "findings_template.yaml",
     "howlframe_audit.json",
@@ -257,6 +258,10 @@ class OrchestrationConfig:
     # instead of the live checkout, so untracked control plane evidence cannot
     # change a verification result (HOWLFRAM-SLOPFIX-07S).
     verification_isolation: bool = True
+    # Set by `work` only: records timeout_seconds in the run directory so a run
+    # can be diagnosed later. A resume rebuilds its own config and leaves it off,
+    # so it never overwrites the limit the work invocation recorded.
+    persist_implementation_timeout: bool = False
 
 
 def compute_remediation_timeout(
@@ -2140,6 +2145,11 @@ class GovernedTaskOrchestrator:
         routing = router.route(task_spec)
         atomic_write_json(run_dir / "route.json", asdict(routing))
         atomic_write_json(run_dir / "initial_route.json", asdict(routing))
+        if self.config.persist_implementation_timeout:
+            atomic_write_json(
+                run_dir / "execution_limits.json",
+                {"implementation_timeout_seconds": self.config.timeout_seconds},
+            )
 
         verif_plan = ProjectAdapter.create_verification_plan(ctx, task_id=task_spec.task_id)
         (run_dir / "verification_plan.json").write_text(verif_plan.to_json(), encoding="utf-8")
