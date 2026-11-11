@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.1]
 
+### Fixed
+
+- A task whose independent review is unavailable now runs the deterministic
+  verification plan before it parks (issues.md #29, HP-SELF-29C). A pass parks
+  `awaiting_human` as before, with the real verification status, one
+  `verification <step>: <status>` evidence line per step and the reviewers'
+  findings kept in the decision packet. A failure on a required step fails the
+  task with "Independent review was also unavailable." appended. The park reason
+  names the true cause, and no longer carries the "Max remediation cycles
+  exceeded" prefix. The pending escalation is a small frozen dataclass
+  (`PendingEscalation`) shared with the remediation-limit path, whose behaviour
+  and text are unchanged.
+
 ### Added
 
 - Added the two missing self hosting regression tests (issues.md #30,

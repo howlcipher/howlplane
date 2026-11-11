@@ -314,6 +314,24 @@ TERMINAL_VERIFICATION_STATUSES = frozenset({"passed", "failed", "partial"})
 # scope creep (issues.md #23). MEDIUM and above still reach the owner.
 FOLLOW_UP_SEVERITIES = frozenset({"low", "informational"})
 
+INDEPENDENT_REVIEW_UNAVAILABLE_MESSAGE = (
+    "Independent review unavailable: no independent provider family completed review"
+)
+
+
+@dataclass(frozen=True)
+class PendingEscalation:
+    """A review outcome the owner must judge, parked only after verification.
+
+    ``message`` is what the task reports; ``park_reason`` is what is recorded
+    when it parks. Each path states its own cause once.
+    """
+
+    kind: str
+    message: str
+    park_reason: str
+    packet: HumanDecisionPacket
+
 
 def deferrable_follow_ups(cycle_res: "ReviewCycleResult") -> Optional[List[ReviewFinding]]:
     """The findings to record as follow-ups instead of escalating, or None.
@@ -3211,7 +3229,7 @@ class GovernedTaskOrchestrator:
         remediation_count = 0
         current_reviewers = list(routing.recommended_reviewers)
         # Set when the remediation limit leaves findings the owner must judge.
-        pending_escalation: Optional[Tuple[str, HumanDecisionPacket]] = None
+        pending_escalation: Optional[PendingEscalation] = None
         # LOW findings the limit left open, recorded rather than escalated.
         follow_ups_recorded: List[ReviewFinding] = []
 
@@ -3361,7 +3379,12 @@ class GovernedTaskOrchestrator:
                     f"{role}: reviewed by non-independent provider family ({getattr(cycle_res, 'reviewing_provider_families', {}).get(role, 'unknown')})"
                     for role in cycle_res.non_independent_roles
                 ] or ["Independent review could not be satisfied by any configured provider."]
-                err_msg = "Independent review unavailable: no independent provider family completed review"
+                # Findings the reviewers did raise stay in front of the owner.
+                evidence.extend(
+                    f"[{f.severity.upper()}] {f.title} ({f.reviewer_role})"
+                    for f in cycle_res.all_findings
+                    if f.status not in ("false_positive", "out_of_scope")
+                )
                 decision_pkt = HumanDecisionPacket(
                     task_id=task_spec.task_id,
                     objective=task_spec.objective,
@@ -3376,14 +3399,15 @@ class GovernedTaskOrchestrator:
                     verification_status="unverified",
                     recommended_action="Authorize manual review or configure an independent provider family.",
                 )
-                self._park_awaiting_human(
-                    task_spec,
-                    run_dir,
-                    err_msg,
-                    decision_pkt,
-                    progress,
+                # Not parked yet: Stage 6 runs the verification plan first so the
+                # owner decides with its result in hand (issues.md #29).
+                pending_escalation = PendingEscalation(
+                    kind="independent_review_unavailable",
+                    message=INDEPENDENT_REVIEW_UNAVAILABLE_MESSAGE,
+                    park_reason=INDEPENDENT_REVIEW_UNAVAILABLE_MESSAGE,
+                    packet=decision_pkt,
                 )
-                return _make_parked_review_exit(err_msg)
+                break
 
             # Check if any findings require remediation
             if not cycle_res.requires_remediation:
@@ -3457,7 +3481,12 @@ class GovernedTaskOrchestrator:
                 # Not parked yet: the owner decides with the verification result
                 # in hand rather than "unverified" (issues.md #23). Stage 6 runs
                 # the same gate it always does, then parks with this packet.
-                pending_escalation = (err_msg, decision_pkt)
+                pending_escalation = PendingEscalation(
+                    kind="remediation_limit",
+                    message=err_msg,
+                    park_reason=f"Max remediation cycles exceeded: {err_msg}",
+                    packet=decision_pkt,
+                )
                 break
 
             remediation_count += 1
@@ -3643,7 +3672,10 @@ class GovernedTaskOrchestrator:
             if pending_escalation is not None:
                 # Approving could not overrule a failed gate (resume ends it
                 # failed), so the task fails here and says what else was open.
-                err_msg += f". Review also left findings open: {pending_escalation[0]}"
+                if pending_escalation.kind == "independent_review_unavailable":
+                    err_msg += ". Independent review was also unavailable."
+                else:
+                    err_msg += f". Review also left findings open: {pending_escalation.message}"
             # A salvaged candidate only ever existed on sufferance. Governance
             # has now rejected it, so the repository goes back to its pre-task
             # baseline rather than keeping a patch nothing stands behind. A
@@ -3694,7 +3726,7 @@ class GovernedTaskOrchestrator:
             )
 
         if pending_escalation is not None:
-            esc_msg, decision_pkt = pending_escalation
+            decision_pkt = pending_escalation.packet
             decision_pkt.verification_status = verif_status
             decision_pkt.evidence.extend(
                 f"verification {s.name}: {s.status}" for s in verif_plan.steps
@@ -3702,11 +3734,11 @@ class GovernedTaskOrchestrator:
             self._park_awaiting_human(
                 task_spec,
                 run_dir,
-                f"Max remediation cycles exceeded: {esc_msg}",
+                pending_escalation.park_reason,
                 decision_pkt,
                 progress,
             )
-            return _make_parked_review_exit(esc_msg)
+            return _make_parked_review_exit(pending_escalation.message)
 
         # --------------------------------------------------------------------
         # Stage 7: Human Authority Boundary Gate (awaiting_human)

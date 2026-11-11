@@ -581,6 +581,114 @@ def test_failing_verification_at_the_limit_fails_the_task_instead_of_asking_the_
     assert "Review also left findings open" in (res.error_message or "")
 
 
+# Independent review unavailable (issues.md #29): verification runs before the
+# task parks, and the park reason names the true cause.
+
+_UNAVAILABLE = "Independent review unavailable: no independent provider family completed review"
+_RAISED_FINDING = """
+findings:
+  - id: "COR-1"
+    reviewer_role: "correctness-reviewer"
+    title: "Extra helper is untested"
+    severity: "medium"
+    category: "test_gap"
+    location: "src/feature.py"
+    claim: "extra() has no test"
+    evidence: "no test imports extra"
+    suggested_fix: "Add a test for extra"
+"""
+
+
+def _run_review_unavailable(tmp_path, task_id, source):
+    """Run with only a same-family reviewer that raises a real finding."""
+    from howlplane.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
+    from tests._dogfood_test_helpers import init_minimal_python_repo
+    from tests.test_provider_failover import _FakeBackendResolver, _profile
+    from tests.test_provider_lifecycle_defects import _make_pool
+
+    repo = init_minimal_python_repo(tmp_path / task_id)
+    resolver = _FakeBackendResolver({
+        "g_impl": {
+            "success": True,
+            "side_effect": lambda _task, cwd, _prompt: (cwd / "src" / "feature.py").write_text(
+                source, encoding="utf-8"
+            ),
+        },
+        "g_rev": {"success": True, "stdout": _RAISED_FINDING},
+    })
+    pool = _make_pool(
+        [_profile("g_impl", "GI", "google"), _profile("g_rev", "GR", "google")],
+        resolver=resolver,
+    )
+    spec = TaskSpec(
+        task_id=task_id, repository="test_repo", objective="Implement feature",
+        acceptance_criteria=["Works"], reviewer_requirements=["correctness-reviewer"],
+    )
+    orchestrator = GovernedTaskOrchestrator(
+        target_repo=repo,
+        control_plane_root=tmp_path / "control_plane",
+        config=OrchestrationConfig(
+            provider_pool=pool, backend_resolver=resolver, acquire_locks=False,
+            enable_howlframe_audit=False, preserve_independent_review=True,
+        ),
+    )
+    record_valid_tia(orchestrator.ledger, task_id)
+    res = orchestrator.run(spec)
+    actions = [e.action for e in orchestrator.ledger.read_entries()[0] if e.task_id == task_id]
+    return res, repo / ".task_runs" / task_id, actions
+
+
+def _task_yaml_text(run_dir):
+    """task.yaml re-serialised unwrapped, so a sentence is not split across lines."""
+    import yaml
+    data = yaml.safe_load((run_dir / "task.yaml").read_text(encoding="utf-8"))
+    return yaml.dump(data, width=10**6)
+
+
+_GOOD_SOURCE = "def run():\n    return True\n\n\ndef extra():\n    return 1\n"
+
+
+def test_unavailable_review_with_passing_verification_parks_with_the_result(tmp_path):
+    res, run_dir, actions = _run_review_unavailable(tmp_path, "UNAVAIL-OK", _GOOD_SOURCE)
+    assert res.final_state == "awaiting_human" and res.exit_code == 2
+    assert res.error_message == _UNAVAILABLE
+    assert res.verification_plan.overall_status == "passed"
+    steps = res.verification_plan.steps
+    assert steps
+    task_yaml = _task_yaml_text(run_dir)
+    assert task_yaml.count(_UNAVAILABLE) == 1
+    assert "Max remediation cycles exceeded" not in task_yaml
+    packet = (run_dir / "decision_packet.md").read_text(encoding="utf-8")
+    assert "**Automated Verification:** `passed`" in packet
+    assert "independent_review_unavailable" in packet and "non_independent_review" in packet
+    assert "[MEDIUM] Extra helper is untested (correctness-reviewer)" in packet
+    for step in steps:
+        assert packet.count(f"verification {step.name}: {step.status}") == 1
+    assert "Extra helper is untested" in (run_dir / "reconciliation_report.md").read_text(encoding="utf-8")
+    assert actions.count("verification_completed") == 1
+
+
+def test_unavailable_review_with_failing_verification_fails_instead_of_parking(tmp_path):
+    res, run_dir, actions = _run_review_unavailable(tmp_path, "UNAVAIL-FAIL", "SYNTAX ERROR :::\n")
+    failed = [s.name for s in res.verification_plan.steps if s.status == "failed" and s.required]
+    assert failed
+    assert res.final_state == "failed" and res.exit_code == 1
+    assert res.error_message == (
+        f"Deterministic verification failed on required steps: {', '.join(failed)}. "
+        "Independent review was also unavailable."
+    )
+    assert not (run_dir / "decision_packet.md").exists()
+    assert actions.count("verification_completed") == 1
+
+
+def test_remediation_limit_park_reason_is_unchanged(tmp_path):
+    res, run_dir = _run_at_the_limit(tmp_path, "LIMIT-REASON", "medium", impl=_touch_auth)
+    assert res.final_state == "awaiting_human"
+    task_yaml = _task_yaml_text(run_dir)
+    assert f"Max remediation cycles exceeded: {res.error_message}" in task_yaml
+    assert _UNAVAILABLE not in task_yaml
+
+
 def _cycle(*findings, status="has_findings", non_independent=()):
     from howlplane.control_plane.reconciliation import ReviewReconciler
     from howlplane.control_plane.review_runner import ReviewCycleResult
