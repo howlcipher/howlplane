@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Added the two missing self hosting regression tests (issues.md #30,
+  HP-SELF-30C2). One checks that `cli._package_dir()` returns the directory of
+  the howlplane package actually imported. One starts a real subprocess against
+  a temporary git repository holding a copy of `src/howlplane`, resumes a task
+  that does not exist with `--debug`, and checks that the pin was created, the
+  traceback names only files under the pin, the exit code is 1, and the
+  diagnostic file landed in a temporary directory. A third enters through
+  `sys.argv`. Both mutations (wrong package directory, parent skipping the
+  child) make the end-to-end test fail. No source changed.
+
 - Wired self hosting into the CLI (issues.md #30, HP-SELF-30B). `work`, `resume`,
   `orchestrate` and `verify` now re-execute from a pinned copy of the last commit
   when they run against the repository holding the imported package. The parent
