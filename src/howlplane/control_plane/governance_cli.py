@@ -153,14 +153,17 @@ def _resume_document(res) -> dict:
     strict reader, so the contract `work --json` prints sits under one new key,
     `work_result`, and nothing existing changes.
     """
-    from howlplane.control_plane.presentation.work_result import work_result_document
+    from pathlib import Path
+    from howlplane.control_plane.presentation.work_result import run_records, work_result_document
 
     routing = getattr(res, "routing_decision", None)
     roles = list(getattr(routing, "recommended_reviewers", None) or [])
     if not roles:
         roles = sorted({r for c in (res.review_cycles or []) for r in c.reviewer_results})
     document = res.to_dict()
-    document["work_result"] = work_result_document(res, roles)
+    # Reviews, verification and timing come from what the run directory recorded.
+    run_dir = Path(res.run_dir) if getattr(res, "run_dir", None) else None
+    document["work_result"] = work_result_document(res, roles, run_records(run_dir))
     return document
 
 

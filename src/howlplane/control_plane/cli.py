@@ -68,7 +68,7 @@ from howlplane.control_plane.reviewers import list_reviewer_roles, get_reviewer_
 from howlplane.control_plane.router import TaskRouter, RoutingDecision
 from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
 from howlplane.control_plane.config_loader import SemanticRecommendationSettings
-from howlplane.control_plane.task_spec import TaskSpec
+from howlplane.control_plane.task_spec import TaskSpec, VALID_TASK_CLASSES
 from howlplane.control_plane.factory.factory_cli import (  # noqa: F401  re-exported for tests and monkeypatching
     _worker_display,
     _owner_decisions,
@@ -580,6 +580,19 @@ def parse_implementation_timeout(value: Any) -> int:
     return seconds
 
 
+def validate_task_class(value: Optional[str]) -> None:
+    """Refuses a --task-class that is not a known class, before anything else happens."""
+    if value is None or value in VALID_TASK_CLASSES:
+        return
+    allowed = ", ".join(sorted(VALID_TASK_CLASSES))
+    raise OperatorFailure(OperatorError(
+        code="USAGE_ERROR",
+        message=f"--task-class {value!r} is not a task class. Allowed: {allowed}.",
+        why="The task class selects routing, review and verification policy, so an unknown value is refused.",
+        next_action=f"Rerun with --task-class set to one of: {allowed}, or omit it to infer the class.",
+    ))
+
+
 def _with_timeout(document: Dict[str, Any], seconds: Optional[int]) -> Dict[str, Any]:
     document["implementation_timeout_seconds"] = seconds
     return document
@@ -611,6 +624,7 @@ def cmd_resume_with_limit(args: argparse.Namespace) -> int:
 
 def cmd_work(args: argparse.Namespace) -> int:
     """Executes the governed work command from any target repository."""
+    validate_task_class(getattr(args, "task_class", None))
     timeout_arg = getattr(args, "implementation_timeout", None)
     timeout_seconds = (DEFAULT_IMPLEMENTATION_TIMEOUT_SECONDS if timeout_arg is None
                        else parse_implementation_timeout(timeout_arg))
@@ -2825,6 +2839,8 @@ def main(args: Optional[List[str]] = None, program_name: str = "howlplane") -> i
 
     try:
         # Validated first: a refusal must precede every pin, worktree, run directory and repository read.
+        if parsed_args.subcommand == "work":
+            validate_task_class(getattr(parsed_args, "task_class", None))
         if parsed_args.subcommand == "work" and getattr(parsed_args, "implementation_timeout", None) is not None:
             parse_implementation_timeout(parsed_args.implementation_timeout)
         # One resolution point: an explicit --workspace-trust overrides config for

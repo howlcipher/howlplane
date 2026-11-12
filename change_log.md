@@ -17,6 +17,12 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `howlplane resume --json` now reports the verification, reviews, duration,
+  review cycles and provider execution the run directory recorded, instead of
+  `none` and `[]`; values the records lack are `null` or marked unrecorded, never
+  `0.0` (issues.md #34, HP-SELF-34D). An invalid `howlplane work --task-class` is a
+  `USAGE_ERROR` that lists the allowed values, refused before any pin, repository
+  access or run directory, instead of `INTERNAL_ERROR`.
 - A task whose independent review is unavailable now runs the deterministic
   verification plan before it parks (issues.md #29, HP-SELF-29C). A pass parks
   `awaiting_human` as before, with the real verification status, one
