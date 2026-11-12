@@ -248,6 +248,22 @@ invocation that set it. It is recorded in the run directory as
 `work --json` (including `--dry-run`) and by `resume --json`, for diagnosis only:
 a resume does not re-run implementation and rebuilds its own configuration.
 
+`howlplane work --task-class VALUE` accepts only a known task class (`automation`,
+`bug_fix`, `docs`, `feature`, `infrastructure`, `other`, `refactor`,
+`security_patch`, `test_improvement`). Anything else exits 1 with a usage error
+that names the bad value and lists the allowed ones (`USAGE_ERROR` under
+`--json`), before any repository or run directory is touched.
+
+`howlplane resume ID --json` builds `work_result.reviews`, `verification`,
+`duration_seconds`, `review_cycles` and `provider_execution` from the run
+directory's own records. A value the records do not hold is `null`, never `0.0`
+or an empty list: `verification.status` is `none` for a missing
+`verification_result.json` and `unreadable` (with a `reason`) for a corrupt one;
+a reviewer whose findings file is missing, empty or corrupt has
+`finding_count: null` and verdict `findings_unrecorded` (or `findings`); and
+`duration_seconds` is the run's duration only when implementation, review and
+verification durations were all recorded.
+
 ### CLI Ownership and Migration
 
 | Command | Owner | Status |
