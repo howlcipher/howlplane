@@ -623,8 +623,23 @@ Also found in that run, still open:
 - **Worked around 2026-11-11** by the owner granting `ls:*` and `grep:*` in `config.toml`; HP-SELF-29C then ran clean.
 - **Needs (owner decides the rule):** distinguish a refusal of a read-only inspection command that changed nothing from a refusal that blocked required work. For the first, record the refusal as evidence and let the candidate go to review and verification, which are the gates that stand behind it; keep failing closed for the second. Either way the preserved candidate should be offered to the next attempt rather than discarded. Prompt text telling the worker which commands it holds did not prevent the refusals in two runs.
 
+**Seen again** 2026-11-12 in HP-SELF-34C: the implementer tried to create a probe script with a `cat > /tmp/... <<'EOF'` heredoc, was refused, and the attempt ended after 7 minutes with no failover target. The task constraints already said that any other command is refused and ends the attempt; the worker ignored them. A rerun (34D) with an explicit "create files only with Write and Edit" constraint ran clean, so the constraint helps but does not guarantee anything. Third refusal-driven failure so far (29, 29B, 34C).
+
+
 ### 34. `resume --json` reports empty verification and reviews, and a bad `--task-class` is reported as `INTERNAL_ERROR`
 
 **Found** 2026-11-10 and 2026-11-11 while shipping HP-SELF-30C2.
 - **Resume document:** after `howlplane resume HP-SELF-30C2 --json` returned `complete`, `work_result.verification` was `{"status": "none", "steps": []}` and `reviews` was `[]`, although `verification_result.json` in the run directory shows all four steps verified (written 11 minutes after the approval). The same document has `duration_seconds: 0.0`, `review_cycles: []` and `provider_execution: null`. A caller that trusts the document would conclude nothing was verified. Needs: build the resume `work_result` from the run directory's final records, and test that its verification and reviews match them.
 - **Usage error:** `howlplane work --task-class test` exits 1 with `INTERNAL_ERROR` ("likely a HowlPlane bug", with a traceback saved) when the value is not one of `automation, bug_fix, docs, feature, infrastructure, other, refactor, security_patch, test_improvement`. It is a usage error: it should say so, list the allowed values, and write no diagnostic.
+
+**Fixed** 2026-11-12 (PR #210, HP-SELF-34D, after 34, 34B and 34C):
+- `resume --json` builds `work_result.verification` and `reviews` from the run directory's records. A duration is null when the records do not hold it; a corrupt `verification_result.json` reports `unreadable` with the reason, a missing one `none`; unrecorded findings are never shown as a pass.
+- A bad `--task-class` is refused as a usage error that lists the allowed values, in `main()` and in `cmd_work`, before any pin, repository access or run directory.
+
+Open follow-ups from the self-review (independent review was unavailable):
+- the fixture has one implementation attempt, so choosing the wrong attempt would go unnoticed;
+- unrecorded findings are untested for a failed reviewer and for the dict-form findings file;
+- null run duration and some `unreadable` edge cases are not all covered;
+- `highest_severity` now takes the most severe finding instead of the first, which also changes live `work --json`; no live-path test covers it;
+- one single-caller helper (`_work_result_fields`), and remediation durations mixed into the implementation list.
+
