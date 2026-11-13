@@ -17,7 +17,9 @@ Deterministic tests proving the human authority lifecycle:
 
 import json
 from pathlib import Path
+import shlex
 import subprocess
+from types import SimpleNamespace
 import pytest
 
 from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
@@ -35,7 +37,8 @@ from howlplane.control_plane.human_boundary import (
 )
 from howlplane.control_plane.launcher import cmd_approve, cmd_reject, cmd_resume, cmd_status, build_parser
 from howlplane.control_plane.task_spec import TaskSpec
-from howlplane.control_plane.git_env import run_git_in_repo
+from howlplane.control_plane.git_baseline import capture_baseline
+from howlplane.control_plane.git_env import run_git_in_repo, sanitized_git_env
 from tests._git_test_helpers import git_in_repo, init_git_repo
 from tests._tia_helpers import record_valid_tia
 
@@ -404,3 +407,153 @@ def test_cli_reject_command(tmp_path: Path, capsys):
     assert data["decision"] == "rejected"
     assert data["reason"] == "Not ready"
     assert data["task_id"] == "TASK-113"
+
+
+# --- reject lists the changes the task left in the working tree (issues.md #26) ---
+
+_LEFTOVER_BASE_FILES = {
+    "README.md": "# Test Repo\n", "mod.txt": "m\n", "gone.txt": "g\n", "ren_old.txt": "r\n",
+    "sp ace.txt": "s\n", "g*b.txt": "glob\n", "gxb.txt": "decoy\n",
+}
+_HEADING = "Changes left in the working tree (not discarded):"
+_DISCARD = "To discard exactly these changes (printed, not run):"
+_RESTORE = "  {git} restore --staged --worktree -- "
+_UNDETERMINED = ["The changes this task left in the working tree could not be determined."]
+_NOT_LISTED = ["The leftover changes could not be listed."]
+
+
+def _listing(rows, commands):
+    return ["", _HEADING, *rows, _DISCARD, *commands]
+
+
+def _tree_state(repo: Path):
+    """Porcelain status plus every path (files with bytes, directories as None) outside .git/.task_runs."""
+    files = {
+        p.relative_to(repo).as_posix(): (p.read_bytes() if p.is_file() else None)
+        for p in sorted(repo.rglob("*"))
+        if not {".git", ".task_runs"} & set(p.relative_to(repo).parts)
+    }
+    return run_git_in_repo(repo, ["status", "--porcelain"]).stdout, files
+
+
+def _apply_ops(repo: Path, ops) -> None:
+    for op, *rest in ops:
+        if op == "write":
+            (repo / rest[0]).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rest[0]).write_text(rest[1], encoding="utf-8")
+        elif op == "rm":
+            (repo / rest[0]).unlink()
+        elif op == "git":
+            git_in_repo(repo, rest)
+        else:  # a real broken repository: git status fails on a corrupt index
+            (repo / ".git" / "index").write_bytes(b"not an index")
+
+
+def _reject_scenario(tmp_path: Path, capsys, pre, ops, baseline, as_json: bool) -> SimpleNamespace:
+    """Real repo, real baseline.json (or a broken one), task changes, then the real reject CLI."""
+    repo = tmp_path / "repo"
+    init_git_repo(repo, files=_LEFTOVER_BASE_FILES)
+    run_dir = _create_awaiting_human_task_run(repo, "TASK-LEFT", diff_content="")
+    _apply_ops(repo, pre)
+    baseline_file = run_dir / "baseline.json"
+    if baseline == "dir":
+        baseline_file.mkdir()
+    elif baseline is None:
+        baseline_file.write_text(json.dumps(capture_baseline(repo).to_dict()), encoding="utf-8")
+    elif baseline != "missing":
+        baseline_file.write_text(baseline, encoding="utf-8")
+    pre_task = _tree_state(repo)
+    _apply_ops(repo, ops)
+    before = _tree_state(repo)
+    argv = ["reject", "TASK-LEFT", "--repo", str(repo), "--reason", "No", "--ledger-file", str(tmp_path / "l.jsonl")]
+    assert cmd_reject(build_parser().parse_args(argv + (["--json"] if as_json else []))) == 0
+    out = capsys.readouterr().out
+    assert _tree_state(repo) == before
+    persisted = json.loads((run_dir / "human_decision.json").read_text(encoding="utf-8"))
+    assert persisted["decision"] == "rejected" and "leftover_changes" not in persisted
+    assert TaskSpec.load_from_file(str(run_dir / "task.yaml")).current_state == "failed"
+    assert "human_rejection" in [e.action for e in EvidenceLedger(str(tmp_path / "l.jsonl")).get_task_entries("TASK-LEFT")]
+    return SimpleNamespace(repo=repo, run_dir=run_dir, out=out, pre_task=pre_task)
+
+
+_MOD = ("write", "mod.txt", "changed\n")
+_NEW = ("write", "new.txt", "n\n")
+_NEWDIR = ("write", "newdir/a.txt", "a\n")
+_GONE = ("rm", "gone.txt")
+_LEFTOVER_CASES = pytest.mark.parametrize("pre, ops, baseline, tail, leftover", [
+    pytest.param([], [_MOD], None,
+                 _listing(["  modified:  mod.txt"], [_RESTORE + "mod.txt"]),
+                 ([], ["mod.txt"], []), id="modified_only"),
+    pytest.param([], [_NEW], None,
+                 _listing(["  untracked: new.txt"], ["  {git} clean -f -- new.txt"]),
+                 (["new.txt"], [], []), id="untracked_file_only"),
+    pytest.param([], [_GONE], None,
+                 _listing(["  deleted:   gone.txt"], [_RESTORE + "gone.txt"]),
+                 ([], [], ["gone.txt"]), id="deleted_only"),
+    pytest.param([], [_MOD, _NEW, _GONE], None,
+                 _listing(["  untracked: new.txt", "  modified:  mod.txt", "  deleted:   gone.txt"],
+                          [_RESTORE + "mod.txt gone.txt", "  {git} clean -f -- new.txt"]),
+                 (["new.txt"], ["mod.txt"], ["gone.txt"]), id="modified_untracked_deleted"),
+    pytest.param([], [_NEWDIR], None,
+                 _listing(["  untracked: newdir/"], ["  {git} clean -fd -- newdir/"]),
+                 (["newdir/"], [], []), id="untracked_directory_only"),
+    pytest.param([], [_NEW, _NEWDIR], None,
+                 _listing(["  untracked: new.txt", "  untracked: newdir/"], ["  {git} clean -fd -- new.txt newdir/"]),
+                 (["new.txt", "newdir/"], [], []), id="untracked_file_and_directory"),
+    pytest.param([], [("write", "staged.txt", "s\n"), ("git", "add", "staged.txt"), ("git", "rm", "gone.txt"),
+                      ("git", "mv", "ren_old.txt", "ren_new.txt")], None,
+                 _listing(["  added:     ren_new.txt", "  added:     staged.txt",
+                           "  deleted:   gone.txt", "  deleted:   ren_old.txt"],
+                          [_RESTORE + "gone.txt ren_old.txt ren_new.txt staged.txt"]),
+                 (["ren_new.txt", "staged.txt"], [], ["gone.txt", "ren_old.txt"]), id="staged_add_delete_rename"),
+    pytest.param([("write", "gxb.txt", "dirt\n")],
+                 [("write", "g*b.txt", "x\n"), ("write", "sp ace.txt", "x\n"), ("write", "new file.txt", "n\n")], None,
+                 _listing(["  untracked: 'new file.txt'", "  modified:  'g*b.txt'", "  modified:  'sp ace.txt'"],
+                          [_RESTORE + "'g*b.txt' 'sp ace.txt'", "  {git} clean -f -- 'new file.txt'"]),
+                 (["new file.txt"], ["g*b.txt", "sp ace.txt"], []), id="glob_and_space_names"),
+    pytest.param([("write", "README.md", "dirt\n"), ("write", "pre.txt", "p\n")], [_MOD, _NEW], None,
+                 _listing(["  untracked: new.txt", "  modified:  mod.txt"],
+                          [_RESTORE + "mod.txt", "  {git} clean -f -- new.txt"]),
+                 (["new.txt"], ["mod.txt"], []), id="pre_existing_dirt_is_not_listed"),
+    pytest.param([], [], None, ["No changes left in the working tree."], ([], [], []), id="clean_tree"),
+    pytest.param([("write", "README.md", "dirt\n")], [], None, ["No changes left in the working tree."],
+                 ([], [], []), id="clean_tree_with_pre_existing_dirt"),
+    pytest.param([], [_MOD], "missing", _UNDETERMINED, None, id="baseline_missing"),
+    pytest.param([], [_MOD], "{not json", _UNDETERMINED, None, id="baseline_corrupt"),
+    pytest.param([], [_MOD], "", _UNDETERMINED, None, id="baseline_empty"),
+    pytest.param([], [_MOD, ("corrupt_index",)], None, _UNDETERMINED, None, id="git_status_fails"),
+    pytest.param([], [_MOD], "dir", _NOT_LISTED, None, id="listing_fails_baseline_is_a_directory"),
+])
+
+
+@_LEFTOVER_CASES
+def test_reject_text_lists_leftover_changes_and_prints_working_discard_commands(
+    tmp_path: Path, capsys, pre, ops, baseline, tail, leftover
+):
+    """Exact layout after the Terminal state line; the printed commands, run as printed, undo exactly the task."""
+    s = _reject_scenario(tmp_path, capsys, pre, ops, baseline, as_json=False)
+    lines = s.out.splitlines()
+    terminal = lines.index("Terminal state:     FAILED (Rejected)")
+    assert lines[terminal + 1] == "=" * 60
+    git = f"git -C {shlex.quote(str(s.repo.resolve()))} --literal-pathspecs"
+    assert lines[terminal + 2:] == [t.format(git=git) for t in tail]
+    commands = [shlex.split(line) for line in lines if line.startswith("  git ")]
+    for argv in commands:
+        subprocess.run(argv, check=True, capture_output=True, env=sanitized_git_env())
+    if commands:
+        assert _tree_state(s.repo) == s.pre_task
+
+
+@_LEFTOVER_CASES
+def test_reject_json_keeps_existing_output_and_adds_leftover_changes(
+    tmp_path: Path, capsys, pre, ops, baseline, tail, leftover
+):
+    """The recorded decision prints byte-for-byte as before; one trailing key carries the listing."""
+    s = _reject_scenario(tmp_path, capsys, pre, ops, baseline, as_json=True)
+    recorded = HumanDecisionRecord.load_from_file(str(s.run_dir / "human_decision.json")).to_json()
+    assert s.out.startswith(recorded[:-2] + ',\n  "leftover_changes": ')
+    added, modified, deleted = leftover or ([], [], [])
+    assert json.loads(s.out)["leftover_changes"] == {
+        "files_added": added, "files_modified": modified, "files_deleted": deleted,
+        "determined": leftover is not None,
+    }
