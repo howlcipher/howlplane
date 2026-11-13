@@ -41,6 +41,7 @@
 5. `howlplane status` shows whether it is healthy, what it is working on, and exactly what you need to do, if anything.
 6. `howlplane logs --follow` shows the details as they happen.
 7. If status says `OWNER REQUIRED`, run the command it prints: `howlplane approve ID` or `howlplane reject ID`. The id can be a task, a parked work item or a repository proposal; HowlPlane works out which.
+   `howlplane reject ID` for a task does not touch the working tree. After recording the rejection it lists the changes that task left there (from its recorded baseline, so changes you made before the task are not included) and prints the `git restore` and `git clean` commands that would discard exactly those paths. It never runs them. If the baseline is missing or unreadable it says the changes could not be determined. With `--json` the decision gains one `leftover_changes` key.
 8. `howlplane stop` pauses safely and keeps all state; `howlplane start` continues.
 9. Something wrong? `howlplane doctor` (`--ready` gives a one-word answer for scripts).
 

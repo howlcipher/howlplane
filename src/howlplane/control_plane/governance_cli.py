@@ -74,7 +74,61 @@ def _handle_proposal_decision(args: argparse.Namespace, decision: str) -> int:
     return _run_owner_decision(args, decision, "proposal")
 
 
+_NOT_DETERMINED = {"files_added": [], "files_modified": [], "files_deleted": [], "determined": False}
+
+
+def _leftover_report(target_repo: str, task_id: str):
+    """(leftover_changes document, text lines) for the changes a rejected task left.
+
+    Reads the task's baseline.json through capture_delta. Reports only: the
+    printed commands are never run. A missing, unreadable or corrupt baseline,
+    or a failing ``git status``, gives ``determined: false`` and never "none".
+    An unexpected failure (for example an unreadable run directory) propagates
+    to the caller's guard.
+    """
+    import json
+    import shlex
+    from pathlib import Path
+    from howlplane.control_plane.git_baseline import GitBaseline, _iter_porcelain_records, _run_git_cmd, capture_delta
+
+    root = Path(target_repo).resolve()
+    baseline_file = _cli().HumanLifecycleManager.get_run_dir(root, task_id) / "baseline.json"
+    undetermined = (dict(_NOT_DETERMINED), ["The changes this task left in the working tree could not be determined."])
+    if not baseline_file.exists():
+        return undetermined
+    text = baseline_file.read_text(encoding="utf-8")
+    try:
+        baseline = GitBaseline.from_dict(json.loads(text))
+    except (ValueError, TypeError, AttributeError):
+        return undetermined
+    status = _run_git_cmd(root, ["status", "--porcelain=v1", "-z"])
+    if status.returncode != 0:
+        return undetermined
+    delta = capture_delta(root, baseline)
+    untracked = {path for code, path, _ in _iter_porcelain_records(status.stdout or "") if code.startswith("??")}
+    public = {"files_added": list(delta.files_added), "files_modified": list(delta.files_modified),
+              "files_deleted": list(delta.files_deleted), "determined": True}
+    staged_added = [p for p in delta.files_added if p not in untracked]
+    new_untracked = [p for p in delta.files_added if p in untracked]
+    listing = ([("added", p) for p in staged_added] + [("untracked", p) for p in new_untracked]
+               + [("modified", p) for p in delta.files_modified] + [("deleted", p) for p in delta.files_deleted])
+    if not listing:
+        return public, ["No changes left in the working tree."]
+    git = f"git -C {shlex.quote(str(root))} --literal-pathspecs"
+    lines = ["", "Changes left in the working tree (not discarded):"]
+    lines += [f"  {kind + ':':<11}{shlex.quote(path)}" for kind, path in listing]
+    lines.append("To discard exactly these changes (printed, not run):")
+    tracked = list(delta.files_modified) + list(delta.files_deleted) + staged_added
+    if tracked:
+        lines.append(f"  {git} restore --staged --worktree -- {' '.join(shlex.quote(p) for p in tracked)}")
+    if new_untracked:
+        flag = "-fd" if any(p.endswith("/") for p in new_untracked) else "-f"
+        lines.append(f"  {git} clean {flag} -- {' '.join(shlex.quote(p) for p in new_untracked)}")
+    return public, lines
+
+
 def _handle_decision(args: argparse.Namespace, decision: str) -> int:
+    import json
     from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
     targets = [getattr(args, name, None) for name in ("task_id", "work_item", "proposal")]
     if sum(1 for target in targets if target) != 1:
@@ -115,8 +169,19 @@ def _handle_decision(args: argparse.Namespace, decision: str) -> int:
         ledger=ledger,
         **kwargs,
     )
+    leftover = None
+    if decision == "rejected":
+        # Only after the rejection is recorded; nothing in here may change the outcome.
+        try:
+            leftover = _leftover_report(target_repo, args.task_id)
+        except Exception:
+            leftover = None
     if getattr(args, "json", False):
-        print(record.to_json())
+        if decision == "rejected":
+            public = leftover[0] if leftover else dict(_NOT_DETERMINED)
+            print(json.dumps({**record.to_dict(), "leftover_changes": public}, indent=2))
+        else:
+            print(record.to_json())
     else:
         title = "TASK AUTHORIZED" if decision == "approved" else "TASK REJECTED"
         print("=" * 60)
@@ -134,6 +199,8 @@ def _handle_decision(args: argparse.Namespace, decision: str) -> int:
         else:
             print("Terminal state:     FAILED (Rejected)")
         print("=" * 60)
+        if decision == "rejected":
+            print("\n".join(leftover[1]) if leftover else "The leftover changes could not be listed.")
     return 0
 
 
