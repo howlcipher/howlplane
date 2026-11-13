@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `howlplane reject` for a task now lists the changes the task left in the
+  working tree, taken from its recorded `baseline.json`, and prints the
+  `git restore` and `git clean` commands that would discard exactly those paths,
+  unstaging anything the task staged and using literal pathspecs (issues.md #26,
+  HP-SELF-26D). Nothing is run, deleted or restored. A missing, unreadable or
+  corrupt baseline, or a failing `git status`, is reported as "could not be
+  determined", never as "no changes". `--json` keeps every existing field and
+  adds `leftover_changes` (`files_added`, `files_modified`, `files_deleted`,
+  `determined`). Exit code, recorded decision and state are unchanged, and a
+  listing failure never loses the rejection.
 - `howlplane work --implementation-timeout SECONDS` lets the operator set the
   implementation time limit of one run, 1 to 1800 seconds (issues.md #31, first
   half, HP-SELF-31A3). Omitted, it stays 600. Invalid values are refused with
