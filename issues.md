@@ -506,6 +506,16 @@ The same session showed the implementer side (`OBJ1-CLAUDE`): Claude made the ed
 
 Smaller note from the same run: `status` reports "5 workers available" while the pool has Devin and Cursor disabled; it counts installed, logged-in CLIs rather than workers the pool would route to.
 
+**Fixed** 2026-11-13 (PR #212, HP-SELF-26D, after 26, 26B and 26C). `howlplane reject` now lists the changes the rejected task left in the working tree, taken from its recorded baseline, and prints the commands that discard exactly those paths (`git -C <repo> --literal-pathspecs restore --staged --worktree -- ...` and `clean -f` or `-fd` for untracked paths). The commands are printed, never run, and nothing is deleted. `--json` keeps its existing output byte for byte and adds a trailing `leftover_changes` object with `determined`. A missing, corrupt or empty baseline, or a failing `git status`, says the changes could not be determined; any failure in the listing leaves the exit code and the recorded rejection untouched.
+
+Open follow-ups from the self-review (independent review was unavailable):
+- a `baseline.json` that is not valid UTF-8 reports "could not be listed" instead of "could not be determined";
+- the `git_status_fails` test corrupts `.git/index` and relies on reject surviving that;
+- the listing helper imports two private `git_baseline` helpers.
+
+The `status` note in this issue (it counts installed CLIs rather than workers the pool would route to) is still open.
+
+
 ### 27. `howlplane work` routes review to AGY, which `orchestrate` skips because AGY's review mode is not read-only
 
 **Found** 2026-11-07 dogfooding Objective 1. `documentation/ORCHESTRATE.md` says AUTO routing skips AGY for planning, review and acceptance, because AGY's `--mode plan` does not enforce read-only operation: as a reviewer it ran the project's CLI, used the network and rewrote tracked files (DOG-037). The `howlplane work` path has no such rule. In `OBJ1-CODEX` and `OBJ1-CLAUDE2` it assigned AGY as a reviewer in every cycle. Nothing visibly went wrong in these runs, but nothing in the `work` path checked either. Needs: confirm whether `work` checks a read-only attempt's repository delta the way `orchestrate` does, then either apply the same AGY review exclusion to the pool's review selection or document why `work` differs. With Devin and Cursor disabled, excluding AGY leaves Codex and Claude as the only reviewers, so the independence rules need checking against that pool.
