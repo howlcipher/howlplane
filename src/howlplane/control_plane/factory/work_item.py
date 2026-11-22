@@ -30,7 +30,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 
-from howlplane.control_plane.atomic_io import atomic_write_json
 from howlplane.control_plane.durable_store import DurableObjectStore
 from howlplane.control_plane.reasoning.artifact_safety import SafeArtifactSerializationMixin
 
@@ -402,12 +401,10 @@ class WorkItemStore(DurableObjectStore):
         target = self._admission_state_for_origin(origin, is_ambiguous, trusted_provenance=trusted_provenance)
         if target != WorkItemState.ADMITTED:
             item.transition_to(target, reason=f"origin={origin} ambiguous={is_ambiguous} trusted={trusted_provenance}")
-        if create_only:
-            self._require_writable()
-            try:
-                atomic_write_json(self._path(item.work_item_id), item.to_dict(), create_only=True)
-            except FileExistsError:
-                return self.load(item.work_item_id)
-        else:
-            self.save_object(item)
+        try:
+            self.save_object(item, create_only=create_only)
+        except FileExistsError:
+            if not create_only:
+                raise
+            return self.load(item.work_item_id)
         return item

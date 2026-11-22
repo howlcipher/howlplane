@@ -77,10 +77,10 @@ class DurableObjectStore:
             )
         return self.base_dir / f"{obj_id}{self._filename_suffix}"
 
-    def save(self, obj_id: str, data: Dict[str, Any]) -> Path:
+    def save(self, obj_id: str, data: Dict[str, Any], *, create_only: bool = False) -> Path:
         self._require_writable()
         target = self._path(obj_id)
-        if target.is_file() and self._dedup_field:
+        if not create_only and target.is_file() and self._dedup_field:
             try:
                 existing = safe_load_json(target)
             except Exception:
@@ -91,10 +91,10 @@ class DurableObjectStore:
                 raise FileExistsError(
                     f"Artifact '{obj_id}' already exists with different {self._dedup_field}."
                 )
-        atomic_write_json(target, data)
+        atomic_write_json(target, data, create_only=create_only)
         return target
 
-    def save_object(self, obj: Any) -> Path:
+    def save_object(self, obj: Any, *, create_only: bool = False) -> Path:
         """Persist an object that carries its own id in `id_attr`.
 
         Deliberately binds `DurableObjectStore.save` rather than `self.save`.
@@ -107,7 +107,9 @@ class DurableObjectStore:
             raise ArtifactIdentityError(
                 "save_object requires the store to declare id_attr."
             )
-        return DurableObjectStore.save(self, getattr(obj, self._id_attr), obj.to_dict())
+        return DurableObjectStore.save(
+            self, getattr(obj, self._id_attr), obj.to_dict(), create_only=create_only
+        )
 
     def load(self, obj_id: str) -> T:
         target = self._path(obj_id)
