@@ -44,6 +44,7 @@ from typing import Any, Callable, Iterator, TextIO
 
 from howlplane.control_plane import orchestration
 from howlplane.control_plane.atomic_io import safe_load_json
+from howlplane.control_plane.factory.improvement import observe_launch
 
 QUEUE_SCHEMA = "howlplane.factory_queue/v1"
 LEDGER_SCHEMA = "howlplane.factory_ledger/v1"
@@ -548,7 +549,7 @@ class QueueFactory:
                 args = task.launch_args(quiet, no_progress, heartbeat, resume=dispatch.action == "resume")
                 if verification_only:
                     args.verification_only = True
-                outcome = self._launch(dispatch, args)
+                outcome = observe_launch(self._launch, dispatch, args)
                 results.append(outcome)
                 session = f" (session {outcome['session_id']})" if outcome["session_id"] else ""
                 self._say("RESULT", f"{task.id}: {outcome['status']}{session}")

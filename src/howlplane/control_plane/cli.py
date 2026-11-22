@@ -1925,6 +1925,13 @@ def register_factory_subparsers(subparsers: Any, parents: Optional[List[Any]] = 
     p_canary.add_argument("--json", action="store_true", help="Output JSON result")
     _add_workspace_trust_argument(p_canary)
 
+    p_improvement = factory_sub.add_parser(
+        "improvement", help="Park a HowlLoop candidate for owner review", **kwargs
+    )
+    p_improvement.add_argument("candidate", type=Path)
+    p_improvement.add_argument("--store", type=Path, required=True)
+    p_improvement.add_argument("--state-dir", type=Path, required=True)
+
     p_queue = factory_sub.add_parser(
         "queue", help="Run finite factory over an explicit task queue", **kwargs
     )

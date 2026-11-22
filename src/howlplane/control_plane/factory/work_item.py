@@ -357,11 +357,14 @@ class WorkItemStore(DurableObjectStore):
         evidence_fingerprints: List[str],
         is_ambiguous: bool = False,
         trusted_provenance: bool = True,
+        create_only: bool = False,
         **kwargs: Any,
     ) -> WorkItem:
         fingerprint = work_item_fingerprint(origin, repository, identity_keys)
         existing = self.find_by_fingerprint(fingerprint)
         if existing is not None:
+            if create_only:
+                return existing
             new_fps = set(evidence_fingerprints).difference(existing.evidence_fingerprints)
             new_refs = set(evidence_refs).difference(existing.evidence_refs)
             if not new_fps and not new_refs:
@@ -398,5 +401,10 @@ class WorkItemStore(DurableObjectStore):
         target = self._admission_state_for_origin(origin, is_ambiguous, trusted_provenance=trusted_provenance)
         if target != WorkItemState.ADMITTED:
             item.transition_to(target, reason=f"origin={origin} ambiguous={is_ambiguous} trusted={trusted_provenance}")
-        self.save_object(item)
+        try:
+            self.save_object(item, create_only=create_only)
+        except FileExistsError:
+            if not create_only:
+                raise
+            return self.load(item.work_item_id)
         return item

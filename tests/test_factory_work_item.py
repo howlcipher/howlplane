@@ -335,3 +335,30 @@ def test_admit_owner_direction_respects_trusted_provenance(tmp_path, trusted, ex
         trusted_provenance=trusted,
     )
     assert item.state == expected_state
+
+
+def test_create_only_admission_preserves_operator_decision(tmp_path, monkeypatch):
+    store = WorkItemStore(tmp_path / "work_items")
+    first = store.admit_evidence(
+        WorkItemOrigin.INFERRED_IMPROVEMENT, "owner/repo", "Investigate",
+        ["candidate"], ["first"], ["a"], create_only=True,
+    )
+    assert first.state == WorkItemState.AWAITING_OWNER
+    first.transition_to(WorkItemState.READY, reason="owner decision")
+    store.save_object(first)
+    replay = store.admit_evidence(
+        WorkItemOrigin.INFERRED_IMPROVEMENT, "owner/repo", "Investigate",
+        ["candidate"], ["second"], ["b"], create_only=True,
+    )
+    assert replay.state == WorkItemState.READY
+    assert replay.evidence_refs == ["first"]
+    assert store.load(first.work_item_id).state == WorkItemState.READY
+
+    # Another intake could have read an empty snapshot before the item was created.
+    monkeypatch.setattr(store, "find_by_fingerprint", lambda _: None)
+    stale = store.admit_evidence(
+        WorkItemOrigin.INFERRED_IMPROVEMENT, "owner/repo", "Investigate",
+        ["candidate"], ["third"], ["c"], create_only=True,
+    )
+    assert stale.state == WorkItemState.READY
+    assert store.load(first.work_item_id).evidence_refs == ["first"]

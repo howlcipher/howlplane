@@ -554,6 +554,9 @@ def cmd_factory(args: argparse.Namespace) -> int:
             if not getattr(args, "until", None):
                 args.until = None
             return _cli().cmd_factory_run(args)
+        if action == "improvement":
+            from howlplane.control_plane.factory import improvement
+            return improvement.command(args)
         if action == "queue":
             from howlplane.control_plane.factory import task_queue
             return task_queue.command(args)
