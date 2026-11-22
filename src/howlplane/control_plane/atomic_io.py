@@ -26,12 +26,15 @@ def atomic_write_text(
     content: str,
     encoding: str = "utf-8",
     sync: bool = True,
+    *,
+    create_only: bool = False,
 ) -> Path:
     """
     Atomically writes string content to target path using a tempfile and os.replace.
     Ensures parent directories exist and syncs to disk before replacement.
     """
-    target = Path(file_path).resolve()
+    path = Path(file_path)
+    target = path.parent.resolve() / path.name if create_only else path.resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
 
     # Use same directory to ensure same filesystem for atomic rename (os.replace)
@@ -45,7 +48,11 @@ def atomic_write_text(
             f.flush()
             if sync:
                 os.fsync(f.fileno())
-        os.replace(temp_file, target)
+        if create_only:
+            os.link(temp_file, target)
+            temp_file.unlink()
+        else:
+            os.replace(temp_file, target)
         return target
     except Exception:
         if temp_file.exists():
@@ -61,10 +68,12 @@ def atomic_write_json(
     data: Any,
     indent: int = 2,
     sync: bool = True,
+    *,
+    create_only: bool = False,
 ) -> Path:
     """Serializes data to formatted JSON and writes atomically."""
     content = json.dumps(data, indent=indent)
-    return atomic_write_text(file_path, content, sync=sync)
+    return atomic_write_text(file_path, content, sync=sync, create_only=create_only)
 
 
 def atomic_write_yaml(

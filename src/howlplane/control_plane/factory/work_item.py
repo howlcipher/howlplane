@@ -30,6 +30,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 
+from howlplane.control_plane.atomic_io import atomic_write_json
 from howlplane.control_plane.durable_store import DurableObjectStore
 from howlplane.control_plane.reasoning.artifact_safety import SafeArtifactSerializationMixin
 
@@ -357,11 +358,14 @@ class WorkItemStore(DurableObjectStore):
         evidence_fingerprints: List[str],
         is_ambiguous: bool = False,
         trusted_provenance: bool = True,
+        create_only: bool = False,
         **kwargs: Any,
     ) -> WorkItem:
         fingerprint = work_item_fingerprint(origin, repository, identity_keys)
         existing = self.find_by_fingerprint(fingerprint)
         if existing is not None:
+            if create_only:
+                return existing
             new_fps = set(evidence_fingerprints).difference(existing.evidence_fingerprints)
             new_refs = set(evidence_refs).difference(existing.evidence_refs)
             if not new_fps and not new_refs:
@@ -398,5 +402,12 @@ class WorkItemStore(DurableObjectStore):
         target = self._admission_state_for_origin(origin, is_ambiguous, trusted_provenance=trusted_provenance)
         if target != WorkItemState.ADMITTED:
             item.transition_to(target, reason=f"origin={origin} ambiguous={is_ambiguous} trusted={trusted_provenance}")
-        self.save_object(item)
+        if create_only:
+            self._require_writable()
+            try:
+                atomic_write_json(self._path(item.work_item_id), item.to_dict(), create_only=True)
+            except FileExistsError:
+                return self.load(item.work_item_id)
+        else:
+            self.save_object(item)
         return item

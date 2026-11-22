@@ -74,6 +74,7 @@ CONSUMES: List[Dict[str, Any]] = [
 ]
 
 EMITS = {
+    ("factory", "improvement"): ["howlplane.improvement_intake/v1"],
     ("reconcile",): [],
     ("interop",): [SCHEMA],
 }
@@ -105,7 +106,7 @@ def describe(parser: argparse.ArgumentParser) -> Dict[str, Any]:
             return
         seen.add(key)
         flags = _flags(current)
-        entry: Dict[str, Any] = {"path": path, "flags": flags, "json": "--json" in flags or key == ("interop",)}
+        entry: Dict[str, Any] = {"path": path, "flags": flags, "json": "--json" in flags or key in {("interop",), ("factory", "improvement")}}
         if EMITS.get(key):
             entry["emits"] = EMITS[key]
         commands.append(entry)
