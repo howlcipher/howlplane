@@ -19,7 +19,9 @@ import time
 from typing import Any, Dict, List, Optional, Union
 import yaml
 
-from howlplane.control_plane.hygiene_policy import HygienePolicyClassifier, PINNED_SLOPSLINT_VERSION
+from howlplane.control_plane.hygiene_policy import (
+    HygienePolicyClassifier, PINNED_SLOPSLINT_VERSION, is_slopslint, slopslint_env,
+)
 
 VERIFICATION_PLAN_SCHEMA_VERSION = "ai.verification_plan/v1"
 
@@ -326,7 +328,8 @@ class VerificationPlan(DataClassSerializationMixin):
                 details=cmd_display,
                 role="verification",
             ):
-                res = _run_bounded(cmd_args, cwd, env, step.effective_timeout_seconds)
+                res = _run_bounded(cmd_args, cwd, slopslint_env(env) if is_slopslint(cmd_args) else env,
+                                   step.effective_timeout_seconds)
 
             step.duration_seconds = round(time.time() - start_time, 3)
             step.exit_code = res.returncode

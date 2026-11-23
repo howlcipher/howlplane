@@ -177,12 +177,14 @@ def check_slopslint() -> DiagnosticCheck:
             details={"action": "bash scripts/install_slopslint.sh"},
         )
     try:
+        from howlplane.control_plane.hygiene_policy import slopslint_env
         res = subprocess.run(
             ["slopslint", "--version"],
             capture_output=True,
             text=True,
             check=False,
             timeout=10.0,
+            env=slopslint_env(),
         )
         if res.returncode == 0:
             ver_line = res.stdout.strip()

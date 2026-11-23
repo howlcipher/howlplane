@@ -513,3 +513,24 @@ def test_evidence_ledger_hygiene_policy_actions_and_metrics():
     assert "Policy tightenings:** 1, **Weakenings requested:** 1" in md
     assert "Tombstones added (debt accepted):** 1, **Removed (cleaned):** 1" in md
     assert "Provider integrity mismatches:** 1" in md
+
+
+# issues.md #19: a shell exporting BUN_OPTIONS (for example --smol) made the
+# Bun-built slopslint reject its own invocation, so healthy gates read failed.
+def test_slopslint_env_drops_bun_runtime_flags_only():
+    from howlplane.control_plane.hygiene_policy import slopslint_env
+
+    base = {"BUN_OPTIONS": "--smol", "PATH": "/usr/bin", "HOME": "/home/x"}
+    env = slopslint_env(base)
+    assert "BUN_OPTIONS" not in env and env["PATH"] == "/usr/bin" and env["HOME"] == "/home/x"
+    assert base["BUN_OPTIONS"] == "--smol", "the caller's mapping is not mutated"
+
+
+def test_provider_integrity_survives_bun_options(monkeypatch):
+    monkeypatch.setenv("BUN_OPTIONS", "--smol")
+    ok, msg, meta = HygienePolicyClassifier.verify_provider_integrity(
+        executable_name="slopslint",
+        pinned_version="0.1.0",
+    )
+    assert ok is True, msg
+    assert meta["version"] == "0.1.0"
