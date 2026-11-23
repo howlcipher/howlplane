@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- CI now builds HowlFrame at `928c005` instead of `41d56ce`; it contains the VM
+  resource-bound fixes found by TUI-00 (HowlFrame bugs #73 to #76:
+  `spawn` instruction budget, `spawn` shared-dict crash, `read_line` and
+  `parse_json` memory charging). The four strict `xfail` proposals in
+  `tests/test_tui00_feasibility.py` are now ordinary regression tests. The full
+  suite, generated notes/todo acceptance and both packaged HFBC1 artifacts
+  passed against the new pin before the move.
 - `howlplane route --probe` checks each resource's readiness first (read only;
   no agent is launched), so a provider whose executable is missing is excluded
   instead of selected. Without the flag, `route` behaves as before (TUI-00 HP-C3).

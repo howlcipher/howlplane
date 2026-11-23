@@ -650,11 +650,15 @@ Validation maintenance separates existing Bandit annotation reasons from rule ID
 and removes obsolete suppressions. It changes no runtime behavior or trust policy.
 
 The generated-application CI suites compile and execute against HowlFrame source
-`41d56cecd9e8f936cf9da35240331ab7da0244cd`. Fast, full and nightly jobs use
-that same immutable commit. A moving sibling default branch is not a runtime
-compatibility guarantee: the newer sibling revision observed in CI fails
-generated notes/todo acceptance. The source pin records the tested contract; it does not establish
-compatibility with newer Frame commits or identify a published release by version.
+`928c00503f1de75e21487d020864076e67323eb4` (2026-11-23; it contains the VM resource-bound fixes for
+bugs #73 to #76 found by TUI-00). Fast, full and nightly jobs use that same
+immutable commit. Before the move, the full suite, including generated
+notes/todo acceptance and both packaged HFBC1 artifacts, passed against it; the
+previous pin was `41d56cecd9e8f936cf9da35240331ab7da0244cd`. A moving sibling
+default branch is still not a runtime compatibility guarantee: an earlier newer
+revision failed generated notes/todo acceptance. The source pin records the
+tested contract; it does not establish compatibility with newer Frame commits or
+identify a published release by version.
 
 ### Bind a finite queue to an existing mission
 
