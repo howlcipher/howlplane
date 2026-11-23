@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `howlplane route --probe` checks each resource's readiness first (read only;
+  no agent is launched), so a provider whose executable is missing is excluded
+  instead of selected. Without the flag, `route` behaves as before (TUI-00 HP-C3).
+- `howlplane.error/v1` gains an optional `retry_safe` field naming a
+  `RetryClassification` (`SAFE_TO_RETRY` or `HUMAN_DECISION_REQUIRED`), set
+  only where the failure was raised before anything ran or needs an owner
+  decision; text output adds a `Retry:` line. Absent still means unknown. The
+  schema stays v1 (TUI-00 HP-C1).
+- `TASK_EVENT_SPEC.md` now states that `ai.run_event/v1` has no live producer
+  (TUI-00 HP-F3).
 - `howlplane tui` (TUI-01, ADR 0009 accepted): an interactive terminal for one
   objective at a time. A HowlFrame reducer with no capability grant owns state,
   validation, view and intents; the host owns the terminal (raw mode, resize,

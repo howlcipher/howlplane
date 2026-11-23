@@ -53,6 +53,12 @@ resumable regardless of which provider executed it:
 - a **run result** records the final outcome,
 - a **failure taxonomy** classifies why a run did not succeed, shared between
   the run result and provider failure-classification logic,
+> **No live producer for run events.** No HowlPlane Python code writes
+> `ai.run_event/v1` today; only the schema, the Go `internal/runtime` types and
+> the drift test reference it (TUI-00 finding HP-F3). Live task progress is the
+> `howlplane.task_progress/v1` snapshot in `.task_runs/<task_id>/progress.json`,
+> and `howlplane tui` session events are `howlplane.tui_event/v1`.
+
 > **Superseded handoff.** No HowlPlane code writes `ai.handoff/v1`. The
 > ecosystem's handoff between AI workers is HowlForge's
 > `howlforge.checkpoint/v1` bundle, which HowlRelay reads; the schema stays so

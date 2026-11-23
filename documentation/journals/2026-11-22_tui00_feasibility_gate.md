@@ -141,13 +141,17 @@ Contract gaps, all additive:
 
 * HP-C1: `howlplane.error/v1` has no retry field. Add optional `retry`
   carrying a `RetryClassification` value where the raiser knows it. Additive, so
-  v1 stays.
+  v1 stays. **Resolved 2026-11-23** as the optional `retry_safe` field
+  (`presentation/errors.py`), set only for failures raised before anything ran
+  or that need an owner decision.
 * HP-C2: progress has no sequenced event stream. Either give the
   existing stderr lines a JSON mode or add a progress callback on
   `TaskProgressTracker`; `ai.run_event/v1` is specified but has no producer.
 * HP-C3: `route` does not probe readiness (`cli.py:762`), so its preview can
   select a resource the inventory reports as `MISSING_EXECUTABLE`. A TUI host
   calling the pool in process needs no change; the CLI would need a `--probe` flag.
+  **Resolved 2026-11-23**: `howlplane route --probe` (opt in; the default is
+  unchanged).
 
 ## 4. Logging and error architecture
 
