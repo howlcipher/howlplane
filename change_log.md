@@ -219,6 +219,15 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 
+- The evidence ledger no longer stores bearer tokens or URL-embedded
+  credentials in plain text: `redact_sensitive_data` now applies its own
+  patterns and then `redact_operator_text`, the shared credential set, and that
+  set now also masks PEM private keys in operator text. Prose that only names a
+  secret is kept. Records already written are not rewritten (decision in
+  `documentation/data_flows.md`).
+- Evidence ledger files and archives the ledger creates are owner-only (0600);
+  an existing file keeps its mode.
+
 - HowlPlane no longer signs the HowlChangeOps approval it waits for (issues.md #20).
   `howlplane approve` relays the owner's decision to `howlchangeops approve
   --owner-confirmed --approver <user>` only when it ran at a terminal or was given

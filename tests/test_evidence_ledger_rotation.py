@@ -203,3 +203,30 @@ def test_concurrent_writers_lose_and_duplicate_nothing_across_rotations(tmp_path
         stamps = [e.timestamp for e in entries if e.task_id == f"W{i}"]
         assert len(stamps) == 40 and stamps == sorted(stamps), "each writer's entries stay in its order"
     assert len(_archives(tmp_path)) >= 2
+
+
+def test_files_the_ledger_creates_are_owner_only(tmp_path):
+    """Task history and findings are private: new active files and archives are 0600."""
+    import stat
+
+    from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+
+    path = tmp_path / "ledger.jsonl"
+    ledger = EvidenceLedger(str(path), rotate_bytes=0)
+    ledger.append_entry(EvidenceEntry(task_id="T-1", agent_id="test", action="task_created"))
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    archive = ledger.rotate()
+    if archive is not None:  # rotation needs flock
+        assert stat.S_IMODE(archive.stat().st_mode) == 0o600
+
+
+def test_an_existing_ledger_keeps_its_mode(tmp_path):
+    import stat
+
+    from howlplane.control_plane.evidence_ledger import EvidenceEntry, EvidenceLedger
+
+    path = tmp_path / "ledger.jsonl"
+    path.write_text("")
+    path.chmod(0o640)
+    EvidenceLedger(str(path), rotate_bytes=0).append_entry(EvidenceEntry(task_id="T-1", agent_id="test", action="task_created"))
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640

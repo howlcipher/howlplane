@@ -32,12 +32,17 @@ except ImportError:  # Windows has no flock, so the ledger is never rotated ther
 from jsonschema import Draft202012Validator, FormatChecker
 
 from howlplane.control_plane.resources import CHECKOUT_ROOT, data_file, is_checkout
+from howlplane.control_plane.presentation.redact import redact_operator_text
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
 
 EVIDENCE_ENTRY_SCHEMA_VERSION = "ai.evidence_entry/v1"
 
 _SCHEMA_PATH = data_file("schemas", "evidence-entry.schema.json")
 _LOG = logging.getLogger(__name__)
+
+# Ledger files hold task history and review findings, so a file the ledger
+# creates is readable by its owner only. An existing file keeps its mode.
+PRIVATE_FILE_MODE = 0o600
 
 # An append that leaves the active file at or above this size rotates it.
 DEFAULT_ROTATE_BYTES = 64 * 1024 * 1024
@@ -104,13 +109,20 @@ REDACTION_PATTERNS = [
 
 
 def redact_sensitive_data(text: str) -> str:
-    """Scans and scrubs secrets, credentials, and PII from text."""
+    """Scans and scrubs secrets, credentials, and PII from text.
+
+    The ledger's own patterns (including e-mail addresses, which operator text
+    keeps) run first, then the operator redaction that every other surface
+    uses, so a credential class added there is covered here too. Before this,
+    bearer tokens and URL credentials reached the durable ledger unredacted
+    (TUI-00 follow-up; decision in documentation/data_flows.md).
+    """
     if not isinstance(text, str):
         return text
     sanitized = text
     for pattern, replacement in REDACTION_PATTERNS:
         sanitized = pattern.sub(replacement, sanitized)
-    return sanitized
+    return redact_operator_text(sanitized)
 
 
 def sanitize_value(val: Any) -> Any:
@@ -271,7 +283,7 @@ class EvidenceLedger:
         # interleaving records; fsync makes the entry durable before returning.
         data = line.encode("utf-8")
         with self._locked(exclusive=False):
-            fd = os.open(self.ledger_file, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
+            fd = os.open(self.ledger_file, os.O_WRONLY | os.O_APPEND | os.O_CREAT, PRIVATE_FILE_MODE)
             try:
                 written = os.write(fd, data)
                 while written < len(data):
@@ -328,7 +340,8 @@ class EvidenceLedger:
         """
         archive = staged.with_name(staged.name + ".gz")
         partial = staged.with_name(staged.name + ".gz.partial")
-        with open(staged, "rb") as src, open(partial, "wb") as raw:
+        fd = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, PRIVATE_FILE_MODE)
+        with open(staged, "rb") as src, os.fdopen(fd, "wb") as raw:
             with gzip.GzipFile(filename=staged.name, mode="wb", fileobj=raw, mtime=0) as dst:
                 shutil.copyfileobj(src, dst, 1024 * 1024)
             raw.flush()
