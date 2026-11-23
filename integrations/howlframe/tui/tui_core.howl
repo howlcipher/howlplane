@@ -149,8 +149,16 @@
               (append lines (str_join (list "Outcome:   " (call text_or (map_get o "final_state") "unknown")
                                             " (exit " (call text_or (map_get o "exit_code") "?") ")") ""))
               (append lines (str_join (list "Verification (reported by HowlPlane): " (call text_or (map_get o "verification_status") "none")) ""))
+              ; Show-only: the operator runs these commands; the TUI never approves.
+              (when (not (is_nil (map_get o "next_detail")))
+                (append lines (str_join (list "Detail:    " (to_string (map_get o "next_detail"))) "")))
               (when (not (is_nil (map_get o "next_command")))
-                (append lines (str_join (list "Next:      " (map_get o "next_command")) ""))))))
+                (append lines (str_join (list "Next:      " (map_get o "next_command")) "")))
+              (when (not (is_nil (map_get o "next_then")))
+                (append lines (str_join (list "Then:      " (to_string (map_get o "next_then"))) "")))
+              (when (not (is_nil (map_get o "next_alternatives")))
+                (for alt (map_get o "next_alternatives")
+                  (append lines (str_join (list "Or:        " (to_string alt)) "")))))))
         (when (map_has state "failure")
           (let (f (map_get state "failure"))
             (do

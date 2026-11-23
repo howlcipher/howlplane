@@ -11,7 +11,7 @@ import textwrap
 import pytest
 
 from howlplane.control_plane.presentation.style import Style, strip_ansi
-from howlplane.control_plane.tui.terminal import LineTerminal, open_terminal, styled
+from howlplane.control_plane.tui.terminal import LineTerminal, open_terminal, styled, wrap_line
 from tests._tui_support import read_until
 
 pytestmark = pytest.mark.unit
@@ -35,6 +35,14 @@ def test_color_only_decorates_words():
     colored = styled(Style(color=True), "FAILED: x")
     assert colored != "FAILED: x" and strip_ansi(colored) == "FAILED: x"
     assert styled(Style(color=False), "FAILED: x") == "FAILED: x"
+
+
+def test_long_lines_wrap_instead_of_being_cut():
+    line = "Detail:    Read /a/very/long/path/to/.task_runs/TUI-1/decision_packet.md first."
+    pieces = wrap_line(line, 30)
+    assert all(len(piece) <= 30 for piece in pieces)
+    assert pieces[0] + "".join(piece[2:] for piece in pieces[1:]) == line
+    assert wrap_line("short", 30) == ["short"]
 
 
 def test_pipes_get_line_mode():

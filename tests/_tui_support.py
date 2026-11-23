@@ -1,8 +1,10 @@
 """Shared helpers for the `howlplane tui` tests: pty reads and a fake-agent sandbox."""
 
 import os
+import pty
 import select
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Dict
@@ -24,16 +26,35 @@ def read_until(fd: int, needle: bytes, timeout: float = 30) -> bytes:
     return data
 
 
-def fake_agent_sandbox(tmp_path: Path) -> Dict[str, Path]:
-    """A Git repository, a `codex` stand-in that records any launch, and a config enabling it."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+def scratch_repo(path: Path) -> Path:
+    """An empty Git repository with one commit."""
+    path.mkdir()
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    subprocess.run(["git", "-C", str(path), "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+                    "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+    return path
+
+
+def spawn_tui(repo: Path, env: Dict[str, str]):
+    """Starts `howlplane tui` in ``repo`` on a new pseudo terminal; returns (pid, master fd)."""
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.chdir(repo)
+        os.execve(sys.executable, [sys.executable, "-m", "howlplane.control_plane", "tui"], env)
+    return pid, fd
+
+
+def fake_agent_sandbox(tmp_path: Path, agent_body: str = "exit 97") -> Dict[str, Path]:
+    """A Git repository, a `codex` stand-in that records any launch, and a config enabling it.
+
+    ``agent_body`` is the shell the stand-in runs after recording the launch.
+    """
+    repo = scratch_repo(tmp_path / "repo")
     bindir = tmp_path / "bin"
     bindir.mkdir()
     marker = tmp_path / "launched"
     agent = bindir / "codex"
-    agent.write_text(f"#!/bin/sh\ntouch {marker}\nexit 97\n", encoding="utf-8")
+    agent.write_text(f"#!/bin/sh\ntouch {marker}\n{agent_body}\n", encoding="utf-8")
     agent.chmod(0o755)
     config = tmp_path / "config.toml"
     config.write_text('[ai_resources]\noperating_mode = "connected"\n'
