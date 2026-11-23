@@ -1,7 +1,7 @@
 {
   "producer": "howlframe source build",
   "producer_source_revision": "41d56cecd9e8f936cf9da35240331ab7da0244cd",
-  "producer_note": "Same revision as the CI runtime pin. The published v0.1.0 release rejects dict literals with mixed value types, which this reducer uses.",
+  "producer_note": "Built with 41d56ce, the CI runtime pin at the time; the published v0.1.0 release rejects dict literals with mixed value types. The pin moved to 928c005 on 2026-11-23, and that compiler rebuilds these exact bytes (tests/test_tui_reducer.py checks it with the pinned compiler).",
   "hfbc_format": 1,
   "build_command": "HOWLFRAME_BIN=<pinned howlframe> scripts/build_tui_reducer.sh",
   "files": {

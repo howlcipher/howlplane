@@ -6,9 +6,10 @@ No AI provider is contacted: the execution boundary is a fake that answers with
 fixtures, and the one real-HowlPlane probe only runs ``providers --json`` with a
 fake, never-invoked agent executable on PATH. Every subprocess has a timeout.
 
-The ``xfail(strict=True)`` tests are regression-test proposals for HowlFrame
-defects HF-D1..HF-D4 (documentation/journals/2026-11-22_tui00_feasibility_gate.md).
-They assert the correct behavior, so they flip to XPASS (and fail) once fixed.
+The HF-D1..HF-D4 tests began as strict ``xfail`` regression proposals for
+HowlFrame defects (documentation/journals/2026-11-22_tui00_feasibility_gate.md).
+HowlFrame fixed them (bugs.md #73 to #76, howlcipher/howlframe#309) and the CI
+runtime pin moved to that fix, so they are ordinary regression tests now.
 """
 
 import json
@@ -306,7 +307,7 @@ def test_exec_child_cannot_observe_operator_path(hf, work, tmp_path):
     assert not marker.exists(), "readiness must never launch the agent executable"
 
 
-# HowlFrame defect regression proposals -------------------------------------------------
+# HowlFrame defect regressions (fixed upstream in 928c005) -------------------------------------------------
 
 def _reproducer(hf, tmp_path, name, *run_args, stdin=None):
     out = tmp_path / f"{name}.hfbc"
@@ -317,28 +318,24 @@ def _reproducer(hf, tmp_path, name, *run_args, stdin=None):
                           timeout=TIMEOUT, env={})
 
 
-@pytest.mark.xfail(strict=True, reason="HF-D1: spawn bodies get a fresh instruction budget")
 def test_hf_d1_spawn_work_is_bounded_by_the_run_budget(hf, tmp_path):
     proc = _reproducer(hf, tmp_path, "hf_d1_spawn_instruction_budget", "--max-instructions", "1500",
                        "--allow-caps", "process")
     assert proc.stdout.count(b"child finished loop") < 5
 
 
-@pytest.mark.xfail(strict=True, reason="HF-D2: concurrent map writes crash the Go runtime")
 def test_hf_d2_spawn_shared_dict_has_structured_outcome(hf, tmp_path):
     proc = _reproducer(hf, tmp_path, "hf_d2_spawn_shared_map_race", "--max-instructions", "10000000",
                        "--max-memory-bytes", "1000000000", "--allow-caps", "process")
     assert b"fatal error" not in proc.stderr
 
 
-@pytest.mark.xfail(strict=True, reason="HF-D3: read_line is not charged to the memory budget")
 def test_hf_d3_read_line_respects_memory_budget(hf, tmp_path):
     proc = _reproducer(hf, tmp_path, "hf_d3_read_line_unbounded", "--max-memory-bytes", "1048576",
                        stdin=b"a" * (8 * 1024 * 1024) + b"\n")
     assert proc.returncode != 0 and b"LIMIT_EXCEEDED" in proc.stderr
 
 
-@pytest.mark.xfail(strict=True, reason="HF-D4: parse_json does not charge the decoded tree")
 def test_hf_d4_parse_json_respects_memory_budget(hf, tmp_path):
     payload = ("[" + ",".join(['{"a":[]}'] * 500000) + "]").encode()
     proc = _reproducer(hf, tmp_path, "hf_d4_parse_json_uncharged", "--max-memory-bytes", "8388608",

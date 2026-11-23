@@ -20,7 +20,7 @@ cp integrations/howlframe/candidate_evaluator.hfbc src/howlplane/control_plane/d
 
 The dedicated published-frame CI job downloads that exact release and runs the
 committed artifact, not a recompiled substitute. The ordinary suite executes it
-with the pinned runtime41d56cecd9e8f936cf9da35240331ab7da0244cd. Both paths require
+with the pinned runtime 928c0050 (before 2026-11-23: 41d56cec). Both paths require
 actual Frame output; Python fallback is made a test failure. Status/authority
 parity, filesystem denial and instruction-limit denial are covered. This is
 advisory assessment, never authorization or an owner-authenticated action.
@@ -36,7 +36,7 @@ both runtimes reject evaluator try_let under -run, so that boundary is not used.
 
 integrations/howlframe/project_context_audit.hfbc also targets HFBC1 and is
 compiled by the same published v0.1.0 producer; its source needs no modification.
-It executes under both published v0.1.0 and runtime41d56cec. Rebuild with the
+It executes under published v0.1.0 and the pinned runtime (928c0050; earlier 41d56cec). Rebuild with the
 published compiler:
 
 ```
@@ -77,7 +77,7 @@ wheels remain unreleased until owner-authorized publication.
 
 Published-runtime compatibility above applies to the two packaged CLI artifacts,
 not every generated application. Generated HTTP applications compile and run with
-the modern pinned runtime41d56cec. That runtime correctly attenuates child
+the modern pinned runtime 928c0050 (earlier 41d56cec). That runtime correctly attenuates child
 capabilities. Generated runners restrict parent filesystem grants to reads under
 static/ and data/ and writes under data/. Handlers use the existing explicit
 inherit:filesystem request so no build-machine absolute paths enter bytecode;
