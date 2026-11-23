@@ -23,13 +23,23 @@ from typing import Any, Callable, TextIO
 
 from howlplane.control_plane import agent_readiness, workspace_trust
 from howlplane.control_plane.context_library import apply_to_prompt as apply_context_library
-from howlplane.control_plane.agent_execution import AgentBackendRegistry
+from howlplane.control_plane.agent_execution import (
+    AgentBackendRegistry,
+    BUDGET_DERIVED_KEY,
+    LAUNCH_OUTCOME_KEY,
+    LAUNCH_OUTCOME_NOT_INSTALLED,
+    LAUNCH_OUTCOME_SPAWN_FAILED,
+    TIMEOUT_SOURCE_BUDGET,
+    TIMEOUT_SOURCE_HARNESS,
+    TIMEOUT_SOURCE_KEY,
+)
 from howlplane.control_plane.atomic_io import safe_load_json
 from howlplane.control_plane.git_env import guarded_git_args
 from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
 from howlplane.control_plane.presentation.redact import redact_operator_text
 from howlplane.control_plane.provider_execution_profile import command_to_bash_specifier, is_mutating_role
 from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
+from howlplane.control_plane.stage_observation import observe_operation
 from howlplane.control_plane.task_spec import TaskSpec
 
 SCHEMA = "howlplane.orchestration/v1"
@@ -1391,8 +1401,21 @@ def execute_assignment(doc: dict[str, Any], role: str, agent: str, model: str, r
         # backend with a fixed signature keeps its bounded contract.
         extra["workspace_trust_policy"] = session_trust_policy(doc)
     instructions = apply_context_library(instructions, agent) if is_mutating_role(role) else instructions
-    return backend.execute(task, repo, role=role, prompt_override=instructions,
-                           timeout_seconds=execution_budget(doc, role), model_id=model, **extra)
+    budget = execution_budget(doc, role)
+    with observe_operation("provider", doc["id"]) as observation:
+        result = backend.execute(task, repo, role=role, prompt_override=instructions,
+                                 timeout_seconds=budget, model_id=model, **extra)
+        if observation is not None and not result.success:
+            metadata = getattr(result, "metadata", None) or {}
+            if metadata.get(LAUNCH_OUTCOME_KEY) in (LAUNCH_OUTCOME_NOT_INSTALLED, LAUNCH_OUTCOME_SPAWN_FAILED):
+                observation.result = "unavailable"
+                observation.detail = "dependency"
+            elif (metadata.get(TIMEOUT_SOURCE_KEY) in (TIMEOUT_SOURCE_HARNESS, TIMEOUT_SOURCE_BUDGET)
+                    or metadata.get(BUDGET_DERIVED_KEY) is True):
+                observation.result = "timeout"
+            else:
+                observation.result = "failed"
+    return result
 
 
 def checkpoint(doc: dict[str, Any], path: Path, token: str, repo: Path) -> None:
@@ -1450,17 +1473,33 @@ def run_verification(doc: dict[str, Any], repo: Path) -> dict[str, Any]:
     command = doc["verify_command"]
     record: dict[str, Any] = {"command": command, "rework_round": doc.get("rework_rounds", 0)}
     timeout = doc.get("verify_timeout_seconds") or VERIFY_TIMEOUT_SECONDS
-    try:
-        verified = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        partial = "".join(part.decode(errors="replace") if isinstance(part, bytes) else part
-                          for part in (exc.stdout, exc.stderr) if part)
-        record.update(exit_code=124, timed_out=True, output=test_output_excerpt(
-            f"{partial}\nHowlPlane stopped the command after {timeout}s (raise it with --verify-timeout)."))
-    except OSError as exc:
-        record.update(exit_code=127, not_runnable=True, output=redact(f"HowlPlane could not run the command: {exc}"))
-    else:
-        record.update(exit_code=verified.returncode, output=test_output_excerpt(verified.stdout + verified.stderr))
+    with observe_operation("verification", doc.get("id")) as observation:
+        try:
+            verified = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            partial = "".join(part.decode(errors="replace") if isinstance(part, bytes) else part
+                              for part in (exc.stdout, exc.stderr) if part)
+            record.update(exit_code=124, timed_out=True, output=test_output_excerpt(
+                f"{partial}\nHowlPlane stopped the command after {timeout}s (raise it with --verify-timeout)."))
+        except OSError as exc:
+            record.update(exit_code=127, not_runnable=True, output=redact(f"HowlPlane could not run the command: {exc}"))
+        else:
+            record.update(exit_code=verified.returncode, output=test_output_excerpt(verified.stdout + verified.stderr))
+        if observation is not None:
+            if record.get("timed_out"):
+                observation.result = "timeout"
+                observation.validation = "unavailable"
+            elif record.get("not_runnable"):
+                observation.result = "unavailable"
+                observation.detail = "dependency"
+                observation.validation = "unavailable"
+            elif record["exit_code"] < 0:
+                observation.result = "interrupted"
+                observation.validation = "unavailable"
+            else:
+                passed = record["exit_code"] == 0
+                observation.result = "ok" if passed else "failed"
+                observation.validation = "passed" if passed else "failed"
     return record
 
 
