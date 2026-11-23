@@ -23,7 +23,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, List, Optional, Protocol
 
 from howlplane.control_plane.atomic_io import safe_load_json
 
@@ -36,6 +36,7 @@ class RunHandle:
     process: Optional[subprocess.Popen]
     stderr_path: Optional[Path] = None
     cancel_requested: bool = False
+    events_offset: int = 0  # bytes of progress_events.jsonl already consumed
 
     def finished(self) -> bool:
         return self.process is None or self.process.poll() is not None
@@ -48,7 +49,9 @@ class Backend(Protocol):
 
     def start_run(self, objective: str, resource_id: Optional[str], task_id: str) -> RunHandle: ...
 
-    def progress(self, handle: RunHandle) -> Optional[Dict[str, Any]]: ...
+    def progress(self, handle: RunHandle) -> List[Dict[str, Any]]:
+        """New progress documents since the last call, oldest first."""
+        ...
 
     def result(self, handle: RunHandle) -> Dict[str, Any]:
         """``{"event": "work_result" | "failure", "document": {...}}`` once ``handle.finished()``."""
@@ -97,13 +100,38 @@ class HowlPlaneBackend:
                 start_new_session=True)
         return RunHandle(task_id=task_id, process=process, stderr_path=Path(name))
 
-    def progress(self, handle: RunHandle) -> Optional[Dict[str, Any]]:
-        path = self.target_repo / ".task_runs" / handle.task_id / "progress.json"
+    def progress(self, handle: RunHandle) -> List[Dict[str, Any]]:
+        """New ``howlplane.task_progress_event/v1`` lines since the last call.
+
+        Only complete lines are consumed, so a line still being written is read
+        on the next poll; an unparseable line is skipped, never fatal. Without
+        an events file (an older run) the snapshot in progress.json is used.
+        """
+        run_dir = self.target_repo / ".task_runs" / handle.task_id
+        events_path = run_dir / "progress_events.jsonl"
+        if not events_path.is_file():
+            try:
+                snapshot = safe_load_json(run_dir / "progress.json") if (run_dir / "progress.json").is_file() else None
+            except Exception:
+                return []
+            return [snapshot] if isinstance(snapshot, dict) else []
         try:
-            document = safe_load_json(path) if path.is_file() else None
-        except Exception:
-            return None
-        return document if isinstance(document, dict) else None
+            with events_path.open("rb") as stream:
+                stream.seek(handle.events_offset)
+                data = stream.read()
+        except OSError:
+            return []
+        complete = data[:data.rfind(b"\n") + 1]
+        handle.events_offset += len(complete)
+        events = []
+        for raw in complete.splitlines():
+            try:
+                value = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                events.append(value)
+        return events
 
     def result(self, handle: RunHandle) -> Dict[str, Any]:
         stdout = handle.process.stdout.read() if handle.process and handle.process.stdout else ""

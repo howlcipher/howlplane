@@ -209,3 +209,14 @@ def test_owner_boundary_shows_the_commands_but_proposes_nothing(runner):
                  "Next:      howlplane approve T-9", "Then:      howlplane resume T-9",
                  "Or:        howlplane reject T-9"):
         assert line in shown.view
+
+
+def test_progress_events_update_the_view_and_surface_failover(runner):
+    running = runner.step(selected(runner).state, {"type": "line", "text": "y"})
+    phase = {"schema": "howlplane.task_progress_event/v1", "seq": 3, "kind": "phase", "phase": "IMPLEMENTING",
+             "state": "RUNNING", "resource_id": "codex", "elapsed_seconds": 5, "details": None}
+    shown = runner.step(running.state, {"type": "progress", "document": phase})
+    assert any(line.startswith("Progress:  IMPLEMENTING codex 5s") for line in shown.view)
+    failover = dict(phase, seq=4, kind="failover", message="codex -> claude_code | QUOTA_EXHAUSTED")
+    shown = runner.step(shown.state, {"type": "progress", "document": failover})
+    assert "failover: codex -> claude_code | QUOTA_EXHAUSTED" in shown.state["notices"]

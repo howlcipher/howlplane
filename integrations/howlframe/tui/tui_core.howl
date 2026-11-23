@@ -103,11 +103,15 @@
   ; One task_progress/v1 snapshot reduced to what the view shows.
   (export (defun summarize_progress (doc)
     (type_hints (doc dict) (return dict))
-    (if (!= (map_get doc "schema") "howlplane.task_progress/v1")
+    ; The event stream (task_progress_event/v1) is preferred; the snapshot
+    ; (task_progress/v1) is what an older run left.
+    (if (and (!= (map_get doc "schema") "howlplane.task_progress_event/v1")
+             (!= (map_get doc "schema") "howlplane.task_progress/v1"))
       (return (dict ("ok" false) ("code" "UNSUPPORTED_PROGRESS_SCHEMA")))
       (return (dict ("ok" true) ("task_id" (map_get doc "task_id")) ("phase" (map_get doc "phase"))
                     ("state" (map_get doc "state")) ("resource_id" (map_get doc "resource_id"))
-                    ("elapsed_seconds" (map_get doc "elapsed_seconds")) ("details" (map_get doc "details")))))))
+                    ("elapsed_seconds" (map_get doc "elapsed_seconds")) ("details" (map_get doc "details"))
+                    ("kind" (map_get doc "kind")) ("message" (map_get doc "message")))))))
 
   (export (defun text_or (value fallback)
     (type_hints (fallback string) (return string))

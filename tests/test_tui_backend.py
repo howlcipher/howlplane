@@ -129,11 +129,27 @@ def test_cancel_stops_the_process_group_and_records_it(sandbox, tmp_path, monkey
     assert document["code"] == "RUN_CANCELLED" and document["retry_safe"] == "RECONCILE_FIRST"
 
 
-def test_progress_reads_the_task_progress_snapshot(sandbox, tmp_path):
+def test_progress_falls_back_to_the_snapshot(sandbox, tmp_path):
     run_dir = Path(sandbox["repo"]) / ".task_runs" / "TUI-2"
     run_dir.mkdir(parents=True)
     snapshot = {"schema": "howlplane.task_progress/v1", "task_id": "TUI-2", "phase": "VERIFYING"}
     (run_dir / "progress.json").write_text(json.dumps(snapshot))
     backend = HowlPlaneBackend(sandbox["repo"], tmp_path)
-    assert backend.progress(RunHandle("TUI-2", None)) == snapshot
-    assert backend.progress(RunHandle("TUI-3", None)) is None
+    assert backend.progress(RunHandle("TUI-2", None)) == [snapshot]
+    assert backend.progress(RunHandle("TUI-3", None)) == []
+
+
+def test_progress_streams_new_events_once_and_waits_for_whole_lines(sandbox, tmp_path):
+    run_dir = Path(sandbox["repo"]) / ".task_runs" / "TUI-4"
+    run_dir.mkdir(parents=True)
+    events = run_dir / "progress_events.jsonl"
+    first = {"schema": "howlplane.task_progress_event/v1", "seq": 1, "kind": "phase", "phase": "ROUTING"}
+    second = {"schema": "howlplane.task_progress_event/v1", "seq": 2, "kind": "phase", "phase": "IMPLEMENTING"}
+    events.write_text(json.dumps(first) + "\n" + "{not json\n" + json.dumps(second)[:20])
+    backend = HowlPlaneBackend(sandbox["repo"], tmp_path)
+    handle = RunHandle("TUI-4", None)
+    assert backend.progress(handle) == [first], "malformed lines are skipped, the partial line waits"
+    with events.open("a") as stream:
+        stream.write(json.dumps(second)[20:] + "\n")
+    assert backend.progress(handle) == [second]
+    assert backend.progress(handle) == []

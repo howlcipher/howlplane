@@ -138,10 +138,10 @@ class TuiApp:
     def poll_run(self) -> None:
         if self.run is None:
             return
-        progress = self.backend.progress(self.run)
-        if progress and progress != self.last_progress:
-            self.last_progress = progress
-            self.dispatch({"type": "progress", "document": progress})
+        for progress in self.backend.progress(self.run):
+            if progress != self.last_progress:
+                self.last_progress = progress
+                self.dispatch({"type": "progress", "document": progress})
         if self.run is not None and self.run.finished():
             handle, self.run = self.run, None
             outcome = self.backend.result(handle)
