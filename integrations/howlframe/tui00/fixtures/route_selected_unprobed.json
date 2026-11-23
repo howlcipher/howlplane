@@ -1,0 +1,138 @@
+{
+    "task_class": "feature",
+    "role": "implementation",
+    "required_capabilities": [
+        "file_editing",
+        "repository_access"
+    ],
+    "status": "SELECTED",
+    "registered_resources": [
+        {
+            "provider_id": "anthropic",
+            "interface_id": "claude_code_subscription",
+            "resource_id": "claude_code",
+            "model_id": null
+        },
+        {
+            "provider_id": "openai",
+            "interface_id": "codex_subscription_cli",
+            "resource_id": "codex",
+            "model_id": null
+        },
+        {
+            "provider_id": "google",
+            "interface_id": "gemini_subscription_cli",
+            "resource_id": "gemini_cli",
+            "model_id": null
+        },
+        {
+            "provider_id": "cognition",
+            "interface_id": "devin_subscription_cli",
+            "resource_id": "devin_cli",
+            "model_id": null
+        },
+        {
+            "provider_id": "google",
+            "interface_id": "agy_subscription_cli",
+            "resource_id": "agy",
+            "model_id": null
+        },
+        {
+            "provider_id": "cursor",
+            "interface_id": "cursor_subscription_cli",
+            "resource_id": "cursor",
+            "model_id": null
+        },
+        {
+            "provider_id": "ollama",
+            "interface_id": "local_runtime",
+            "resource_id": "local_ollama",
+            "model_id": "qwen2.5-coder:7b-instruct"
+        }
+    ],
+    "eligible_resources": [
+        {
+            "provider_id": "openai",
+            "interface_id": "codex_subscription_cli",
+            "resource_id": "codex",
+            "model_id": null
+        },
+        {
+            "provider_id": "anthropic",
+            "interface_id": "claude_code_subscription",
+            "resource_id": "claude_code",
+            "model_id": null
+        }
+    ],
+    "exclusions": [
+        {
+            "resource_id": "gemini_cli",
+            "reason": "NOT_CONFIGURED",
+            "stage": "operator_permission",
+            "detail": null
+        },
+        {
+            "resource_id": "devin_cli",
+            "reason": "NOT_CONFIGURED",
+            "stage": "operator_permission",
+            "detail": null
+        },
+        {
+            "resource_id": "agy",
+            "reason": "NOT_CONFIGURED",
+            "stage": "operator_permission",
+            "detail": null
+        },
+        {
+            "resource_id": "cursor",
+            "reason": "NOT_CONFIGURED",
+            "stage": "operator_permission",
+            "detail": null
+        },
+        {
+            "resource_id": "local_ollama",
+            "reason": "NOT_CONFIGURED",
+            "stage": "operator_permission",
+            "detail": null
+        }
+    ],
+    "selected": {
+        "provider_id": "openai",
+        "interface_id": "codex_subscription_cli",
+        "resource_id": "codex",
+        "model_id": null
+    },
+    "selection_policy": "adaptive_capacity",
+    "economic_policy": {
+        "strategy": "adaptive_capacity",
+        "subscription_first": true,
+        "prefer_existing_capacity": true,
+        "external_before_local": true,
+        "allow_paid_api": false,
+        "preserve_independent_review": true,
+        "preferred_external": [],
+        "preferred_local": [],
+        "cooldown_seconds": 300,
+        "quota_cooldown_seconds": 21600,
+        "session_cooldown_seconds": 14400,
+        "max_metered_invocations": null
+    },
+    "cognitive_recommendation": {
+        "resource_id": "codex",
+        "reason": "Deterministic routing preference for role 'implementation'.",
+        "strategy_id": "deterministic_router/v1"
+    },
+    "capacity_before": {
+        "agy": "DISABLED",
+        "claude_code": "UNKNOWN",
+        "codex": "UNKNOWN",
+        "cursor": "DISABLED",
+        "devin_cli": "DISABLED",
+        "gemini_cli": "DISABLED",
+        "local_ollama": "DISABLED"
+    },
+    "explicit_override": false,
+    "blocked_reason": null,
+    "diversity_achieved": null,
+    "schema": "howlplane.resource_selection/v1"
+}
