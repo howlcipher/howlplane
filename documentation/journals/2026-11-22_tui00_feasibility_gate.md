@@ -241,6 +241,10 @@ the correct behavior and was observed failing on both `9c739c9` and `41d56ce`.
 | HF-D3 | `READ_LINE` buffers an entire line without charging the memory budget | `hf_d3_read_line_unbounded.howl`: a 32 MiB line accepted under 1 MiB | read through a reader bounded by the remaining budget and charge the bytes, as `READ_STDIN` does | a line larger than `--max-memory-bytes` fails with `LIMIT_EXCEEDED` at `READ_LINE` |
 | HF-D4 | `PARSE_JSON` does not charge the decoded tree | `hf_d4_parse_json_uncharged.howl`: 4.5 MB input under an 8 MiB budget reached 225 MiB RSS | charge decoded nodes (for example a fixed cost per value plus string bytes) during decoding | a many small objects document exceeding the budget fails with `LIMIT_EXCEEDED` at `PARSE_JSON` |
 
+**Status 2026-11-23:** fixed upstream in howlcipher/howlframe#309 (bugs.md
+#73 to #76, merged as `928c005`). HowlPlane's CI pin moved to `928c005` and the
+four tests became ordinary regression tests.
+
 ### 6.2 Gaps (by design or missing; none blocks the recommended split)
 
 | ID | Gap | Smallest safe improvement, if ever needed |
