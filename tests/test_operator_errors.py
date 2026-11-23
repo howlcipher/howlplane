@@ -95,3 +95,28 @@ def test_factory_input_errors_use_canonical_presentation(monkeypatch, capsys):
     assert main(["factory", "status", "--json"]) == 1
     payload = json.loads(capsys.readouterr().err)
     assert payload["code"] == "FACTORY_INPUT_ERROR" and payload["command"] == "howlplane factory doctor"
+
+
+# HP-C1 (TUI-00): retry safety is stated only where the raiser knows it.
+RETRY_CASES = [
+    (cli.TargetRepositoryNotFoundError("no repo"), "SAFE_TO_RETRY"),
+    (workspace_trust.PreparationRefused("not authorized"), "HUMAN_DECISION_REQUIRED"),
+    (human_boundary.ApprovalRequiredError("needs approval"), "HUMAN_DECISION_REQUIRED"),
+    (human_boundary.StaleApprovalError("stale"), "HUMAN_DECISION_REQUIRED"),
+    (locking.RepositoryLockedError("locked"), None),
+    (CampaignError("dirty worktree"), None),
+]
+
+
+@pytest.mark.parametrize("exc,retry", RETRY_CASES)
+def test_retry_safety_is_reported_only_when_known(exc, retry):
+    from howlplane.control_plane.recovery import RetryClassification
+
+    explained = explain(exc)
+    document = explained.to_dict()
+    if retry is None:
+        assert "retry_safe" not in document and "Retry:" not in explained.render()
+    else:
+        assert document["retry_safe"] == retry and RetryClassification(retry)
+        assert f"Retry: {retry}" in explained.render()
+    assert document["schema"] == ERROR_SCHEMA

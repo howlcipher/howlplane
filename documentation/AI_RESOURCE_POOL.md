@@ -117,7 +117,10 @@ temporary file and refuses any save outside the temporary directory.
 A saved `MISSING_EXECUTABLE`, whether a probe recorded it as readiness or a launch
 that found no binary recorded it as status, is re-probed locally before selection
 excludes the resource, so pools built without probing on start (`howlplane route`, Factory)
-do not trust it forever. The probe runs after egress policy and never contacts a
+do not trust it forever. A readiness state that was never recorded is not probed by
+`howlplane route`, so its preview can select a resource whose executable is gone;
+`howlplane route --probe` probes first (read only, no agent is launched) and
+`howlplane tui` always does. The probe runs after egress policy and never contacts a
 hosted provider. Saved authentication and capacity states are kept.
 Availability failures update that single state for implementation and review.
 Engineering failures, failed tests, review defects, malformed output, and
