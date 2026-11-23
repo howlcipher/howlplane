@@ -1,0 +1,167 @@
+; HowlPlane TUI (ADR 0009): pure presentation, validation and state helpers.
+; This module holds no capability. It only reads documents HowlPlane already
+; emits (howlplane.ai_resources/v1, howlplane.resource_selection/v1,
+; howlplane.error/v1, howlplane.work_result/v1) and HowlFrame runtime errors.
+; Nothing here names a provider, model, executable path or runtime limit.
+(module
+  ; Trims and bounds an operator objective. max_chars comes from the host.
+  (export (defun validate_objective (raw max_chars)
+    (type_hints (raw string) (max_chars int) (return dict))
+    (let (text (str_trim (to_string raw)))
+      (if (= (str_len text) 0)
+        (return (dict ("ok" false) ("code" "OBJECTIVE_EMPTY")
+                      ("message" "Type an objective before submitting.")))
+        (if (> (str_len text) max_chars)
+          (return (dict ("ok" false) ("code" "OBJECTIVE_TOO_LONG")
+                        ("message" (str_join (list "Objective exceeds " (to_string max_chars) " characters.") ""))))
+          (return (dict ("ok" true) ("objective" text))))))))
+
+  ; One row per configured resource from howlplane.ai_resources/v1.
+  (export (defun summarize_inventory (doc)
+    (type_hints (doc dict) (return dict))
+    (if (!= (map_get doc "schema") "howlplane.ai_resources/v1")
+      (return (dict ("ok" false) ("code" "UNSUPPORTED_INVENTORY_SCHEMA")
+                    ("message" (str_join (list "Expected howlplane.ai_resources/v1, got " (to_string (map_get doc "schema"))) ""))))
+      (let (rows (list))
+        (let (available (list))
+          (do
+            (for r (map_get doc "resources")
+              (when (map_get r "configured")
+                (let (rid (map_get (map_get r "identity") "resource_id"))
+                  (let (usable (and (map_get r "enabled") (= (map_get r "readiness") "READY")))
+                    (do
+                      (append rows (dict ("resource_id" rid)
+                                         ("readiness" (map_get r "readiness"))
+                                         ("enabled" (map_get r "enabled"))
+                                         ("capacity" (map_get r "capacity"))
+                                         ("usable" usable)))
+                      (when usable (append available rid)))))))
+            (return (dict ("ok" true) ("operating_mode" (map_get doc "operating_mode"))
+                          ("rows" rows) ("available" available)))))))))
+
+  ; Resources that were usable before and are not usable now.
+  (export (defun lost_resources (previous current_rows)
+    (type_hints (previous list) (current_rows list) (return list))
+    (let (lost (list))
+      (do
+        (for rid previous
+          (for row current_rows
+            (when (and (= (map_get row "resource_id") rid) (not (map_get row "usable")))
+              (append lost (dict ("resource_id" rid) ("readiness" (map_get row "readiness")))))))
+        (for rid previous
+          (let (seen false)
+            (do
+              (for row current_rows
+                (when (= (map_get row "resource_id") rid) (set seen true)))
+              (when (not seen)
+                (append lost (dict ("resource_id" rid) ("readiness" "NOT_CONFIGURED")))))))
+        (return lost)))))
+
+  ; Routing preview from howlplane.resource_selection/v1. `available` is the
+  ; latest probed inventory; a selection outside it is flagged, because
+  ; `howlplane route` does not probe readiness (probe_on_start=False).
+  (export (defun summarize_route (doc available)
+    (type_hints (doc dict) (available list) (return dict))
+    (if (!= (map_get doc "schema") "howlplane.resource_selection/v1")
+      (return (dict ("ok" false) ("code" "UNSUPPORTED_ROUTE_SCHEMA")
+                    ("message" (str_join (list "Expected howlplane.resource_selection/v1, got " (to_string (map_get doc "schema"))) ""))))
+      (if (= (map_get doc "status") "BLOCKED")
+        (let (excluded (list))
+          (do
+            (for x (map_get doc "exclusions")
+              (append excluded (str_join (list (map_get x "resource_id") ": " (map_get x "reason")) "")))
+            (return (dict ("ok" true) ("status" "BLOCKED")
+                          ("reason" (map_get doc "blocked_reason")) ("excluded" excluded)))))
+        (let (rid (map_get (map_get doc "selected") "resource_id"))
+          (return (dict ("ok" true) ("status" "SELECTED") ("resource_id" rid)
+                        ("role" (map_get doc "role"))
+                        ("readiness_confirmed" (list_contains available rid)))))))))
+
+  ; Normalizes any failure the host or a child reported into what/why/next/retry.
+  ; Retry safety is only reported when a source states it; it is never guessed.
+  (export (defun explain_failure (doc)
+    (type_hints (doc dict) (return dict))
+    (if (= (map_get doc "schema") "howlplane.error/v1")
+      (return (dict ("source" "howlplane") ("code" (map_get doc "code"))
+                    ("what" (map_get doc "message")) ("why" (map_get doc "why"))
+                    ("next" (map_get doc "next_action")) ("command" (map_get doc "command"))
+                    ("retry" (if (map_has doc "retry_safe") (map_get doc "retry_safe") "UNKNOWN"))))
+      (if (map_has doc "phase")
+        (return (dict ("source" "howlframe") ("code" (map_get doc "code"))
+                      ("what" (map_get doc "message"))
+                      ("why" (str_join (list "HowlFrame " (map_get doc "phase") " error at " (to_string (map_get doc "opcode"))) ""))
+                      ("next" (if (map_has doc "exit_code") "Inspect the child output; the boundary process exited non-zero." "Inspect the diagnostic; the probe did not complete."))
+                      ("command" (map_get (dict) "none"))
+                      ("retry" "UNKNOWN")
+                      ("exit_code" (map_get doc "exit_code"))))
+        (return (dict ("source" "unknown") ("code" "MALFORMED_FAILURE")
+                      ("what" "A failure document had no recognized schema.")
+                      ("why" "The document is neither howlplane.error/v1 nor a HowlFrame runtime error.")
+                      ("next" "Treat the outcome as failed and inspect the raw diagnostic.")
+                      ("command" (map_get (dict) "none")) ("retry" "UNKNOWN")))))))
+
+  ; One task_progress/v1 snapshot reduced to what the view shows.
+  (export (defun summarize_progress (doc)
+    (type_hints (doc dict) (return dict))
+    (if (!= (map_get doc "schema") "howlplane.task_progress/v1")
+      (return (dict ("ok" false) ("code" "UNSUPPORTED_PROGRESS_SCHEMA")))
+      (return (dict ("ok" true) ("task_id" (map_get doc "task_id")) ("phase" (map_get doc "phase"))
+                    ("state" (map_get doc "state")) ("resource_id" (map_get doc "resource_id"))
+                    ("elapsed_seconds" (map_get doc "elapsed_seconds")) ("details" (map_get doc "details")))))))
+
+  (export (defun text_or (value fallback)
+    (type_hints (fallback string) (return string))
+    (if (is_nil value) (return fallback) (return (to_string value)))))
+
+  ; Plain text view lines. Meaning is carried by words; the host only paints.
+  (export (defun render (state)
+    (type_hints (state dict) (return list))
+    (let (lines (list))
+      (do
+        (append lines (str_join (list "Objective: " (call text_or (map_get state "objective") "(none yet)")) ""))
+        (append lines (str_join (list "Provider:  " (call text_or (map_get state "explicit_resource") "automatic")) ""))
+        (when (= (list_len (map_get state "rows")) 0)
+          (append lines "Resources: not loaded (/refresh)"))
+        (when (> (list_len (map_get state "rows")) 0)
+          (append lines "Resources:"))
+        (for row (map_get state "rows")
+          (append lines (str_join (list "  " (map_get row "resource_id") "  " (map_get row "readiness")
+                                        (if (map_get row "usable") "  usable" "  not usable")) "")))
+        (when (map_has state "route")
+          (let (r (map_get state "route"))
+            (do
+              (when (= (map_get r "status") "SELECTED")
+                (append lines (str_join (list "Route:     " (map_get r "resource_id") " for " (to_string (map_get r "role"))) "")))
+              (when (= (map_get r "status") "BLOCKED")
+                (do
+                  (append lines (str_join (list "Route:     BLOCKED " (to_string (map_get r "reason"))) ""))
+                  (for x (map_get r "excluded")
+                    (append lines (str_join (list "  excluded " x) ""))))))))
+        (when (map_has state "progress")
+          (let (p (map_get state "progress"))
+            (append lines (str_join (list "Progress:  " (call text_or (map_get p "phase") "?") " "
+                                          (call text_or (map_get p "resource_id") "") " "
+                                          (call text_or (map_get p "elapsed_seconds") "0") "s "
+                                          (call text_or (map_get p "details") "")) ""))))
+        (when (map_has state "outcome")
+          (let (o (map_get state "outcome"))
+            (do
+              (append lines (str_join (list "Outcome:   " (call text_or (map_get o "final_state") "unknown")
+                                            " (exit " (call text_or (map_get o "exit_code") "?") ")") ""))
+              (append lines (str_join (list "Verification (reported by HowlPlane): " (call text_or (map_get o "verification_status") "none")) ""))
+              (when (not (is_nil (map_get o "next_command")))
+                (append lines (str_join (list "Next:      " (map_get o "next_command")) ""))))))
+        (when (map_has state "failure")
+          (let (f (map_get state "failure"))
+            (do
+              (append lines (str_join (list "FAILED:    " (call text_or (map_get f "what") "unknown failure")) ""))
+              (append lines (str_join (list "Why:       " (call text_or (map_get f "why") "not reported")) ""))
+              (append lines (str_join (list "Next:      " (call text_or (map_get f "next") "not reported")) ""))
+              (when (not (is_nil (map_get f "command")))
+                (append lines (str_join (list "Command:   " (to_string (map_get f "command"))) "")))
+              (append lines (str_join (list "Retry:     " (call text_or (map_get f "retry") "UNKNOWN")) ""))
+              (append lines (str_join (list "Code:      " (call text_or (map_get f "code") "UNKNOWN")) "")))))
+        (for note (map_get state "notices")
+          (append lines (str_join (list "! " note) "")))
+        (return lines)))))
+)

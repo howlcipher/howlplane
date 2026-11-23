@@ -122,6 +122,7 @@ include = ["howlplane", "howlplane.*"]
     "data/schemas/*.json",
     "data/contracts/howlinstinct/*.json",
     "data/integrations/howlframe/*.hfbc",
+    "data/integrations/howlframe/tui/*.hfbc",
 ]
 
 # Seconds each HowlPlane verification step category may run (issues.md #28).

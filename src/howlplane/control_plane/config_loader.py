@@ -58,6 +58,8 @@ def _resource_local_config(local_data: dict) -> dict:
     # One canonical top-level table, read by `workspace_trust.resolve_policy`.
     if "workspace_trust" in local_data:
         extracted["workspace_trust"] = local_data["workspace_trust"]
+    if "tui" in local_data:
+        extracted["tui"] = local_data["tui"]
     return extracted
 
 
@@ -232,6 +234,27 @@ class SemanticRecommendationSettings(BaseModel):
         return self
 
 
+class TuiSettings(BaseModel):
+    """Bounds for `howlplane tui` (ADR 0009). Every limit is finite and validated.
+
+    Each reducer step runs the HowlFrame VM with no capability grant under
+    these limits; the host refuses a step document larger than
+    ``max_step_bytes`` before it starts the VM.
+    """
+
+    # A step measured at most about 610 instructions with seven resources
+    # (TUI-01); the default leaves room for much larger pools.
+    max_instructions: int = Field(default=50_000, ge=1_000, le=10_000_000)
+    max_memory_bytes: int = Field(default=16 * 1024 * 1024, ge=1024 * 1024, le=256 * 1024 * 1024)
+    step_deadline_seconds: float = Field(default=5.0, gt=0, le=60)
+    max_step_bytes: int = Field(default=1024 * 1024, ge=16 * 1024, le=16 * 1024 * 1024)
+    max_objective_chars: int = Field(default=4000, ge=1, le=100_000)
+    progress_poll_seconds: float = Field(default=1.0, ge=0.1, le=30)
+    cancel_grace_seconds: float = Field(default=10.0, gt=0, le=300)
+
+    model_config = {"extra": "forbid"}
+
+
 class AppSettings(BaseSettings):
     operating_mode: Literal["local_only", "connected"] = "local_only"
     llm_model: str = "ollama/qwen3:30b-instruct"
@@ -254,6 +277,7 @@ class AppSettings(BaseSettings):
     )
     roles: dict = Field(default_factory=dict)
     workspace_trust: WorkspaceTrustSettings = WorkspaceTrustSettings()
+    tui: TuiSettings = TuiSettings()
     active_mcps: list = []
     mcp_servers: dict = {}
 

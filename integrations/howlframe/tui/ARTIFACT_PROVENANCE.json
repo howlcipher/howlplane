@@ -1,0 +1,12 @@
+{
+  "producer": "howlframe source build",
+  "producer_source_revision": "41d56cecd9e8f936cf9da35240331ab7da0244cd",
+  "producer_note": "Same revision as the CI runtime pin. The published v0.1.0 release rejects dict literals with mixed value types, which this reducer uses.",
+  "hfbc_format": 1,
+  "build_command": "HOWLFRAME_BIN=<pinned howlframe> scripts/build_tui_reducer.sh",
+  "files": {
+    "integrations/howlframe/tui/tui_core.howl": "0fd84ddd0c4b0a84a1b8c82993448e2c78e925cc235b67ed8dd9bd795008604f",
+    "integrations/howlframe/tui/tui_reducer.howl": "9b256886fe4f495e41772e3ad6ee4a90c69c72c5a0bb2cae810250cc78f55725",
+    "integrations/howlframe/tui/tui_reducer.hfbc": "ffb80a9af72c912fa925e0bd119c30deee822309b73eda663f78f5ef47f4da05"
+  }
+}

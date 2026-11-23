@@ -1305,7 +1305,7 @@ def _grouped_help_formatter(groups, default_title):
 
 
 _TOP_LEVEL_HELP_GROUPS = [
-    ("Everyday", ["setup", "start", "status", "logs", "stop", "approve", "reject", "doctor"]),
+    ("Everyday", ["setup", "start", "status", "logs", "stop", "approve", "reject", "doctor", "tui"]),
     ("Governance and recovery", ["resume", "cancel", "unlock", "tia", "config"]),
     ("Diagnostics and inspection", ["agents", "providers", "route", "trace", "explore", "metrics", "report"]),
     ("Writing and creative pipelines", ["write", "creative"]),
@@ -1447,6 +1447,11 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
         default=None,
         help="Override the configured HowlInstinct mode for this route only",
     )
+
+    # tui
+    subparsers.add_parser(
+        "tui", parents=[common_parser],
+        help="Interactive terminal: type an objective, preview its route, run it with confirmation")
 
     # providers
     p_providers = subparsers.add_parser(
@@ -2701,6 +2706,7 @@ HANDLERS = {
     "work": cmd_work,
     "route": cmd_route,
     "providers": cmd_providers,
+    "tui": lambda args: __import__("howlplane.control_plane.tui", fromlist=["command"]).command(args),
     "status": cmd_product_status,
     "start": cmd_product_start,
     "logs": cmd_product_logs,
