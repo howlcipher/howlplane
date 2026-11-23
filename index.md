@@ -614,6 +614,7 @@ never clears an explicit parent value. Each option requires a path value.
 - [Localizations & Languages](documentation/languages/README_en_US.md)
 - [Change Log](change_log.md)
 - [2026-09-29 remote snapshot follow-ons](documentation/journals/2026-09-29_team_howlplane_backlog.md)
+- [TUI-00 interactive terminal feasibility gate](documentation/journals/2026-11-22_tui00_feasibility_gate.md) and [ADR 0009 (proposed)](documentation/adr/0009_interactive_terminal_host.md)
 
 Validation maintenance separates existing Bandit annotation reasons from rule IDs
 and removes obsolete suppressions. It changes no runtime behavior or trust policy.
