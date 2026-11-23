@@ -223,8 +223,9 @@ howlplane work "refactor database adapter" --agent codex --execute
 # Inspect active project context, verification suites, and task runs:
 howlplane status
 
-# Deterministically route a task and select reviewer roles without mutating code:
-howlplane route "patch authentication vulnerability"
+# Deterministically route a task and select reviewer roles without mutating code
+# (--probe checks provider readiness first, read only):
+howlplane route "patch authentication vulnerability" --probe
 
 # Run system and toolchain preflight diagnostics:
 howlplane doctor

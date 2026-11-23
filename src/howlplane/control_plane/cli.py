@@ -759,7 +759,7 @@ def cmd_route(args: argparse.Namespace) -> int:
     """Lightweight read-only routing of an objective against the current target repository."""
     target_repo = _resolve_repo(args)
     ctx = ProjectAdapter.discover(target_repo)
-    pool = ProviderPoolManager.from_config(read_only=True, probe_on_start=False)
+    pool = ProviderPoolManager.from_config(read_only=True, probe_on_start=bool(getattr(args, "probe", False)))
     semantic_mode = getattr(args, "semantic", None)
     if semantic_mode:
         try:
@@ -1441,6 +1441,11 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
         default="implementation",
     )
     p_route.add_argument("--json", action="store_true", help="Output JSON decision")
+    p_route.add_argument(
+        "--probe", action="store_true",
+        help="Check each resource's readiness first (read only; never launches an agent), "
+             "so a provider whose executable is missing is excluded instead of selected",
+    )
     p_route.add_argument(
         "--semantic",
         choices=["off", "shadow", "active"],

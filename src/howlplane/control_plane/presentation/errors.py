@@ -18,6 +18,10 @@ from howlplane.control_plane.presentation.redact import redact_operator_text
 
 ERROR_SCHEMA = "howlplane.error/v1"
 
+# recovery.RetryClassification names; duplicated as text so this module stays import-light.
+SAFE_TO_RETRY = "SAFE_TO_RETRY"
+HUMAN_DECISION_REQUIRED = "HUMAN_DECISION_REQUIRED"
+
 
 @dataclass(frozen=True)
 class OperatorError:
@@ -30,10 +34,13 @@ class OperatorError:
 
     diagnostic_id: Optional[str] = None
     expected_recovery: Optional[str] = None
+    # A recovery.RetryClassification name, set only where the raiser knows it;
+    # absent means unknown, never "safe" (additive, so the schema stays v1).
+    retry_safe: Optional[str] = None
 
     def to_dict(self) -> dict:
         data = asdict(self)
-        for key in ("diagnostic_id", "expected_recovery"):
+        for key in ("diagnostic_id", "expected_recovery", "retry_safe"):
             if data[key] is None:
                 del data[key]
         return data
@@ -45,6 +52,8 @@ class OperatorError:
         lines = [paint("error", self.message), f"Why: {self.why}"]
         if self.expected_recovery:
             lines.append(f"Recovery: {self.expected_recovery}")
+        if self.retry_safe:
+            lines.append(f"Retry: {self.retry_safe}")
         lines.append(f"Next: {self.next_action}")
         if self.command:
             lines.append("  " + paint("command", self.command))
@@ -118,7 +127,7 @@ def _config_error(exc: BaseException) -> Optional["OperatorError"]:
     return OperatorError(
         "INVALID_CONFIGURATION", f"Invalid configuration: {names}.", shown,
         "Fix the setting (environment variable, config/settings.yaml or ~/.config/howlplane/config.toml).",
-        "howlplane config validate")
+        "howlplane config validate", retry_safe=SAFE_TO_RETRY)
 
 
 def _by_message(text: str) -> Optional[tuple]:
@@ -155,25 +164,26 @@ def explain(exc: BaseException) -> Optional[OperatorError]:
                              "The orchestrate request has invalid arguments or conflicts with session state; "
                              "nothing was changed.",
                              exc.next_action or "Correct the request and run it again.",
-                             exc.command or "howlplane orchestrate --help")
+                             exc.command or "howlplane orchestrate --help", retry_safe=SAFE_TO_RETRY)
     if isinstance(exc, cli.TargetRepositoryNotFoundError):
         return OperatorError("NOT_A_GIT_REPOSITORY", text, "HowlPlane operates on a Git repository.",
-                             "Run it inside a Git repository, or pass --repo PATH.")
+                             "Run it inside a Git repository, or pass --repo PATH.", retry_safe=SAFE_TO_RETRY)
     if isinstance(exc, workspace_trust.PreparationRefused):
         return OperatorError("WORKSPACE_TRUST_REQUIRED", text,
                              "Workspace trust was not authorized for this repository.",
-                             "Authorize and prepare the repository.", "howlplane factory prepare")
+                             "Authorize and prepare the repository.", "howlplane factory prepare",
+                             retry_safe=HUMAN_DECISION_REQUIRED)
     if isinstance(exc, (locking.RepositoryLockedError, locking.TaskLockedError)):
         return OperatorError("LOCKED", text, "Another run currently holds the lock.",
                              "See who holds it. Use unlock only if its owner is gone.", "howlplane status")
     if isinstance(exc, human_boundary.ApprovalRequiredError):
         return OperatorError("OWNER_REQUIRED", text, "This step needs an owner decision.",
                              "List what is waiting, then approve or reject it with the exact command shown.",
-                             "howlplane factory status")
+                             "howlplane factory status", retry_safe=HUMAN_DECISION_REQUIRED)
     if isinstance(exc, (human_boundary.StaleApprovalError, human_boundary.RepositoryDriftError)):
         return OperatorError("APPROVAL_STALE", text, "The repository changed after the approval was recorded.",
                              "Review the change, then approve the task again (howlplane approve TASK_ID).",
-                             "howlplane status")
+                             "howlplane status", retry_safe=HUMAN_DECISION_REQUIRED)
     if isinstance(exc, AgentUnavailableError):
         return OperatorError("PROVIDER_UNAVAILABLE", text, "The selected worker could not be used.",
                              "Check which workers are ready.", "howlplane agents doctor")
