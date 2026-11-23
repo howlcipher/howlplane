@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- TUI-00 feasibility gate for an interactive HowlPlane terminal: an architecture
+  and feasibility audit of HowlPlane and HowlFrame
+  (`documentation/journals/2026-11-22_tui00_feasibility_gate.md`), a proposed
+  ADR 0009, and isolated probes in `integrations/howlframe/tui00/` checked by
+  `tests/test_tui00_feasibility.py`. It records four HowlFrame defects with
+  reproducers and strict `xfail` regression proposals, and finds that HowlPlane
+  run as a HowlFrame exec child cannot see the operator's `PATH`, so provider
+  readiness differs. No runtime behavior changes.
 - `howlplane reject` for a task now lists the changes the task left in the
   working tree, taken from its recorded `baseline.json`, and prints the
   `git restore` and `git clean` commands that would discard exactly those paths,

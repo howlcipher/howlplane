@@ -1,0 +1,58 @@
+; TUI-00 feasibility probe: talk to an execution boundary through exec.
+; argv: SHELL BOUNDARY_SCRIPT COMMAND [OBJECTIVE] [RESOURCE_ID]
+; The runner's process:exec= grants decide which argv shapes are allowed; this
+; program names no executable itself. Output is one JSON document on stdout.
+(cli_app
+  (use "tui_core.howl" as core)
+  (let (shell (cli_args 0))
+    (let (script (cli_args 1))
+      (let (command (cli_args 2))
+        (let (objective (cli_args 3))
+          (let (resource (cli_args 4))
+            (let (argv (list script command))
+              (do
+                (when (!= command "providers")
+                  (append argv objective))
+                (when (and (= command "route") (!= resource ""))
+                  (do (append argv "--agent") (append argv resource)))
+                (when (= command "work")
+                  (do (append argv "--execute") (append argv "--progress") (append argv "never")))
+                (append argv "--json")
+                (try_let (out (exec shell argv))
+                  (catch e
+                    (try_let (err (parse_json Err e))
+                      (catch e2
+                        (do
+                          (print (encode_json (dict ("ok" false) ("failure" (dict ("code" "UNSTRUCTURED_FAILURE") ("what" e)
+                                                                                   ("retry" "UNKNOWN"))))))
+                          (exit 1)))
+                      ; A child that exited non-zero: its output may carry howlplane.error/v1.
+                      (let (child_out (to_string (map_get err "output")))
+                        (try_let (child_doc (parse_json ChildDoc child_out))
+                          (catch e3
+                            (do
+                              (print (encode_json (dict ("ok" false) ("exit_code" (map_get err "exit_code"))
+                                                        ("failure" (call core/explain_failure err)))))
+                              (exit 1)))
+                          ; The versioned document is authoritative; the exit code is advisory.
+                          ; route exits 3 with a valid BLOCKED resource_selection document.
+                          (if (= (map_get child_doc "schema") "howlplane.error/v1")
+                            (do
+                              (print (encode_json (dict ("ok" false) ("exit_code" (map_get err "exit_code"))
+                                                        ("failure" (call core/explain_failure child_doc)))))
+                              (exit 1))
+                            (print (encode_json (dict ("ok" true) ("exit_code" (map_get err "exit_code"))
+                                                      ("schema" (map_get child_doc "schema"))
+                                                      ("document" child_doc)))))))))
+                  (try_let (doc (parse_json Doc out))
+                    (catch e4
+                      (do
+                        (print (encode_json (dict ("ok" false)
+                                                  ("failure" (dict ("source" "tui") ("code" "MALFORMED_OUTPUT")
+                                                                   ("what" "The boundary exited 0 but its output is not one JSON document.")
+                                                                   ("why" "Output was truncated, malformed, or mixed with diagnostics.")
+                                                                   ("next" "Inspect the boundary output; do not treat the step as successful.")
+                                                                   ("retry" "UNKNOWN"))))))
+                        (exit 1)))
+                    (print (encode_json (dict ("ok" true) ("argv_count" (list_len argv))
+                                              ("schema" (map_get doc "schema")) ("document" doc))))))))))))))

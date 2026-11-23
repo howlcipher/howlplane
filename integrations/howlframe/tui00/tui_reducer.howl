@@ -1,0 +1,92 @@
+; TUI-00 feasibility probe: one deterministic step of the proposed TUI state machine.
+; stdin:  {"schema":"howlplane.tui_step/v0","state":{...},"event":{...},"config":{...}}
+; stdout: {"schema":"howlplane.tui_step_result/v0","state":{...},"view":[...],"intents":[...]}
+; Runs with no capability grant. Intents are proposals; the host decides.
+(cli_app
+  (use "tui_core.howl" as core)
+  (let (raw (read_stdin))
+    (try_let (step (parse_json Step raw))
+      (catch e
+        (do
+          (print (encode_json (dict ("schema" "howlplane.tui_step_result/v0") ("ok" false)
+                                    ("code" "MALFORMED_STEP") ("diagnostic" e))))
+          (exit 2)))
+      (if (!= (map_get step "schema") "howlplane.tui_step/v0")
+        (do
+          (print (encode_json (dict ("schema" "howlplane.tui_step_result/v0") ("ok" false)
+                                    ("code" "UNSUPPORTED_STEP_SCHEMA"))))
+          (exit 2))
+        (let (state (map_get step "state"))
+          (let (event (map_get step "event"))
+            (let (config (map_get step "config"))
+              (let (kind (map_get event "type"))
+                (let (intents (list))
+                  (let (notices (list))
+                    (do
+                      (map_delete state "failure")
+                      (cond
+                        ((= kind "objective_submitted")
+                          (let (v (call core/validate_objective (map_get event "text") (map_get config "max_objective_chars")))
+                            (if (map_get v "ok")
+                              (do
+                                (map_set state "objective" (map_get v "objective"))
+                                (append intents (dict ("kind" "route_preview")
+                                                      ("objective" (map_get v "objective"))
+                                                      ("resource_id" (map_get state "explicit_resource")))))
+                              (map_set state "failure" (dict ("source" "tui") ("code" (map_get v "code"))
+                                                             ("what" (map_get v "message"))
+                                                             ("why" "Input validation failed before any HowlPlane call.")
+                                                             ("next" "Edit the objective and submit again.")
+                                                             ("retry" "SAFE_TO_RETRY"))))))
+                        ((= kind "provider_selected")
+                          (let (rid (map_get event "resource_id"))
+                            (if (or (is_nil rid) (list_contains (map_get state "available") rid))
+                              (map_set state "explicit_resource" rid)
+                              (append notices (str_join (list "Provider " (to_string rid) " is not currently usable; automatic selection kept.") "")))))
+                        ((= kind "inventory")
+                          (let (inv (call core/summarize_inventory (map_get event "document")))
+                            (if (map_get inv "ok")
+                              (let (lost (call core/lost_resources (map_get state "available") (map_get inv "rows")))
+                                (do
+                                  (for x lost
+                                    (do
+                                      (append notices (str_join (list (map_get x "resource_id") " became unavailable: " (map_get x "readiness")) ""))
+                                      (when (= (map_get state "explicit_resource") (map_get x "resource_id"))
+                                        (do
+                                          (map_set state "explicit_resource" (map_get (dict) "none"))
+                                          (append notices "Explicit provider choice cleared; HowlPlane will select automatically.")))))
+                                  (map_set state "rows" (map_get inv "rows"))
+                                  (map_set state "available" (map_get inv "available"))
+                                  (when (= (list_len (map_get inv "available")) 0)
+                                    (append notices "No configured provider is currently usable."))))
+                              (map_set state "failure" (dict ("source" "tui") ("code" (map_get inv "code"))
+                                                             ("what" (map_get inv "message"))
+                                                             ("why" "The inventory contract version is not one this TUI understands.")
+                                                             ("next" "Upgrade the TUI or HowlPlane so their contract versions match.")
+                                                             ("retry" "NEVER_AUTO_RETRY"))))))
+                        ((= kind "route_preview")
+                          (let (r (call core/summarize_route (map_get event "document") (map_get state "available")))
+                            (if (map_get r "ok")
+                              (do
+                                (map_set state "route" r)
+                                (when (and (= (map_get r "status") "SELECTED") (not (map_get r "readiness_confirmed")))
+                                  (append notices "Preview selected a provider the latest inventory does not report as usable; HowlPlane re-checks readiness at execution.")))
+                              (map_set state "failure" (dict ("source" "tui") ("code" (map_get r "code"))
+                                                             ("what" (map_get r "message"))
+                                                             ("why" "The routing contract version is not one this TUI understands.")
+                                                             ("next" "Upgrade the TUI or HowlPlane so their contract versions match.")
+                                                             ("retry" "NEVER_AUTO_RETRY"))))))
+                        ((= kind "failure")
+                          (map_set state "failure" (call core/explain_failure (map_get event "document"))))
+                        ((= kind "work_result")
+                          (let (doc (map_get event "document"))
+                            (map_set state "outcome" (dict ("final_state" (map_get doc "final_state"))
+                                                           ("exit_code" (map_get doc "exit_code"))
+                                                           ("next" (map_get (map_get doc "next_action") "reason"))
+                                                           ("verification_status" (map_get (map_get doc "verification") "status"))))))
+                        (true
+                          (append notices (str_join (list "Ignored unknown event type: " (to_string kind)) ""))))
+                      (map_set state "notices" notices)
+                      (print (encode_json (dict ("schema" "howlplane.tui_step_result/v0") ("ok" true)
+                                                ("state" state) ("intents" intents)
+                                                ("view" (call core/render state))))))))))))))))

@@ -1,0 +1,8 @@
+; HF-D4 reproducer: parse_json does not charge the decoded value tree.
+; Expected: the decoded structure counts toward --max-memory-bytes.
+; Observed: 4.5 MB of '[{"a":[]},...]' decodes under an 8 MiB budget while the
+; process reaches about 225 MiB RSS.
+(cli_app
+  (let (raw (read_stdin))
+    (let (doc (parse_json Doc raw))
+      (print "decoded elements" (list_len doc)))))

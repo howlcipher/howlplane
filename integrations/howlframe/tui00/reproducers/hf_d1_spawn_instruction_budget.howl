@@ -1,0 +1,15 @@
+; HF-D1 reproducer: each `spawn` body gets a fresh instruction budget.
+; Expected: the run's --max-instructions bounds all work, as it does when the
+; same 500 loop iterations run sequentially (that variant fails at 1500).
+; Observed on 9c739c9 and 41d56ce: all five children finish under
+; --max-instructions 1500. Run: howlframe run --max-instructions 1500 --allow-caps process
+(cli_app
+  (do
+    (for i (range 0 5)
+      (spawn (lambda ()
+        (let (n 0)
+          (do
+            (while (< n 100) (set n (+ n 1)))
+            (print "child finished loop" n))))))
+    (sleep 1500)
+    (print "main done")))
