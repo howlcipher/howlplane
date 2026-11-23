@@ -1402,3 +1402,4 @@ Added a standard-library runner for existing deterministic component suites, bou
 The final six-group deterministic component matrix passed with unchanged source fingerprints. ChangeOps used a mode-0700 runtime home because this host's ordinary `/home` ancestry is rejected by its protected-ledger guard. GitHub PR #187's first lint attempt failed while downloading/verifying an upstream Go module checksum (sum.golang.org HTTP/2 stream error); the retry passed, as did all other checks on implementation/evidence commit `2e892ab`. Its full regression still reports one external ChromaDB deprecation warning, so no warning-free completion or merge is claimed.
 
 - Added owner-gated HowlLoop candidate intake and optional finite queue observations.
+- Added opt-in provider and verification timings correlated with finite queue dispatches and orchestration sessions.
