@@ -58,7 +58,7 @@ class FakeBackend:
         return self.handle
 
     def progress(self, handle):
-        return self.progress_doc
+        return [self.progress_doc] if self.progress_doc else []
 
     def result(self, handle):
         self.calls.append(("result", handle.task_id))

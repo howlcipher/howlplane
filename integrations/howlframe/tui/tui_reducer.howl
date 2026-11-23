@@ -158,7 +158,11 @@
                           ((= kind "progress")
                             (let (p (call core/summarize_progress (map_get event "document")))
                               (when (map_get p "ok")
-                                (map_set state "progress" p))))
+                                (do
+                                  (map_set state "progress" p)
+                                  ; Failover and provider failures are worth a line of their own.
+                                  (when (not (is_nil (map_get p "message")))
+                                    (append notices (str_join (list (to_string (map_get p "kind")) ": " (to_string (map_get p "message"))) "")))))))
                           ((= kind "failure")
                             (do
                               (when (map_get event "ends_run") (set mode "idle"))

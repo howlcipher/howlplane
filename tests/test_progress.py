@@ -561,3 +561,58 @@ def test_cli_progress_modes_and_stream_isolation(tmp_path, monkeypatch, capsys):
         ]
     )
     assert args_quiet.quiet is True
+
+
+# HP-C2: the ordered progress event stream beside the snapshot.
+def test_progress_events_record_every_transition_in_order(tmp_path):
+    import io
+    import json
+    import stat
+
+    from howlplane.control_plane.progress import (
+        PROGRESS_EVENT_SCHEMA_VERSION, TaskPhase, TaskProgressState, TaskProgressTracker,
+    )
+
+    tracker = TaskProgressTracker("T-1", run_dir=tmp_path, stream=io.StringIO(), heartbeat_interval=0)
+    tracker.start()
+    tracker.transition(TaskPhase.ROUTING)
+    tracker.transition(TaskPhase.IMPLEMENTING, resource_id="codex")
+    tracker.transition(TaskPhase.IMPLEMENTING, resource_id="codex")  # no change, no event
+    tracker.emit_failover("codex", "claude_code", "QUOTA_EXHAUSTED token=abc12345secret")
+    tracker.record_terminal(TaskProgressState.COMPLETE)
+    path = tmp_path / "progress_events.jsonl"
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [e["seq"] for e in events] == [1, 2, 3, 4, 5]
+    assert [(e["kind"], e["phase"]) for e in events] == [
+        ("phase", "PREPARING"), ("phase", "ROUTING"), ("phase", "IMPLEMENTING"),
+        ("failover", "IMPLEMENTING"), ("terminal", "COMPLETE")]
+    assert {e["schema"] for e in events} == {PROGRESS_EVENT_SCHEMA_VERSION}
+    assert "abc12345secret" not in events[3]["message"]
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert json.loads((tmp_path / "progress.json").read_text())["state"] == "COMPLETE", "the snapshot is unchanged"
+
+
+def test_a_resumed_tracker_continues_the_sequence_past_a_torn_line(tmp_path):
+    import io
+    import json
+
+    from howlplane.control_plane.progress import TaskProgressTracker
+
+    path = tmp_path / "progress_events.jsonl"
+    path.write_text(json.dumps({"seq": 7}) + "\n" + '{"seq": 8, "kind": "ph')
+    TaskProgressTracker("T-1", run_dir=tmp_path, stream=io.StringIO(), heartbeat_interval=0).start()
+    last = json.loads(path.read_text().splitlines()[-1])
+    assert last["seq"] == 8, "numbering resumes after the last whole line"
+
+
+def test_heartbeats_do_not_add_events(tmp_path):
+    import io
+
+    from howlplane.control_plane.progress import TaskProgressTracker
+
+    tracker = TaskProgressTracker("T-1", run_dir=tmp_path, stream=io.StringIO(), heartbeat_interval=0)
+    tracker.start()
+    for _ in range(3):
+        tracker._record.elapsed_seconds += 30
+        tracker._flush_json()
+    assert len((tmp_path / "progress_events.jsonl").read_text().splitlines()) == 1

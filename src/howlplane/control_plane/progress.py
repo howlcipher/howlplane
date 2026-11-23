@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+import json
 import os
 from pathlib import Path
 import sys
@@ -18,7 +19,27 @@ from howlplane.control_plane.atomic_io import atomic_write_json
 from howlplane.control_plane.task_spec import DataClassSerializationMixin
 
 PROGRESS_SCHEMA_VERSION = "howlplane.task_progress/v1"
+PROGRESS_EVENT_SCHEMA_VERSION = "howlplane.task_progress_event/v1"
+PROGRESS_EVENTS_FILENAME = "progress_events.jsonl"
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30.0
+_EVENT_STATE_FIELDS = ("phase", "state", "resource_id", "role", "cycle", "details")
+
+
+def _last_event_seq(path: Path) -> int:
+    """The highest ``seq`` already in an events file, so a resumed task keeps counting."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return 0
+    for line in reversed(lines):
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue  # an interrupted final write
+        if isinstance(value, dict) and isinstance(value.get("seq"), int):
+            return value["seq"]
+    return 0
 
 
 class TaskPhase(str, Enum):
@@ -126,6 +147,8 @@ class TaskProgressTracker:
             updated_at=stamp,
             pid=os.getpid(),
         )
+        self._event_seq: Optional[int] = None
+        self._last_event_state: Optional[tuple] = None
 
     @property
     def _heartbeat_thread(self) -> Optional[threading.Thread]:
@@ -247,6 +270,8 @@ class TaskProgressTracker:
         if failure_class:
             parts.append(failure_class)
         self._write_stream(" | ".join(parts))
+        with self._lock:
+            self._emit_event("failover", " | ".join(parts[1:]))
 
     def emit_implementation_failed(
         self,
@@ -258,6 +283,8 @@ class TaskProgressTracker:
         if reason:
             parts.append(reason)
         self._write_stream(" | ".join(parts))
+        with self._lock:
+            self._emit_event("implementation_failed", " | ".join(parts[1:]))
 
     def emit_provider_unusable(
         self, resource_id: str, reason: str, elapsed_seconds: float,
@@ -269,6 +296,8 @@ class TaskProgressTracker:
             f"[HowlPlane] {label} | {resource_id} | Reason: {reason} | "
             f"Elapsed: {format_elapsed(elapsed_seconds)}"
         )
+        with self._lock:
+            self._emit_event("provider_unusable", f"{label.title()}: {resource_id} ({reason})")
         if reason == "provider_stalled" and diagnostics:
             stall_age = diagnostics.get("semantic_stall_age_seconds", elapsed_seconds)
             self._write_stream(
@@ -372,6 +401,52 @@ class TaskProgressTracker:
         try:
             self.run_dir.mkdir(parents=True, exist_ok=True)
             atomic_write_json(self.run_dir / "progress.json", self._record.to_dict())
+        except Exception:
+            pass
+        state = tuple(getattr(self._record, name) for name in _EVENT_STATE_FIELDS)
+        if state != self._last_event_state:
+            kind = "terminal" if self._record.state != TaskProgressState.RUNNING.value else "phase"
+            self._emit_event(kind, None)
+            self._last_event_state = state
+
+    def _emit_event(self, kind: str, message: Optional[str]) -> None:
+        """Appends one ``howlplane.task_progress_event/v1`` line; the caller holds the lock.
+
+        The snapshot in progress.json says where a task is; this stream says how
+        it got there, in order, so a reader polling every second loses no
+        transition. One O_APPEND write per line; the file is owner-only. Like
+        the snapshot, failure to write never changes the task.
+        """
+        if not (self.enabled and self.run_dir):
+            return
+        from howlplane.control_plane.presentation.redact import redact_operator_text
+        path = self.run_dir / PROGRESS_EVENTS_FILENAME
+        try:
+            prefix = b""
+            if self._event_seq is None:
+                self._event_seq = _last_event_seq(path)
+                # A write cut short by a crash leaves no newline; start a fresh
+                # line so the torn tail cannot swallow this event.
+                if path.is_file() and path.stat().st_size and not path.read_bytes().endswith(b"\n"):
+                    prefix = b"\n"
+            self._event_seq += 1
+            record = self._record
+            event: Dict[str, Any] = {
+                "schema": PROGRESS_EVENT_SCHEMA_VERSION, "seq": self._event_seq, "ts": _now_utc_str(),
+                "task_id": record.task_id, "kind": kind, "phase": record.phase, "state": record.state,
+                "resource_id": record.resource_id, "role": record.role, "cycle": record.cycle,
+                "elapsed_seconds": record.elapsed_seconds,
+                "details": redact_operator_text(record.details) if record.details else None,
+            }
+            if message:
+                event["message"] = redact_operator_text(message)
+            line = prefix + (json.dumps(event) + "\n").encode("utf-8")
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            try:
+                os.write(fd, line)
+            finally:
+                os.close(fd)
         except Exception:
             pass
 

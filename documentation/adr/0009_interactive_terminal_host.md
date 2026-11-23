@@ -49,9 +49,15 @@ HowlBoard keeps dashboards and multiple sessions.
   `backend.py` is the only path into HowlPlane, `terminal.py` owns the TTY,
   `app.py` holds the closed intent table).
 * Runs are `howlplane work OBJECTIVE --execute --json` children with the
-  operator's environment; progress is the `howlplane.task_progress/v1`
-  snapshot; cancel interrupts the child, then calls
-  `HumanLifecycleManager.cancel`.
+  operator's environment; progress is the `howlplane.task_progress_event/v1`
+  stream (the `howlplane.task_progress/v1` snapshot for older runs); cancel
+  interrupts the child, then calls `HumanLifecycleManager.cancel` with the
+  control plane ledger, as `howlplane cancel` does.
+* **Approvals are show-only (owner decision, 2026-11-23).** At the owner
+  boundary the TUI shows the decision packet path and the `approve`, `resume`
+  and `reject` commands from `howlplane.work_result/v1`, and the intent table
+  has no approve or reject intent. An approval stays a deliberate command the
+  owner types, outside the interactive loop.
 * Limits are the `[tui]` table of the operator TOML (`TuiSettings`). A step
   measured at most about 610 instructions, so the default budget is 50000.
 * Events are `howlplane.tui_event/v1` lines written by `OperationalLog` with

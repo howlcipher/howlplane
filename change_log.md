@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- A sequenced progress stream beside the snapshot: each task run now writes
+  `howlplane.task_progress_event/v1` lines to
+  `.task_runs/<task_id>/progress_events.jsonl` (owner-only), one per change of
+  phase, state, resource, role, cycle or details, plus `failover`,
+  `implementation_failed` and `provider_unusable` events. Each has a `seq` that a
+  resumed task continues; a torn final line from a crash is skipped and never
+  merges with the next event. `progress.json` and the stderr lines are
+  unchanged. `howlplane tui` reads the stream, so no transition between polls is
+  lost, and shows failovers as notices (TUI-00 HP-C2).
 - TUI-02: `howlplane tui` shows the owner boundary in full (decision packet
   path, `approve`, `resume` and `reject` commands) without proposing any of
   them, and wraps long lines instead of cutting them. A real governed run through

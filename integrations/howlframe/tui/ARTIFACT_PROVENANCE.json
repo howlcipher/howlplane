@@ -5,8 +5,8 @@
   "hfbc_format": 1,
   "build_command": "HOWLFRAME_BIN=<pinned howlframe> scripts/build_tui_reducer.sh",
   "files": {
-    "integrations/howlframe/tui/tui_core.howl": "99f12ae45c19e8ee01c0cc134cbcbbffe2580439ca09c7f67e7da8c539cea525",
-    "integrations/howlframe/tui/tui_reducer.howl": "63244795d5b3de568037cc943c01e70b5d849cfa2e9ad4925b6cc19e6582c7f7",
-    "integrations/howlframe/tui/tui_reducer.hfbc": "38bd1842f34472b15848bee85f27baec49856a0cb253e43cec8c5d10b65c8a2b"
+    "integrations/howlframe/tui/tui_core.howl": "dda39b20cb91b3776d696a5c2551aa0da5d4d202856dc00d6e6b6908c80446b9",
+    "integrations/howlframe/tui/tui_reducer.howl": "5d769a76070c7f112a9115992bdf1348e35a186fb03c534c9cbb0d392fe0ce76",
+    "integrations/howlframe/tui/tui_reducer.hfbc": "5819e48c55c0db7c59e7d16fff14baaca4e8a23f08369bd5c1ae1db94049965a"
   }
 }
