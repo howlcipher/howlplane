@@ -13,29 +13,24 @@ from pathlib import Path
 
 import pytest
 
+from howlplane.control_plane import config_loader
 from howlplane.control_plane.tui import backend as backend_mod
 from howlplane.control_plane.tui.backend import HowlPlaneBackend, RunHandle
+from tests._tui_support import fake_agent_sandbox
 
 pytestmark = pytest.mark.contract
 
 
 @pytest.fixture
 def sandbox(tmp_path, monkeypatch):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    marker = tmp_path / "launched"
-    agent = bindir / "codex"
-    agent.write_text(f"#!/bin/sh\ntouch {marker}\nexit 97\n", encoding="utf-8")
-    agent.chmod(0o755)
-    config = tmp_path / "config.toml"
-    config.write_text('[ai_resources]\noperating_mode = "connected"\n'
-                      '[ai_resources.providers.codex]\nenabled = true\n', encoding="utf-8")
-    monkeypatch.setenv("HOWLPLANE_LOCAL_CONFIG", str(config))
+    box = fake_agent_sandbox(tmp_path)
+    monkeypatch.setenv("HOWLPLANE_LOCAL_CONFIG", str(box["config"]))
     monkeypatch.setenv("HOWLPLANE_CAPACITY_PATH", str(tmp_path / "capacity.json"))
-    return {"repo": repo, "bindir": bindir, "agent": agent, "marker": marker, "tmp": tmp_path}
+    # The pool reads the process-wide loader; pin it to this config so the
+    # result cannot depend on which earlier test imported it first.
+    monkeypatch.setattr(config_loader, "default_loader",
+                        config_loader.ConfigLoader(local_config_path=str(box["config"])), raising=False)
+    return box
 
 
 def codex_readiness(document):

@@ -7,47 +7,21 @@ may be launched and the terminal must be restored.
 
 import os
 import pty
-import select
-import subprocess
 import sys
-import time
 
 import pytest
 
 from howlplane.control_plane.howlframe_runner import find_howlframe_binary
+from tests._tui_support import fake_agent_sandbox, read_until
 
 pytestmark = pytest.mark.integration
-
-
-def read_until(fd, needle, timeout=60):
-    data, end = b"", time.monotonic() + timeout
-    while needle not in data and time.monotonic() < end:
-        ready, _, _ = select.select([fd], [], [], 0.2)
-        if ready:
-            try:
-                chunk = os.read(fd, 65536)
-            except OSError:
-                break
-            if not chunk:
-                break
-            data += chunk
-    return data
 
 
 def test_interactive_session_previews_and_declines_without_launching(tmp_path):
     hf = find_howlframe_binary()
     assert hf, "Real howlframe binary is required; set HOWLFRAME_BIN or put it on PATH"
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    marker = tmp_path / "launched"
-    (bindir / "codex").write_text(f"#!/bin/sh\ntouch {marker}\nexit 97\n", encoding="utf-8")
-    (bindir / "codex").chmod(0o755)
-    config = tmp_path / "config.toml"
-    config.write_text('[ai_resources]\noperating_mode = "connected"\n'
-                      '[ai_resources.providers.codex]\nenabled = true\n', encoding="utf-8")
+    box = fake_agent_sandbox(tmp_path)
+    repo, bindir, marker, config = box["repo"], box["bindir"], box["marker"], box["config"]
     env = {"HOME": str(tmp_path), "PATH": f"{bindir}:/usr/bin:/bin", "TERM": "xterm",
            "HOWLPLANE_LOCAL_CONFIG": str(config), "HOWLPLANE_CAPACITY_PATH": str(tmp_path / "cap.json"),
            "HOWLFRAME_BIN": hf, "XDG_STATE_HOME": str(tmp_path / "state"),

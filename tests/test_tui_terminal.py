@@ -3,17 +3,16 @@
 import io
 import os
 import pty
-import select
 import signal
 import sys
 import termios
 import textwrap
-import time
 
 import pytest
 
 from howlplane.control_plane.presentation.style import Style, strip_ansi
 from howlplane.control_plane.tui.terminal import LineTerminal, open_terminal, styled
+from tests._tui_support import read_until
 
 pytestmark = pytest.mark.unit
 
@@ -73,21 +72,6 @@ def spawn(tmp_path):
     if pid == 0:
         os.execv(sys.executable, [sys.executable, str(script)])
     return pid, fd
-
-
-def read_until(fd, needle, timeout=15):
-    data, end = b"", time.monotonic() + timeout
-    while needle not in data and time.monotonic() < end:
-        ready, _, _ = select.select([fd], [], [], 0.2)
-        if ready:
-            try:
-                chunk = os.read(fd, 4096)
-            except OSError:
-                break
-            if not chunk:
-                break
-            data += chunk
-    return data
 
 
 def test_raw_keys_line_editing_and_restore(tmp_path):
