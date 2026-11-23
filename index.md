@@ -701,3 +701,13 @@ Install HowlLoop in the Plane environment and run
 Plane checks retained evidence and parks new work for owner review. Reintake keeps the
 existing work item and its decision. Set `HOWLLOOP_STORE` to collect bounded status and
 elapsed-time observations from finite Factory queue tasks.
+
+For `howlplane orchestrate`, the same setting records separate monotonic wall
+times for the provider call and the configured verification command. A finite
+queue dispatch shares its run and task identifiers with those stage observations.
+An orchestration session started directly correlates its stages by session ID.
+Provider success describes the execution result. Verification reports its own
+pass, failure, timeout, interruption, or unavailable outcome. The records carry UUIDs and
+structured outcomes. Prompts, command lines, and subprocess output stay in
+their existing workflow boundaries. CPU, memory, and token usage remain unknown
+at these call sites.
