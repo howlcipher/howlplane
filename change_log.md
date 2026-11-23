@@ -62,6 +62,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- HowlPlane runs `slopslint` without `BUN_OPTIONS`, which the Bun runtime would
+  otherwise pass to it as flags (`unknown option: --smol`). A shell exporting
+  that variable no longer turns a healthy hygiene gate red (issues.md #19).
 - `howlplane resume --json` now reports the verification, reviews, duration,
   review cycles and provider execution the run directory recorded, instead of
   `none` and `[]`; values the records lack are `null` or marked unrecorded, never

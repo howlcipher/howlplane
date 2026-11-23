@@ -177,9 +177,12 @@ missing here, instead of letting a long run fail to explain it.
 
 CI sets `HOWLPLANE_REQUIRE_TOOLS=1` and installs everything, so there a missing
 extra does not skip: it fails. Set the same variable locally to prove an
-environment is complete. A tool that is installed but cannot run (for example
-`slopslint` with `BUN_OPTIONS=--smol` in the environment) is reported by
-`make check-tools` as installed-but-failing, not as missing.
+environment is complete. A tool that is installed but cannot run is reported by
+`make check-tools` as installed-but-failing, not as missing. `slopslint` is a
+Bun-built binary and rejects flags injected through `BUN_OPTIONS` (for example
+`--smol`), so HowlPlane removes that variable whenever it runs slopslint
+(`hygiene_policy.slopslint_env`, issues.md #19); only a manual `slopslint` run
+still needs it unset.
 
 ## Continuous Test Impact Assessment
 
