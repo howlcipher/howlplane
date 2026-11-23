@@ -55,9 +55,17 @@ resumable regardless of which provider executed it:
   the run result and provider failure-classification logic,
 > **No live producer for run events.** No HowlPlane Python code writes
 > `ai.run_event/v1` today; only the schema, the Go `internal/runtime` types and
-> the drift test reference it (TUI-00 finding HP-F3). Live task progress is the
-> `howlplane.task_progress/v1` snapshot in `.task_runs/<task_id>/progress.json`,
-> and `howlplane tui` session events are `howlplane.tui_event/v1`.
+> the drift test reference it (TUI-00 finding HP-F3). It describes a provider's
+> own events (messages, tool calls, an `attempt_id`), which HowlPlane does not
+> normalize. Task lifecycle progress has two contracts instead, both in
+> `.task_runs/<task_id>/`: the `howlplane.task_progress/v1` snapshot in
+> `progress.json` (where the task is now), and since 2026-11-23 the
+> `howlplane.task_progress_event/v1` stream in `progress_events.jsonl` (how it
+> got there: one owner-only JSON line per change of phase, state, resource,
+> role, cycle or details, plus `failover`, `implementation_failed` and
+> `provider_unusable` events, each with a per-task `seq` that a resumed task
+> continues). `howlplane tui` reads the stream. Its session events are
+> `howlplane.tui_event/v1`. The stream does not supersede `ai.run_event/v1`.
 
 > **Superseded handoff.** No HowlPlane code writes `ai.handoff/v1`. The
 > ecosystem's handoff between AI workers is HowlForge's
