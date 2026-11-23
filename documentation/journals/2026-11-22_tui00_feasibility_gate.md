@@ -190,11 +190,14 @@ Proposed `howlplane.tui_event/v1`, one JSON object per line:
   probe). Retry safety is `UNKNOWN` unless a source states it.
 * **Redaction.** One primitive, `redact_operator_text`. Library update
   candidate: `evidence_ledger.redact_sensitive_data` is a second, different
-  primitive and should be consolidated.
+  primitive and should be consolidated. **Resolved 2026-11-23:** layered rather
+  than merged, after a comparison showed each missed secrets the other caught;
+  see the decision in `documentation/data_flows.md`.
 * **Permissions.** Log directory 0700 and files 0600, using the existing
   `atomic_io.write_private_json` convention. Gap: `OperationalLog` and the
   evidence ledger (`evidence_ledger.py:274`, mode 0666 before umask) create files
-  with umask dependent modes.
+  with umask dependent modes. **Resolved 2026-11-23:** `OperationalLog` has the
+  `private` option (TUI-01) and the ledger creates its files 0600.
 * **Rotation.** Reuse oplog rotation (10 MiB, keep 5) for operational events;
   evidence keeps its own gzip rotation.
 * **Interrupted writes and malformed events.** One `write` per line on an

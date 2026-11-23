@@ -33,6 +33,8 @@ _PATTERNS = [
     # Credentials embedded in URLs.
     re.compile(r"(://[^/\s:@]+:)[^@\s/]+(@)"),
 ]
+# Whole PEM private-key blocks: never readable prose, so the block is replaced outright.
+_PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----")
 _BARE_TOKENS = re.compile(
     r"\b(?:sk[-_][A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}"
     r"|AKIA[0-9A-Z]{12,}|xox[abprs]-[A-Za-z0-9-]{8,}|AIza[0-9A-Za-z_-]{20,})"
@@ -43,6 +45,7 @@ def redact_operator_text(text: str) -> str:
     """Mask credentials in free text while keeping the rest of the line readable."""
     if not text:
         return text
+    text = _PRIVATE_KEY.sub(_REDACTED, text)
     for pattern in _PATTERNS:
         text = pattern.sub(lambda m: m.group(1) + _REDACTED + (m.group(2) if m.lastindex and m.lastindex > 1 else ""), text)
     return _BARE_TOKENS.sub(_REDACTED, text)
