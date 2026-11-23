@@ -1,0 +1,40 @@
+{
+    "schema": "howlplane.work_result/v1",
+    "task_id": "TASK-FIXTURE-1",
+    "final_state": "complete",
+    "exit_code": 0,
+    "run_dir": null,
+    "implementer": "codex",
+    "changes": {
+        "files_added": [],
+        "files_modified": [],
+        "files_deleted": [],
+        "insertions": 0,
+        "deletions": 0
+    },
+    "reviews": [
+        {
+            "role": "correctness",
+            "verdict": "not_run",
+            "finding_count": 0,
+            "highest_severity": null,
+            "earlier_cycle": false,
+            "self_review": false
+        }
+    ],
+    "remediation_cycles": 0,
+    "verification": {
+        "status": "none",
+        "steps": []
+    },
+    "follow_ups": [],
+    "decision_packet": null,
+    "error": null,
+    "next_action": {
+        "command": null,
+        "then": null,
+        "alternatives": [],
+        "reason": "COMPLETE",
+        "detail": "Review the change in the working tree and commit it."
+    }
+}

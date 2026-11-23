@@ -1,0 +1,16 @@
+; HF-D2 reproducer: a spawn body and its parent mutate one captured dict.
+; Expected: a structured runtime result (or serialized access).
+; Observed: Go "fatal error: concurrent map writes", process exit 2, no
+; structured diagnostic and no receipt.
+; Run: howlframe run --max-instructions 10000000 --max-memory-bytes 1000000000 --allow-caps process
+(cli_app
+  (let (shared (dict ("k" 0)))
+    (do
+      (spawn (lambda ()
+        (let (i 0)
+          (while (< i 200000)
+            (do (map_set shared (to_string i) i) (set i (+ i 1)))))))
+      (let (j 0)
+        (while (< j 200000)
+          (do (map_set shared (str_join (list "m" (to_string j)) "") j) (set j (+ j 1)))))
+      (print "survived" (list_len (map_keys shared))))))

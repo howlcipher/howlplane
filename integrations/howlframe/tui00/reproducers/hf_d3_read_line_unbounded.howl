@@ -1,0 +1,7 @@
+; HF-D3 reproducer: read_line buffers a whole line without charging the memory budget.
+; Expected: LIMIT_EXCEEDED at READ_LINE for a line larger than --max-memory-bytes
+; (READ_STDIN already fails at its own opcode).
+; Observed: a 32 MiB line is accepted under --max-memory-bytes 1048576.
+(cli_app
+  (let (line (read_line))
+    (print "read_line accepted a line larger than the memory budget")))

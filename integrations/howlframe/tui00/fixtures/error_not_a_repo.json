@@ -1,0 +1,8 @@
+{
+    "code": "NOT_A_GIT_REPOSITORY",
+    "message": "ERROR: no target Git repository found in '/nonexistent/repo'. HowlPlane must be run inside a Git repository.",
+    "why": "HowlPlane operates on a Git repository.",
+    "next_action": "Run it inside a Git repository, or pass --repo PATH.",
+    "command": null,
+    "schema": "howlplane.error/v1"
+}
