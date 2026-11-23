@@ -1,0 +1,59 @@
+# TUI-01: `howlplane tui`
+
+Date: 2026-11-23. Implements ADR 0009 (accepted by the owner on this date) on
+the evidence of `2026-11-22_tui00_feasibility_gate.md`.
+
+## What was built
+
+| Part | Location | Notes |
+| --- | --- | --- |
+| Reducer | `integrations/howlframe/tui/tui_reducer.howl`, `tui_core.howl` | `howlplane.tui_step/v1` in, `howlplane.tui_step_result/v1` out (`state`, `view`, `prompt`, `intents`); no capability grant |
+| Artifact | `tui_reducer.hfbc`, packaged copy under `src/howlplane/control_plane/data/` | built by `scripts/build_tui_reducer.sh` with HowlFrame `41d56ce`; hashes in `integrations/howlframe/tui/ARTIFACT_PROVENANCE.json` |
+| Reducer runner | `src/howlplane/control_plane/tui/reducer.py` | empty environment, `--max-instructions`, `--max-memory-bytes`, `--deadline`, host input cap, fail closed |
+| Backend | `src/howlplane/control_plane/tui/backend.py` | pool read only with `probe_on_start=True`; run is `howlplane work --execute --json`; cancel through `HumanLifecycleManager.cancel` |
+| Terminal | `src/howlplane/control_plane/tui/terminal.py` | raw mode, alternate screen, SIGWINCH, restore on exit, SIGTERM and SIGHUP; line mode without a TTY |
+| Loop | `src/howlplane/control_plane/tui/app.py` | closed intent table: `inventory_refresh`, `route_preview`, `run_objective`, `cancel`, `quit` |
+| Config | `TuiSettings` in `config_loader.py`, `[tui]` table | every limit finite and range checked |
+| Events | `OperationalLog` options `schema`, `sequenced`, `private`, `filename` | `howlplane.tui_event/v1`; Factory events byte identical |
+
+## Decisions made while building
+
+* **Producer.** The published v0.1.0 compiler rejects dict literals whose
+  values differ in type (`dict value 2 has type string, want bool`); the CI
+  runtime pin `41d56ce` accepts them. The artifact is built with `41d56ce`,
+  which CI already builds from source, and recorded in its own provenance file
+  rather than changing the existing v0.1.0 provenance. Output was byte
+  identical across builds and ran on `41d56ce`, `9c739c9` and the patched VM.
+* **Run boundary.** A run is a child `howlplane work` with the operator's
+  environment instead of an in-process orchestrator call: identical code path
+  to the CLI, its stdout cannot corrupt the screen, and it can be interrupted.
+  `--progress never` also disables `progress.json`, so the child runs with
+  progress on and its stderr goes to an owner-only file.
+* **Instruction budget.** The largest measured step (seven resources) needed
+  about 610 instructions, so the default is 50000.
+* **Notices** accumulate across the follow-up steps of one input and reset on
+  the next input; a smoke run showed a provider warning being overwritten.
+
+## Test Impact Assessment
+
+* Behavior added: the `howlplane tui` command; `OperationalLog` keyword
+  options; the `[tui]` configuration table. Existing behavior changed: none
+  (Factory event shape is asserted byte for byte).
+* New tests: `test_tui_reducer.py` (artifact provenance, rebuild equality, no
+  grant, every interaction rule, budget and size refusals), `test_tui_app.py`
+  (fake backend: preview never runs, typed confirmation, progress, outcome,
+  cancel by Ctrl-C, `/cancel` and `/quit`, failures displayed, unknown intent
+  refused, private sequenced log), `test_tui_backend.py` (real pool: readiness
+  probed, missing executable BLOCKED, nothing launched, read only; run argv;
+  result and error parsing; cancel escalation), `test_tui_terminal.py` (line
+  mode; raw keys, UTF-8, Ctrl-C, Ctrl-D and restore in a real pty; restore on
+  SIGTERM), `test_tui_session.py` (the real command in a pty: preview, decline,
+  exit, nothing launched, no task created), `test_oplog_options.py`.
+* Tiers: unit (terminal, oplog), contract (backend), integration (reducer, app,
+  session; they need the real HowlFrame runtime).
+* Two pty test races were found and fixed in the tests (typing before raw mode;
+  reading `RESTORED` before ` True`); 40 consecutive runs were then clean.
+* Not covered: a real governed run (it would call a provider), so the
+  `start_run` to `result` path is proven with stand-in children and the real
+  command line, not a provider.
+* Tests run: see the final handoff of this task.

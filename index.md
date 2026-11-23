@@ -233,6 +233,34 @@ howlplane doctor
 howlplane verify
 ```
 
+### Interactive terminal (`howlplane tui`)
+
+`howlplane tui` is a lightweight interactive terminal for one objective at a
+time. Type an objective and it shows the configured AI resources, their
+readiness and the route HowlPlane would take; `/agent ID` (or `/agent auto`)
+chooses a provider within the eligible set, `/run` asks for a typed `y` before
+anything runs, `/cancel` (or Ctrl-C) stops a run, and `/quit` (or Ctrl-D) leaves.
+
+* Every decision runs on the HowlFrame VM with no capability grant
+  (`integrations/howlframe/tui/`); the Python host only owns the terminal and a
+  closed set of actions (ADR 0009).
+* Preview is read only and probes readiness, so a provider whose executable is
+  gone is shown as excluded instead of selected. A run is exactly
+  `howlplane work OBJECTIVE --execute --json` with your environment, so it keeps
+  every authority, review and verification gate.
+* Errors say what failed, why, whether a retry is safe and what to do next.
+  Verification shown after a run is what HowlPlane reported; evidence stays in
+  the evidence ledger.
+* Session events are `howlplane.tui_event/v1` lines in
+  `$XDG_STATE_HOME/howlplane/tui/logs/tui_events.jsonl` (owner-only files).
+* Limits live in the `[tui]` table of `~/.config/howlplane/config.toml`
+  (`max_instructions`, `max_memory_bytes`, `step_deadline_seconds`,
+  `max_step_bytes`, `max_objective_chars`, `progress_poll_seconds`,
+  `cancel_grace_seconds`); all are finite and validated.
+* It needs a `howlframe` runtime (`HOWLFRAME_BIN` or `PATH`). Without a TTY it
+  falls back to line mode, so it can also be scripted. Dashboards and multiple
+  sessions remain HowlBoard's.
+
 Direct vendor commands (`claude`, `codex`, `agy`) remain available as escape hatches when full multi-agent orchestration is not desired; `howlplane work` remains the governed default.
 
 `howlplane work --implementation-timeout SECONDS` sets the implementation time
@@ -614,7 +642,8 @@ never clears an explicit parent value. Each option requires a path value.
 - [Localizations & Languages](documentation/languages/README_en_US.md)
 - [Change Log](change_log.md)
 - [2026-09-29 remote snapshot follow-ons](documentation/journals/2026-09-29_team_howlplane_backlog.md)
-- [TUI-00 interactive terminal feasibility gate](documentation/journals/2026-11-22_tui00_feasibility_gate.md) and [ADR 0009 (proposed)](documentation/adr/0009_interactive_terminal_host.md)
+- [TUI-00 interactive terminal feasibility gate](documentation/journals/2026-11-22_tui00_feasibility_gate.md) and [ADR 0009: interactive terminal host](documentation/adr/0009_interactive_terminal_host.md)
+- [TUI-01: `howlplane tui`](documentation/journals/2026-11-23_tui01_interactive_terminal.md)
 
 Validation maintenance separates existing Bandit annotation reasons from rule IDs
 and removes obsolete suppressions. It changes no runtime behavior or trust policy.

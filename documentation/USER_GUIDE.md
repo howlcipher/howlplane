@@ -113,7 +113,9 @@ Available actions:
 
 ## 3. 🤖 Visual Work Surface
 
-HowlPlane is the governed engine; it does not ship a terminal or web dashboard.
+HowlPlane is the governed engine; it does not ship a dashboard. `howlplane tui`
+is a lightweight interactive terminal for one objective at a time (preview,
+confirm, run, progress, outcome); see the README and ADR 0009.
 The rich visual work surface is **HowlBoard**, which reads the stable contracts
 HowlPlane publishes (for example `howlplane factory status --json` and the
 redacted remote status snapshot). Use `howlplane factory status` for a concise
