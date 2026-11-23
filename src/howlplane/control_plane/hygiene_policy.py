@@ -17,12 +17,32 @@ Classifies policy changes into:
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
 PINNED_SLOPSLINT_VERSION = "0.1.0"
+
+# slopslint is a Bun-compiled binary. Bun's runtime reads BUN_OPTIONS as extra
+# command-line flags, which slopslint's own CLI then rejects (a shell exporting
+# BUN_OPTIONS=--smol makes it exit with `unknown option: --smol`), so a healthy
+# hygiene gate reported failed (issues.md #19). No BUN_OPTIONS value is meant
+# for slopslint, so it never receives one.
+SLOPSLINT_FOREIGN_ENV = ("BUN_OPTIONS",)
+
+
+def slopslint_env(base: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
+    """The environment to run slopslint with: ``base`` (default os.environ) minus foreign runtime flags."""
+    env = dict(os.environ if base is None else base)
+    for name in SLOPSLINT_FOREIGN_ENV:
+        env.pop(name, None)
+    return env
+
+
+def is_slopslint(argv: List[str]) -> bool:
+    return bool(argv) and Path(str(argv[0])).name == "slopslint"
 
 
 class PolicyChangeType(str, Enum):
@@ -632,6 +652,7 @@ class HygienePolicyClassifier:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                env=slopslint_env(),
             )
             version_output = res.stdout.strip()
         except Exception as e:

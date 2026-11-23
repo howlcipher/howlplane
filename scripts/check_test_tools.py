@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 
 INSTALL = {
     "howlframe-artifact-compiler": "set HOWLFRAME_ARTIFACT_COMPILER_BIN to the published v0.1.0 producer (documentation/FRAME_ARTIFACTS.md)",
-    "slopslint": "bash scripts/install_slopslint.sh  (and unset BUN_OPTIONS if it is set to --smol)",
+    "slopslint": "bash scripts/install_slopslint.sh  (HowlPlane runs it without BUN_OPTIONS; unset it for manual runs)",
     "howlframe": "build the pinned binary as .github/workflows/test.yml does, or set HOWLFRAME_BIN",
     "go": "install Go 1.26+ (https://go.dev/dl/)",
 }
@@ -48,7 +48,9 @@ def binary_problem(name: str, version_substring: Optional[str] = None) -> Option
         return None
     arg = "version" if name == "go" else "--version"
     try:
-        result = subprocess.run([path, arg], capture_output=True, text=True, timeout=15, check=False)
+        # Probe slopslint the way HowlPlane runs it: without foreign Bun runtime flags (issues.md #19).
+        env = {k: v for k, v in os.environ.items() if k != "BUN_OPTIONS"} if name == "slopslint" else None
+        result = subprocess.run([path, arg], capture_output=True, text=True, timeout=15, check=False, env=env)
     except (OSError, subprocess.SubprocessError) as exc:
         return f"could not run: {exc}"
     if result.returncode != 0:
