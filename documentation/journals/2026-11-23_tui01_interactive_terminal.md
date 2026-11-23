@@ -57,3 +57,43 @@ the evidence of `2026-11-22_tui00_feasibility_gate.md`.
   `start_run` to `result` path is proven with stand-in children and the real
   command line, not a provider.
 * Tests run: see the final handoff of this task.
+
+## TUI-02 follow-up (2026-11-23)
+
+* **Governed run proven without a provider.** `tests/test_tui_governed_run.py`
+  drives the real `howlplane tui` in a pseudo terminal through a real
+  `howlplane work --execute` child, with only the agent executable replaced by
+  a stand-in. A completing stand-in reaches the owner boundary
+  (`awaiting_human`) and the screen shows the decision packet path and the
+  `approve`, `resume` and `reject` commands; a hanging stand-in is cancelled and
+  the ledger shows `implementation_started` then `task_cancelled`. Evidence goes
+  to a temporary control plane root (`HOWLPLANE_HOME`); the checkout ledger is
+  asserted untouched.
+* **Approvals stay show-only** (owner decision): the TUI displays
+  `next_action` from `howlplane.work_result/v1` (detail, command, then,
+  alternatives) and never proposes an approve or reject intent; a reducer test
+  pins that.
+* **Defects found and fixed while building this:** cancel recorded no evidence
+  (`ledger=None`), so the TUI now resolves the ledger exactly as
+  `howlplane cancel` does; long lines were cut at the terminal width, hiding the
+  decision packet path, so `RawTerminal` now wraps them.
+* The reducer artifact is now built with the CI pin `928c005`.
+
+### Runbook: one live acceptance run
+
+`tests/test_tui_live_run.py` is the only test that reaches a real provider. It is
+deselected unless `HOWLPLANE_LIVE_PROVIDERS` is set and skips when no configured
+provider is `READY`. Run it once on a machine where a provider CLI is installed
+and signed in:
+
+```bash
+HOWLFRAME_BIN=/path/to/howlframe HOWLPLANE_LIVE_PROVIDERS=1 \
+  pytest tests/test_tui_live_run.py -p no:randomly -rs
+```
+
+It creates a scratch repository under the pytest temporary directory, asks for a
+one-line file, confirms the run, and waits up to 30 minutes for an outcome. Keep
+as evidence: the pytest output, the task's `.task_runs/<task_id>/` directory from
+the temporary repository, and the session log under the temporary
+`XDG_STATE_HOME`. It costs one provider session; it writes nothing to the
+checkout's ledger.
