@@ -22,6 +22,7 @@ client_secret.json
 !dogfood/historical-reasoning-evidence/runs/*.json
 !tests/fixtures/*.json
 !integrations/howlframe/tui00/fixtures/*.json
+!integrations/howlframe/tui/ARTIFACT_PROVENANCE.json
 !.dogfood/mission_state.json
 # Redacted Factory status published from the host (HOWL-011). Not a credential.
 !factory/status/remote-snapshot.json

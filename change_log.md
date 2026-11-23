@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `howlplane tui` (TUI-01, ADR 0009 accepted): an interactive terminal for one
+  objective at a time. A HowlFrame reducer with no capability grant owns state,
+  validation, view and intents; the host owns the terminal (raw mode, resize,
+  restore on exit and SIGTERM, line mode without a TTY) and a closed action
+  table. Preview uses the provider pool read only with readiness probed; a run
+  is `howlplane work --execute --json` after a typed confirmation; cancel stops
+  the child and records it through the existing cancel path. Limits come from
+  a validated `[tui]` config table, and session events are
+  `howlplane.tui_event/v1`. `OperationalLog` gains additive `schema`, `seq`,
+  `filename` and owner-only `private` options; Factory events are unchanged.
 - TUI-00 feasibility gate for an interactive HowlPlane terminal: an architecture
   and feasibility audit of HowlPlane and HowlFrame
   (`documentation/journals/2026-11-22_tui00_feasibility_gate.md`), a proposed
