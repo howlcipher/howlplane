@@ -53,7 +53,7 @@ def kinds(result):
 
 def test_provenance_matches_committed_bytes():
     provenance = json.loads((TUI_DIR / "ARTIFACT_PROVENANCE.json").read_text(encoding="utf-8"))
-    assert provenance["producer_source_revision"] == "928c00503f1de75e21487d020864076e67323eb4"
+    assert provenance["producer_source_revision"] == "dffcb001222d9bedc2d6eb615541450b5f68bcd3"
     for name, digest in provenance["files"].items():
         assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest, name
 

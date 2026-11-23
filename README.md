@@ -245,6 +245,14 @@ anything runs, `/cancel` (or Ctrl-C) stops a run, and `/quit` (or Ctrl-D) leaves
 * Every decision runs on the HowlFrame VM with no capability grant
   (`integrations/howlframe/tui/`); the Python host only owns the terminal and a
   closed set of actions (ADR 0009).
+* `howlplane tui --engine howlframe` runs the whole TUI in HowlFrame
+  (`tui_app.howl`, ADR 0010): the HowlFrame runtime owns the terminal, timers
+  and the `howlplane` child processes, and the launcher only grants seven exact
+  `howlplane` command shapes, the run's `.task_runs` directory (read) and the
+  session log directory (write). It needs a HowlFrame runtime with
+  `terminal_app` and a repository path without whitespace or commas. Both
+  engines pass the same governed-run tests; the Python host is the default
+  until it is retired.
 * Preview is read only and probes readiness, so a provider whose executable is
   gone is shown as excluded instead of selected. A run is exactly
   `howlplane work OBJECTIVE --execute --json` with your environment, so it keeps
@@ -645,16 +653,19 @@ never clears an explicit parent value. Each option requires a path value.
 - [2026-09-29 remote snapshot follow-ons](documentation/journals/2026-09-29_team_howlplane_backlog.md)
 - [TUI-00 interactive terminal feasibility gate](documentation/journals/2026-11-22_tui00_feasibility_gate.md) and [ADR 0009: interactive terminal host](documentation/adr/0009_interactive_terminal_host.md)
 - [TUI-01: `howlplane tui`](documentation/journals/2026-11-23_tui01_interactive_terminal.md)
+- [ADR 0010: pure HowlFrame TUI](documentation/adr/0010_pure_howlframe_tui.md) (`howlplane tui --engine howlframe`)
 
 Validation maintenance separates existing Bandit annotation reasons from rule IDs
 and removes obsolete suppressions. It changes no runtime behavior or trust policy.
 
 The generated-application CI suites compile and execute against HowlFrame source
-`928c00503f1de75e21487d020864076e67323eb4` (2026-11-23; it contains the VM resource-bound fixes for
-bugs #73 to #76 found by TUI-00). Fast, full and nightly jobs use that same
-immutable commit. Before the move, the full suite, including generated
-notes/todo acceptance and both packaged HFBC1 artifacts, passed against it; the
-previous pin was `41d56cecd9e8f936cf9da35240331ab7da0244cd`. A moving sibling
+`dffcb001222d9bedc2d6eb615541450b5f68bcd3` (2026-11-23; HowlFrame `main` with the versioned runtime error,
+exec process bounds, the runner-only `process:exec_inherit_env=` grant and
+`terminal_app`, which `howlplane tui --engine howlframe` needs). Fast, full and
+nightly jobs use that same immutable commit. Before the move, the full suite,
+including generated notes/todo acceptance and both packaged HFBC1 artifacts,
+passed against it; the previous pins were `928c00503f1de75e21487d020864076e67323eb4` (VM resource-bound fixes
+for bugs #73 to #76) and `41d56cecd9e8f936cf9da35240331ab7da0244cd`. A moving sibling
 default branch is still not a runtime compatibility guarantee: an earlier newer
 revision failed generated notes/todo acceptance. The source pin records the
 tested contract; it does not establish compatibility with newer Frame commits or
