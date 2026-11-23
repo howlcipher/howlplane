@@ -1,13 +1,13 @@
 """Explicit owner-gated intake and opt-in queue execution observations."""
 
 import json
-import os
 from importlib import import_module
-from uuid import NAMESPACE_URL, uuid5
 
 from howlplane.control_plane.factory.work_item import (
     WorkItemOrigin, WorkItemStore,
 )
+
+from howlplane.control_plane.stage_observation import observe_dispatch
 
 REPOSITORIES = {
     "writer": "howlcipher/howlwriter",
@@ -56,16 +56,11 @@ def command(args):
 
 
 def observe_launch(launch, dispatch, args):
-    if not os.environ.get("HOWLLOOP_STORE"):
-        return launch(dispatch, args)
-    try:
-        producer = import_module("howlloop.producer")
-    except ImportError:
-        return launch(dispatch, args)
-    task_id = str(uuid5(NAMESPACE_URL, dispatch.task.fingerprint))
     operation = "recovery" if dispatch.action == "resume" else "factory_task"
-    with producer.observe("plane", operation, task_id=task_id) as observation:
+    with observe_dispatch(operation, dispatch.task.fingerprint) as observation:
         outcome = launch(dispatch, args)
+        if observation is None:
+            return outcome
         observation.result = {
             "COMPLETE": "ok",
             "COMPLETE WITH WARNINGS": "incomplete",
