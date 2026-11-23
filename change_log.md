@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- TUI-02: `howlplane tui` shows the owner boundary in full (decision packet
+  path, `approve`, `resume` and `reject` commands) without proposing any of
+  them, and wraps long lines instead of cutting them. A real governed run through
+  the TUI is tested end to end with a stand-in agent (completion to the owner
+  boundary, and cancel), and a live acceptance test with a runbook covers one
+  real provider run. Cancel from the TUI now records `task_cancelled` in the
+  control plane ledger, as `howlplane cancel` does.
 - CI now builds HowlFrame at `928c005` instead of `41d56ce`; it contains the VM
   resource-bound fixes found by TUI-00 (HowlFrame bugs #73 to #76:
   `spawn` instruction budget, `spawn` shared-dict crash, `read_line` and

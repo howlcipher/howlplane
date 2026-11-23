@@ -47,6 +47,18 @@ def _kind_for(line: str) -> Optional[str]:
     return None
 
 
+def wrap_line(line: str, width: int) -> List[str]:
+    """Hard-wraps one view line to ``width`` columns; continuation lines are indented."""
+    if len(line) <= width:
+        return [line]
+    pieces, rest, indent = [line[:width]], line[width:], "  "
+    while rest:
+        room = max(1, width - len(indent))
+        pieces.append(indent + rest[:room])
+        rest = rest[room:]
+    return pieces
+
+
 def styled(style: Style, line: str) -> str:
     kind = _kind_for(line)
     return style.paint(kind, line) if kind else line
@@ -203,11 +215,13 @@ class RawTerminal(Terminal):
     def paint(self, header: str, view: List[str], prompt: str) -> None:
         size = shutil.get_terminal_size((80, 24))
         width, height = max(20, size.columns), max(5, size.lines)
-        body = [header] + view
+        # Wrap rather than cut: a path or command on a long line is often the
+        # one thing the operator needs (the decision packet, the approve command).
+        body = [piece for line in [header] + view for piece in wrap_line(line, width)]
         body = body[-(height - 1):]  # keep the newest lines when the screen is short
         out = [f"{ESC}[H{ESC}[2J"]
         for line in body:
-            out.append(styled(self.style, line[:width]) + "\r\n")
+            out.append(styled(self.style, line) + "\r\n")
         tail = (prompt + self.buffer)[-(width - 1):]
         out.append(f"{ESC}[{height};1H{ESC}[2K" + self.style.paint("title", tail))
         self.stdout.write("".join(out))

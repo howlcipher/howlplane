@@ -6,13 +6,12 @@ may be launched and the terminal must be restored.
 """
 
 import os
-import pty
 import sys
 
 import pytest
 
 from howlplane.control_plane.howlframe_runner import find_howlframe_binary
-from tests._tui_support import fake_agent_sandbox, read_until
+from tests._tui_support import fake_agent_sandbox, read_until, spawn_tui
 
 pytestmark = pytest.mark.integration
 
@@ -26,10 +25,7 @@ def test_interactive_session_previews_and_declines_without_launching(tmp_path):
            "HOWLPLANE_LOCAL_CONFIG": str(config), "HOWLPLANE_CAPACITY_PATH": str(tmp_path / "cap.json"),
            "HOWLFRAME_BIN": hf, "XDG_STATE_HOME": str(tmp_path / "state"),
            "PYTHONPATH": os.pathsep.join(sys.path)}
-    pid, fd = pty.fork()
-    if pid == 0:
-        os.chdir(repo)
-        os.execve(sys.executable, [sys.executable, "-m", "howlplane.control_plane", "tui"], env)
+    pid, fd = spawn_tui(repo, env)
     try:
         assert b"codex  READY  usable" in read_until(fd, b"codex  READY  usable")
         os.write(fd, b"Add a /health endpoint\r")

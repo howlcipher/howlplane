@@ -171,6 +171,9 @@
                                                                ("exit_code" (map_get doc "exit_code"))
                                                                ("next" (map_get (map_get doc "next_action") "reason"))
                                                                ("next_command" (map_get (map_get doc "next_action") "command"))
+                                                               ("next_then" (map_get (map_get doc "next_action") "then"))
+                                                               ("next_alternatives" (map_get (map_get doc "next_action") "alternatives"))
+                                                               ("next_detail" (map_get (map_get doc "next_action") "detail"))
                                                                ("verification_status" (map_get (map_get doc "verification") "status")))))))
                           (true
                             (append notices (str_join (list "Ignored unknown event type: " (to_string kind)) ""))))

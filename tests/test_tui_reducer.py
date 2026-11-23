@@ -53,7 +53,7 @@ def kinds(result):
 
 def test_provenance_matches_committed_bytes():
     provenance = json.loads((TUI_DIR / "ARTIFACT_PROVENANCE.json").read_text(encoding="utf-8"))
-    assert provenance["producer_source_revision"] == "41d56cecd9e8f936cf9da35240331ab7da0244cd"
+    assert provenance["producer_source_revision"] == "928c00503f1de75e21487d020864076e67323eb4"
     for name, digest in provenance["files"].items():
         assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest, name
 
@@ -194,3 +194,18 @@ def test_missing_runtime_is_an_actionable_error(monkeypatch):
         ReducerRunner(TuiSettings()).check_ready()
     assert caught.value.code == "HOWLFRAME_UNAVAILABLE"
     assert "HOWLFRAME_BIN" in caught.value.next_action
+
+
+def test_owner_boundary_shows_the_commands_but_proposes_nothing(runner):
+    """Show-only approvals: the operator runs approve/reject; the reducer never proposes them."""
+    doc = dict(fixture("work_result_complete"), final_state="awaiting_human", exit_code=2, next_action={
+        "command": "howlplane approve T-9", "then": "howlplane resume T-9",
+        "alternatives": ["howlplane reject T-9"], "reason": "OWNER_REQUIRED",
+        "detail": "Read /repo/.task_runs/T-9/decision_packet.md first."})
+    shown = runner.step(initial_state(), {"type": "work_result", "document": doc})
+    assert shown.intents == []
+    for line in ("Outcome:   awaiting_human (exit 2)",
+                 "Detail:    Read /repo/.task_runs/T-9/decision_packet.md first.",
+                 "Next:      howlplane approve T-9", "Then:      howlplane resume T-9",
+                 "Or:        howlplane reject T-9"):
+        assert line in shown.view

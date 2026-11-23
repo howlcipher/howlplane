@@ -144,7 +144,7 @@ class HowlPlaneBackend:
         from howlplane.control_plane.human_boundary import HumanLifecycleManager
         try:
             outcome = HumanLifecycleManager.cancel(target_repo=str(self.target_repo), task_id=handle.task_id,
-                                                   reason="cancelled from howlplane tui", ledger=None)
+                                                   reason="cancelled from howlplane tui", ledger=_cancel_ledger())
             recorded = f"Recorded as cancelled (exit {outcome.exit_code}); code changes are kept in the working tree."
         except Exception as exc:  # the stop already happened; say plainly what did not
             recorded = f"The cancellation could not be recorded: {exc}"
@@ -154,6 +154,14 @@ class HowlPlaneBackend:
                 "next_action": "Review the working tree; resume or start a new objective.",
                 "command": f"howlplane status --repo {self.target_repo}",
                 "retry_safe": "RECONCILE_FIRST"}
+
+
+def _cancel_ledger():
+    """The ledger `howlplane cancel` records to: the control plane root's (governance_cli.cmd_cancel)."""
+    from howlplane.control_plane.cli import _resolve_ledger_file
+    from howlplane.control_plane.evidence_ledger import EvidenceLedger
+    ledger_file = _resolve_ledger_file(argparse.Namespace(ledger_file=None, control_plane_dir=None))
+    return EvidenceLedger(ledger_file) if ledger_file else None
 
 
 def _last_error_document(path: Optional[Path]) -> Optional[Dict[str, Any]]:
