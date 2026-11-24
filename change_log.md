@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.1]
 
+### Added
+
+- `howlplane tui --print-command` prints the exact `howlframe run` command,
+  grant profile included, so the TUI can be reviewed and run on HowlFrame
+  alone, without the Python launcher. Each run of a saved command draws its own
+  session id.
+
 ### Changed
 
 - `howlplane tui` is now only the pure HowlFrame engine (ADR 0010). The Python
