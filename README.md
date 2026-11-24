@@ -268,6 +268,32 @@ anything runs, `/cancel` (or Ctrl-C) stops a run, and `/quit` (or Ctrl-D) leaves
   falls back to line mode, so it can also be scripted. Dashboards and multiple
   sessions remain HowlBoard's.
 
+#### Running it on HowlFrame alone
+
+`howlplane tui` is a thin launcher: it works out paths and the grant profile,
+then replaces itself with `howlframe run`. To skip it, print that command once
+and run it yourself:
+
+```bash
+# in the repository: save the command as a private script, then run that
+{ echo '#!/bin/sh'; printf 'exec '; howlplane tui --print-command; } > ~/.local/bin/howlplane-tui
+chmod 700 ~/.local/bin/howlplane-tui
+```
+
+The line is the whole authority the TUI has, so it can be read before it runs:
+
+| Grant | Why |
+| --- | --- |
+| `process:exec_inherit_env=<entry>` | the `howlplane` entry script gets your environment, so providers are found and can authenticate |
+| seven `process:exec=<entry> ...` | exactly `providers`, `route --probe` (with and without `--agent`), `work --execute` (with and without `--agent`) and `cancel`; free text only after `--` |
+| `filesystem:read=<repo>/.task_runs` | the run's progress stream |
+| `filesystem:write=<state>/logs` | the session log |
+
+`<entry>` is a private script the command prepares under
+`$XDG_STATE_HOME/howlplane/tui/bin`. Each run starts its own session. Print the
+command again after moving the repository, the Python environment or the
+`howlframe` binary, or after changing `[tui]` limits.
+
 Direct vendor commands (`claude`, `codex`, `agy`) remain available as escape hatches when full multi-agent orchestration is not desired; `howlplane work` remains the governed default.
 
 `howlplane work --implementation-timeout SECONDS` sets the implementation time

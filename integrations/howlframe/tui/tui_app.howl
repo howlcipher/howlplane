@@ -8,9 +8,11 @@
 ;
 ; argv[0] is the launcher's configuration as JSON:
 ;   {"cli": [abs entry], "repo": abs, "task_runs": abs, "log_path": abs|null,
-;    "session_id": str, "max_objective_chars": int, "poll_ms": int,
+;    "session_id": str|absent, "max_objective_chars": int, "poll_ms": int,
 ;    "cancel_grace_ms": int, "cancel_reason": str}
-; Nothing here names a provider, model, executable path or runtime limit.
+; Without a session_id (a saved `howlplane tui --print-command` line) each run
+; draws its own. Nothing here names a provider, model, executable path or
+; runtime limit.
 (cli_app
   (use "tui_core.howl" as core)
 
@@ -419,8 +421,10 @@
           (do
             (stderr "howlplane tui: the launcher configuration is not JSON\n")
             (exit 2)))
-        (exit (terminal_app "on_event"
+        (do
+          (when (is_nil (map_get cfg "session_id")) (map_set cfg "session_id" (rand_hex 8)))
+          (exit (terminal_app "on_event"
                 (dict ("cfg" cfg) ("mode" "idle") ("objective" (map_get (dict) "none"))
                       ("explicit_resource" (map_get (dict) "none")) ("rows" (list)) ("available" (list))
                       ("notices" (list)) ("log_seq" 0) ("want_route" false) ("run_live" false)
-                      ("quit_after" false) ("events_offset" 0) ("task_id" (map_get (dict) "none")))))))))
+                      ("quit_after" false) ("events_offset" 0) ("task_id" (map_get (dict) "none"))))))))))

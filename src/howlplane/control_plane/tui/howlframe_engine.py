@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import shlex
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -86,8 +87,12 @@ def grant_profile(entry: str, repo: str, task_runs: str, log_dir: str) -> List[s
 
 
 def launch_argv(howlframe: str, target_repo: Path, settings: TuiSettings, state_root: Path,
-                session_id: Optional[str] = None) -> List[str]:
-    """The complete `howlframe run` command line for one session."""
+                session_id: Optional[str] = None, reusable: bool = False) -> List[str]:
+    """The complete `howlframe run` command line for one session.
+
+    ``reusable`` leaves the session id out, so the program draws a fresh one on
+    every run of a saved command line (``howlplane tui --print-command``).
+    """
     artifact = app_artifact()
     if not artifact.is_file():
         raise LaunchError(f"The HowlFrame TUI artifact is missing at {artifact}; reinstall HowlPlane")
@@ -104,18 +109,29 @@ def launch_argv(howlframe: str, target_repo: Path, settings: TuiSettings, state_
         "repo": repo,
         "task_runs": task_runs,
         "log_path": os.path.join(logs, "tui_events.jsonl"),
-        "session_id": session_id or secrets.token_hex(8),
         "max_objective_chars": settings.max_objective_chars,
         "poll_ms": int(settings.progress_poll_seconds * 1000),
         "cancel_grace_ms": int(settings.cancel_grace_seconds * 1000),
         "cancel_reason": CANCEL_REASON,
     }
+    if not reusable:
+        config["session_id"] = session_id or secrets.token_hex(8)
     return [howlframe, "run",
             "--allow-caps", ",".join(grant_profile(entry, repo, task_runs, logs)),
             "--max-event-instructions", str(settings.max_instructions),
             "--max-event-memory-bytes", str(settings.max_memory_bytes),
             "--max-state-bytes", str(settings.max_step_bytes),
             str(artifact), json.dumps(config)]
+
+
+def print_command(howlframe: str, target_repo: Path, settings: TuiSettings, state_root: Path) -> str:
+    """The wrapper-free command: one shell-quoted line that runs the TUI on HowlFrame alone.
+
+    It also prepares what the line names (the private entry script and the
+    log directory), so it can be run as-is; regenerate it after moving the
+    repository, the Python environment or the howlframe binary.
+    """
+    return shlex.join(launch_argv(howlframe, target_repo, settings, state_root, reusable=True))
 
 
 def run(howlframe: str, target_repo: Path, settings: TuiSettings, state_root: Path) -> int:

@@ -27,6 +27,9 @@ def command(args: argparse.Namespace) -> int:
             "howlplane tui runs entirely on the HowlFrame VM.",
             "Install HowlFrame or set HOWLFRAME_BIN to a howlframe binary with terminal_app."))
     try:
+        if getattr(args, "print_command", False):
+            print(howlframe_engine.print_command(howlframe, target_repo, settings, howlframe_engine.default_state_root()))
+            return 0
         return howlframe_engine.run(howlframe, target_repo, settings, howlframe_engine.default_state_root())
     except howlframe_engine.LaunchError as exc:
         raise OperatorFailure(OperatorError(
