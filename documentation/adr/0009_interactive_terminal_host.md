@@ -41,7 +41,7 @@ HowlBoard keeps dashboards and multiple sessions.
 * Reducer: `integrations/howlframe/tui/tui_reducer.howl` with `tui_core.howl`,
   committed as `tui_reducer.hfbc` and packaged under
   `src/howlplane/control_plane/data/`. It is built by
-  `scripts/build_tui_reducer.sh` with HowlFrame at the CI runtime pin (`928c005` since 2026-11-23, `41d56ce` before);
+  `scripts/build_tui_reducer.sh` with HowlFrame at the CI runtime pin (`dffcb00` since ADR 0010, earlier `928c005` and `41d56ce`);
   the published v0.1.0 producer rejects dict literals with mixed value types.
   `ARTIFACT_PROVENANCE.json` beside it holds the hashes, and a test rebuilds the
   artifact and compares bytes.

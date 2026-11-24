@@ -61,7 +61,7 @@ jobs:
         run: |
           mkdir -p "$HOME/.local/bin"
           git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
-          git -C /tmp/howlframe checkout --detach 928c00503f1de75e21487d020864076e67323eb4
+          git -C /tmp/howlframe checkout --detach dffcb001222d9bedc2d6eb615541450b5f68bcd3
           cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Run fast deterministic suite
@@ -104,7 +104,7 @@ jobs:
         run: |
           mkdir -p "$HOME/.local/bin"
           git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
-          git -C /tmp/howlframe checkout --detach 928c00503f1de75e21487d020864076e67323eb4
+          git -C /tmp/howlframe checkout --detach dffcb001222d9bedc2d6eb615541450b5f68bcd3
           cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       # `shell: bash` is load-bearing: it runs the step under `bash -eo pipefail`.
@@ -160,7 +160,7 @@ jobs:
         run: |
           mkdir -p "$HOME/.local/bin"
           git clone https://github.com/howlcipher/howlframe.git /tmp/howlframe
-          git -C /tmp/howlframe checkout --detach 928c00503f1de75e21487d020864076e67323eb4
+          git -C /tmp/howlframe checkout --detach dffcb001222d9bedc2d6eb615541450b5f68bcd3
           cd /tmp/howlframe && go build -o "$HOME/.local/bin/howlframe" howlframe.go
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       # A vendored producer schema must equal the file at the commit its

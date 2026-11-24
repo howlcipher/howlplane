@@ -35,12 +35,12 @@ def scratch_repo(path: Path) -> Path:
     return path
 
 
-def spawn_tui(repo: Path, env: Dict[str, str]):
+def spawn_tui(repo: Path, env: Dict[str, str], engine: str = "python"):
     """Starts `howlplane tui` in ``repo`` on a new pseudo terminal; returns (pid, master fd)."""
     pid, fd = pty.fork()
     if pid == 0:
         os.chdir(repo)
-        os.execve(sys.executable, [sys.executable, "-m", "howlplane.control_plane", "tui"], env)
+        os.execve(sys.executable, [sys.executable, "-m", "howlplane.control_plane", "tui", "--engine", engine], env)
     return pid, fd
 
 

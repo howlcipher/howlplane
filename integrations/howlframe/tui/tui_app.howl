@@ -1,0 +1,426 @@
+; HowlPlane TUI as a pure HowlFrame terminal_app (ADR 0010).
+; The HowlFrame runtime owns the terminal, timers and child processes and
+; calls on_event once per event with no grants and a fresh budget. Every
+; HowlPlane action is an effect the runtime runs under the launcher's exact
+; grants: `howlplane` subcommands through process:exec= argv grants (with the
+; operator's environment via process:exec_inherit_env=), the run's progress
+; stream through filesystem:read and the session log through filesystem:write.
+;
+; argv[0] is the launcher's configuration as JSON:
+;   {"cli": [abs entry], "repo": abs, "task_runs": abs, "log_path": abs|null,
+;    "session_id": str, "max_objective_chars": int, "poll_ms": int,
+;    "cancel_grace_ms": int, "cancel_reason": str}
+; Nothing here names a provider, model, executable path or runtime limit.
+(cli_app
+  (use "tui_core.howl" as core)
+
+  ; howlplane argv: the configured entry point followed by tail.
+  (defun hp (state tail)
+    (type_hints (state dict) (tail list) (return list))
+    (let (argv (list))
+      (do
+        (for part (map_get (map_get state "cfg") "cli") (append argv part))
+        (for part tail (append argv part))
+        (return argv))))
+
+  (defun exec_effect (id argv)
+    (type_hints (id string) (argv list) (return dict))
+    (return (dict ("kind" "exec_start") ("id" id) ("argv" argv))))
+
+  ; Lists are values in HowlFrame, so helpers queue effects and notices on
+  ; the state dict, which every helper shares; on_event takes them out.
+  (defun fx (state effect)
+    (type_hints (state dict) (effect dict) (return dict))
+    (let (queued (map_get state "fx"))
+      (do
+        (append queued effect)
+        (map_set state "fx" queued)
+        (return state))))
+
+  (defun note (state text)
+    (type_hints (state dict) (text string) (return dict))
+    (let (queued (map_get state "notices"))
+      (do
+        (append queued text)
+        (map_set state "notices" queued)
+        (return state))))
+
+  ; One howlplane.tui_event/v1 line, or nothing when logging is off.
+  (defun log_event (state code message level)
+    (type_hints (state dict) (code string) (message string) (level string) (return dict))
+    (let (cfg (map_get state "cfg"))
+      (do
+        (when (not (is_nil (map_get cfg "log_path")))
+          (let (seq (+ (map_get state "log_seq") 1))
+            (do
+              (map_set state "log_seq" seq)
+              (call fx state (dict ("kind" "append_log") ("path" (map_get cfg "log_path"))
+                                    ("line" (encode_json (dict ("schema" "howlplane.tui_event/v1") ("seq" seq)
+                                                               ("ts" (time_now)) ("session_id" (map_get cfg "session_id"))
+                                                               ("code" code) ("message" message) ("level" level)
+                                                               ("source" "tui.howlframe") ("task_id" (map_get state "task_id"))))))))))
+        (return state))))
+
+  (defun refresh (state)
+    (type_hints (state dict) (return dict))
+    (do
+      (call fx state (call exec_effect "inventory" (call hp state (list "providers" "--json" "--repo" (map_get (map_get state "cfg") "repo")))))
+      (return state)))
+
+  (defun preview (state)
+    (type_hints (state dict) (return dict))
+    (do
+      (map_set state "want_route" true)
+      (return (call refresh state))))
+
+  (defun route_argv (state)
+    (type_hints (state dict) (return list))
+    (let (tail (list "route" "--probe" "--json" "--repo" (map_get (map_get state "cfg") "repo")))
+      (do
+        (when (not (is_nil (map_get state "explicit_resource")))
+          (do (append tail "--agent") (append tail (map_get state "explicit_resource"))))
+        (append tail "--")
+        (append tail (map_get state "objective"))
+        (return (call hp state tail)))))
+
+  (defun run_argv (state)
+    (type_hints (state dict) (return list))
+    (let (tail (list "work" "--execute" "--json" "--progress" "always" "--task-id" (map_get state "task_id")
+                     "--repo" (map_get (map_get state "cfg") "repo")))
+      (do
+        (when (not (is_nil (map_get state "explicit_resource")))
+          (do (append tail "--agent") (append tail (map_get state "explicit_resource"))))
+        (append tail "--")
+        (append tail (map_get state "objective"))
+        (return (call hp state tail)))))
+
+  (defun poll (state)
+    (type_hints (state dict) (return dict))
+    (do
+      (call fx state (dict ("kind" "timer") ("id" "poll") ("ms" (map_get (map_get state "cfg") "poll_ms"))))
+      (return state)))
+
+  ; Interrupt the run, give it the grace period, then record the cancel.
+  (defun begin_cancel (state)
+    (type_hints (state dict) (return dict))
+    (do
+      (when (= (map_get state "mode") "running")
+        (do
+          (map_set state "mode" "cancelling")
+          (call fx state (dict ("kind" "exec_signal") ("id" "run") ("signal" "interrupt")))
+          (call fx state (dict ("kind" "timer") ("id" "grace") ("ms" (map_get (map_get state "cfg") "cancel_grace_ms"))))
+          (call log_event state "TUI_RUN_CANCEL_REQUESTED" "interrupting the governed run" "WARNING")))
+      (return state)))
+
+  (defun leave (state)
+    (type_hints (state dict) (return dict))
+    (do
+      (if (map_get state "run_live")
+        (do
+          (map_set state "quit_after" true)
+          (call begin_cancel state))
+        (do
+          (call log_event state "TUI_STOPPED" "session stopped" "INFO")
+          (call fx state (dict ("kind" "quit") ("code" 0)))))
+      (return state)))
+
+  ; The last howlplane.error/v1 line a child wrote to stderr, or nothing.
+  (defun error_document (stderr_text)
+    (type_hints (stderr_text string) (return dict))
+    (let (found (dict))
+      (do
+        (for line (str_split stderr_text "\n")
+          (when (starts_with (str_trim line) "{")
+            (let (raw (str_trim line))
+              (try_let (doc (parse_json Any raw))
+                (catch e (set found found))
+                (when (= (map_get doc "schema") "howlplane.error/v1") (set found doc))))))
+        (return found))))
+
+  ; A child's JSON reply on stdout, or a failure document explaining why not.
+  (defun reply (ev)
+    (type_hints (ev dict) (return dict))
+    (let (raw (str_trim (to_string (map_get ev "stdout"))))
+      (let (parsed (dict ("ok" false)))
+        (do
+          (when (starts_with raw "{")
+            (try_let (doc (parse_json Any raw))
+              (catch e (set parsed parsed))
+              (set parsed (dict ("ok" true) ("document" doc)))))
+          (when (not (map_get parsed "ok"))
+            (let (err (call error_document (to_string (map_get ev "stderr"))))
+              (if (map_has err "schema")
+                (set parsed (dict ("ok" false) ("document" err)))
+                (set parsed (dict ("ok" false) ("document"
+                  (dict ("schema" "howlplane.error/v1") ("code" "RUN_OUTPUT_UNREADABLE")
+                        ("message" "HowlPlane did not report a readable result.")
+                        ("why" (str_join (list "The child exited with " (to_string (map_get ev "exit_code")) " and no JSON reply.") ""))
+                        ("next_action" "Inspect the task's evidence before retrying.")
+                        ("command" (str_join (list "howlplane status " (to_string (map_get ev "id"))) ""))
+                        ("retry_safe" "RECONCILE_FIRST"))))))))
+          (return parsed)))))
+
+  (defun on_inventory (state doc)
+    (type_hints (state dict) (doc dict) (return dict))
+    (let (inv (call core/summarize_inventory doc))
+      (do
+        (if (map_get inv "ok")
+          (let (lost (call core/lost_resources (map_get state "available") (map_get inv "rows")))
+            (do
+              (map_delete state "failure")
+              (for x lost
+                (do
+                  (call note state (str_join (list (map_get x "resource_id") " became unavailable: " (map_get x "readiness")) ""))
+                  (when (= (map_get state "explicit_resource") (map_get x "resource_id"))
+                    (do
+                      (map_set state "explicit_resource" (map_get (dict) "none"))
+                      (call note state "Explicit provider choice cleared; HowlPlane will select automatically.")))))
+              (map_set state "rows" (map_get inv "rows"))
+              (map_set state "available" (map_get inv "available"))
+              (when (= (list_len (map_get inv "available")) 0)
+                (call note state "No configured provider is currently usable."))))
+          (map_set state "failure" (dict ("source" "tui") ("code" (map_get inv "code")) ("what" (map_get inv "message"))
+                                         ("why" "The inventory contract version is not one this TUI understands.")
+                                         ("next" "Upgrade the TUI or HowlPlane so their contract versions match.")
+                                         ("retry" "NEVER_AUTO_RETRY"))))
+        (return state))))
+
+  (defun on_route (state doc)
+    (type_hints (state dict) (doc dict) (return dict))
+    (let (r (call core/summarize_route doc (map_get state "available")))
+      (do
+        (if (map_get r "ok")
+          (do
+            (map_delete state "failure")
+            (map_set state "route" r)
+            (when (= (map_get r "status") "SELECTED")
+              (call note state "Type /run to run this objective, or edit it.")))
+          (map_set state "failure" (dict ("source" "tui") ("code" (map_get r "code")) ("what" (map_get r "message"))
+                                         ("why" "The routing contract version is not one this TUI understands.")
+                                         ("next" "Upgrade the TUI or HowlPlane so their contract versions match.")
+                                         ("retry" "NEVER_AUTO_RETRY"))))
+        (return state))))
+
+  (defun on_progress (state doc)
+    (type_hints (state dict) (doc dict) (return dict))
+    (let (p (call core/summarize_progress doc))
+      (do
+        (when (map_get p "ok")
+          (do
+            (map_set state "progress" p)
+            (when (not (is_nil (map_get p "message")))
+              (call note state (str_join (list (to_string (map_get p "kind")) ": " (to_string (map_get p "message"))) "")))))
+        (return state))))
+
+  (defun on_line (state text)
+    (type_hints (state dict) (text string) (return dict))
+    (let (mode (map_get state "mode"))
+      (do
+        (cond
+          ((and (= mode "confirm") (= text "/quit"))
+            (do (map_set state "mode" "idle") (call leave state)))
+          ((= mode "confirm")
+            (if (or (= (to_lower text) "y") (= (to_lower text) "yes"))
+              (do
+                (map_set state "mode" "running")
+                (map_delete state "outcome")
+                (map_delete state "progress")
+                (map_delete state "failure")
+                (map_set state "task_id" (str_join (list "TUI-" (to_string (time_now)) "-" (rand_hex 2)) ""))
+                (map_set state "events_offset" 0)
+                (map_set state "run_live" true)
+                (call fx state (call exec_effect "run" (call run_argv state)))
+                (call poll state)
+                (call log_event state "TUI_RUN_STARTED" "governed run started" "INFO"))
+              (do (map_set state "mode" "idle") (call note state "Run not started."))))
+          ((or (= mode "running") (= mode "cancelling"))
+            (cond
+              ((= text "/cancel") (call begin_cancel state))
+              ((= text "/quit") (call leave state))
+              (true (call note state "A run is in progress. Type /cancel to stop it."))))
+          ((= text "") (call note state "Type an objective, or /help."))
+          ((starts_with text "/")
+            (let (parts (str_split text " "))
+              (let (cmd (list_get parts 0))
+                (cond
+                  ((= cmd "/help")
+                    (do
+                      (call note state "Type an objective to preview its route. Commands:")
+                      (call note state "/agent ID | /agent auto   choose a provider or automatic selection")
+                      (call note state "/refresh   re-check configured AI resources")
+                      (call note state "/run       run the previewed objective (asks to confirm)")
+                      (call note state "/cancel    stop a running objective    /quit   leave")))
+                  ((= cmd "/quit") (call leave state))
+                  ((= cmd "/refresh") (call refresh state))
+                  ((= cmd "/cancel") (call note state "Nothing is running."))
+                  ((= cmd "/agent")
+                    (let (rid (if (> (list_len parts) 1) (list_get parts 1) ""))
+                      (do
+                        (cond
+                          ((or (= rid "") (= rid "auto"))
+                            (do (map_set state "explicit_resource" (map_get (dict) "none"))
+                                (call note state "Automatic provider selection.")))
+                          ((list_contains (map_get state "available") rid) (map_set state "explicit_resource" rid))
+                          (true (call note state (str_join (list "Provider " rid " is not currently usable; selection unchanged.") ""))))
+                        (when (not (is_nil (map_get state "objective"))) (call preview state)))))
+                  ((= cmd "/run")
+                    (cond
+                      ((is_nil (map_get state "objective")) (call note state "Type an objective first."))
+                      ((not (map_has state "route")) (call note state "Wait for the route preview first."))
+                      ((!= (map_get (map_get state "route") "status") "SELECTED")
+                        (call note state "The route is BLOCKED; nothing can run. Fix the exclusions or /refresh."))
+                      (true (map_set state "mode" "confirm"))))
+                  (true (call note state (str_join (list "Unknown command " cmd ". Type /help.") "")))))))
+          (true
+            (let (v (call core/validate_objective text (map_get (map_get state "cfg") "max_objective_chars")))
+              (if (map_get v "ok")
+                (do
+                  (map_set state "objective" (map_get v "objective"))
+                  (map_delete state "route")
+                  (map_delete state "outcome")
+                  (call preview state))
+                (map_set state "failure" (dict ("source" "tui") ("code" (map_get v "code")) ("what" (map_get v "message"))
+                                               ("why" "Input validation failed before any HowlPlane call.")
+                                               ("next" "Edit the objective and submit again.") ("retry" "SAFE_TO_RETRY")))))))
+        (return state))))
+
+  (defun on_exit (state ev)
+    (type_hints (state dict) (ev dict) (return dict))
+    (let (id (map_get ev "id"))
+      (let (r (call reply ev))
+        (do
+          (cond
+            ((= id "inventory")
+              (do
+                (if (map_get r "ok")
+                  (call on_inventory state (map_get r "document"))
+                  (map_set state "failure" (call core/explain_failure (map_get r "document"))))
+                (when (and (map_get state "want_route") (not (is_nil (map_get state "objective"))))
+                  (do
+                    (map_set state "want_route" false)
+                    (call fx state (call exec_effect "route" (call route_argv state)))))))
+            ((= id "route")
+              (if (map_get r "ok")
+                (call on_route state (map_get r "document"))
+                (map_set state "failure" (call core/explain_failure (map_get r "document")))))
+            ((= id "run")
+              (do
+                (map_set state "run_live" false)
+                (call fx state (dict ("kind" "tail") ("id" "progress") ("offset" (map_get state "events_offset"))
+                                      ("path" (str_join (list (map_get (map_get state "cfg") "task_runs") "/" (map_get state "task_id") "/progress_events.jsonl") ""))))
+                (if (= (map_get state "mode") "cancelling")
+                  (call fx state (call exec_effect "cancel" (call hp state (list "cancel" "--json" "--repo" (map_get (map_get state "cfg") "repo")
+                                                                            "--reason" (map_get (map_get state "cfg") "cancel_reason") "--" (map_get state "task_id")))))
+                  (do
+                    (map_set state "mode" "idle")
+                    (if (and (map_get r "ok") (= (map_get (map_get r "document") "schema") "howlplane.work_result/v1"))
+                      (let (doc (map_get r "document"))
+                        (map_set state "outcome" (dict ("final_state" (map_get doc "final_state")) ("exit_code" (map_get doc "exit_code"))
+                                                       ("next" (map_get (map_get doc "next_action") "reason"))
+                                                       ("next_command" (map_get (map_get doc "next_action") "command"))
+                                                       ("next_then" (map_get (map_get doc "next_action") "then"))
+                                                       ("next_alternatives" (map_get (map_get doc "next_action") "alternatives"))
+                                                       ("next_detail" (map_get (map_get doc "next_action") "detail"))
+                                                       ("verification_status" (map_get (map_get doc "verification") "status")))))
+                      (map_set state "failure" (call core/explain_failure (map_get r "document"))))
+                    (call log_event state "TUI_RUN_FINISHED" "governed run finished" "INFO")))))
+            ((= id "cancel")
+              (do
+                (map_set state "mode" "idle")
+                (map_set state "failure" (call core/explain_failure
+                  (dict ("schema" "howlplane.error/v1") ("code" "RUN_CANCELLED")
+                        ("message" (str_join (list "Run " (map_get state "task_id") " was cancelled.") ""))
+                        ("why" "The operator stopped the run from the TUI; HowlPlane recorded the cancellation.")
+                        ("next_action" "Review the task's evidence before starting it again.")
+                        ("command" (str_join (list "howlplane status " (map_get state "task_id")) ""))
+                        ("retry_safe" "RECONCILE_FIRST"))))
+                (when (!= (map_get ev "exit_code") 0)
+                  (call note state "howlplane cancel reported a problem; check `howlplane status`."))
+                (call log_event state "TUI_RUN_CANCELLED" "governed run cancelled" "WARNING")
+                (when (map_get state "quit_after") (call leave state)))))
+          (return state)))))
+
+  (defun on_event (state event)
+    (type_hints (state dict) (event dict) (return dict))
+    (let (kind (map_get event "type"))
+      (do
+        (map_set state "fx" (list))
+        ; Notices accumulate until the operator types again.
+        (when (or (= kind "line") (is_nil (map_get state "notices"))) (map_set state "notices" (list)))
+        (let (effects (list))
+          (do
+            (cond
+              ((= kind "start")
+                (do
+                  (call log_event state "TUI_STARTED" "session started" "INFO")
+                  (call refresh state)))
+              ((= kind "line") (call on_line state (str_trim (to_string (map_get event "text")))))
+              ((= kind "interrupt")
+                (if (or (= (map_get state "mode") "running") (= (map_get state "mode") "cancelling"))
+                  (call begin_cancel state)
+                  (call leave state)))
+              ((= kind "eof") (call leave state))
+              ((= kind "terminate") (call begin_cancel state))
+              ((= kind "process_exit") (call on_exit state event))
+              ((= kind "timer")
+                (cond
+                  ((and (= (map_get event "id") "poll") (map_get state "run_live"))
+                    (do
+                      (call fx state (dict ("kind" "tail") ("id" "progress") ("offset" (map_get state "events_offset"))
+                                            ("path" (str_join (list (map_get (map_get state "cfg") "task_runs") "/" (map_get state "task_id") "/progress_events.jsonl") ""))))
+                      (call poll state)))
+                  ((and (= (map_get event "id") "grace") (map_get state "run_live"))
+                    (call fx state (dict ("kind" "exec_signal") ("id" "run") ("signal" "kill"))))))
+              ((= kind "tail_lines")
+                (do
+                  (map_set state "events_offset" (map_get event "offset"))
+                  (for line (map_get event "lines")
+                    (try_let (doc (parse_json Any line))
+                      (catch e (set line line))
+                      (call on_progress state doc)))))
+              ; The progress stream does not exist until the run creates it.
+              ((and (= kind "effect_failed") (= (map_get event "id") "progress")) (set kind kind))
+              ((= kind "effect_failed")
+                (do
+                  (when (= (map_get event "id") "run")
+                    (do (map_set state "mode" "idle") (map_set state "run_live" false)))
+                  ; A cancel that could not be recorded still ends the cancel.
+                  (when (= (map_get event "id") "cancel")
+                    (do
+                      (map_set state "mode" "idle")
+                      (call note state "The run was stopped but HowlPlane could not record the cancel; run `howlplane cancel` yourself.")))
+                  (map_set state "failure" (dict ("source" "tui") ("code" "TUI_ACTION_FAILED")
+                                                 ("what" (str_join (list (to_string (map_get event "kind")) " " (to_string (map_get event "id")) " failed: "
+                                                                         (to_string (map_get (map_get event "error") "message"))) ""))
+                                                 ("why" "The HowlFrame runtime refused or could not complete the action.")
+                                                 ("next" "Check readiness, then try again.") ("command" "howlplane doctor")
+                                                 ("retry" "UNKNOWN")))
+                  (call log_event state "TUI_ACTION_FAILED" (to_string (map_get (map_get event "error") "code")) "ERROR")
+                  (when (and (= (map_get event "id") "cancel") (map_get state "quit_after")) (call leave state))))
+              ((= kind "handler_failed")
+                (map_set state "failure" (call core/explain_failure (map_get event "error")))))
+            (set effects (map_get state "fx"))
+            (map_delete state "fx")
+            (let (prompt "objective or /help > ")
+              (do
+                (when (= (map_get state "mode") "confirm")
+                  (set prompt (str_join (list "Run with " (to_string (map_get (map_get state "route") "resource_id")) "? [y/N] ") "")))
+                (when (= (map_get state "mode") "running") (set prompt "running (/cancel) > "))
+                (when (= (map_get state "mode") "cancelling") (set prompt "cancelling > "))
+                (return (dict ("state" state)
+                              ("view" (call core/render state))
+                              ("prompt" prompt)
+                              ("effects" effects))))))))))
+
+  (let (args (cli_args))
+    (let (raw (if (> (list_len args) 0) (list_get args 0) "{}"))
+      (try_let (cfg (parse_json Any raw))
+        (catch e
+          (do
+            (stderr "howlplane tui: the launcher configuration is not JSON\n")
+            (exit 2)))
+        (exit (terminal_app "on_event"
+                (dict ("cfg" cfg) ("mode" "idle") ("objective" (map_get (dict) "none"))
+                      ("explicit_resource" (map_get (dict) "none")) ("rows" (list)) ("available" (list))
+                      ("notices" (list)) ("log_seq" 0) ("want_route" false) ("run_live" false)
+                      ("quit_after" false) ("events_offset" 0) ("task_id" (map_get (dict) "none")))))))))
