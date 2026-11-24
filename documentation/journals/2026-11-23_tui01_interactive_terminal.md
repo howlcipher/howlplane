@@ -132,3 +132,26 @@ Python host had been covering for (howlframe#311 to #314, merged as
 - **Existing tests:** they still express intended behavior. The governed-run tests were parametrized rather than duplicated.
 - **Out of scope here:** the Python-host-only unit tests (`test_tui_app.py`, `test_tui_backend.py`) remain until the Python host is deleted. Their engine-level counterparts are the tests above.
 - **Run:** the TUI suites on both engines, then the full gate at pin `dffcb00`.
+
+
+## Python host retired (2026-11-24)
+
+Both engines had passed the governed-run tests on CI (howlplane#224), so the
+Python host was removed, following the owner's "parity, then delete" decision:
+- `tui/app.py`, `backend.py`, `reducer.py` and `terminal.py`;
+- the ADR 0009 reducer artifact;
+- `--engine`.
+
+`howlplane tui` now launches `tui_app.howl` directly.
+
+### Test Impact Assessment
+- **Removed:** the Python-host unit tests `test_tui_app.py`, `test_tui_backend.py`, `test_tui_reducer.py` and `test_tui_terminal.py`. Each covered only deleted code. Their behavior is protected at the engine level:
+  - confirmation, notices, a blocked route and the session log: `test_tui_howlframe_engine.py`;
+  - governed run, owner boundary and cancel evidence: `test_tui_governed_run.py`;
+  - raw mode, decline and exit restore: `test_tui_session.py`;
+  - line editing and the pty restore: HowlFrame `terminal_app_pty_linux_test.go`.
+- **Moved:** the provenance pin check, into `test_tui_howlframe_engine.py`.
+- **Added:**
+  - a SIGTERM restore check on the real session (`test_tui_session.py`);
+  - a missing-runtime error check.
+- **Run:** the TUI suites, then the full gate.

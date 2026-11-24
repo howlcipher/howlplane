@@ -1,4 +1,4 @@
-"""`howlplane tui --engine howlframe`: the pure HowlFrame terminal_app (ADR 0010).
+"""`howlplane tui`: the pure HowlFrame terminal_app (ADR 0010).
 
 The launcher only resolves paths and writes the exact grant profile; these
 tests pin that authority, check the committed artifact against its source,
@@ -6,6 +6,7 @@ and drive the real program in line mode (stdin is a pipe) against the real
 `howlplane` CLI with a stand-in agent, so no provider is contacted.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -20,7 +21,7 @@ import pytest
 from howlplane.control_plane.config_loader import TuiSettings
 from howlplane.control_plane.howlframe_runner import find_howlframe_binary
 from howlplane.control_plane.tui import howlframe_engine
-from tests._tui_support import fake_agent_sandbox
+from tests._tui_support import fake_agent_sandbox, scratch_repo
 
 pytestmark = pytest.mark.integration
 
@@ -81,8 +82,28 @@ def test_paths_a_grant_cannot_carry_are_refused(tmp_path, howlframe):
         howlframe_engine.launch_argv(howlframe, spaced, TuiSettings(), tmp_path / "state")
 
 
+def test_provenance_matches_committed_bytes():
+    provenance = json.loads((TUI_DIR / "ARTIFACT_PROVENANCE.json").read_text(encoding="utf-8"))
+    assert provenance["producer_source_revision"] == "dffcb001222d9bedc2d6eb615541450b5f68bcd3"
+    assert set(provenance["files"]) == {f"integrations/howlframe/tui/{n}" for n in ("tui_core.howl", "tui_app.howl", "tui_app.hfbc")}
+    for name, digest in provenance["files"].items():
+        assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest, name
+
+
+def test_missing_runtime_is_an_actionable_error(monkeypatch, tmp_path):
+    from howlplane.control_plane.presentation.errors import OperatorFailure
+    from howlplane.control_plane import tui
+    monkeypatch.setattr("howlplane.control_plane.howlframe_runner.find_howlframe_binary", lambda: None)
+    repo = scratch_repo(tmp_path / "repo")
+    monkeypatch.chdir(repo)
+    args = type("Args", (), {"repo": str(repo), "control_plane_dir": None})()
+    with pytest.raises(OperatorFailure) as failure:
+        tui.command(args)
+    assert failure.value.error.code == "HOWLFRAME_UNAVAILABLE"
+
+
 def test_committed_app_is_what_the_source_builds(tmp_path, howlframe):
-    """Fails when tui_app.howl or tui_core.howl changed without scripts/build_tui_reducer.sh."""
+    """Fails when tui_app.howl or tui_core.howl changed without scripts/build_tui_app.sh."""
     shutil.copy(TUI_DIR / "tui_app.howl", tmp_path)
     shutil.copy(TUI_DIR / "tui_core.howl", tmp_path)
     out = tmp_path / "rebuilt.hfbc"
@@ -109,7 +130,7 @@ class Session:
                "HOWLFRAME_BIN": howlframe, "XDG_STATE_HOME": str(self.state),
                "PYTHONPATH": os.pathsep.join(sys.path)}
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "howlplane.control_plane", "tui", "--engine", "howlframe"],
+            [sys.executable, "-m", "howlplane.control_plane", "tui"],
             cwd=box["repo"], env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         os.set_blocking(self.proc.stdout.fileno(), False)
         self.out = b""

@@ -1,13 +1,11 @@
 {
   "producer": "howlframe source build",
   "producer_source_revision": "dffcb001222d9bedc2d6eb615541450b5f68bcd3",
-  "producer_note": "Built with the CI runtime pin. The published v0.1.0 release rejects dict literals with mixed value types, so a source build at the pin is the producer; tests/test_tui_reducer.py rebuilds with the pinned compiler and compares bytes. Earlier builds used 928c005 and, before that, 41d56ce.",
+  "producer_note": "Built with the CI runtime pin. The published v0.1.0 release rejects dict literals with mixed value types, so a source build at the pin is the producer; tests/test_tui_howlframe_engine.py rebuilds with the pinned compiler and compares bytes. Earlier builds used 928c005 and, before that, 41d56ce; the ADR 0009 reducer artifact was retired with the Python host.",
   "hfbc_format": 1,
-  "build_command": "HOWLFRAME_BIN=<pinned howlframe> scripts/build_tui_reducer.sh",
+  "build_command": "HOWLFRAME_BIN=<pinned howlframe> scripts/build_tui_app.sh",
   "files": {
     "integrations/howlframe/tui/tui_core.howl": "dda39b20cb91b3776d696a5c2551aa0da5d4d202856dc00d6e6b6908c80446b9",
-    "integrations/howlframe/tui/tui_reducer.howl": "5d769a76070c7f112a9115992bdf1348e35a186fb03c534c9cbb0d392fe0ce76",
-    "integrations/howlframe/tui/tui_reducer.hfbc": "5819e48c55c0db7c59e7d16fff14baaca4e8a23f08369bd5c1ae1db94049965a",
     "integrations/howlframe/tui/tui_app.howl": "641cb633ac3493cd79c52beef00a36ea35fc3809526362db78ae0c436d00a50e",
     "integrations/howlframe/tui/tui_app.hfbc": "dd1cc27397fbaf5584e0a2275afb2b0da04d84a48fb5f171af427400dc5e2443"
   }

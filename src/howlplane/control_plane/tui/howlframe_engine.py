@@ -1,4 +1,4 @@
-"""`howlplane tui --engine howlframe`: launch the pure HowlFrame TUI (ADR 0010).
+"""`howlplane tui`: launch the pure HowlFrame TUI (ADR 0010).
 
 This module holds no TUI logic. It resolves absolute paths, writes the
 grant profile and replaces itself with `howlframe run` on the packaged
@@ -26,6 +26,12 @@ CANCEL_REASON = "cancelled-from-howlplane-tui"
 
 class LaunchError(Exception):
     """The HowlFrame TUI cannot start; the message says why and what to do."""
+
+
+def default_state_root() -> Path:
+    """Private TUI state: ``$XDG_STATE_HOME/howlplane/tui`` (default ``~/.local/state``)."""
+    state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(state) / "howlplane" / "tui"
 
 
 def app_artifact() -> Path:

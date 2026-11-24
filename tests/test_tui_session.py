@@ -5,8 +5,11 @@ an objective, opens the run confirmation, declines it and leaves, so nothing
 may be launched and the terminal must be restored.
 """
 
+import json
 import os
+import signal
 import sys
+import termios
 
 import pytest
 
@@ -43,6 +46,28 @@ def test_interactive_session_previews_and_declines_without_launching(tmp_path):
     assert not marker.exists(), "no agent may be launched by a preview or a declined run"
     assert not (repo / ".task_runs").exists(), "a declined run creates no task"
     log = tmp_path / "state" / "howlplane" / "tui" / "logs" / "tui_events.jsonl"
-    codes = [line.split('"code": "')[1].split('"')[0] for line in log.read_text().splitlines()]
+    codes = [json.loads(line)["code"] for line in log.read_text().splitlines()]
     assert codes[0] == "TUI_STARTED" and codes[-1] == "TUI_STOPPED"
     assert "TUI_RUN_STARTED" not in codes
+
+
+def test_sigterm_restores_the_terminal(tmp_path):
+    hf = find_howlframe_binary()
+    assert hf, "Real howlframe binary is required; set HOWLFRAME_BIN or put it on PATH"
+    box = fake_agent_sandbox(tmp_path)
+    env = {"HOME": str(tmp_path), "PATH": f"{box['bindir']}:/usr/bin:/bin", "TERM": "xterm",
+           "HOWLPLANE_LOCAL_CONFIG": str(box["config"]), "HOWLPLANE_CAPACITY_PATH": str(tmp_path / "cap.json"),
+           "HOWLFRAME_BIN": hf, "XDG_STATE_HOME": str(tmp_path / "state"),
+           "PYTHONPATH": os.pathsep.join(sys.path)}
+    pid, fd = spawn_tui(box["repo"], env)
+    try:
+        started = read_until(fd, b"codex  READY  usable")
+        assert b"\x1b[?1049h" in started, "raw mode enters the alternate screen"
+        assert not termios.tcgetattr(fd)[3] & termios.ICANON, "the runtime holds raw mode"
+        os.kill(pid, signal.SIGTERM)
+        tail = read_until(fd, b"\x1b[?1049l")
+    finally:
+        _, status = os.waitpid(pid, 0)
+    assert os.waitstatus_to_exitcode(status) == 143
+    assert b"\x1b[?1049l" in tail
+    assert termios.tcgetattr(fd)[3] & termios.ICANON, "canonical mode is back after SIGTERM"
