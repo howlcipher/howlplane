@@ -1454,9 +1454,13 @@ def build_parser(program_name: str = "howlplane") -> argparse.ArgumentParser:
     )
 
     # tui
-    subparsers.add_parser(
+    p_tui = subparsers.add_parser(
         "tui", parents=[common_parser],
         help="Interactive terminal: type an objective, preview its route, run it with confirmation")
+    p_tui.add_argument(
+        "--print-command", action="store_true",
+        help="Print the exact `howlframe run` command (grants included) instead of starting; "
+             "it runs the TUI on HowlFrame alone")
 
     # providers
     p_providers = subparsers.add_parser(

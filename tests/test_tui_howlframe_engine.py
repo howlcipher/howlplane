@@ -9,6 +9,7 @@ and drive the real program in line mode (stdin is a pipe) against the real
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -118,7 +119,7 @@ def test_committed_app_is_what_the_source_builds(tmp_path, howlframe):
 # -- the program, in line mode --------------------------------------------------------------
 
 class Session:
-    def __init__(self, box, howlframe):
+    def __init__(self, box, howlframe, argv=None):
         tmp = box["tmp"]
         root = tmp / "control-plane"
         root.mkdir(exist_ok=True)
@@ -129,8 +130,9 @@ class Session:
                "HOWLPLANE_CAPACITY_PATH": str(tmp / "cap.json"), "HOWLPLANE_DIAGNOSTICS_DIR": str(tmp / "diag"),
                "HOWLFRAME_BIN": howlframe, "XDG_STATE_HOME": str(self.state),
                "PYTHONPATH": os.pathsep.join(sys.path)}
+        self.env = env
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "howlplane.control_plane", "tui"],
+            argv or [sys.executable, "-m", "howlplane.control_plane", "tui"],
             cwd=box["repo"], env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         os.set_blocking(self.proc.stdout.fileno(), False)
         self.out = b""
@@ -226,3 +228,43 @@ def test_session_log_is_private_versioned_and_sequenced(session):
     assert events[0]["code"] == "TUI_STARTED" and events[-1]["code"] == "TUI_STOPPED"
     assert stat.S_IMODE(log.stat().st_mode) == 0o600
     assert stat.S_IMODE(log.parent.stat().st_mode) == 0o700
+
+
+# -- the wrapper-free path ----------------------------------------------------------------
+
+def test_print_command_is_the_exact_launch_argv(tmp_path, howlframe):
+    repo = scratch_repo(tmp_path / "repo")
+    line = howlframe_engine.print_command(howlframe, repo, TuiSettings(), tmp_path / "state")
+    argv = shlex.split(line)
+    expected = howlframe_engine.launch_argv(howlframe, repo, TuiSettings(), tmp_path / "state", reusable=True)
+    assert argv == expected
+    config = json.loads(argv[-1])
+    assert "session_id" not in config, "a saved command must not reuse one session id"
+    assert argv[argv.index("--allow-caps") + 1].split(",") == howlframe_engine.grant_profile(
+        config["cli"][0], config["repo"], config["task_runs"], os.path.dirname(config["log_path"]))
+
+
+def test_printed_command_runs_the_tui_on_howlframe_alone(tmp_path, howlframe):
+    """`howlplane tui --print-command`, then that line run directly: no Python wrapper in the session."""
+    box = fake_agent_sandbox(tmp_path)
+    probe = Session(box, howlframe, argv=[sys.executable, "-m", "howlplane.control_plane", "tui", "--print-command"])
+    printed = probe.proc.communicate(timeout=60)[0].decode()
+    assert probe.proc.returncode == 0, printed
+    assert printed.count("\n") == 1, "exactly one line, so it can be saved as a script"
+    argv = shlex.split(printed)
+    assert argv[0] == howlframe and argv[1] == "run"
+
+    sessions = []
+    for _ in range(2):
+        s = Session(box, howlframe, argv=argv)
+        s.wait_for("codex  READY  usable")
+        s.send("Add a /health endpoint")
+        s.wait_for("Route:     codex for implementation")
+        s.send("/quit")
+        assert s.finish() == 0
+        sessions.append(s)
+    assert not box["marker"].exists(), "the preview never launches the agent"
+    events, _ = sessions[-1].log_codes()
+    ids = {e["session_id"] for e in events}
+    assert len(ids) == 2, "each run of a saved command is its own session"
+    assert all(len(i) == 16 for i in ids)
