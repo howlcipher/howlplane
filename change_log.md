@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.1]
 
+### Changed
+
+- `howlplane tui` is now only the pure HowlFrame engine (ADR 0010). The Python
+  host (`tui/app.py`, `backend.py`, `reducer.py`, `terminal.py`), the ADR 0009
+  reducer artifact and `--engine` were removed after both engines passed the
+  same governed-run tests on CI. `scripts/build_tui_reducer.sh` is now
+  `scripts/build_tui_app.sh`. `[tui] step_deadline_seconds` is still accepted
+  and no longer used.
+
 ### Added
 
 - `howlplane tui --engine howlframe`: the TUI as a pure HowlFrame

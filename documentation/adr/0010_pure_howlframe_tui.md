@@ -1,7 +1,7 @@
 # ADR 0010: Pure HowlFrame TUI
 
 ## Status
-Accepted (2026-11-23, owner). This ADR supersedes the host half of ADR 0009. The show-only approval decision in ADR 0009 still holds.
+Accepted (2026-11-23, owner); implemented. This ADR supersedes the host half of ADR 0009. The show-only approval decision in ADR 0009 still holds. The Python host was deleted on 2026-11-24 once both engines had passed the same governed-run tests on CI (howlplane#224), so `howlplane tui` is now only this engine.
 
 ## Context
 ADR 0009 split `howlplane tui` in two. HowlFrame decides state, view and intents in about 370 lines of `.howl`. About 830 lines of Python own everything else:
@@ -38,7 +38,7 @@ The owner asked for a pure HowlFrame TUI. HowlFrame now provides what was missin
 2. **Hosting a long-running interactive program.**
    - **Event-loop app kind (chosen).** It mirrors the ADR 0009 reducer, so the decision code carries over. Budgets are per event, as in HTTP handlers. Terminal restore and sanitizing live in the runtime.
    - Imperative builtins plus a budget-scope construct: rejected. Restoring the terminal, scoping budgets and reclaiming memory would become every program's problem.
-3. **Rollout: parity, then delete (chosen).** `--engine howlframe` ships next to the Python host. Both engines pass the same governed-run tests. The Python host is deleted in a later change once that parity holds on CI.
+3. **Rollout: parity, then delete (chosen, done).** `--engine howlframe` shipped next to the Python host (#224). Both engines pass the same governed-run tests. The Python host is deleted in a later change once that parity holds on CI.
 
 ## Decision
 - **The program.** `integrations/howlframe/tui/tui_app.howl` is the whole TUI. It reuses `tui_core.howl` unchanged.
@@ -49,7 +49,7 @@ The owner asked for a pure HowlFrame TUI. HowlFrame now provides what was missin
     - `append_log` for `howlplane.tui_event/v1` session events;
     - `quit`.
   - Because lists are values in HowlFrame, helpers queue effects and notices on the state dict.
-- **The launcher.** `howlplane tui --engine howlframe` (`tui/howlframe_engine.py`) holds no TUI logic.
+- **The launcher.** `howlplane tui` (`tui/howlframe_engine.py`) holds no TUI logic.
   - It writes a private entry script (0700). HowlFrame refuses to exec a symlink, and a venv interpreter usually is one.
   - It resolves canonical paths and refuses any containing whitespace or a comma, which a grant token cannot carry.
   - It then `execv`s `howlframe run` with exactly these grants:

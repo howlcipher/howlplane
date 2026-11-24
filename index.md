@@ -242,17 +242,13 @@ readiness and the route HowlPlane would take; `/agent ID` (or `/agent auto`)
 chooses a provider within the eligible set, `/run` asks for a typed `y` before
 anything runs, `/cancel` (or Ctrl-C) stops a run, and `/quit` (or Ctrl-D) leaves.
 
-* Every decision runs on the HowlFrame VM with no capability grant
-  (`integrations/howlframe/tui/`); the Python host only owns the terminal and a
-  closed set of actions (ADR 0009).
-* `howlplane tui --engine howlframe` runs the whole TUI in HowlFrame
-  (`tui_app.howl`, ADR 0010): the HowlFrame runtime owns the terminal, timers
-  and the `howlplane` child processes, and the launcher only grants seven exact
-  `howlplane` command shapes, the run's `.task_runs` directory (read) and the
-  session log directory (write). It needs a HowlFrame runtime with
-  `terminal_app` and a repository path without whitespace or commas. Both
-  engines pass the same governed-run tests; the Python host is the default
-  until it is retired.
+* The whole TUI is HowlFrame (`integrations/howlframe/tui/tui_app.howl`,
+  ADR 0010). The HowlFrame runtime owns the terminal, timers and the `howlplane`
+  child processes, and each event's handler runs with no capability grant and
+  a fresh budget. The launcher only grants seven exact `howlplane` command
+  shapes (with your environment), the run's `.task_runs` directory (read) and
+  the session log directory (write). The repository path must not contain
+  whitespace or commas.
 * Preview is read only and probes readiness, so a provider whose executable is
   gone is shown as excluded instead of selected. A run is exactly
   `howlplane work OBJECTIVE --execute --json` with your environment, so it keeps
@@ -263,10 +259,12 @@ anything runs, `/cancel` (or Ctrl-C) stops a run, and `/quit` (or Ctrl-D) leaves
 * Session events are `howlplane.tui_event/v1` lines in
   `$XDG_STATE_HOME/howlplane/tui/logs/tui_events.jsonl` (owner-only files).
 * Limits live in the `[tui]` table of `~/.config/howlplane/config.toml`
-  (`max_instructions`, `max_memory_bytes`, `step_deadline_seconds`,
-  `max_step_bytes`, `max_objective_chars`, `progress_poll_seconds`,
-  `cancel_grace_seconds`); all are finite and validated.
-* It needs a `howlframe` runtime (`HOWLFRAME_BIN` or `PATH`). Without a TTY it
+  (`max_instructions` and `max_memory_bytes` per event, `max_step_bytes` for the
+  carried state, `max_objective_chars`, `progress_poll_seconds`,
+  `cancel_grace_seconds`; `step_deadline_seconds` is accepted but no longer
+  used); all are finite and validated.
+* It needs a `howlframe` runtime with `terminal_app` (HowlFrame `main` at
+  `dffcb00` or v0.3.0 once tagged; `HOWLFRAME_BIN` or `PATH`). Without a TTY it
   falls back to line mode, so it can also be scripted. Dashboards and multiple
   sessions remain HowlBoard's.
 
@@ -653,7 +651,7 @@ never clears an explicit parent value. Each option requires a path value.
 - [2026-09-29 remote snapshot follow-ons](documentation/journals/2026-09-29_team_howlplane_backlog.md)
 - [TUI-00 interactive terminal feasibility gate](documentation/journals/2026-11-22_tui00_feasibility_gate.md) and [ADR 0009: interactive terminal host](documentation/adr/0009_interactive_terminal_host.md)
 - [TUI-01: `howlplane tui`](documentation/journals/2026-11-23_tui01_interactive_terminal.md)
-- [ADR 0010: pure HowlFrame TUI](documentation/adr/0010_pure_howlframe_tui.md) (`howlplane tui --engine howlframe`)
+- [ADR 0010: pure HowlFrame TUI](documentation/adr/0010_pure_howlframe_tui.md) (`howlplane tui`)
 
 Validation maintenance separates existing Bandit annotation reasons from rule IDs
 and removes obsolete suppressions. It changes no runtime behavior or trust policy.
@@ -661,7 +659,7 @@ and removes obsolete suppressions. It changes no runtime behavior or trust polic
 The generated-application CI suites compile and execute against HowlFrame source
 `dffcb001222d9bedc2d6eb615541450b5f68bcd3` (2026-11-23; HowlFrame `main` with the versioned runtime error,
 exec process bounds, the runner-only `process:exec_inherit_env=` grant and
-`terminal_app`, which `howlplane tui --engine howlframe` needs). Fast, full and
+`terminal_app`, which `howlplane tui` needs). Fast, full and
 nightly jobs use that same immutable commit. Before the move, the full suite,
 including generated notes/todo acceptance and both packaged HFBC1 artifacts,
 passed against it; the previous pins were `928c00503f1de75e21487d020864076e67323eb4` (VM resource-bound fixes
