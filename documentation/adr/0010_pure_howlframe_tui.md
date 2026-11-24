@@ -66,4 +66,5 @@ The owner asked for a pure HowlFrame TUI. HowlFrame now provides what was missin
 - **Paths.** Paths with whitespace or commas need the Python engine until grants can quote.
 - **HowlFrame runtime.** The engine needs a HowlFrame runtime with `terminal_app`, so HowlPlane's CI pin moves to that commit.
 - **What remains non-HowlFrame:** `howlplane` itself, as the exec child, and the launcher.
+- **Building with HowlFrame alone.** `scripts/build_tui_app.sh` runs `howlframe build`, then `scripts/tui_provenance.howl`. That program hashes the sources and the artifact into `ARTIFACT_PROVENANCE.json` and writes the packaged copy, holding only read and write grants on those two directories. The TUI is now written, built and run with HowlFrame; outside it are `howlplane`, which the TUI drives, and the HowlFrame runtime.
 - **Running without the launcher.** A HowlFrame program cannot grant itself authority, so someone outside it has to choose the grants. `howlplane tui --print-command` prints the launcher's exact `howlframe run` line, without a fixed session id, so the operator can review it and run the TUI on HowlFrame alone. The tests run that printed line directly.

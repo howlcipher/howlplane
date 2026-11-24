@@ -243,7 +243,9 @@ chooses a provider within the eligible set, `/run` asks for a typed `y` before
 anything runs, `/cancel` (or Ctrl-C) stops a run, and `/quit` (or Ctrl-D) leaves.
 
 * The whole TUI is HowlFrame (`integrations/howlframe/tui/tui_app.howl`,
-  ADR 0010). The HowlFrame runtime owns the terminal, timers and the `howlplane`
+  ADR 0010), and so is its build: `scripts/build_tui_app.sh` is only
+  `howlframe build` plus the HowlFrame program `scripts/tui_provenance.howl`,
+  which records the artifact's hashes and packages it. The HowlFrame runtime owns the terminal, timers and the `howlplane`
   child processes, and each event's handler runs with no capability grant and
   a fresh budget. The launcher only grants seven exact `howlplane` command
   shapes (with your environment), the run's `.task_runs` directory (read) and

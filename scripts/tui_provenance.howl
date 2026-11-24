@@ -1,0 +1,53 @@
+; Records the howlplane tui artifact's provenance and packages it, in HowlFrame.
+; Run by scripts/build_tui_app.sh after `howlframe build`:
+;   howlframe run --allow-caps "filesystem:read=<tui>,filesystem:write=<tui>,filesystem:write=<pkg>" \
+;     scripts/tui_provenance.howl -- <tui> <pkg>
+; <tui> is integrations/howlframe/tui and <pkg> its packaged copy under
+; src/howlplane/control_plane/data. It needs no exec, network or environment grant.
+(cli_app
+  (defun hash_of (dir name)
+    (type_hints (dir string) (name string) (return string))
+    (return (sha256_hex (bytes_to_string (read_file (str_join (list dir "/" name) ""))))))
+
+  ; Pretty JSON for a flat object: one line per key, keys in byte order.
+  (defun render_flat (doc indent)
+    (type_hints (doc dict) (indent string) (return string))
+    (let (lines (list))
+      (do
+        (for key (map_keys doc)
+          (append lines (str_join (list indent "  " (encode_json key) ": " (encode_json (map_get doc key))) "")))
+        (return (str_join (list "{\n" (str_join lines ",\n") "\n" indent "}") "")))))
+
+  ; The provenance document: flat values plus the nested "files" object.
+  (defun render (doc)
+    (type_hints (doc dict) (return string))
+    (let (lines (list))
+      (do
+        (for key (map_keys doc)
+          (if (= key "files")
+            (append lines (str_join (list "  \"files\": " (call render_flat (map_get doc key) "  ")) ""))
+            (append lines (str_join (list "  " (encode_json key) ": " (encode_json (map_get doc key))) ""))))
+        (return (str_join (list "{\n" (str_join lines ",\n") "\n}") "")))))
+
+  (let (args (cli_args))
+    (if (!= (list_len args) 2)
+      (do
+        (stderr "usage: tui_provenance.howl <tui dir> <packaged dir>\n")
+        (exit 2))
+      (let (tui (list_get args 0))
+        (let (pkg (list_get args 1))
+          (let (path (str_join (list tui "/ARTIFACT_PROVENANCE.json") ""))
+            (let (raw (bytes_to_string (read_file path)))
+              (do
+                (mkdir pkg)
+                (write_file (str_join (list pkg "/tui_app.hfbc") "") (read_file (str_join (list tui "/tui_app.hfbc") "")))
+                (let (doc (parse_json Any raw))
+                  (let (files (dict))
+                    (do
+                      (for name (list "tui_core.howl" "tui_app.howl" "tui_app.hfbc")
+                        (map_set files (str_join (list "integrations/howlframe/tui/" name) "") (call hash_of tui name)))
+                      (map_set doc "files" files)
+                      (map_set doc "build_command" "HOWLFRAME_BIN=/path/to/pinned/howlframe scripts/build_tui_app.sh")
+                      (write_file path (str_join (list (call render doc) "\n") ""))
+                      (print (str_join (list "Recorded provenance in " path) ""))))))))))))
+)
