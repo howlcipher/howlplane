@@ -97,3 +97,38 @@ as evidence: the pytest output, the task's `.task_runs/<task_id>/` directory fro
 the temporary repository, and the session log under the temporary
 `XDG_STATE_HOME`. It costs one provider session; it writes nothing to the
 checkout's ledger.
+
+
+## Pure HowlFrame engine (ADR 0010)
+
+The owner asked for the TUI in pure HowlFrame. HowlFrame gained what the
+Python host had been covering for (howlframe#311 to #314, merged as
+`dffcb00`):
+- the versioned `howlframe.runtime_error/v1`;
+- `--max-exec-millis` and `--max-processes`;
+- the runner-only `process:exec_inherit_env=` grant;
+- `terminal_app`, a runtime-owned event loop with per-event budgets and a closed effect table.
+
+`integrations/howlframe/tui/tui_app.howl` is now the whole TUI on that runtime.
+`howlplane tui --engine howlframe` launches it with an exact grant profile.
+
+### Issues found while porting
+- **List mutation.** HowlFrame lists are values, so `append` inside a helper never reaches the caller. Effects and notices are now queued on the state dict, which helpers share.
+- **Cancel argv.** The cancel reason had spaces, which a grant token cannot carry, so cancel was denied. A failed cancel also left the session unable to quit. The reason now comes from the launcher config (`cancel_reason`), and a failed cancel ends the cancel and still honors quit.
+- **Symlinked interpreter.** A venv interpreter is a symlink, which `exec` refuses. The launcher writes a private 0700 entry script whose interpreter line keeps the venv.
+
+### Test Impact Assessment
+- **Behavior added:** a second TUI engine. The default engine is unchanged.
+- **Tests that prove it:**
+  - `tests/test_tui_governed_run.py` now runs both scenarios on both engines: the run reaching the owner boundary with the show-only commands, and cancel with ledger evidence.
+  - `tests/test_tui_howlframe_engine.py`:
+    - grant profile exactness and no coarse authority;
+    - launch argv, limits, config, and the entry and log directory modes;
+    - refusal of paths a grant cannot carry;
+    - the committed artifact equals the source build and the packaged copy;
+    - preview never runs, and a run needs typed confirmation;
+    - command notices and a blocked route;
+    - the session log is private, versioned and sequenced.
+- **Existing tests:** they still express intended behavior. The governed-run tests were parametrized rather than duplicated.
+- **Out of scope here:** the Python-host-only unit tests (`test_tui_app.py`, `test_tui_backend.py`) remain until the Python host is deleted. Their engine-level counterparts are the tests above.
+- **Run:** the TUI suites on both engines, then the full gate at pin `dffcb00`.

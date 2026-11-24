@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `howlplane tui --engine howlframe`: the TUI as a pure HowlFrame
+  `terminal_app` (`integrations/howlframe/tui/tui_app.howl`, ADR 0010). The
+  launcher writes a private entry script and an exact grant profile (the
+  operator's environment for that entry only, seven `howlplane` argv shapes,
+  `.task_runs` read, session log write) and replaces itself with
+  `howlframe run`. Inventory, route preview, run, progress, cancel (through
+  `howlplane cancel`, so evidence matches the CLI) and the show-only approval
+  view behave as in the Python engine; the governed-run tests run on both.
+
 - A sequenced progress stream beside the snapshot: each task run now writes
   `howlplane.task_progress_event/v1` lines to
   `.task_runs/<task_id>/progress_events.jsonl` (owner-only), one per change of
