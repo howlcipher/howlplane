@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- The `howlplane tui` build is HowlFrame too: `scripts/build_tui_app.sh` runs
+  `howlframe build` and then `scripts/tui_provenance.howl`, a HowlFrame program
+  with read and write grants on two directories only, which records the
+  artifact's SHA-256 provenance and writes the packaged copy. The Python step
+  is gone; the record's hashes are unchanged and its keys are now sorted.
+
 - `howlplane tui --print-command` prints the exact `howlframe run` command,
   grant profile included, so the TUI can be reviewed and run on HowlFrame
   alone, without the Python launcher. Each run of a saved command draws its own

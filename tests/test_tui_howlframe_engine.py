@@ -268,3 +268,38 @@ def test_printed_command_runs_the_tui_on_howlframe_alone(tmp_path, howlframe):
     ids = {e["session_id"] for e in events}
     assert len(ids) == 2, "each run of a saved command is its own session"
     assert all(len(i) == 16 for i in ids)
+
+
+# -- the build, in HowlFrame alone --------------------------------------------------------
+
+PROVENANCE_PROGRAM = ROOT / "scripts" / "tui_provenance.howl"
+
+
+def run_provenance(howlframe, tui, pkg, grants):
+    return subprocess.run([howlframe, "run", "--allow-caps", ",".join(grants), str(PROVENANCE_PROGRAM), str(tui), str(pkg)],
+                          capture_output=True, text=True, timeout=60)
+
+
+def test_provenance_program_reproduces_the_committed_record(tmp_path, howlframe):
+    tui, pkg = tmp_path / "tui", tmp_path / "pkg"
+    shutil.copytree(TUI_DIR, tui)
+    pkg.mkdir()
+    done = run_provenance(howlframe, tui, pkg, [f"filesystem:read={tui}", f"filesystem:write={tui}", f"filesystem:write={pkg}"])
+    assert done.returncode == 0, done.stdout + done.stderr
+    rebuilt = json.loads((tui / "ARTIFACT_PROVENANCE.json").read_text(encoding="utf-8"))
+    committed = json.loads((TUI_DIR / "ARTIFACT_PROVENANCE.json").read_text(encoding="utf-8"))
+    assert rebuilt == committed, "the committed record is what the HowlFrame program writes"
+    for name, digest in rebuilt["files"].items():
+        assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest, name
+    assert (pkg / "tui_app.hfbc").read_bytes() == (TUI_DIR / "tui_app.hfbc").read_bytes()
+    assert (tui / "ARTIFACT_PROVENANCE.json").read_text() == (TUI_DIR / "ARTIFACT_PROVENANCE.json").read_text()
+
+
+def test_provenance_program_holds_only_its_grants(tmp_path, howlframe):
+    tui, pkg = tmp_path / "tui", tmp_path / "pkg"
+    shutil.copytree(TUI_DIR, tui)
+    pkg.mkdir()
+    before = (tui / "ARTIFACT_PROVENANCE.json").read_bytes()
+    denied = run_provenance(howlframe, tui, pkg, [f"filesystem:read={tui}", f"filesystem:write={pkg}"])
+    assert denied.returncode != 0 and "CAPABILITY_DENIED" in denied.stderr, denied.stderr
+    assert (tui / "ARTIFACT_PROVENANCE.json").read_bytes() == before
