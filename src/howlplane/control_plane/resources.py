@@ -21,7 +21,7 @@ PACKAGED_FILES = (
     ("contracts", "howlinstinct", "howlinstinct.decision_receipt.v1.schema.json"),
     ("integrations", "howlframe", "candidate_evaluator.hfbc"),
     ("integrations", "howlframe", "project_context_audit.hfbc"),
-    ("integrations", "howlframe", "tui", "tui_reducer.hfbc"),
+    ("integrations", "howlframe", "tui", "tui_app.hfbc"),
 )
 
 

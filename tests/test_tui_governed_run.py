@@ -23,10 +23,6 @@ from tests._tui_support import fake_agent_sandbox, read_until, spawn_tui
 
 pytestmark = pytest.mark.integration
 
-# Both engines must behave the same: the HowlPlane host (ADR 0009) and the
-# pure HowlFrame terminal_app (ADR 0010).
-ENGINES = pytest.mark.parametrize("engine", ["python", "howlframe"])
-
 CHECKOUT_LEDGER = Path(__file__).resolve().parents[1] / "logs" / "control_plane" / "evidence_ledger.jsonl"
 
 
@@ -35,11 +31,11 @@ def checkout_ledger_lines():
 
 
 def unwrap(screen):
-    """Rejoins lines RawTerminal wrapped at the terminal width (continuations start with two spaces)."""
+    """Rejoins lines the HowlFrame runtime wrapped at the terminal width (continuations start with two spaces)."""
     return re.sub(r"\r*\n  ", "", strip_ansi(screen))
 
 
-def start_session(box, engine):
+def start_session(box):
     hf = find_howlframe_binary()
     assert hf, "Real howlframe binary is required; set HOWLFRAME_BIN or put it on PATH"
     tmp = box["tmp"]
@@ -51,7 +47,7 @@ def start_session(box, engine):
            "HOWLPLANE_CAPACITY_PATH": str(tmp / "cap.json"), "HOWLPLANE_DIAGNOSTICS_DIR": str(tmp / "diag"),
            "HOWLFRAME_BIN": hf, "XDG_STATE_HOME": str(tmp / "state"),
            "PYTHONPATH": os.pathsep.join(sys.path)}
-    pid, fd = spawn_tui(box["repo"], env, engine)
+    pid, fd = spawn_tui(box["repo"], env)
     return pid, fd, root
 
 
@@ -81,11 +77,10 @@ def task_entries(root, task_id):
     return [json.loads(line) for line in ledger.read_text().splitlines() if task_id in line]
 
 
-@ENGINES
-def test_run_reaches_the_owner_boundary_and_shows_the_commands(tmp_path, engine):
+def test_run_reaches_the_owner_boundary_and_shows_the_commands(tmp_path):
     box = fake_agent_sandbox(tmp_path, agent_body="echo hello > hello.txt\nexit 0")
     before = checkout_ledger_lines()
-    pid, fd, root = start_session(box, engine)
+    pid, fd, root = start_session(box)
     try:
         confirm_run(fd)
         screen = unwrap(read_until(fd, b"Or:        howlplane reject", timeout=240).decode(errors="replace"))
@@ -105,11 +100,10 @@ def test_run_reaches_the_owner_boundary_and_shows_the_commands(tmp_path, engine)
     assert checkout_ledger_lines() == before, "the checkout ledger is never written"
 
 
-@ENGINES
-def test_cancel_stops_the_run_and_records_it(tmp_path, engine):
+def test_cancel_stops_the_run_and_records_it(tmp_path):
     box = fake_agent_sandbox(tmp_path, agent_body="sleep 120")
     before = checkout_ledger_lines()
-    pid, fd, root = start_session(box, engine)
+    pid, fd, root = start_session(box)
     try:
         confirm_run(fd)
         assert b"running (/cancel)" in read_until(fd, b"running (/cancel)")

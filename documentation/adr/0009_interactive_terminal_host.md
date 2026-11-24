@@ -2,6 +2,10 @@
 
 ## Status
 Accepted (2026-11-23, owner). Implemented in TUI-01 as `howlplane tui`.
+Host half superseded by ADR 0010 (2026-11-24): the Python host, the reducer
+and `tui_reducer.howl` were removed and `howlplane tui` is a pure HowlFrame
+`terminal_app`. The show-only approval decision below still holds. The
+implementation notes below describe the retired host.
 
 ## Context
 The goal is a lightweight interactive terminal for one objective at a time,

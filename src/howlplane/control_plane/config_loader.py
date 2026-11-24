@@ -235,15 +235,19 @@ class SemanticRecommendationSettings(BaseModel):
 
 
 class TuiSettings(BaseModel):
-    """Bounds for `howlplane tui` (ADR 0009). Every limit is finite and validated.
+    """Bounds for `howlplane tui` (ADR 0010). Every limit is finite and validated.
 
-    Each reducer step runs the HowlFrame VM with no capability grant under
-    these limits; the host refuses a step document larger than
-    ``max_step_bytes`` before it starts the VM.
+    Each event runs the TUI's HowlFrame handler with no capability grant and
+    a fresh budget: ``max_instructions`` and ``max_memory_bytes`` become
+    ``--max-event-instructions`` and ``--max-event-memory-bytes``, and
+    ``max_step_bytes`` bounds the state carried between events
+    (``--max-state-bytes``). ``step_deadline_seconds`` applied to the retired
+    per-step reducer process (ADR 0009); it is still accepted so existing
+    configuration keeps loading, and has no effect.
     """
 
-    # A step measured at most about 610 instructions with seven resources
-    # (TUI-01); the default leaves room for much larger pools.
+    # A reducer step measured at most about 610 instructions with seven
+    # resources (TUI-01); the default leaves room for much larger pools.
     max_instructions: int = Field(default=50_000, ge=1_000, le=10_000_000)
     max_memory_bytes: int = Field(default=16 * 1024 * 1024, ge=1024 * 1024, le=256 * 1024 * 1024)
     step_deadline_seconds: float = Field(default=5.0, gt=0, le=60)
