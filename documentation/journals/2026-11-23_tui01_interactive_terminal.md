@@ -155,3 +155,49 @@ Python host was removed, following the owner's "parity, then delete" decision:
   - a SIGTERM restore check on the real session (`test_tui_session.py`);
   - a missing-runtime error check.
 - **Run:** the TUI suites, then the full gate.
+
+
+## Operator improvements (2026-11-26)
+
+The owner chose six improvements: paste-safe confirmation, replay test mode,
+faster preview, line editing with history, colour, and scrolling. The runtime
+parts went into HowlFrame first (howlframe#318 replay, #319 editing, paste,
+styles and scrolling; merged as `e64256e`), and the CI pin moved there. The
+TUI adopts them as ADR 0010's amendment records:
+- a pasted confirmation is refused;
+- previews probe the inventory and the route concurrently, under generation-tagged ids;
+- the view is styled;
+- the launcher forwards `--color` and refuses an older runtime.
+
+### Issues found while building
+- **Lost notice.** The port had dropped the TUI-00 reducer's notice for a route that selects a provider the inventory does not report as usable. It is back. It is checked once both replies are in, because they can now arrive in either order.
+- **Wrong next step on an unreadable reply.** The failure said `howlplane status run`, using the process id instead of the task id, and told the operator to reconcile a read-only probe. Found while writing the replay tests.
+- **Typed lists.** HowlFrame rejects a list that mixes strings and dicts, so every view entry is a `{"text", "style"}` dict, with `plain` for ordinary lines.
+- **Stale records.** The provenance said `hfbc_format` 1 while the artifact header says 2. The launcher's path error and ADR 0010 still pointed at the removed Python engine.
+
+### Test Impact Assessment
+- **Behavior changed:**
+  - the run confirmation refuses a pasted yes;
+  - previews probe concurrently, and stale replies are ignored;
+  - the readiness notice is restored;
+  - the view is styled;
+  - `--color` is forwarded;
+  - an older runtime is refused at launch;
+  - unreadable replies name the right next step.
+- **Existing tests:**
+  - The engine, session and governed-run tests pass unchanged on the new runtime. Their needles match inside styled text, and the governed-run screens are compared after `strip_ansi`.
+  - The launcher test now also checks `--color`. The provenance pin assertion moved to `e64256e`.
+- **Added:**
+  - `tests/test_tui_logic.py` (32 cases) replays events through the committed artifact. It restores the decision-level coverage the deleted reducer tests gave:
+    - previews, stale replies, the readiness flag, provider choice and loss, and schema refusal;
+    - objective validation and the confirmation variants (typed, pasted, declined, quit);
+    - route gating, running-mode commands, progress and failover, the cancel sequence, and quit while running;
+    - outcomes with and without proposed commands;
+    - error documents, unreadable replies, refused effects, failed handlers and a lost cancel;
+    - notice persistence, leaving, and logging on and off.
+  - `test_tui_howlframe_engine.py`: the colour policy and the flag, the global `--color` reaching the printed command, and refusal of a runtime without the needed flags or without a descriptor. Nothing is prepared before the refusal.
+  - `test_tui_session.py`: a real pty session in which a bracketed-paste objective is accepted and a pasted `y` is refused, with the styled route drawn and bracketed paste turned off on exit. No agent is launched.
+- **Mutation checks:**
+  - Building the program without the paste check fails the three pasted-yes cases.
+  - Accepting any route reply fails the stale-reply test.
+- **Run:** the TUI suites on the merged pin, then the full gate.

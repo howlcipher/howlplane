@@ -62,9 +62,41 @@ The owner asked for a pure HowlFrame TUI. HowlFrame now provides what was missin
 
 ## Consequences
 - **Authority.** It is the operator's authority, limited to seven argv shapes of one program plus two directories, which is narrower than the Python host.
-- **Cost.** Every inventory and route preview starts a `howlplane` process, about a second each, where the Python host stayed in process.
-- **Paths.** Paths with whitespace or commas need the Python engine until grants can quote.
+- **Cost.** Every inventory and route preview starts a `howlplane` process, about a second each, where the Python host stayed in process. Since 2026-11-26 the two run at the same time (see the amendment below).
+- **Paths.** Paths with whitespace or commas are refused until grants can quote them. The Python engine that once covered them was removed.
 - **HowlFrame runtime.** The engine needs a HowlFrame runtime with `terminal_app`, so HowlPlane's CI pin moves to that commit.
 - **What remains non-HowlFrame:** `howlplane` itself, as the exec child, and the launcher.
 - **Building with HowlFrame alone.** `scripts/build_tui_app.sh` runs `howlframe build`, then `scripts/tui_provenance.howl`. That program hashes the sources and the artifact into `ARTIFACT_PROVENANCE.json` and writes the packaged copy, holding only read and write grants on those two directories. The TUI is now written, built and run with HowlFrame; outside it are `howlplane`, which the TUI drives, and the HowlFrame runtime.
 - **Running without the launcher.** A HowlFrame program cannot grant itself authority, so someone outside it has to choose the grants. `howlplane tui --print-command` prints the launcher's exact `howlframe run` line, without a fixed session id, so the operator can review it and run the TUI on HowlFrame alone. The tests run that printed line directly.
+
+## Amendment (2026-11-26): operator improvements
+
+The owner chose six improvements. HowlFrame gained what the runtime has to own (howlframe#318, #319, merged as `e64256e`):
+- `--replay`, which runs a `terminal_app` against recorded events with no effect executed;
+- a line editor with in-memory history;
+- bracketed paste, with `pasted` on every `line` event;
+- view entries styled from a fixed palette, under `--color`;
+- scrolling.
+
+The TUI uses them as follows.
+
+- **Paste-safe confirmation.** A pasted `y` or `yes` at the run confirmation is refused with a notice, and the prompt stays open. A typed answer is needed.
+  - Considered: refusing every pasted line in confirm mode. Rejected: a pasted `n` or `/quit` is harmless.
+  - The objective itself may be pasted.
+- **Faster preview.** The inventory and the route are probed concurrently. Each probe's process id carries a generation (`inventory-N`, `route-N`), so a reply from a replaced probe is ignored, and a new preview never waits for an old one. Options:
+  - **Generation ids, stale replies ignored (chosen).** Pro: the latest objective is probed at once, and nothing is killed. Con: a superseded probe runs to completion. It is bounded by typing speed and the runtime's `--max-processes`.
+  - **One probe per kind, coalescing newer requests.** Pro: at most two probes run. Con: the latest objective waits for the stale probe to finish.
+  - **Terminating the superseded probe.** Pro: no wasted work. Con: it signals a HowlPlane child mid-way, for little gain. Rejected while probes stay about a second.
+  - Because the route can arrive before the inventory, the preview keeps the route document and re-checks it against the inventory. Once both are in, a selection the inventory does not report as usable gets the notice the TUI-00 reducer had. That notice was lost in the port.
+  - If the inventory clears an explicit provider choice, the route is asked for again.
+- **Colour.** `tui_core.render` returns `{"text", "style"}` entries:
+  - failures are `error`;
+  - a selected route and an outcome that exited 0 are `ok`;
+  - a blocked route and any other outcome are `warning`;
+  - notices are `info`.
+
+  The launcher passes HowlPlane's colour policy (the global `--color`, then `HOWLPLANE_COLOR`) as the runtime's `--color`. The runtime keeps the `NO_COLOR` and `TERM=dumb` rules.
+- **Runtime check.** The launcher reads the runtime's `howl.interop/v1` descriptor. It refuses to start unless `run` offers every flag it passes. `--color` stands for paste-marked line events, which arrived in the same change. The error says what to install.
+- **Tests without authority.** `tests/test_tui_logic.py` drives the committed artifact through `--replay` with the TUI-00 fixtures. That restores the decision-level coverage the ADR 0009 reducer tests gave. The tests need no grant, terminal or child.
+- **Fixed while testing.** An unreadable child reply suggested `howlplane status run`, the process id, and told the operator to reconcile a read-only probe. It now names the task for a run or cancel, and `howlplane doctor` with a safe retry for a probe.
+

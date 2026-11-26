@@ -13,6 +13,7 @@ from howlplane.control_plane.config_loader import ConfigLoader
 
 
 def command(args: argparse.Namespace) -> int:
+    from howlplane.control_plane import cli as cli_module
     from howlplane.control_plane.cli import _resolve_repo
     from howlplane.control_plane.howlframe_runner import find_howlframe_binary
     from howlplane.control_plane.presentation.errors import OperatorError, OperatorFailure
@@ -26,12 +27,14 @@ def command(args: argparse.Namespace) -> int:
             "HOWLFRAME_UNAVAILABLE", "The HowlFrame runtime was not found.",
             "howlplane tui runs entirely on the HowlFrame VM.",
             "Install HowlFrame or set HOWLFRAME_BIN to a howlframe binary with terminal_app."))
+    color = howlframe_engine.color_mode(getattr(cli_module, "_COLOR_MODE", None))
+    state_root = howlframe_engine.default_state_root()
     try:
         if getattr(args, "print_command", False):
-            print(howlframe_engine.print_command(howlframe, target_repo, settings, howlframe_engine.default_state_root()))
+            print(howlframe_engine.print_command(howlframe, target_repo, settings, state_root, color=color))
             return 0
-        return howlframe_engine.run(howlframe, target_repo, settings, howlframe_engine.default_state_root())
+        return howlframe_engine.run(howlframe, target_repo, settings, state_root, color=color)
     except howlframe_engine.LaunchError as exc:
         raise OperatorFailure(OperatorError(
             "TUI_LAUNCH_FAILED", str(exc), "The HowlFrame TUI could not be prepared.",
-            "Fix the reported path and try again.")) from exc
+            exc.next_action)) from exc

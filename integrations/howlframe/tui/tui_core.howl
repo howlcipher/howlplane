@@ -117,63 +117,70 @@
     (type_hints (fallback string) (return string))
     (if (is_nil value) (return fallback) (return (to_string value)))))
 
-  ; Plain text view lines. Meaning is carried by words; the host only paints.
+  ; One view entry. The style names the HowlFrame runtime's fixed palette;
+  ; the runtime draws it only when colour is on, so meaning stays in words.
+  (export (defun entry (text style)
+    (type_hints (text string) (style string) (return dict))
+    (return (dict ("text" text) ("style" style)))))
+
+  ; View entries: failures in error, outcomes in ok or warning, notices in info.
   (export (defun render (state)
     (type_hints (state dict) (return list))
     (let (lines (list))
       (do
-        (append lines (str_join (list "Objective: " (call text_or (map_get state "objective") "(none yet)")) ""))
-        (append lines (str_join (list "Provider:  " (call text_or (map_get state "explicit_resource") "automatic")) ""))
+        (append lines (call entry (str_join (list "Objective: " (call text_or (map_get state "objective") "(none yet)")) "") "plain"))
+        (append lines (call entry (str_join (list "Provider:  " (call text_or (map_get state "explicit_resource") "automatic")) "") "plain"))
         (when (= (list_len (map_get state "rows")) 0)
-          (append lines "Resources: not loaded (/refresh)"))
+          (append lines (call entry "Resources: not loaded (/refresh)" "plain")))
         (when (> (list_len (map_get state "rows")) 0)
-          (append lines "Resources:"))
+          (append lines (call entry "Resources:" "plain")))
         (for row (map_get state "rows")
-          (append lines (str_join (list "  " (map_get row "resource_id") "  " (map_get row "readiness")
-                                        (if (map_get row "usable") "  usable" "  not usable")) "")))
+          (append lines (call entry (str_join (list "  " (map_get row "resource_id") "  " (map_get row "readiness")
+                                                    (if (map_get row "usable") "  usable" "  not usable")) "") "plain")))
         (when (map_has state "route")
           (let (r (map_get state "route"))
             (do
               (when (= (map_get r "status") "SELECTED")
-                (append lines (str_join (list "Route:     " (map_get r "resource_id") " for " (to_string (map_get r "role"))) "")))
+                (append lines (call entry (str_join (list "Route:     " (map_get r "resource_id") " for " (to_string (map_get r "role"))) "") "ok")))
               (when (= (map_get r "status") "BLOCKED")
                 (do
-                  (append lines (str_join (list "Route:     BLOCKED " (to_string (map_get r "reason"))) ""))
+                  (append lines (call entry (str_join (list "Route:     BLOCKED " (to_string (map_get r "reason"))) "") "warning"))
                   (for x (map_get r "excluded")
-                    (append lines (str_join (list "  excluded " x) ""))))))))
+                    (append lines (call entry (str_join (list "  excluded " x) "") "plain"))))))))
         (when (map_has state "progress")
           (let (p (map_get state "progress"))
-            (append lines (str_join (list "Progress:  " (call text_or (map_get p "phase") "?") " "
-                                          (call text_or (map_get p "resource_id") "") " "
-                                          (call text_or (map_get p "elapsed_seconds") "0") "s "
-                                          (call text_or (map_get p "details") "")) ""))))
+            (append lines (call entry (str_join (list "Progress:  " (call text_or (map_get p "phase") "?") " "
+                                                      (call text_or (map_get p "resource_id") "") " "
+                                                      (call text_or (map_get p "elapsed_seconds") "0") "s "
+                                                      (call text_or (map_get p "details") "")) "") "plain"))))
         (when (map_has state "outcome")
           (let (o (map_get state "outcome"))
             (do
-              (append lines (str_join (list "Outcome:   " (call text_or (map_get o "final_state") "unknown")
-                                            " (exit " (call text_or (map_get o "exit_code") "?") ")") ""))
-              (append lines (str_join (list "Verification (reported by HowlPlane): " (call text_or (map_get o "verification_status") "none")) ""))
+              (append lines (call entry (str_join (list "Outcome:   " (call text_or (map_get o "final_state") "unknown")
+                                                        " (exit " (call text_or (map_get o "exit_code") "?") ")") "")
+                                  (if (= (call text_or (map_get o "exit_code") "?") "0") "ok" "warning")))
+              (append lines (call entry (str_join (list "Verification (reported by HowlPlane): " (call text_or (map_get o "verification_status") "none")) "") "plain"))
               ; Show-only: the operator runs these commands; the TUI never approves.
               (when (not (is_nil (map_get o "next_detail")))
-                (append lines (str_join (list "Detail:    " (to_string (map_get o "next_detail"))) "")))
+                (append lines (call entry (str_join (list "Detail:    " (to_string (map_get o "next_detail"))) "") "plain")))
               (when (not (is_nil (map_get o "next_command")))
-                (append lines (str_join (list "Next:      " (map_get o "next_command")) "")))
+                (append lines (call entry (str_join (list "Next:      " (map_get o "next_command")) "") "plain")))
               (when (not (is_nil (map_get o "next_then")))
-                (append lines (str_join (list "Then:      " (to_string (map_get o "next_then"))) "")))
+                (append lines (call entry (str_join (list "Then:      " (to_string (map_get o "next_then"))) "") "plain")))
               (when (not (is_nil (map_get o "next_alternatives")))
                 (for alt (map_get o "next_alternatives")
-                  (append lines (str_join (list "Or:        " (to_string alt)) "")))))))
+                  (append lines (call entry (str_join (list "Or:        " (to_string alt)) "") "plain")))))))
         (when (map_has state "failure")
           (let (f (map_get state "failure"))
             (do
-              (append lines (str_join (list "FAILED:    " (call text_or (map_get f "what") "unknown failure")) ""))
-              (append lines (str_join (list "Why:       " (call text_or (map_get f "why") "not reported")) ""))
-              (append lines (str_join (list "Next:      " (call text_or (map_get f "next") "not reported")) ""))
+              (append lines (call entry (str_join (list "FAILED:    " (call text_or (map_get f "what") "unknown failure")) "") "error"))
+              (append lines (call entry (str_join (list "Why:       " (call text_or (map_get f "why") "not reported")) "") "plain"))
+              (append lines (call entry (str_join (list "Next:      " (call text_or (map_get f "next") "not reported")) "") "plain"))
               (when (not (is_nil (map_get f "command")))
-                (append lines (str_join (list "Command:   " (to_string (map_get f "command"))) "")))
-              (append lines (str_join (list "Retry:     " (call text_or (map_get f "retry") "UNKNOWN")) ""))
-              (append lines (str_join (list "Code:      " (call text_or (map_get f "code") "UNKNOWN")) "")))))
+                (append lines (call entry (str_join (list "Command:   " (to_string (map_get f "command"))) "") "plain")))
+              (append lines (call entry (str_join (list "Retry:     " (call text_or (map_get f "retry") "UNKNOWN")) "") "plain"))
+              (append lines (call entry (str_join (list "Code:      " (call text_or (map_get f "code") "UNKNOWN")) "") "plain")))))
         (for note (map_get state "notices")
-          (append lines (str_join (list "! " note) "")))
+          (append lines (call entry (str_join (list "! " note) "") "info")))
         (return lines)))))
 )

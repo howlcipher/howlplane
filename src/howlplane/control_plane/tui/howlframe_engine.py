@@ -18,15 +18,49 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from howlplane.control_plane import component_bin
 from howlplane.control_plane.config_loader import TuiSettings
+from howlplane.control_plane.presentation.style import COLOR_CHOICES
 from howlplane.control_plane.resources import data_file
 
 ENTRY_NAME = "howlplane-tui-entry"
 CANCEL_REASON = "cancelled-from-howlplane-tui"
 
+# The runner flags the launcher passes. A runtime whose interop descriptor
+# does not list them all predates styled views and paste-marked line events,
+# which the run confirmation relies on, so the TUI refuses to start on it.
+REQUIRED_RUN_FLAGS = ("--allow-caps", "--max-event-instructions", "--max-event-memory-bytes",
+                      "--max-state-bytes", "--color")
+
 
 class LaunchError(Exception):
-    """The HowlFrame TUI cannot start; the message says why and what to do."""
+    """The HowlFrame TUI cannot start; the message says why, ``next_action`` what to do."""
+
+    def __init__(self, message: str, next_action: str = "Fix the reported path and try again.") -> None:
+        super().__init__(message)
+        self.next_action = next_action
+
+
+def check_runtime(howlframe: str) -> None:
+    """Refuses a HowlFrame whose ``run`` lacks a flag the TUI needs, before anything starts."""
+    descriptor = component_bin.describe(howlframe)
+    if not component_bin.offers(descriptor, ["run"], *REQUIRED_RUN_FLAGS):
+        version = (descriptor or {}).get("version") or "without an interop descriptor"
+        raise LaunchError(
+            f"HowlFrame {version} at {howlframe} is too old for howlplane tui: its run command does not offer "
+            f"all of {', '.join(REQUIRED_RUN_FLAGS)}.",
+            "Install a newer HowlFrame and set HOWLFRAME_BIN to it, or put it on PATH.")
+
+
+def color_mode(requested: Optional[str], env: Optional[Dict[str, str]] = None) -> str:
+    """HowlPlane's colour policy as the runtime's ``--color``: the global ``--color``, then ``HOWLPLANE_COLOR``.
+
+    ``auto`` lets the runtime decide: colour only on a terminal, with
+    ``NO_COLOR`` unset and ``TERM`` not ``dumb``.
+    """
+    env = dict(os.environ) if env is None else env
+    mode = (requested or env.get("HOWLPLANE_COLOR") or "auto").lower()
+    return mode if mode in COLOR_CHOICES else "auto"
 
 
 def default_state_root() -> Path:
@@ -44,8 +78,8 @@ def _plain(path: Path, what: str) -> str:
     """A canonical absolute path that a grant token can carry verbatim."""
     text = os.path.realpath(path)
     if any(c.isspace() for c in text) or "," in text:
-        raise LaunchError(f"{what} path {text!r} contains whitespace or a comma, which a HowlFrame grant cannot carry; "
-                          "use a path without them or the default engine (--engine python)")
+        raise LaunchError(f"{what} path {text!r} contains whitespace or a comma, which a HowlFrame grant cannot carry",
+                          "Use a path without whitespace or commas and try again.")
     return text
 
 
@@ -87,12 +121,17 @@ def grant_profile(entry: str, repo: str, task_runs: str, log_dir: str) -> List[s
 
 
 def launch_argv(howlframe: str, target_repo: Path, settings: TuiSettings, state_root: Path,
-                session_id: Optional[str] = None, reusable: bool = False) -> List[str]:
+                session_id: Optional[str] = None, reusable: bool = False, color: str = "auto") -> List[str]:
     """The complete `howlframe run` command line for one session.
 
     ``reusable`` leaves the session id out, so the program draws a fresh one on
     every run of a saved command line (``howlplane tui --print-command``).
+    ``color`` is the runtime's ``--color`` (see ``color_mode``).
     """
+    if color not in COLOR_CHOICES:
+        raise LaunchError(f"--color must be one of {', '.join(COLOR_CHOICES)}, got {color!r}",
+                          "Pass --color auto, always or never.")
+    check_runtime(howlframe)
     artifact = app_artifact()
     if not artifact.is_file():
         raise LaunchError(f"The HowlFrame TUI artifact is missing at {artifact}; reinstall HowlPlane")
@@ -121,21 +160,23 @@ def launch_argv(howlframe: str, target_repo: Path, settings: TuiSettings, state_
             "--max-event-instructions", str(settings.max_instructions),
             "--max-event-memory-bytes", str(settings.max_memory_bytes),
             "--max-state-bytes", str(settings.max_step_bytes),
+            "--color", color,
             str(artifact), json.dumps(config)]
 
 
-def print_command(howlframe: str, target_repo: Path, settings: TuiSettings, state_root: Path) -> str:
+def print_command(howlframe: str, target_repo: Path, settings: TuiSettings, state_root: Path,
+                  color: str = "auto") -> str:
     """The wrapper-free command: one shell-quoted line that runs the TUI on HowlFrame alone.
 
     It also prepares what the line names (the private entry script and the
     log directory), so it can be run as-is; regenerate it after moving the
     repository, the Python environment or the howlframe binary.
     """
-    return shlex.join(launch_argv(howlframe, target_repo, settings, state_root, reusable=True))
+    return shlex.join(launch_argv(howlframe, target_repo, settings, state_root, reusable=True, color=color))
 
 
-def run(howlframe: str, target_repo: Path, settings: TuiSettings, state_root: Path) -> int:
+def run(howlframe: str, target_repo: Path, settings: TuiSettings, state_root: Path, color: str = "auto") -> int:
     """Replaces this process with the HowlFrame TUI; returns only on failure to start."""
-    argv = launch_argv(howlframe, target_repo, settings, state_root)
+    argv = launch_argv(howlframe, target_repo, settings, state_root, color=color)
     os.execv(howlframe, argv)
     return 127  # pragma: no cover - execv does not return
