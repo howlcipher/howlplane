@@ -242,6 +242,21 @@ readiness and the route HowlPlane would take; `/agent ID` (or `/agent auto`)
 chooses a provider within the eligible set, `/run` asks for a typed `y` before
 anything runs, `/cancel` (or Ctrl-C) stops a run, and `/quit` (or Ctrl-D) leaves.
 
+* **Keys.** The input line edits like a shell: Left, Right, Home, End,
+  Backspace and Delete, plus Ctrl-A, E, K, U and W. Up and Down recall earlier
+  lines of the session, which are kept in memory only. PageUp and PageDown
+  scroll a screen taller than the terminal, and Ctrl-L redraws it.
+* **Paste.** You can paste an objective, but a pasted `y` never confirms a run:
+  the confirmation must be typed. A paste never presses Enter by itself.
+* **Colour.** Failures are red; a selected route and a run that exited 0 are
+  green; a blocked route and any other outcome are yellow; notices are cyan.
+  The words carry the meaning either way. The global
+  `--color auto|always|never` (or `HOWLPLANE_COLOR`) is passed to the runtime;
+  `auto` colours only a terminal, with `NO_COLOR` unset and `TERM` not `dumb`.
+* **Preview.** The inventory and the route are probed at the same time, so a
+  preview takes about one probe. Typing a new objective while one is pending
+  starts a new preview at once; the old reply is ignored when it arrives.
+
 * The whole TUI is HowlFrame (`integrations/howlframe/tui/tui_app.howl`,
   ADR 0010), and so is its build: `scripts/build_tui_app.sh` is only
   `howlframe build` plus the HowlFrame program `scripts/tui_provenance.howl`,
@@ -265,10 +280,12 @@ anything runs, `/cancel` (or Ctrl-C) stops a run, and `/quit` (or Ctrl-D) leaves
   carried state, `max_objective_chars`, `progress_poll_seconds`,
   `cancel_grace_seconds`; `step_deadline_seconds` is accepted but no longer
   used); all are finite and validated.
-* It needs a `howlframe` runtime with `terminal_app` (HowlFrame `main` at
-  `dffcb00` or v0.3.0 once tagged; `HOWLFRAME_BIN` or `PATH`). Without a TTY it
-  falls back to line mode, so it can also be scripted. Dashboards and multiple
-  sessions remain HowlBoard's.
+* It needs a `howlframe` runtime whose `terminal_app` marks pasted lines and
+  draws styles (HowlFrame `main` at `e64256e`, so a release after v0.3.0;
+  `HOWLFRAME_BIN` or `PATH`). The launcher reads the runtime's interop
+  descriptor and refuses an older one, saying what to install, before anything
+  starts. Without a TTY it falls back to line mode, so it can also be scripted.
+  Dashboards and multiple sessions remain HowlBoard's.
 
 #### Running it on HowlFrame alone
 
@@ -685,12 +702,14 @@ Validation maintenance separates existing Bandit annotation reasons from rule ID
 and removes obsolete suppressions. It changes no runtime behavior or trust policy.
 
 The generated-application CI suites compile and execute against HowlFrame source
-`dffcb001222d9bedc2d6eb615541450b5f68bcd3` (2026-11-23; HowlFrame `main` with the versioned runtime error,
-exec process bounds, the runner-only `process:exec_inherit_env=` grant and
-`terminal_app`, which `howlplane tui` needs). Fast, full and
+`e64256e5059df32bef82ef42f9814750f3a06fad` (2026-11-26; HowlFrame `main` with `terminal_app` replay, line
+editing, paste-marked lines, styled views and `--color`, which `howlplane tui`
+needs). Fast, full and
 nightly jobs use that same immutable commit. Before the move, the full suite,
 including generated notes/todo acceptance and both packaged HFBC1 artifacts,
-passed against it; the previous pins were `928c00503f1de75e21487d020864076e67323eb4` (VM resource-bound fixes
+passed against it; the previous pins were `dffcb001222d9bedc2d6eb615541450b5f68bcd3` (the versioned runtime
+error, exec process bounds, the `process:exec_inherit_env=` grant and
+`terminal_app`), `928c00503f1de75e21487d020864076e67323eb4` (VM resource-bound fixes
 for bugs #73 to #76) and `41d56cecd9e8f936cf9da35240331ab7da0244cd`. A moving sibling
 default branch is still not a runtime compatibility guarantee: an earlier newer
 revision failed generated notes/todo acceptance. The source pin records the
