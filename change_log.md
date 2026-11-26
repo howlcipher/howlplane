@@ -6,6 +6,27 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `howlplane tui` operator improvements (ADR 0010 amendment):
+  - a pasted `y` or `yes` can no longer confirm a run, because the runtime now marks pasted lines;
+  - line editing with the usual shell keys, and session-only history on Up and Down;
+  - colour, through the global `--color` or `HOWLPLANE_COLOR`, with `NO_COLOR` honoured;
+  - PageUp and PageDown scrolling of a screen taller than the terminal.
+- The inventory and route probes of a preview now run at the same time. A new objective starts its preview at once, and replies from a replaced preview are ignored.
+- The notice for a route that selects a provider the inventory does not report as usable is back. The TUI-00 reducer had it; the port lost it.
+- `tests/test_tui_logic.py` replays recorded events through the committed TUI with `howlframe run --replay`. It covers confirmation, running-mode commands, progress and failover, outcomes, failure explanations, schema refusal, provider choice, notices, the cancel sequence, stale replies and styles. It needs no grant, terminal or child.
+
+### Changed
+
+- The HowlFrame CI pin moves to `e64256e` (howlframe#318 and #319). `howlplane tui` now refuses, before it starts, a runtime whose interop descriptor lacks a flag it passes.
+
+### Fixed
+
+- An unreadable child reply in the TUI suggested `howlplane status run` and a reconcile for read-only probes. It now names the task for a run or cancel, and `howlplane doctor` with a safe retry for a probe.
+- The TUI launcher's path error no longer points at the removed `--engine python`, and ADR 0010 no longer says such paths need the Python engine.
+- The TUI artifact provenance records `hfbc_format` 2, which is what the artifact header carries.
+
+### Added
+
 - The `howlplane tui` build is HowlFrame too: `scripts/build_tui_app.sh` runs
   `howlframe build` and then `scripts/tui_provenance.howl`, a HowlFrame program
   with read and write grants on two directories only, which records the

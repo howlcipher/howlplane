@@ -65,6 +65,7 @@ def test_launch_argv_carries_limits_and_a_plain_config(tmp_path, howlframe):
     assert argv[argv.index("--max-event-instructions") + 1] == "60000"
     assert argv[argv.index("--max-event-memory-bytes") + 1] == str(settings.max_memory_bytes)
     assert argv[argv.index("--max-state-bytes") + 1] == str(settings.max_step_bytes)
+    assert argv[argv.index("--color") + 1] == "auto", "the runtime decides colour unless the operator chose"
     assert argv[-2] == str(howlframe_engine.app_artifact())
     config = json.loads(argv[-1])
     assert config["repo"] == os.path.realpath(repo) and config["session_id"] == "s1"
@@ -83,9 +84,48 @@ def test_paths_a_grant_cannot_carry_are_refused(tmp_path, howlframe):
         howlframe_engine.launch_argv(howlframe, spaced, TuiSettings(), tmp_path / "state")
 
 
+def test_colour_policy_becomes_the_runtime_flag(tmp_path, howlframe):
+    assert howlframe_engine.color_mode(None, {}) == "auto"
+    assert howlframe_engine.color_mode("never", {"HOWLPLANE_COLOR": "always"}) == "never", "--color wins"
+    assert howlframe_engine.color_mode(None, {"HOWLPLANE_COLOR": "ALWAYS"}) == "always"
+    assert howlframe_engine.color_mode("sometimes", {}) == "auto"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    argv = howlframe_engine.launch_argv(howlframe, repo, TuiSettings(), tmp_path / "state", color="never")
+    assert argv[argv.index("--color") + 1] == "never"
+    with pytest.raises(howlframe_engine.LaunchError, match="--color must be one of"):
+        howlframe_engine.launch_argv(howlframe, repo, TuiSettings(), tmp_path / "state", color="sometimes")
+
+
+def fake_runtime(tmp_path, descriptor):
+    """A stand-in howlframe that only answers `interop --json`."""
+    fake = tmp_path / "old-howlframe"
+    reply = f"cat <<'EOF'\n{json.dumps(descriptor)}\nEOF" if descriptor else "exit 1"
+    fake.write_text(f"#!/bin/sh\n{reply}\n", encoding="utf-8")
+    fake.chmod(0o755)
+    return str(fake)
+
+
+@pytest.mark.parametrize("descriptor,shown", [
+    ({"schema": "howl.interop/v1", "version": "0.3.0",
+      "commands": [{"path": ["run"], "flags": ["--allow-caps", "--max-event-instructions", "--max-event-memory-bytes", "--max-state-bytes"]}]},
+     "HowlFrame 0.3.0"),
+    (None, "HowlFrame without an interop descriptor"),
+])
+def test_a_runtime_without_the_needed_flags_is_refused_before_anything_starts(tmp_path, descriptor, shown):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    old = fake_runtime(tmp_path, descriptor)
+    with pytest.raises(howlframe_engine.LaunchError, match="too old for howlplane tui") as refused:
+        howlframe_engine.launch_argv(old, repo, TuiSettings(), tmp_path / "state")
+    assert shown in str(refused.value) and "--color" in str(refused.value)
+    assert "HOWLFRAME_BIN" in refused.value.next_action
+    assert not (tmp_path / "state").exists(), "nothing is prepared for a runtime that cannot run the TUI"
+
+
 def test_provenance_matches_committed_bytes():
     provenance = json.loads((TUI_DIR / "ARTIFACT_PROVENANCE.json").read_text(encoding="utf-8"))
-    assert provenance["producer_source_revision"] == "dffcb001222d9bedc2d6eb615541450b5f68bcd3"
+    assert provenance["producer_source_revision"] == "e64256e5059df32bef82ef42f9814750f3a06fad"
     assert set(provenance["files"]) == {f"integrations/howlframe/tui/{n}" for n in ("tui_core.howl", "tui_app.howl", "tui_app.hfbc")}
     for name, digest in provenance["files"].items():
         assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest, name
@@ -253,6 +293,7 @@ def test_printed_command_runs_the_tui_on_howlframe_alone(tmp_path, howlframe):
     assert printed.count("\n") == 1, "exactly one line, so it can be saved as a script"
     argv = shlex.split(printed)
     assert argv[0] == howlframe and argv[1] == "run"
+    assert argv[argv.index("--color") + 1] == "auto"
 
     sessions = []
     for _ in range(2):
@@ -268,6 +309,15 @@ def test_printed_command_runs_the_tui_on_howlframe_alone(tmp_path, howlframe):
     ids = {e["session_id"] for e in events}
     assert len(ids) == 2, "each run of a saved command is its own session"
     assert all(len(i) == 16 for i in ids)
+
+
+def test_the_global_color_flag_reaches_the_runtime(tmp_path, howlframe):
+    box = fake_agent_sandbox(tmp_path)
+    probe = Session(box, howlframe, argv=[sys.executable, "-m", "howlplane.control_plane", "--color", "never", "tui", "--print-command"])
+    printed = probe.proc.communicate(timeout=60)[0].decode()
+    assert probe.proc.returncode == 0, printed
+    argv = shlex.split(printed)
+    assert argv[argv.index("--color") + 1] == "never"
 
 
 # -- the build, in HowlFrame alone --------------------------------------------------------

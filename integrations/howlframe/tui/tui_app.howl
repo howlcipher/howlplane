@@ -63,19 +63,25 @@
                                                                ("source" "tui.howlframe") ("task_id" (map_get state "task_id"))))))))))
         (return state))))
 
+  ; Starts a new generation of a read-only probe, "inventory" or "route".
+  ; The id carries the generation, so a reply from an earlier probe that was
+  ; still running when the operator moved on is recognised and ignored, and
+  ; a new probe never waits for an old one.
+  (defun probe (state kind tail)
+    (type_hints (state dict) (kind string) (tail list) (return dict))
+    (let (gen (+ (map_get state (str_join (list kind "_gen") "")) 1))
+      (let (id (str_join (list kind "-" (to_string gen)) ""))
+        (do
+          (map_set state (str_join (list kind "_gen") "") gen)
+          (map_set state (str_join (list kind "_live") "") id)
+          (call fx state (call exec_effect id (call hp state tail)))
+          (return state)))))
+
   (defun refresh (state)
     (type_hints (state dict) (return dict))
-    (do
-      (call fx state (call exec_effect "inventory" (call hp state (list "providers" "--json" "--repo" (map_get (map_get state "cfg") "repo")))))
-      (return state)))
+    (return (call probe state "inventory" (list "providers" "--json" "--repo" (map_get (map_get state "cfg") "repo")))))
 
-  (defun preview (state)
-    (type_hints (state dict) (return dict))
-    (do
-      (map_set state "want_route" true)
-      (return (call refresh state))))
-
-  (defun route_argv (state)
+  (defun route_tail (state)
     (type_hints (state dict) (return list))
     (let (tail (list "route" "--probe" "--json" "--repo" (map_get (map_get state "cfg") "repo")))
       (do
@@ -83,7 +89,22 @@
           (do (append tail "--agent") (append tail (map_get state "explicit_resource"))))
         (append tail "--")
         (append tail (map_get state "objective"))
-        (return (call hp state tail)))))
+        (return tail))))
+
+  ; Forgets the previous preview and asks for a new one.
+  (defun request_route (state)
+    (type_hints (state dict) (return dict))
+    (do
+      (map_delete state "route")
+      (map_delete state "route_doc")
+      (return (call probe state "route" (call route_tail state)))))
+
+  ; The inventory and the route are probed at the same time.
+  (defun preview (state)
+    (type_hints (state dict) (return dict))
+    (do
+      (call refresh state)
+      (return (call request_route state))))
 
   (defun run_argv (state)
     (type_hints (state dict) (return list))
@@ -140,8 +161,10 @@
         (return found))))
 
   ; A child's JSON reply on stdout, or a failure document explaining why not.
-  (defun reply (ev)
-    (type_hints (ev dict) (return dict))
+  ; `command`, `next` and `retry` fit what the child was: a read-only probe
+  ; can simply be retried, a governed run needs its evidence checked first.
+  (defun reply (ev command next retry)
+    (type_hints (ev dict) (command string) (next string) (retry string) (return dict))
     (let (raw (str_trim (to_string (map_get ev "stdout"))))
       (let (parsed (dict ("ok" false)))
         (do
@@ -157,10 +180,25 @@
                   (dict ("schema" "howlplane.error/v1") ("code" "RUN_OUTPUT_UNREADABLE")
                         ("message" "HowlPlane did not report a readable result.")
                         ("why" (str_join (list "The child exited with " (to_string (map_get ev "exit_code")) " and no JSON reply.") ""))
-                        ("next_action" "Inspect the task's evidence before retrying.")
-                        ("command" (str_join (list "howlplane status " (to_string (map_get ev "id"))) ""))
-                        ("retry_safe" "RECONCILE_FIRST"))))))))
+                        ("next_action" next) ("command" command) ("retry_safe" retry))))))))
           (return parsed)))))
+
+  ; The route shown is the latest route reply checked against the latest
+  ; inventory. Once both are in, a selection the inventory does not report as
+  ; usable is flagged once.
+  (defun settle_route (state)
+    (type_hints (state dict) (return dict))
+    (do
+      (when (map_has state "route_doc")
+        (let (r (call core/summarize_route (map_get state "route_doc") (map_get state "available")))
+          (do
+            (map_set state "route" r)
+            (when (and (= (map_get state "inventory_live") "") (not (map_get state "route_checked")))
+              (do
+                (map_set state "route_checked" true)
+                (when (and (= (map_get r "status") "SELECTED") (not (map_get r "readiness_confirmed")))
+                  (call note state "Preview selected a provider the latest inventory does not report as usable; HowlPlane re-checks readiness at execution.")))))))
+      (return state)))
 
   (defun on_inventory (state doc)
     (type_hints (state dict) (doc dict) (return dict))
@@ -168,19 +206,25 @@
       (do
         (if (map_get inv "ok")
           (let (lost (call core/lost_resources (map_get state "available") (map_get inv "rows")))
-            (do
-              (map_delete state "failure")
-              (for x lost
-                (do
-                  (call note state (str_join (list (map_get x "resource_id") " became unavailable: " (map_get x "readiness")) ""))
-                  (when (= (map_get state "explicit_resource") (map_get x "resource_id"))
-                    (do
-                      (map_set state "explicit_resource" (map_get (dict) "none"))
-                      (call note state "Explicit provider choice cleared; HowlPlane will select automatically.")))))
-              (map_set state "rows" (map_get inv "rows"))
-              (map_set state "available" (map_get inv "available"))
-              (when (= (list_len (map_get inv "available")) 0)
-                (call note state "No configured provider is currently usable."))))
+            (let (reroute false)
+              (do
+                (map_delete state "failure")
+                (for x lost
+                  (do
+                    (call note state (str_join (list (map_get x "resource_id") " became unavailable: " (map_get x "readiness")) ""))
+                    (when (= (map_get state "explicit_resource") (map_get x "resource_id"))
+                      (do
+                        (map_set state "explicit_resource" (map_get (dict) "none"))
+                        (set reroute true)
+                        (call note state "Explicit provider choice cleared; HowlPlane will select automatically.")))))
+                (map_set state "rows" (map_get inv "rows"))
+                (map_set state "available" (map_get inv "available"))
+                (when (= (list_len (map_get inv "available")) 0)
+                  (call note state "No configured provider is currently usable."))
+                ; A preview made for the cleared choice is stale, so ask again.
+                (if (and reroute (not (is_nil (map_get state "objective"))))
+                  (call request_route state)
+                  (call settle_route state)))))
           (map_set state "failure" (dict ("source" "tui") ("code" (map_get inv "code")) ("what" (map_get inv "message"))
                                          ("why" "The inventory contract version is not one this TUI understands.")
                                          ("next" "Upgrade the TUI or HowlPlane so their contract versions match.")
@@ -194,9 +238,11 @@
         (if (map_get r "ok")
           (do
             (map_delete state "failure")
-            (map_set state "route" r)
+            (map_set state "route_doc" doc)
+            (map_set state "route_checked" false)
             (when (= (map_get r "status") "SELECTED")
-              (call note state "Type /run to run this objective, or edit it.")))
+              (call note state "Type /run to run this objective, or edit it."))
+            (call settle_route state))
           (map_set state "failure" (dict ("source" "tui") ("code" (map_get r "code")) ("what" (map_get r "message"))
                                          ("why" "The routing contract version is not one this TUI understands.")
                                          ("next" "Upgrade the TUI or HowlPlane so their contract versions match.")
@@ -214,13 +260,17 @@
               (call note state (str_join (list (to_string (map_get p "kind")) ": " (to_string (map_get p "message"))) "")))))
         (return state))))
 
-  (defun on_line (state text)
-    (type_hints (state dict) (text string) (return dict))
+  ; `pasted` is true when any of the line arrived by paste: a run starts only
+  ; on a confirmation the operator typed.
+  (defun on_line (state text pasted)
+    (type_hints (state dict) (text string) (pasted bool) (return dict))
     (let (mode (map_get state "mode"))
       (do
         (cond
           ((and (= mode "confirm") (= text "/quit"))
             (do (map_set state "mode" "idle") (call leave state)))
+          ((and (= mode "confirm") pasted (or (= (to_lower text) "y") (= (to_lower text) "yes")))
+            (call note state "A pasted answer cannot start a run. Type y to run it, or anything else to cancel."))
           ((= mode "confirm")
             (if (or (= (to_lower text) "y") (= (to_lower text) "yes"))
               (do
@@ -251,7 +301,8 @@
                       (call note state "/agent ID | /agent auto   choose a provider or automatic selection")
                       (call note state "/refresh   re-check configured AI resources")
                       (call note state "/run       run the previewed objective (asks to confirm)")
-                      (call note state "/cancel    stop a running objective    /quit   leave")))
+                      (call note state "/cancel    stop a running objective    /quit   leave")
+                      (call note state "Keys: Up and Down recall earlier lines; PageUp and PageDown scroll; Ctrl-C stops a run or leaves.")))
                   ((= cmd "/quit") (call leave state))
                   ((= cmd "/refresh") (call refresh state))
                   ((= cmd "/cancel") (call note state "Nothing is running."))
@@ -289,22 +340,27 @@
   (defun on_exit (state ev)
     (type_hints (state dict) (ev dict) (return dict))
     (let (id (map_get ev "id"))
-      (let (r (call reply ev))
+      (let (r (if (or (= id "run") (= id "cancel"))
+                (call reply ev (str_join (list "howlplane status " (to_string (map_get state "task_id"))) "")
+                      "Inspect the task's evidence before retrying." "RECONCILE_FIRST")
+                (call reply ev "howlplane doctor" "Check readiness with the command below, then /refresh." "SAFE_TO_RETRY")))
         (do
           (cond
-            ((= id "inventory")
-              (do
-                (if (map_get r "ok")
-                  (call on_inventory state (map_get r "document"))
-                  (map_set state "failure" (call core/explain_failure (map_get r "document"))))
-                (when (and (map_get state "want_route") (not (is_nil (map_get state "objective"))))
-                  (do
-                    (map_set state "want_route" false)
-                    (call fx state (call exec_effect "route" (call route_argv state)))))))
-            ((= id "route")
-              (if (map_get r "ok")
-                (call on_route state (map_get r "document"))
-                (map_set state "failure" (call core/explain_failure (map_get r "document")))))
+            ; A reply from a probe the operator has since replaced is ignored.
+            ((starts_with id "inventory-")
+              (when (= id (map_get state "inventory_live"))
+                (do
+                  (map_set state "inventory_live" "")
+                  (if (map_get r "ok")
+                    (call on_inventory state (map_get r "document"))
+                    (map_set state "failure" (call core/explain_failure (map_get r "document")))))))
+            ((starts_with id "route-")
+              (when (= id (map_get state "route_live"))
+                (do
+                  (map_set state "route_live" "")
+                  (if (map_get r "ok")
+                    (call on_route state (map_get r "document"))
+                    (map_set state "failure" (call core/explain_failure (map_get r "document")))))))
             ((= id "run")
               (do
                 (map_set state "run_live" false)
@@ -356,7 +412,8 @@
                 (do
                   (call log_event state "TUI_STARTED" "session started" "INFO")
                   (call refresh state)))
-              ((= kind "line") (call on_line state (str_trim (to_string (map_get event "text")))))
+              ((= kind "line") (call on_line state (str_trim (to_string (map_get event "text")))
+                                     (= (to_string (map_get event "pasted")) "true")))
               ((= kind "interrupt")
                 (if (or (= (map_get state "mode") "running") (= (map_get state "mode") "cancelling"))
                   (call begin_cancel state)
@@ -382,8 +439,15 @@
                       (call on_progress state doc)))))
               ; The progress stream does not exist until the run creates it.
               ((and (= kind "effect_failed") (= (map_get event "id") "progress")) (set kind kind))
+              ; A probe the operator has since replaced no longer matters.
+              ((and (= kind "effect_failed")
+                    (or (starts_with (to_string (map_get event "id")) "inventory-") (starts_with (to_string (map_get event "id")) "route-"))
+                    (!= (map_get event "id") (map_get state "inventory_live")) (!= (map_get event "id") (map_get state "route_live")))
+                (set kind kind))
               ((= kind "effect_failed")
                 (do
+                  (when (= (map_get event "id") (map_get state "inventory_live")) (map_set state "inventory_live" ""))
+                  (when (= (map_get event "id") (map_get state "route_live")) (map_set state "route_live" ""))
                   (when (= (map_get event "id") "run")
                     (do (map_set state "mode" "idle") (map_set state "run_live" false)))
                   ; A cancel that could not be recorded still ends the cancel.
@@ -426,5 +490,6 @@
           (exit (terminal_app "on_event"
                 (dict ("cfg" cfg) ("mode" "idle") ("objective" (map_get (dict) "none"))
                       ("explicit_resource" (map_get (dict) "none")) ("rows" (list)) ("available" (list))
-                      ("notices" (list)) ("log_seq" 0) ("want_route" false) ("run_live" false)
+                      ("notices" (list)) ("log_seq" 0) ("inventory_gen" 0) ("inventory_live" "")
+                      ("route_gen" 0) ("route_live" "") ("route_checked" false) ("run_live" false)
                       ("quit_after" false) ("events_offset" 0) ("task_id" (map_get (dict) "none"))))))))))
