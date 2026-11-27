@@ -506,6 +506,12 @@ class AgentBackend(ABC):
     # this False, so the stall watchdog does not read silence as a stall.
     streams_progress_events: bool = True
 
+    # Whether the provider CLI enforces the read-only mode this backend uses
+    # for every role `is_mutating_role` refuses (review, planning, acceptance,
+    # verification, writing). A backend that cannot enforce it sets this False
+    # and is never selected for such a role (issues.md #27).
+    enforces_read_only: bool = True
+
     def probe_readiness(self) -> BackendReadiness:
         """Checks safe runtime readiness without consuming generation capacity."""
         available = self.is_available()
@@ -1048,10 +1054,10 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
 class CodexBackend(SubprocessAgentBackend):
     def __init__(self):
         def _codex_cmd(t, c, r, p, timeout_seconds: int = 300, **kwargs):
-            # Codex defaults to a read-only sandbox; implementation and
-            # remediation roles must be able to edit files in the workspace.
-            # Review roles keep the default read-only sandbox.
-            if r and (r.endswith("-reviewer") or r in ("review", "planning", "acceptance") or r.startswith("writing:")):
+            # Codex defaults to a read-only sandbox; only the roles allowed to
+            # change the repository (implementation, remediation) get a
+            # writable workspace.
+            if not is_mutating_role(r):
                 return ["codex", "exec", "--skip-git-repo-check", p]
             network = ["-c", "sandbox_workspace_write.network_access=true"] if (getattr(t, "metadata", None) or {}).get("worker_network") else []
             return [
@@ -1093,6 +1099,9 @@ class AgyBackend(SubprocessAgentBackend):
     # `agy -p` prints its answer at the end; HP-SELF-30 captured no stdout at
     # all in two minutes of a healthy run.
     streams_progress_events = False
+    # `--mode plan` makes no read-only guarantee: as a reviewer agy ran the
+    # project's CLI, used the network and rewrote tracked files (DOG-037).
+    enforces_read_only = False
 
     def __init__(self):
         def _agy_cmd(t, c, r, p, timeout_seconds: int = 300, **kwargs):
@@ -1100,7 +1109,7 @@ class AgyBackend(SubprocessAgentBackend):
             return [
                 "agy",
                 "-p", p,
-                "--mode", "plan" if r in ("planning", "review", "acceptance") else "accept-edits",
+                "--mode", "accept-edits" if is_mutating_role(r) else "plan",
                 "--print-timeout", f"{print_timeout}s",
             ]
         super().__init__("agy", "agy", _agy_cmd)
@@ -1160,7 +1169,7 @@ class AgyBackend(SubprocessAgentBackend):
 class DevinCLIBackend(SubprocessAgentBackend):
     def __init__(self):
         def _devin_cmd(t, c, r, p, timeout_seconds: int = 300, **kwargs):
-            return ["devin", "-p", p, "--permission-mode", "auto" if r in ("planning", "review", "acceptance") else "accept-edits"]
+            return ["devin", "-p", p, "--permission-mode", "accept-edits" if is_mutating_role(r) else "auto"]
         super().__init__("devin_cli", "devin", _devin_cmd)
 
 
@@ -1170,10 +1179,12 @@ class CursorBackend(SubprocessAgentBackend):
     Uses the installed ``agent`` executable in print mode, which is Cursor's
     supported non-interactive automation interface. The ``agent`` binary is
     distinct from the IDE launcher (``cursor``) and does not require the IDE.
-    Planning uses ``--mode plan``. Review and acceptance use ``--mode ask``:
-    both are read-only, but in print mode ``plan`` builds a plan instead of
-    answering, so a review came back as a bare newline after minutes (DOG-006).
-    Implementation uses the default editing mode.
+    Planning uses ``--mode plan``. Every other role that may not change the
+    repository (review, the named reviewer roles, acceptance) uses
+    ``--mode ask``: both are read-only, but in print mode ``plan`` builds a
+    plan instead of answering, so a review came back as a bare newline after
+    minutes (DOG-006). Implementation and remediation use the default editing
+    mode.
     """
 
     def __init__(self):
@@ -1181,7 +1192,7 @@ class CursorBackend(SubprocessAgentBackend):
             command = ["agent", "-p", prompt, "--output-format", "text", "--workspace", str(cwd)]
             if role == "planning":
                 command += ["--mode", "plan"]
-            elif role in ("review", "acceptance"):
+            elif not is_mutating_role(role):
                 command += ["--mode", "ask"]
             return command
         super().__init__("cursor", "agent", _cursor_cmd)
@@ -1520,6 +1531,12 @@ class AgentBackendRegistry:
         if canonical_id in cls._instances:
             return cls._instances[canonical_id]
         return SubprocessAgentBackend(agent_id=agent_id, binary_name=agent_id)
+
+    @classmethod
+    def read_only_unenforced(cls) -> frozenset:
+        """Registered agent ids whose CLI does not enforce read-only operation."""
+        return frozenset(agent_id for agent_id, backend in cls._instances.items()
+                         if not getattr(backend, "enforces_read_only", True))
 
     @classmethod
     def register_backend(cls, agent_id: str, backend: AgentBackend) -> None:

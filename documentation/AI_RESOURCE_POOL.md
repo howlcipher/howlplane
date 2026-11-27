@@ -166,6 +166,17 @@ from the implementer. Routing records `review_diversity_achieved` truthfully. A
 same-provider/model request is not described as independent, and unavailable
 diversity does not weaken required review.
 
+A role that may not change the repository (every reviewer role, the test
+falsifier, planning, acceptance and verification) runs only on a CLI that
+enforces read-only operation, and in that CLI's read-only mode. A backend
+declares `enforces_read_only = False` when it cannot (AGY: its `--mode plan`
+rewrote tracked files as a reviewer, DOG-037), and selection then excludes it
+for those roles with reason `READ_ONLY_NOT_ENFORCED` at the `authority` stage.
+It still implements and remediates. With Devin and Cursor disabled this leaves
+Codex and Claude Code as the only reviewers. A review attempt that changes the
+repository anyway is discarded, and no other reviewer is shown the changed tree
+(issues.md #27).
+
 ## Execution profiles and unattended provider permissions
 
 Headless CLI providers (such as Claude Code) require explicit tool permissions

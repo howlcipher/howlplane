@@ -188,9 +188,12 @@ def test_review_provider_quota_exhaustion_updates_state_and_retries(tmp_path: Pa
     signature must update ProviderPoolManager state (like implementation
     attempts already do) and retry against an independent candidate, not be
     silently absorbed as a generic reviewer failure."""
+    # Claude Code is the architecture reviewer here. This used to be agy, which
+    # can no longer review because its CLI does not enforce read-only
+    # operation (issues.md #27).
     quota_stderr = "Error: Individual quota reached. Please upgrade your subscription."
     backend = ScriptedReviewBackend(review_outcomes={
-        ("agy", "architecture-reviewer"): (1, "", quota_stderr),
+        ("claude_code", "architecture-reviewer"): (1, "", quota_stderr),
     })
     pool = _pool()
     engine = ProductSynthesizer(provider_pool=pool, custom_backend=backend, max_repair_cycles=1)
@@ -198,11 +201,12 @@ def test_review_provider_quota_exhaustion_updates_state_and_retries(tmp_path: Pa
     res = engine.create_from_prompt("Create a persistent notes app", output_dir=tmp_path / "app")
 
     from howlplane.control_plane.synthesis.provider_pool import ProviderAvailabilityStatus
-    assert pool.get_status("agy") == ProviderAvailabilityStatus.SESSION_EXHAUSTED
+    assert pool.get_status("claude_code") == ProviderAvailabilityStatus.SESSION_EXHAUSTED
     arch_invocation = next(i for i in res.reviewer_invocations if i["role"] == "architecture-reviewer")
+    assert arch_invocation["attempts"][0]["provider"] == "claude_code"
     # Failover moved on to an independent candidate after the exhaustion.
     assert arch_invocation["completed"] is True
-    assert arch_invocation["provider"] != "agy"
+    assert arch_invocation["provider"] not in ("claude_code", "agy")
 
 
 def test_completed_diversity_true_when_a_single_role_completes(tmp_path: Path):
@@ -212,13 +216,17 @@ def test_completed_diversity_true_when_a_single_role_completes(tmp_path: Path):
     survivor = "claude_code"
 
     class SingleSurvivorBackend(ScriptedReviewBackend):
+        # The survivor completes only the role it is assigned directly. The
+        # pool's fallback order then cannot hand it a second role, which it did
+        # once agy (a failing reviewer here before) stopped being eligible to
+        # review (issues.md #27).
         def execute(self, task, cwd, role="implementation", prompt_override=None, **kwargs):
-            if role != "implementation" and task.dispatch_target != survivor:
+            if role != "implementation" and (task.dispatch_target != survivor or role != "test-falsifier"):
                 return scripted_result(role, task.dispatch_target, exit_code=1, stderr="unsuccessful")
             return super().execute(task, cwd, role=role, prompt_override=prompt_override, **kwargs)
 
     backend = SingleSurvivorBackend()
-    pool = _pool(available=("codex", survivor, "agy", "devin_cli"))
+    pool = _pool(available=("codex", survivor, "cursor", "devin_cli"))
     engine = ProductSynthesizer(provider_pool=pool, custom_backend=backend)
     out_path = tmp_path / "app"
     out_path.mkdir()
@@ -231,10 +239,8 @@ def test_completed_diversity_true_when_a_single_role_completes(tmp_path: Path):
     )
 
     completed = [i for i in invocations if i.get("completed")]
-    # Bounded 2-attempt failover means only the role directly assigned to the
-    # survivor reaches it; the other two roles' fallback candidates are drawn
-    # from providers that also fail, so they remain incomplete.
-    assert {i["provider"] for i in completed} == {survivor}
+    # Exactly one role completes, by the survivor; the other two stay incomplete.
+    assert [(i["role"], i["provider"]) for i in completed] == [("test-falsifier", survivor)]
     assert completed_diversity is True
 
 

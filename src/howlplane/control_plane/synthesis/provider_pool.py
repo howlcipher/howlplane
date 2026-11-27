@@ -32,6 +32,7 @@ from howlplane.control_plane.agent_execution import (
     PROVIDER_RETRY_AFTER_SECONDS_KEY,
 )
 from howlplane.control_plane.agent_registry import AgentProfile, AgentRegistry
+from howlplane.control_plane.provider_execution_profile import is_mutating_role
 from howlplane.control_plane.atomic_io import atomic_write_json, safe_load_json
 from howlplane.control_plane.resource_models import (
     AuthenticationStatus,
@@ -1246,6 +1247,15 @@ class ProviderPoolManager:
             required.add("command_execution")
         return sorted(required)
 
+    def _enforces_read_only(self, resource_id: str) -> bool:
+        """Whether the resource's CLI enforces the read-only mode non-mutating roles use."""
+        try:
+            backend = self._backend_resolver(resource_id)
+        except Exception:
+            # No backend can be resolved, so nothing can be launched either.
+            return True
+        return bool(getattr(backend, "enforces_read_only", True))
+
     @staticmethod
     def _is_review_role(role: str) -> bool:
         return (
@@ -1579,6 +1589,11 @@ class ProviderPoolManager:
                     ",".join(missing),
                 )
                 continue
+            if not is_mutating_role(role) and not self._enforces_read_only(resource_id):
+                # A role that may not change the repository runs only on a CLI
+                # that enforces read-only operation (issues.md #27, DOG-037).
+                exclude(profile, "READ_ONLY_NOT_ENFORCED", "authority")
+                continue
             if role in LOCAL_INELIGIBLE_REVIEWER_ROLES and profile.locality == ResourceLocality.LOCAL.value:
                 exclude(profile, "LOCAL_REVIEW_AUTHORITY_FORBIDDEN", "authority")
                 continue
@@ -1738,6 +1753,8 @@ class ProviderPoolManager:
                     and not is_task_local_eligible(task)
                 ):
                     continue
+                if not is_mutating_role(role) and not self._enforces_read_only(normalized):
+                    continue
                 if self.get_status(normalized) in {
                     ProviderAvailabilityStatus.AVAILABLE,
                     ProviderAvailabilityStatus.UNKNOWN,
@@ -1778,6 +1795,7 @@ class ProviderPoolManager:
                 for profile in self.registry.list_resources()
                 if self.get_status(profile.resource_id or profile.agent_id)
                 == ProviderAvailabilityStatus.AVAILABLE
+                and self._enforces_read_only(profile.resource_id or profile.agent_id)
             ]
             distinct = [item for item in available if item != implementation_id]
             mapping: Dict[str, str] = {}

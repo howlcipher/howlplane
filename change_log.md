@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.1]
 
+### Fixed
+
+- `howlplane work` reviewers ran in editing modes (issues.md #27). The agy, Devin and Cursor launchers chose read-only mode only for the literal roles `planning`, `review` and `acceptance`. `work`'s reviewers (`correctness-reviewer`, `test-falsifier` and the rest) therefore launched agy with `--mode accept-edits`, Devin with `accept-edits` and Cursor in editing mode, and Codex gave the test falsifier a writable workspace. Every launcher now uses `is_mutating_role`, so only implementation and remediation can edit. A CLI that cannot enforce read-only operation (agy) is excluded from those roles by the pool (`READ_ONLY_NOT_ENFORCED`). A review attempt that changes the repository is discarded, and failover stops instead of showing the changed tree to another reviewer.
+
 ### Changed
 
 - Backlog grooming (2026-11-27). Bugs #34 and #26 are marked Done: PRs #210 and #212 had fixed them, and their open follow-ups stay listed. #26's `status` worker-count note is now #35. #18 is closed, because the optional extras skip with a reason and the HowlFrame dogfood suite fails closed by design. The owner's rules for #33 and #31 part 2 are recorded. Improvement #86 checks HowlPlane against HowlFrame #320. Of ten task journals for finished August items, nine are deleted. The #60A record moves to `documentation/journals/`, where its recovery test reads it.
