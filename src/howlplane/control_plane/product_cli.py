@@ -85,14 +85,31 @@ def _readiness(args: argparse.Namespace) -> Dict[str, Any]:
     return setup_cli.gather(Path(_repo_start(args) or ".").expanduser().resolve())
 
 
-def _not_started(args: argparse.Namespace) -> Tuple[Any, Dict[str, Any], Optional[int]]:
-    """Operator view of a repository where nothing has run: (operator, status, workers available)."""
+def _worker_counts(checks: list) -> Tuple[Optional[int], int]:
+    """(routable, installed) ready AI workers; routable is None when the pool cannot say (issues.md #35).
+
+    Counting every ready CLI said "5 available" while the operator had Devin and
+    Cursor disabled. Only what routing could choose is available: workers the
+    operator disabled or never configured, and hosted workers under
+    `local_only`, are left out, as routing leaves them out.
+    """
+    from howlplane.control_plane.synthesis.provider_pool import ProviderPoolManager
+    ready = [c["id"][len("agent."):] for c in checks if c["id"].startswith("agent.") and c["status"] == "ready"]
+    try:
+        pool = ProviderPoolManager.from_config(read_only=True, probe_on_start=False)
+    except Exception:
+        return None, len(ready)  # the configuration check already reports why
+    return sum(1 for agent in ready if pool.is_routable(agent)), len(ready)
+
+
+def _not_started(args: argparse.Namespace) -> Tuple[Any, Dict[str, Any], Optional[Tuple[Optional[int], int]]]:
+    """Operator view of a repository where nothing has run: (operator, status, worker counts)."""
     from howlplane.control_plane.presentation.operator import not_started_status
     report = _readiness(args)
     status = {"project": _project_name(args), "state": "not_started"}
     checks = report["checks"]
     blocked = next((c for c in checks if c["status"] == "blocked"), None)
-    workers = sum(1 for c in checks if c["id"].startswith("agent.") and c["status"] == "ready")
+    workers = _worker_counts(checks)
     if blocked is not None and blocked["id"] == "repository":
         return (not_started_status(False, None, "howlplane setup",
                                    "This directory is not a Git repository.",
@@ -130,7 +147,7 @@ def _awaiting_task_runs(args: argparse.Namespace) -> list:
 
 
 def _collect(args: argparse.Namespace):
-    """(operator, status, workers_available) from durable state, or the not-started view."""
+    """(operator, status, worker counts) from durable state, or the not-started view."""
     campaign = _campaign(args)
     if not _has_state(campaign):
         return _not_started(args)
@@ -150,7 +167,9 @@ def cmd_home(args: argparse.Namespace) -> int:
     follow_ups = ["howlplane status"] if operator.state == "not_started" else ["howlplane status", "howlplane logs"]
     if operator.label == "NOT READY":
         follow_ups = []
-    print("\n".join(render_home_text(operator, status, _style(), workers, follow_ups)))
+    available, installed = workers or (None, None)
+    print("\n".join(render_home_text(operator, status, _style(), available, follow_ups,
+                                     workers_installed=installed)))
     return 0
 
 
@@ -164,7 +183,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         _emit_json(operator, status)
         return 0
     if operator.state == "not_started":
-        print("\n".join(render_home_text(operator, status, _style(), workers)))
+        available, installed = workers or (None, None)
+        print("\n".join(render_home_text(operator, status, _style(), available, workers_installed=installed)))
         return 0
     details = ["howlplane status --verbose",
                "howlplane logs --errors" if operator.severity.value in ("attention", "error")

@@ -3429,11 +3429,25 @@ class GovernedTaskOrchestrator:
                 self.config.failure_injection_hook("post_review", run_dir, task_spec)
 
             # Check if independent review was satisfied
-            if (
+            independence_unavailable = (
                 self.config.preserve_independent_review
                 and not self.config.custom_reviewer_fn
                 and not getattr(cycle_res, "independent_review_satisfied", True)
-            ):
+            )
+            open_findings = [f for f in cycle_res.all_findings if f.status not in ("false_positive", "out_of_scope")]
+            # Remediate, then park (issues.md #31, owner decision 2026-11-26).
+            # Concrete findings from the reviewers that did run are still worth
+            # fixing when no independent reviewer can confirm the result. So
+            # the bounded remediation cycles run and re-review with the
+            # reviewers available, and only then does the task park.
+            # Independence is reported as unavailable either way.
+            remediate_before_parking = (
+                independence_unavailable
+                and cycle_res.requires_remediation
+                and bool(open_findings)
+                and remediation_count < self.config.max_remediation_cycles
+            )
+            if independence_unavailable and not remediate_before_parking:
                 triggers: List[str] = ["independent_review_unavailable"]
                 if cycle_res.non_independent_roles:
                     triggers.append("non_independent_review")
@@ -3442,12 +3456,13 @@ class GovernedTaskOrchestrator:
                     f"{role}: reviewed by non-independent provider family ({getattr(cycle_res, 'reviewing_provider_families', {}).get(role, 'unknown')})"
                     for role in cycle_res.non_independent_roles
                 ] or ["Independent review could not be satisfied by any configured provider."]
+                if remediation_count:
+                    evidence.append(
+                        f"{remediation_count} remediation cycle(s) ran on the available reviewers' findings; "
+                        "the diff shown is the remediated one."
+                    )
                 # Findings the reviewers did raise stay in front of the owner.
-                evidence.extend(
-                    f"[{f.severity.upper()}] {f.title} ({f.reviewer_role})"
-                    for f in cycle_res.all_findings
-                    if f.status not in ("false_positive", "out_of_scope")
-                )
+                evidence.extend(f"[{f.severity.upper()}] {f.title} ({f.reviewer_role})" for f in open_findings)
                 decision_pkt = HumanDecisionPacket(
                     task_id=task_spec.task_id,
                     objective=task_spec.objective,
@@ -3575,7 +3590,13 @@ class GovernedTaskOrchestrator:
                 agent_id=routing.selected_agent_id,
                 action="remediation_started",
                 spec=task_spec,
-                metadata={"cycle": remediation_count, "findings_count": len(cycle_res.all_findings)},
+                metadata={
+                    "cycle": remediation_count,
+                    "findings_count": len(cycle_res.all_findings),
+                    # True when this cycle runs before parking on missing
+                    # independent review (issues.md #31).
+                    "remediating_without_independent_review": independence_unavailable,
+                },
             )
 
             rem_cycle_dir = remediation_base_dir / f"cycle-{remediation_count:02d}"

@@ -810,6 +810,21 @@ class ProviderPoolManager:
             for resource_id, state in sorted(self._provider_states.items())
         }
 
+    def routable_resource_ids(self) -> Set[str]:
+        """Resources routing may choose at all: configured, enabled and allowed by the egress policy.
+
+        These are what `_initialize_states` leaves out of `DISABLED`. Readiness,
+        capacity and role still decide each selection.
+        """
+        return {
+            resource_id for resource_id, state in self._provider_states.items()
+            if state.status != ProviderAvailabilityStatus.DISABLED
+        }
+
+    def is_routable(self, agent_id: str) -> bool:
+        """True when `agent_id`, under any of its aliases, names a routable resource."""
+        return self._normalize(agent_id) in self.routable_resource_ids()
+
     def inventory(self) -> List[Dict[str, Any]]:
         """Returns registered, configured, readiness, and capacity distinctions."""
         rows = []

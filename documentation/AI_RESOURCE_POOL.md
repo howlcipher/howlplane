@@ -165,6 +165,13 @@ When independent review is required, selection prefers another provider family
 from the implementer. Routing records `review_diversity_achieved` truthfully. A
 same-provider/model request is not described as independent, and unavailable
 diversity does not weaken required review.
+When `howlplane work` cannot get independent review, it still remediates
+the concrete findings that the available reviewers raised, within the usual
+remediation cycle limit, and has those reviewers review each remediation
+again. Only then does the task park as independent review unavailable. It
+parks after deterministic verification, and the decision packet carries the
+remediated diff, the findings still open and the verification result
+(issues.md #29, #31).
 
 A role that may not change the repository (every reviewer role, the test
 falsifier, planning, acceptance and verification) runs only on a CLI that

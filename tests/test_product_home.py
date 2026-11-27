@@ -32,10 +32,38 @@ def test_outside_a_repository_says_so_and_changes_nothing(product, tmp_path, mon
     assert not (tmp_path / "state" / "howlplane").exists()  # read-only: nothing was created
 
 
-def test_prepared_repository_is_ready_to_start(product):
+def _operator_config(monkeypatch, tmp_path, toml):
+    """Gives HowlPlane this operator config, as `~/.config/howlplane/config.toml` would."""
+    from howlplane.control_plane import config_loader
+    path = tmp_path / "operator_config.toml"
+    path.write_text(toml, encoding="utf-8")
+    monkeypatch.setenv("HOWLPLANE_LOCAL_CONFIG", str(path))
+    monkeypatch.setattr(config_loader, "default_loader", config_loader.ConfigLoader())
+
+
+CONNECTED = '[ai_resources]\noperating_mode = "connected"\n'
+ENABLED = "[ai_resources.providers.{}]\nenabled = {}\n"
+
+
+def test_prepared_repository_is_ready_to_start(product, monkeypatch, tmp_path):
+    _operator_config(monkeypatch, tmp_path, CONNECTED + ENABLED.format("codex", "true") + ENABLED.format("claude_code", "true"))
     code, out, _ = product.run()
     assert code == 0 and "READY" in out and "2 available" in out and "howlplane start" in out
+    assert "not routable" not in out
     assert not (product.repo.parent / "state" / "howlplane").exists()  # bare invocation is read-only
+
+
+@pytest.mark.parametrize("toml, shown", [
+    (CONNECTED + ENABLED.format("codex", "true") + ENABLED.format("claude_code", "false"),
+     "1 available, 1 more installed but not routable (howlplane providers)"),
+    ("", "0 available, 2 more installed but not routable (howlplane providers)"),  # the built-in local_only
+], ids=["one_disabled", "local_only_default"])
+def test_workers_counts_only_what_routing_could_choose(product, monkeypatch, tmp_path, toml, shown):
+    """Both CLIs are ready, but `status` said "2 available" whatever the operator allowed (issues.md #35)."""
+    _operator_config(monkeypatch, tmp_path, toml)
+    for command in ((), ("status",)):
+        code, out, _ = product.run(*command)
+        assert code == 0 and shown in out, command
 
 
 def test_running_shows_work_worker_and_nothing_required(product):

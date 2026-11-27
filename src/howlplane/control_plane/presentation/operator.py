@@ -520,9 +520,20 @@ def render_operator_text(op: OperatorStatus, status: Mapping[str, Any], style: O
     return lines
 
 
+def _workers_text(available: Optional[int], installed: Optional[int]) -> Optional[str]:
+    """The Workers row: what routing could choose, and any ready CLI it cannot (issues.md #35)."""
+    if available is None:
+        return f"{installed} installed" if installed else None
+    text = f"{available} available"
+    if installed is not None and installed > available:
+        text += f", {installed - available} more installed but not routable (howlplane providers)"
+    return text
+
+
 def render_home_text(op: OperatorStatus, status: Mapping[str, Any], style: Optional[Style] = None,
                      workers_available: Optional[int] = None,
-                     follow_ups: Optional[List[str]] = None) -> List[str]:
+                     follow_ups: Optional[List[str]] = None, *,
+                     workers_installed: Optional[int] = None) -> List[str]:
     """The compact contextual home screen shown by bare ``howlplane``.
 
     Reads the same ``OperatorStatus`` as every other surface; it only chooses fewer rows.
@@ -537,7 +548,7 @@ def render_home_text(op: OperatorStatus, status: Mapping[str, Any], style: Optio
         ("Working on", working_on),
         ("Worker", op.worker),
         ("Elapsed", format_duration(op.elapsed_seconds)),
-        ("Workers", f"{workers_available} available" if workers_available is not None else None),
+        ("Workers", _workers_text(workers_available, workers_installed)),
     ]
     if op.severity is not Severity.OK:
         rows.append(("Reason", op.summary))
