@@ -18,12 +18,13 @@ Pending bugs carry the same diminishing-returns score defined in `improvements.m
 | 32 | [Claude never received the operator's `execution_profile` grants, so self-hosted remediation could only run the full suite](#32-claude-never-received-the-operators-execution_profile-grants-so-self-hosted-remediation-could-only-run-the-full-suite) | Done (2026-11-09) | 8.0 (8×1.0÷1) | Opus 5.5 | Gemini 3.8 Flash | Every Claude remediation of HP-SELF-30A ran the 16-minute suite, and the third ran out of time. Fixed directly as a self-hosting bootstrap blocker. |
 | 29 | [A task parked as "independent review unavailable" escalates to the owner before verification runs](#29-a-task-parked-as-independent-review-unavailable-escalates-to-the-owner-before-verification-runs) | Resolved 2026-11-11 | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | The #23 fix covered only the remediation limit. The owner is asked to approve without verification evidence, the gap #23 closed. |
 | 31 | [The 10-minute implementation limit is hard-coded, and a parked review skips remediation](#31-the-10-minute-implementation-limit-is-hard-coded-and-a-parked-review-skips-remediation) | Pending | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | In the second HP-SELF-30 run both implementers ran out the limit and HIGH-finding partial work went to review, then straight to the owner. |
-| 33 | [A refused shell command ends the whole worker attempt and discards its finished work](#33-a-refused-shell-command-ends-the-whole-worker-attempt-and-discards-its-finished-work) | Pending | 3.0 (6×1.0÷2) | Sonnet 5.5 | Gemini 3.8 Flash | HP-SELF-29 and 29B both failed after the worker had produced a complete candidate, because it ran an inspection command outside its grants. Two runs and about two hours were lost before the owner widened the grants. |
+| 33 | [A refused shell command ends the whole worker attempt and discards its finished work](#33-a-refused-shell-command-ends-the-whole-worker-attempt-and-discards-its-finished-work) | Done (2026-11-27) | — | — | — | HP-SELF-29 and 29B both failed after the worker had produced a complete candidate, because it ran an inspection command outside its grants. Two runs and about two hours were lost before the owner widened the grants. **Done 2026-11-27:** per the owner's rule, a candidate from an attempt refused only commands goes on to review and verification, with the refusals recorded. |
 | 34 | [`resume --json` reports empty verification and reviews, and a bad `--task-class` is reported as `INTERNAL_ERROR`](#34-resume---json-reports-empty-verification-and-reviews-and-a-bad---task-class-is-reported-as-internal_error) | Done (2026-11-12) | 1.5 (3×1.0÷2) | Sonnet 5.5 | Gemini 3.8 Flash | The document an AI caller reads after resume does not carry the evidence the run produced, which undermines the `work_result/v1` contract for programmatic callers. |
 | 30 | [Smaller gaps from the first self-hosted run (HP-SELF-25)](#30-smaller-gaps-from-the-first-self-hosted-run-hp-self-25) | Pending | 1.5 (3×1.0÷2) | Sonnet 5.5 | Gemini 3.8 Flash | Each one cost a review or a diagnosis in the run, and none blocks a task outright. |
 | 27 | [`howlplane work` routes review to AGY, which `orchestrate` skips because AGY's review mode is not read-only](#27-howlplane-work-routes-review-to-agy-which-orchestrate-skips-because-agys-review-mode-is-not-read-only) | Done (2026-11-27) | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | With Devin off, AGY is one of only two non-implementer reviewers, so `work` assigns it review often. DOG-037 showed it rewriting tracked files as a reviewer. |
 | 26 | [Rejecting a `work` task leaves its changes in the working tree without saying so](#26-rejecting-a-work-task-leaves-its-changes-in-the-working-tree-without-saying-so) | Done (2026-11-13) | 1.5 (3×1.0÷2) | Sonnet 5.5 | Gemini 3.8 Flash | The next task starts on top of rejected work, including build artifacts the agent created. |
 | 35 | [`status` counts installed CLIs, not the workers the pool would route to](#35-status-counts-installed-clis-not-the-workers-the-pool-would-route-to) | Pending | 1.5 (3×1.0÷2) | — | — | Split from #26 on 2026-11-27. The operator view says "5 workers available" while Devin and Cursor are disabled, so it overstates what a task can use. |
+| 36 | [The factory SIGTERM test can signal a resumed supervisor mid-startup](#36-the-factory-sigterm-test-can-signal-a-resumed-supervisor-mid-startup) | Done (2026-11-27) | — | — | — | Failed once on CI (Python 3.14, howlplane#230) on a change that never touches the factory, blocking a merge. **Done 2026-11-27:** the test waits for a tick by the process it is about to signal. |
 | 25 | [A shell-less Claude reviewer that asked to run tests had its whole verdict discarded, and was then benched from review for good](#25-a-shell-less-claude-reviewer-that-asked-to-run-tests-had-its-whole-verdict-discarded-and-was-then-benched-from-review-for-good) | Done (2026-11-08) | 4.0 (8×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Claude had failed 57 reviews in a row since 2026-10-25, so with Devin and Cursor off only Codex and agy could review. |
 | 24 | [Three `howlplane work` operator-view defects found dogfooding](#24-three-howlplane-work-operator-view-defects-found-dogfooding) | Done (2026-11-07) | 2.0 (4×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Each one broke the basic single-task path for a first-time operator: a crash on `--agent`, a READY status over a pending gate, and a clean reviewer shown as not run. |
 | 23 | [One LOW finding left after the remediation limit escalates to the owner before verification runs](#23-one-low-finding-left-after-the-remediation-limit-escalates-to-the-owner-before-verification-runs) | Done | 2.0 (4×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Owner approved 2026-11-07: verify before escalating, LOW leftovers become follow-ups. MEDIUM-and-above still escalates. |
@@ -651,6 +652,31 @@ Also found in that run, still open:
 
 **Owner decision 2026-11-26: a refused command continues to review.** A refused command never ran. When an attempt fails only because commands were refused and it produced a candidate, HowlPlane keeps the candidate, records the refused commands as evidence, and sends it to review and deterministic verification, which still gate it. The attempt fails as before only when there is no candidate. Grants are never widened.
 
+**Fixed 2026-11-27** in the `work` path.
+* **Signal.** `ClaudeCodeBackend` still fails a refused mutating run closed, because it cannot see the repository. When the run otherwise succeeded (exit 0, no terminal error), it now also sets `refusal_only_failure`. A non-zero exit or a terminal error never sets it.
+* **Decision.** The closed-loop orchestrator now captures the scoped delta before the pool records the result. When the marker is set and the attempt left a candidate, the attempt succeeds:
+  * the refusals move to `refused_commands` in the attempt's `result.json` and its `implementation_attempts` entry;
+  * an `implementation_refusals_recorded` event names them;
+  * the provider is not charged.
+
+  The candidate then faces review and verification like any other.
+* **Remediation.** The same rule applies to a remediation cycle that changed the candidate it was given, recorded as `remediation_refusals_recorded`. A remediation that changed nothing still fails the task and rolls it back.
+* **Unchanged:**
+  * grants;
+  * an attempt with no candidate, which still fails with `EXECUTION_PERMISSION_REQUIRED` and fails over;
+  * denials from the other CLIs, which carry no marker;
+  * `howlplane orchestrate`, which keeps its own grant-gap handling (DOG-018, DOG-040).
+* **Prompt.** The implementer's shell note no longer says that a refusal fails the task. It now says that a refused command never runs and is recorded against the attempt.
+* **Tests.** `tests/test_refused_commands_continue_to_review.py` drives the real Claude result handling over a scripted CLI run:
+  * a refused `ls` with a candidate completes through review and verification, with the evidence recorded and the provider not charged;
+  * with no candidate, the attempt still fails;
+  * verification still rejects a broken candidate;
+  * review findings still gate a refused remediation;
+  * a refused remediation that changed nothing still fails and rolls back;
+  * a denial without the marker fails as before.
+
+  `tests/test_provider_permissions.py` covers when the backend sets the marker.
+
 ### 34. `resume --json` reports empty verification and reviews, and a bad `--task-class` is reported as `INTERNAL_ERROR`
 
 **Found** 2026-11-10 and 2026-11-11 while shipping HP-SELF-30C2.
@@ -671,3 +697,11 @@ Open follow-ups from the self-review (independent review was unavailable):
 ### 35. `status` counts installed CLIs, not the workers the pool would route to
 
 **Split from #26** on 2026-11-27 (found 2026-11-07 dogfooding Objective 1). `status` reported "5 workers available" while the pool had Devin and Cursor disabled: it counts installed, logged-in CLIs, not the workers the pool would route a task to. Needs: count from the pool's own selection (enabled, configured and not cooling down), keep the installed count separate if it stays useful, and cover both with tests.
+
+### 36. The factory SIGTERM test can signal a resumed supervisor mid-startup
+
+**Found** 2026-11-27. On howlplane#230, which only moved the HowlFrame pin, `Fast Python (3.14)` failed `tests/test_factory_service.py::test_real_idle_process_sigterm_releases_lock_and_can_resume`: the resumed `factory run --resume-stopped` was still running 5 seconds after SIGTERM. The factory supervisor never runs HowlFrame, so the change could not reach it, and the same commit passed on Python 3.11, 3.12 and 3.13 and in the full 3.12 regression.
+
+* **Cause.** The test waits for `last_successful_tick_at` before it signals. For the resumed run that field is already set by the first run, so the wait passes at once and the test signals as soon as the lock file exists, possibly during the resumed process's first tick. The supervisor honours a signal only once the current tick settles (`request_stop`), by design, so a slow cold first tick on a loaded runner outlasts the 5-second bound.
+* **Reproduced** by delaying the first tick by 6 seconds in a local, uncommitted patch: the old test fails with exactly CI's `TimeoutExpired`, and the fixed test passes.
+* **Fixed 2026-11-27.** Each run now waits for a tick newer than any already on disk, so the signal always reaches an idle supervisor, which is the path the test is named for. The supervisor is unchanged and the test's assertions are unchanged.

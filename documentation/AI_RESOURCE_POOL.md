@@ -190,8 +190,16 @@ shell commands it holds.
 Review roles hold file tools only (Read, Glob, Grep) and are told so. A
 reviewer refused a command it was never granted keeps its answer, and the
 refused commands are recorded as `read_only_role_denials`; the review parser
-still decides whether the answer is a valid verdict. Mutating roles still fail
-closed on a refusal.
+still decides whether the answer is a valid verdict. In a mutating role the
+backend still fails the attempt closed on a refusal, and marks it when the run
+otherwise succeeded. In `howlplane work`, such an implementation or
+remediation attempt that left a candidate goes on to review and deterministic
+verification, which decide it as they do any other: a refused command never
+ran (issues.md #33). The refusals are kept as `refused_commands` in the
+attempt's `result.json` and its entry in `implementation_attempts`, and as an
+`implementation_refusals_recorded` or `remediation_refusals_recorded`
+evidence event. The provider is not charged. An attempt that left nothing
+fails as before, and no grant changes.
 
 With an explicit agent (`--agent X`), failover stays on X: once X is attempted,
 the other workers are reported as `EXPLICIT_AGENT_REQUESTED` rather than tried.

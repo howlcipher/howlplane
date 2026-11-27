@@ -120,6 +120,10 @@ def test_real_idle_process_sigterm_releases_lock_and_can_resume(tmp_path):
     store = SupervisorStateStore(state / "supervisor")
 
     def run_and_stop(resume=False):
+        # Wait for a tick by this process: the resumed run would otherwise find
+        # the first run's tick on disk and signal it mid-startup, and a signal
+        # is honoured only once the current tick settles (issues.md #36).
+        earlier_tick = store.load().last_successful_tick_at
         process = subprocess.Popen(
             command + ["run", "--state-dir", str(state), "--target-repo", str(repo)]
             + (["--resume-stopped"] if resume else []),
@@ -127,7 +131,7 @@ def test_real_idle_process_sigterm_releases_lock_and_can_resume(tmp_path):
         )
         try:
             deadline = time.monotonic() + 15
-            while not store.load().last_successful_tick_at:
+            while store.load().last_successful_tick_at in (None, earlier_tick):
                 if process.poll() is not None:
                     pytest.fail(str(process.communicate()))
                 if time.monotonic() >= deadline:

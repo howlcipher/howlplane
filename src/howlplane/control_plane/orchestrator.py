@@ -23,6 +23,8 @@ from howlplane.control_plane.agent_execution import (
     AgentBackendRegistry,
     AgentExecutionResult,
     AgentUnavailableError,
+    REFUSAL_ONLY_FAILURE_KEY,
+    REFUSED_COMMANDS_KEY,
     TOOL_PERMISSION_DENIED,
     TOOL_PERMISSION_KEY,
     ProviderStreamObserver,
@@ -549,6 +551,45 @@ class GovernedTaskOrchestrator:
             )
         return delta
 
+    def _continue_past_refusals(
+        self,
+        task_spec: TaskSpec,
+        resource_id: str,
+        result: Optional[AgentExecutionResult],
+        *,
+        produced_candidate: bool,
+        action: str,
+        **evidence: Any,
+    ) -> bool:
+        """Sends an attempt that failed only because commands were refused on to review (issues.md #33).
+
+        A refused command never ran. When the attempt still left a candidate,
+        the refusals are recorded as evidence and the candidate goes to review
+        and deterministic verification, which decide it as they decide any
+        other. Without a candidate the attempt fails as before. Called before
+        the pool records the result, so the provider is charged only for an
+        attempt that really failed. No grant changes.
+        """
+        metadata = (result.metadata or {}) if result is not None else {}
+        if result is None or result.success or not metadata.get(REFUSAL_ONLY_FAILURE_KEY) or not produced_candidate:
+            return False
+        refused = list(metadata.get("denied_commands") or metadata.get("denied_tools") or [])
+        unnamed = metadata.get("unnamed_denials") or 0
+        for key in (REFUSAL_ONLY_FAILURE_KEY, TOOL_PERMISSION_KEY, "denied_tools", "denied_commands", "unnamed_denials"):
+            metadata.pop(key, None)
+        metadata[REFUSED_COMMANDS_KEY] = refused
+        result.metadata = metadata
+        result.success = True
+        result.error_message = None
+        self._record_event(
+            task_id=task_spec.task_id,
+            agent_id=resource_id,
+            action=action,
+            spec=task_spec,
+            metadata={**evidence, REFUSED_COMMANDS_KEY: refused, "unnamed_refusals": unnamed},
+        )
+        return True
+
     def _record_implementation_attempt(
         self,
         run_dir: Path,
@@ -607,6 +648,9 @@ class GovernedTaskOrchestrator:
         }
         if impl_res and isinstance((impl_res.metadata or {}).get("watchdog_diagnostics"), dict):
             record["watchdog_diagnostics"] = impl_res.metadata["watchdog_diagnostics"]
+        if impl_res and (impl_res.metadata or {}).get(REFUSED_COMMANDS_KEY):
+            # Shown with the attempt, so the operator sees what was refused (issues.md #33).
+            record[REFUSED_COMMANDS_KEY] = impl_res.metadata[REFUSED_COMMANDS_KEY]
         if carried_salvage:
             record["retained_salvage"] = carried_salvage
         self._persist_attempt_record(record, attempts_dir)
@@ -2814,6 +2858,19 @@ class GovernedTaskOrchestrator:
                             metadata={"attempt": attempt_num, "files": swept},
                         )
 
+                current_delta = self._capture_scoped_delta(
+                    task_spec, baseline, current_impl_resource_id, stage="implementation"
+                )
+                # A refused command never ran, so an attempt that left a
+                # candidate goes on to review instead of being charged and
+                # rolled back (issues.md #33). This is decided before the pool
+                # records the result.
+                self._continue_past_refusals(
+                    task_spec, current_impl_resource_id, impl_res,
+                    produced_candidate=not current_delta.is_empty,
+                    action="implementation_refusals_recorded", attempt=attempt_num,
+                )
+
                 # Snapshot capacity before record_result mutates it, so the
                 # recorded "before" is genuinely the pre-attempt state.
                 capacity_before: Dict[str, str] = (
@@ -2827,10 +2884,6 @@ class GovernedTaskOrchestrator:
                         impl_res,
                         task_id=task_spec.task_id,
                     )
-
-                current_delta = self._capture_scoped_delta(
-                    task_spec, baseline, current_impl_resource_id, stage="implementation"
-                )
 
                 denial_outcome = (
                     (impl_res.metadata or {}).get(TOOL_PERMISSION_KEY)
@@ -3536,6 +3589,7 @@ class GovernedTaskOrchestrator:
             rem_res = None
             rem_failure = None
             remediation_timeout = None
+            remediated_delta: Optional[RepositoryDelta] = None
             if not self.config.custom_remediation_fn:
                 rem_prompt = self._build_remediation_prompt(task_spec, current_delta.diff_content, cycle_res.all_findings)
                 affected_files = set(current_delta.files_modified + current_delta.files_added)
@@ -3578,6 +3632,18 @@ class GovernedTaskOrchestrator:
                         prompt_override=apply_context_library(rem_prompt, rem_resource_id),
                         timeout_seconds=remediation_timeout,
                     )
+                    remediated_delta = self._capture_scoped_delta(
+                        task_spec, baseline, routing.selected_agent_id, stage="remediation"
+                    )
+                    # As for implementation (issues.md #33): a remediation that
+                    # was only refused commands and changed the candidate goes
+                    # back to review. `current_delta` is still the candidate it
+                    # was given.
+                    self._continue_past_refusals(
+                        task_spec, rem_resource_id, rem_res,
+                        produced_candidate=remediated_delta.diff_content != current_delta.diff_content,
+                        action="remediation_refusals_recorded", cycle=remediation_count,
+                    )
                     (rem_cycle_dir / "result.json").write_text(rem_res.to_json(), encoding="utf-8")
                     if self.config.provider_pool is not None:
                         rem_failure = self.config.provider_pool.record_result(
@@ -3588,7 +3654,7 @@ class GovernedTaskOrchestrator:
 
                         rem_failure = ProviderPoolManager.classify_result(rem_resource_id, rem_res)
 
-            current_delta = self._capture_scoped_delta(
+            current_delta = remediated_delta if remediated_delta is not None else self._capture_scoped_delta(
                 task_spec, baseline, routing.selected_agent_id, stage="remediation"
             )
             self._write_delta_patch(current_delta, rem_cycle_dir, run_dir)
