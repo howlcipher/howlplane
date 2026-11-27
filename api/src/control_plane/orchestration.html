@@ -562,7 +562,7 @@
 </span><span id="L-57"><a href="#L-57"><span class="linenos">  57</span></a><span class="c1"># rewrote tracked research files, which ended the session BLOCKED (DOG-037). Codex reviews run in</span>
 </span><span id="L-58"><a href="#L-58"><span class="linenos">  58</span></a><span class="c1"># its read-only sandbox, Claude gets only Read/Grep/Glob, Cursor uses plan/ask, Devin `auto`</span>
 </span><span id="L-59"><a href="#L-59"><span class="linenos">  59</span></a><span class="c1"># auto-approves read-only tools only.</span>
-</span><span id="L-60"><a href="#L-60"><span class="linenos">  60</span></a><span class="n">READ_ONLY_UNENFORCED</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s2">"agy"</span><span class="p">})</span>
+</span><span id="L-60"><a href="#L-60"><span class="linenos">  60</span></a><span class="n">READ_ONLY_UNENFORCED</span> <span class="o">=</span> <span class="n">AgentBackendRegistry</span><span class="o">.</span><span class="n">read_only_unenforced</span><span class="p">()</span>
 </span><span id="L-61"><a href="#L-61"><span class="linenos">  61</span></a><span class="n">ROLES</span> <span class="o">=</span> <span class="p">(</span><span class="s2">"planning"</span><span class="p">,</span> <span class="s2">"implementation"</span><span class="p">,</span> <span class="s2">"review"</span><span class="p">,</span> <span class="s2">"acceptance"</span><span class="p">)</span>
 </span><span id="L-62"><a href="#L-62"><span class="linenos">  62</span></a><span class="n">AGENT_STATES</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"AVAILABLE"</span><span class="p">,</span> <span class="s2">"DEGRADED"</span><span class="p">,</span> <span class="s2">"UNAVAILABLE"</span><span class="p">,</span> <span class="s2">"RESERVED"</span><span class="p">}</span>
 </span><span id="L-63"><a href="#L-63"><span class="linenos">  63</span></a><span class="n">UNAVAILABLE_FAILURES</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"MISSING_EXECUTABLE"</span><span class="p">,</span> <span class="s2">"AUTHENTICATION_REQUIRED"</span><span class="p">,</span> <span class="s2">"PROVIDER_UNAVAILABLE"</span><span class="p">}</span>
@@ -2830,7 +2830,7 @@
                 <section id="READ_ONLY_ROLES">
                     <div class="attr variable">
             <span class="name">READ_ONLY_ROLES</span>        =
-<span class="default_value">frozenset({&#39;review&#39;, &#39;planning&#39;, &#39;acceptance&#39;})</span>
+<span class="default_value">frozenset({&#39;acceptance&#39;, &#39;review&#39;, &#39;planning&#39;})</span>
 
         
     </div>
@@ -2866,7 +2866,7 @@
                 <section id="AGENT_STATES">
                     <div class="attr variable">
             <span class="name">AGENT_STATES</span>        =
-<span class="default_value">{&#39;DEGRADED&#39;, &#39;AVAILABLE&#39;, &#39;UNAVAILABLE&#39;, &#39;RESERVED&#39;}</span>
+<span class="default_value">{&#39;DEGRADED&#39;, &#39;AVAILABLE&#39;, &#39;RESERVED&#39;, &#39;UNAVAILABLE&#39;}</span>
 
         
     </div>
@@ -2878,7 +2878,7 @@
                 <section id="UNAVAILABLE_FAILURES">
                     <div class="attr variable">
             <span class="name">UNAVAILABLE_FAILURES</span>        =
-<span class="default_value">{&#39;MISSING_EXECUTABLE&#39;, &#39;PROVIDER_UNAVAILABLE&#39;, &#39;AUTHENTICATION_REQUIRED&#39;}</span>
+<span class="default_value">{&#39;PROVIDER_UNAVAILABLE&#39;, &#39;AUTHENTICATION_REQUIRED&#39;, &#39;MISSING_EXECUTABLE&#39;}</span>
 
         
     </div>
@@ -2890,7 +2890,7 @@
                 <section id="MODEL_LIMIT_FAILURES">
                     <div class="attr variable">
             <span class="name">MODEL_LIMIT_FAILURES</span>        =
-<span class="default_value">{&#39;SESSION_LIMIT&#39;, &#39;RATE_LIMITED&#39;, &#39;QUOTA_EXHAUSTED&#39;}</span>
+<span class="default_value">{&#39;QUOTA_EXHAUSTED&#39;, &#39;SESSION_LIMIT&#39;, &#39;RATE_LIMITED&#39;}</span>
 
         
     </div>
@@ -2987,7 +2987,7 @@
                     <div class="attr variable">
             <span class="name">ROLE_FAILURES</span>        =
 <input id="ROLE_FAILURES-view-value" class="view-value-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
-            <label class="view-value-button pdoc-button" for="ROLE_FAILURES-view-value"></label><span class="default_value">{&#39;NO_REPOSITORY_CHANGE&#39;, &#39;CAPABILITY_FAILURE&#39;, &#39;ACCEPTANCE_REJECTED_OR_UNCONFIRMED&#39;, &#39;VERIFICATION_FAILURE&#39;, &#39;READ_ONLY_ROLE_MUTATED_REPOSITORY&#39;, &#39;AUDIT_FINDINGS_OR_UNCONFIRMED&#39;, &#39;IMPLEMENTATION_INCOMPLETE&#39;, &#39;EXECUTION_PERMISSION_REQUIRED&#39;, &#39;PROVIDER_STALLED&#39;, &#39;AUDIT_NO_VERDICT&#39;, &#39;MALFORMED_OUTPUT&#39;, &#39;ENGINEERING_FAILURE&#39;, &#39;POLICY_FAILURE&#39;}</span>
+            <label class="view-value-button pdoc-button" for="ROLE_FAILURES-view-value"></label><span class="default_value">{&#39;READ_ONLY_ROLE_MUTATED_REPOSITORY&#39;, &#39;AUDIT_FINDINGS_OR_UNCONFIRMED&#39;, &#39;AUDIT_NO_VERDICT&#39;, &#39;PROVIDER_STALLED&#39;, &#39;VERIFICATION_FAILURE&#39;, &#39;NO_REPOSITORY_CHANGE&#39;, &#39;EXECUTION_PERMISSION_REQUIRED&#39;, &#39;MALFORMED_OUTPUT&#39;, &#39;CAPABILITY_FAILURE&#39;, &#39;ACCEPTANCE_REJECTED_OR_UNCONFIRMED&#39;, &#39;POLICY_FAILURE&#39;, &#39;ENGINEERING_FAILURE&#39;, &#39;IMPLEMENTATION_INCOMPLETE&#39;}</span>
 
         
     </div>
@@ -3037,7 +3037,7 @@
                 <section id="SUCCESSFULLY_TERMINAL_STATUSES">
                     <div class="attr variable">
             <span class="name">SUCCESSFULLY_TERMINAL_STATUSES</span>        =
-<span class="default_value">frozenset({&#39;COMPLETE WITH WARNINGS&#39;, &#39;COMPLETE&#39;})</span>
+<span class="default_value">frozenset({&#39;COMPLETE&#39;, &#39;COMPLETE WITH WARNINGS&#39;})</span>
 
         
     </div>
@@ -3050,7 +3050,7 @@
                     <div class="attr variable">
             <span class="name">RESUMABLE_STATUSES</span>        =
 <input id="RESUMABLE_STATUSES-view-value" class="view-value-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
-            <label class="view-value-button pdoc-button" for="RESUMABLE_STATUSES-view-value"></label><span class="default_value">frozenset({&#39;ACCEPTANCE&#39;, &#39;PLANNED&#39;, &#39;HANDOFF REQUIRED&#39;, &#39;PLANNING&#39;, &#39;IMPLEMENTATION&#39;, &#39;REVIEW&#39;, &#39;INTERRUPTED&#39;})</span>
+            <label class="view-value-button pdoc-button" for="RESUMABLE_STATUSES-view-value"></label><span class="default_value">frozenset({&#39;IMPLEMENTATION&#39;, &#39;INTERRUPTED&#39;, &#39;REVIEW&#39;, &#39;PLANNED&#39;, &#39;HANDOFF REQUIRED&#39;, &#39;PLANNING&#39;, &#39;ACCEPTANCE&#39;})</span>
 
         
     </div>
@@ -3086,7 +3086,7 @@
                 <section id="TERMINAL">
                     <div class="attr variable">
             <span class="name">TERMINAL</span>        =
-<span class="default_value">frozenset({&#39;COMPLETE WITH WARNINGS&#39;, &#39;SUPERSEDED&#39;, &#39;COMPLETE&#39;, &#39;SESSION_STATE_INVALID&#39;})</span>
+<span class="default_value">frozenset({&#39;SUPERSEDED&#39;, &#39;COMPLETE&#39;, &#39;SESSION_STATE_INVALID&#39;, &#39;COMPLETE WITH WARNINGS&#39;})</span>
 
         
     </div>
@@ -6381,7 +6381,7 @@ result, not a crash: the record says so in place of the runner's output.</p>
                     <div class="attr variable">
             <span class="name">VERDICT_FAILURES</span>        =
 <input id="VERDICT_FAILURES-view-value" class="view-value-toggle-state" type="checkbox" aria-hidden="true" tabindex="-1">
-            <label class="view-value-button pdoc-button" for="VERDICT_FAILURES-view-value"></label><span class="default_value">frozenset({&#39;AUDIT_NO_VERDICT&#39;, &#39;ACCEPTANCE_REJECTED_OR_UNCONFIRMED&#39;, &#39;AUDIT_FINDINGS_OR_UNCONFIRMED&#39;})</span>
+            <label class="view-value-button pdoc-button" for="VERDICT_FAILURES-view-value"></label><span class="default_value">frozenset({&#39;AUDIT_FINDINGS_OR_UNCONFIRMED&#39;, &#39;AUDIT_NO_VERDICT&#39;, &#39;ACCEPTANCE_REJECTED_OR_UNCONFIRMED&#39;})</span>
 
         
     </div>
