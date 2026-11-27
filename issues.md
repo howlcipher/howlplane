@@ -23,7 +23,7 @@ Pending bugs carry the same diminishing-returns score defined in `improvements.m
 | 30 | [Smaller gaps from the first self-hosted run (HP-SELF-25)](#30-smaller-gaps-from-the-first-self-hosted-run-hp-self-25) | Pending | 1.5 (3×1.0÷2) | Sonnet 5.5 | Gemini 3.8 Flash | Each one cost a review or a diagnosis in the run, and none blocks a task outright. |
 | 27 | [`howlplane work` routes review to AGY, which `orchestrate` skips because AGY's review mode is not read-only](#27-howlplane-work-routes-review-to-agy-which-orchestrate-skips-because-agys-review-mode-is-not-read-only) | Done (2026-11-27) | 3.0 (6×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | With Devin off, AGY is one of only two non-implementer reviewers, so `work` assigns it review often. DOG-037 showed it rewriting tracked files as a reviewer. |
 | 26 | [Rejecting a `work` task leaves its changes in the working tree without saying so](#26-rejecting-a-work-task-leaves-its-changes-in-the-working-tree-without-saying-so) | Done (2026-11-13) | 1.5 (3×1.0÷2) | Sonnet 5.5 | Gemini 3.8 Flash | The next task starts on top of rejected work, including build artifacts the agent created. |
-| 35 | [`status` counts installed CLIs, not the workers the pool would route to](#35-status-counts-installed-clis-not-the-workers-the-pool-would-route-to) | Pending | 1.5 (3×1.0÷2) | — | — | Split from #26 on 2026-11-27. The operator view says "5 workers available" while Devin and Cursor are disabled, so it overstates what a task can use. |
+| 35 | [`status` counts installed CLIs, not the workers the pool would route to](#35-status-counts-installed-clis-not-the-workers-the-pool-would-route-to) | Done (2026-11-27) | — | — | — | Split from #26 on 2026-11-27. The operator view says "5 workers available" while Devin and Cursor are disabled, so it overstates what a task can use. **Done 2026-11-27:** the count is what routing could choose, and the CLIs it cannot use are counted separately. |
 | 36 | [The factory SIGTERM test can signal a resumed supervisor mid-startup](#36-the-factory-sigterm-test-can-signal-a-resumed-supervisor-mid-startup) | Done (2026-11-27) | — | — | — | Failed once on CI (Python 3.14, howlplane#230) on a change that never touches the factory, blocking a merge. **Done 2026-11-27:** the test waits for a tick by the process it is about to signal. |
 | 37 | [Test-strength follow-ups for `work --implementation-timeout`](#37-test-strength-follow-ups-for-work---implementation-timeout) | Pending | 1.0 (2×1.0÷2) | — | — | Moved from #31 on 2026-11-27. The flag works, but its self-review left five paths untested, among them the `resume` fallbacks and the parser's edge cases. |
 | 25 | [A shell-less Claude reviewer that asked to run tests had its whole verdict discarded, and was then benched from review for good](#25-a-shell-less-claude-reviewer-that-asked-to-run-tests-had-its-whole-verdict-discarded-and-was-then-benched-from-review-for-good) | Done (2026-11-08) | 4.0 (8×1.0÷2) | Opus 5.5 | Gemini 3.8 Flash | Claude had failed 57 reviews in a row since 2026-10-25, so with Devin and Cursor off only Codex and agy could review. |
@@ -721,6 +721,17 @@ Open follow-ups from the self-review (independent review was unavailable):
 ### 35. `status` counts installed CLIs, not the workers the pool would route to
 
 **Split from #26** on 2026-11-27 (found 2026-11-07 dogfooding Objective 1). `status` reported "5 workers available" while the pool had Devin and Cursor disabled: it counts installed, logged-in CLIs, not the workers the pool would route a task to. Needs: count from the pool's own selection (enabled, configured and not cooling down), keep the installed count separate if it stays useful, and cover both with tests.
+
+**Fixed 2026-11-27.**
+* **Available.** `status` and bare `howlplane` count a ready worker as available only when routing could choose it: the operator configured and enabled it, and the operating mode allows it. Before, every ready CLI counted.
+* **Installed.** Ready CLIs that routing cannot use are counted separately, with a pointer to `howlplane providers`, which says why for each. An example: `0 available, 2 more installed but not routable (howlplane providers)` under the built-in `local_only` default.
+* **Source of the count.** It comes from the pool's own `routable_resource_ids()`: the configured, enabled and egress-allowed resources, the ones `_initialize_states` does not disable. A read-only pool is built without probing, so `status` still writes nothing.
+* **Tests** in `tests/test_product_home.py` cover:
+  * two enabled workers in connected mode;
+  * one worker disabled;
+  * the `local_only` default.
+
+  Both the bare command and `status` are checked. Ignoring the pool, or dropping the installed count, fails the new tests.
 
 ### 36. The factory SIGTERM test can signal a resumed supervisor mid-startup
 
