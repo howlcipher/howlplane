@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- A refused command no longer costs `howlplane work` a finished candidate (issues.md #33). Sometimes an implementation or remediation attempt fails only because commands were refused, yet still leaves a candidate. The refusals are now recorded as evidence: `refused_commands` in the attempt result, and an `implementation_refusals_recorded` or `remediation_refusals_recorded` event. The provider is not charged, and the candidate goes on to review and deterministic verification, which still decide it. An attempt that left nothing fails as before, and no grant changes.
+- The factory SIGTERM test could signal a resumed supervisor during its first tick, and it failed on a slow CI runner (issues.md #36). The supervisor honours a signal only once the tick settles. The test now waits for a tick by the process it signals.
 - `howlplane work` reviewers ran in editing modes (issues.md #27). The agy, Devin and Cursor launchers chose read-only mode only for the literal roles `planning`, `review` and `acceptance`. `work`'s reviewers (`correctness-reviewer`, `test-falsifier` and the rest) therefore launched agy with `--mode accept-edits`, Devin with `accept-edits` and Cursor in editing mode, and Codex gave the test falsifier a writable workspace. Every launcher now uses `is_mutating_role`, so only implementation and remediation can edit. A CLI that cannot enforce read-only operation (agy) is excluded from those roles by the pool (`READ_ONLY_NOT_ENFORCED`). A review attempt that changes the repository is discarded, and failover stops instead of showing the changed tree to another reviewer.
 
 ### Changed
