@@ -67,6 +67,15 @@ BUDGET_DERIVED_KEY = "budget_derived"
 TOOL_PERMISSION_KEY = "tool_permission_outcome"
 TOOL_PERMISSION_DENIED = "denied"
 
+# Set when a run that otherwise succeeded failed only because commands were
+# refused. The backend still fails the attempt closed, because it cannot see
+# the repository. The orchestrator can: when the attempt left a candidate, the
+# refusals become evidence and review and verification decide the candidate
+# (issues.md #33). A refused command never ran, so no grant is widened.
+REFUSAL_ONLY_FAILURE_KEY = "refusal_only_failure"
+# The refusals of an attempt that went on to review, kept as attempt evidence.
+REFUSED_COMMANDS_KEY = "refused_commands"
+
 # Exact provider errors from structured result envelopes are terminal evidence.
 # Keeping this separate from the transcript lets classification distinguish a
 # current provider stop from similar words quoted during ordinary reasoning.
@@ -239,7 +248,8 @@ def _tool_bounds_note(profile: ProviderExecutionProfile) -> str:
     )
     return (
         "Use Read, Glob and Grep to read files, never `cat`, `ls` or `head`. Your shell is "
-        f"limited to: {commands}. Any other command is refused, and a refusal fails the task."
+        f"limited to: {commands}. Any other command is refused and never runs, so it cannot "
+        "check your work; each refusal is recorded against this attempt."
     )
 
 
@@ -977,6 +987,7 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
                 result.metadata["denied_tools"] = ["unreported"]
                 if result.success:
                     result.success = False
+                    result.metadata[REFUSAL_ONLY_FAILURE_KEY] = True
                     result.error_message = (
                         "Required tool permissions were unavailable: unreported"
                     )
@@ -1042,6 +1053,7 @@ class ClaudeCodeBackend(SubprocessAgentBackend):
                 result.metadata["unnamed_denials"] = unnamed_denials
             if result.success:
                 result.success = False
+                result.metadata[REFUSAL_ONLY_FAILURE_KEY] = True
                 # Name the command when one is known: "Bash" alone does not say
                 # whether the bound was wrong or the request was illegitimate.
                 detail = ", ".join(denied_commands or denied_tools)

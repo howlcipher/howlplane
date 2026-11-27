@@ -13,6 +13,7 @@ import pytest
 from howlplane.control_plane.agent_execution import (
     READ_ONLY_DENIALS_KEY,
     READ_ONLY_ROLE_NOTE,
+    REFUSAL_ONLY_FAILURE_KEY,
     TOOL_PERMISSION_DENIED,
     TOOL_PERMISSION_KEY,
     ClaudeCodeBackend,
@@ -178,20 +179,11 @@ def test_claude_permission_denial_with_zero_delta_fails(tmp_path):
 
 
 def test_claude_permission_denial_in_plain_text(tmp_path):
-    backend = ClaudeCodeBackend()
-    task = _sample_task()
-
-    with patch.object(backend, "is_available", return_value=True):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = SimpleNamespace(
-                returncode=0,
-                stdout="Every attempt returned: This command requires approval from the user.",
-                stderr="",
-            )
-            res = backend.execute(task, cwd=tmp_path, role="implementation")
+    res = _execute_with_envelope("Every attempt returned: This command requires approval from the user.", tmp_path)
 
     assert res.success is False
     assert res.metadata.get(TOOL_PERMISSION_KEY) == TOOL_PERMISSION_DENIED
+    assert res.metadata.get(REFUSAL_ONLY_FAILURE_KEY) is True, "the run otherwise succeeded (issues.md #33)"
     pool = ProviderPoolManager(operating_mode="connected")
     assert pool.classify_failure("claude_code", res) == ProviderFailureClass.EXECUTION_PERMISSION_REQUIRED
 
@@ -375,13 +367,13 @@ def test_interpreter_formatters_are_granted_verbatim_not_as_prefixes(command):
 # --- Denial forensics (HOWLFRAM-SLOPFIX-07) ----------------------------------
 
 
-def _execute_with_envelope(stdout: str, tmp_path, role: str = "implementation"):
+def _execute_with_envelope(stdout: str, tmp_path, role: str = "implementation", returncode: int = 0):
     """Runs ClaudeCodeBackend against a canned CLI result envelope."""
     backend = ClaudeCodeBackend()
     with patch.object(backend, "is_available", return_value=True):
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = SimpleNamespace(
-                returncode=0, stdout=stdout, stderr=""
+                returncode=returncode, stdout=stdout, stderr=""
             )
             return backend.execute(_sample_task(), cwd=tmp_path, role=role)
 
@@ -437,7 +429,7 @@ def test_read_only_role_keeps_its_verdict_when_refused_a_command_it_was_not_gran
     )
 
     assert res.success is True
-    assert TOOL_PERMISSION_KEY not in res.metadata
+    assert TOOL_PERMISSION_KEY not in res.metadata and REFUSAL_ONLY_FAILURE_KEY not in res.metadata
     assert res.metadata[READ_ONLY_DENIALS_KEY] == ["python3 -m pytest -q"]
     assert "findings: []" in res.stdout
 
@@ -458,6 +450,17 @@ def test_mutating_role_denial_still_fails_closed(tmp_path):
     )
     assert res.success is False
     assert READ_ONLY_DENIALS_KEY not in res.metadata
+    # Closed, but marked: the orchestrator keeps a candidate the attempt left (issues.md #33).
+    assert res.metadata[REFUSAL_ONLY_FAILURE_KEY] is True
+
+
+@pytest.mark.parametrize("returncode, is_error", [(1, False), (0, True)], ids=["nonzero_exit", "terminal_error"])
+def test_a_run_that_failed_for_another_reason_is_never_refusal_only(tmp_path, returncode, is_error):
+    envelope = json.dumps({"type": "result", "result": "Stopped.", "is_error": is_error,
+                           "permission_denials": [{"tool_name": "Bash", "tool_input": {"command": "ls"}}]})
+    res = _execute_with_envelope(envelope, tmp_path, returncode=returncode)
+    assert res.success is False
+    assert REFUSAL_ONLY_FAILURE_KEY not in res.metadata
 
 
 def test_only_a_shell_less_role_is_told_it_has_no_shell(tmp_path):
