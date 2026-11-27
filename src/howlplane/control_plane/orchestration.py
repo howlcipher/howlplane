@@ -57,7 +57,7 @@ READ_ONLY_ROLES = frozenset({"planning", "review", "acceptance"})
 # rewrote tracked research files, which ended the session BLOCKED (DOG-037). Codex reviews run in
 # its read-only sandbox, Claude gets only Read/Grep/Glob, Cursor uses plan/ask, Devin `auto`
 # auto-approves read-only tools only.
-READ_ONLY_UNENFORCED = frozenset({"agy"})
+READ_ONLY_UNENFORCED = AgentBackendRegistry.read_only_unenforced()
 ROLES = ("planning", "implementation", "review", "acceptance")
 AGENT_STATES = {"AVAILABLE", "DEGRADED", "UNAVAILABLE", "RESERVED"}
 UNAVAILABLE_FAILURES = {"MISSING_EXECUTABLE", "AUTHENTICATION_REQUIRED", "PROVIDER_UNAVAILABLE"}

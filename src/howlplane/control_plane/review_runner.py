@@ -22,6 +22,7 @@ from howlplane.control_plane.agent_execution import (
 )
 from howlplane.control_plane.agent_registry import AgentRegistry
 from howlplane.control_plane.atomic_io import atomic_write_json, safe_load_json
+from howlplane.control_plane.provider_execution_profile import is_mutating_role
 from howlplane.control_plane.reconciliation import ReviewFinding, ReconciliationResult, ReviewReconciler, VALID_SEVERITIES
 from howlplane.control_plane.reviewers import get_reviewer_role, ReviewerRole, build_skill_context
 from howlplane.control_plane.task_spec import TaskSpec
@@ -604,6 +605,28 @@ def _current_capacity_block(
     return None
 
 
+# A review attempt that changed the repository it was reviewing (issues.md #27).
+MUTATED_REPOSITORY_OUTCOME = "read_only_role_mutated_repository"
+
+
+def _repository_fingerprint(cwd: Union[str, Path]) -> Optional[str]:
+    """The fingerprint of the working tree a reviewer must leave unchanged, or None outside Git."""
+    from howlplane.control_plane.orchestration import evidence, fingerprint
+    try:
+        return fingerprint(evidence(Path(cwd)))
+    except Exception:
+        return None
+
+
+def reviewer_failure_message(role_id: str, attempts_log: List[Dict[str, Any]]) -> str:
+    """Why a review role produced no verdict, naming a reviewer that changed the repository."""
+    mutated = [a for a in attempts_log if a.get("outcome") == MUTATED_REPOSITORY_OUTCOME]
+    if mutated:
+        return (f"Reviewer {mutated[0]['provider']} changed the repository during the {role_id} review; "
+                "its verdict was discarded and no other reviewer was shown the changed tree.")
+    return "All candidate reviewers failed or were unavailable"
+
+
 def invoke_reviewer_with_failover(
     role_id: str,
     candidates: List[str],
@@ -676,6 +699,11 @@ def invoke_reviewer_with_failover(
         if not backend or not backend.is_available():
             attempts_log.append(_unlaunched_attempt(candidate, "backend_unavailable"))
             continue
+        if not is_mutating_role(role_id) and not getattr(backend, "enforces_read_only", True):
+            # The pool already excludes such a resource; this guards a
+            # candidate list built some other way (issues.md #27).
+            attempts_log.append(_unlaunched_attempt(candidate, "read_only_not_enforced"))
+            continue
 
         # Past this point the provider is actually invoked, so this is where an
         # opportunity is genuinely spent.
@@ -691,6 +719,7 @@ def invoke_reviewer_with_failover(
         # `task.dispatch_target`, which falls back to `actual_agent` for the
         # implementation paths that never set a dispatch target.
         task.dispatch_resource_id = candidate
+        before = _repository_fingerprint(cwd)
         attempt_started = datetime.now(timezone.utc).isoformat()
         agent_res = backend.execute(
             task=task,
@@ -708,6 +737,12 @@ def invoke_reviewer_with_failover(
             "duration_seconds": round(agent_res.duration_seconds, 3),
         }
         attempt.update(_attempt_execution_evidence(agent_res, provider_pool, candidate))
+        if before is not None and _repository_fingerprint(cwd) != before:
+            # The reviewer changed the change it was reviewing. Its verdict is
+            # discarded, and no other reviewer is shown the altered tree.
+            attempt["outcome"] = MUTATED_REPOSITORY_OUTCOME
+            attempts_log.append(attempt)
+            return None, None, attempts_log
 
         exhaustion = None
         if provider_pool:
@@ -1051,10 +1086,11 @@ class ReviewRunner:
                     if winner and agent_res:
                         raw_output = agent_res.stdout
                     else:
-                        err_message = "All candidate reviewers failed or were unavailable"
+                        err_message = reviewer_failure_message(role_id, attempts_log)
                         has_failure = True
                 else:
                     selected_backend = backend or AgentBackendRegistry.get_backend(assigned_agent)
+                    before = _repository_fingerprint(target_cwd)
                     agent_res = selected_backend.execute(
                         task=task,
                         cwd=target_cwd,
@@ -1063,7 +1099,13 @@ class ReviewRunner:
                         timeout_seconds=REVIEW_TIMEOUT_SECONDS,
                     )
                     duration = agent_res.duration_seconds
-                    if agent_res.success:
+                    if before is not None and _repository_fingerprint(target_cwd) != before:
+                        err_message = reviewer_failure_message(role_id, [{
+                            "provider": getattr(selected_backend, "agent_id", assigned_agent),
+                            "outcome": MUTATED_REPOSITORY_OUTCOME,
+                        }])
+                        has_failure = True
+                    elif agent_res.success:
                         raw_output = agent_res.stdout
                     else:
                         err_message = agent_res.stderr or agent_res.error_message
