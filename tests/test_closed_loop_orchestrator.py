@@ -11,6 +11,8 @@ Human Authority Boundary Gate -> Governed Completion & Evidence.
 from pathlib import Path
 import subprocess
 
+import pytest
+
 from howlplane.control_plane.agent_execution import FakeAgentBackend
 from howlplane.control_plane.launcher import cmd_work, cmd_status, build_parser
 from howlplane.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
@@ -599,8 +601,21 @@ findings:
 """
 
 
-def _run_review_unavailable(tmp_path, task_id, source):
-    """Run with only a same-family reviewer that raises a real finding."""
+class _ScriptedReviewer(FakeAgentBackend):
+    """A reviewer whose successive answers are scripted; the last one repeats."""
+
+    def __init__(self, agent_id, answers):
+        super().__init__(agent_id=agent_id)
+        self.answers = list(answers)
+
+    def execute(self, task, cwd, role="implementation", **kwargs):
+        result = super().execute(task, cwd, role=role, **kwargs)
+        result.stdout = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        return result
+
+
+def _run_review_unavailable(tmp_path, task_id, source, reviews=(_RAISED_FINDING,), **config):
+    """Run with only a same-family reviewer, answering `reviews` in turn; returns its evidence entries."""
     from howlplane.control_plane.orchestrator import GovernedTaskOrchestrator, OrchestrationConfig
     from tests._dogfood_test_helpers import init_minimal_python_repo
     from tests.test_provider_failover import _FakeBackendResolver, _profile
@@ -614,8 +629,8 @@ def _run_review_unavailable(tmp_path, task_id, source):
                 source, encoding="utf-8"
             ),
         },
-        "g_rev": {"success": True, "stdout": _RAISED_FINDING},
     })
+    resolver.backends["g_rev"] = _ScriptedReviewer("g_rev", reviews)
     pool = _make_pool(
         [_profile("g_impl", "GI", "google"), _profile("g_rev", "GR", "google")],
         resolver=resolver,
@@ -629,13 +644,17 @@ def _run_review_unavailable(tmp_path, task_id, source):
         control_plane_root=tmp_path / "control_plane",
         config=OrchestrationConfig(
             provider_pool=pool, backend_resolver=resolver, acquire_locks=False,
-            enable_howlframe_audit=False, preserve_independent_review=True,
+            enable_howlframe_audit=False, preserve_independent_review=True, **config,
         ),
     )
     record_valid_tia(orchestrator.ledger, task_id)
     res = orchestrator.run(spec)
-    actions = [e.action for e in orchestrator.ledger.read_entries()[0] if e.task_id == task_id]
-    return res, repo / ".task_runs" / task_id, actions
+    entries = [e for e in orchestrator.ledger.read_entries()[0] if e.task_id == task_id]
+    return res, repo / ".task_runs" / task_id, entries
+
+
+def _actions(entries, name):
+    return [e for e in entries if e.action == name]
 
 
 def _task_yaml_text(run_dir):
@@ -649,7 +668,7 @@ _GOOD_SOURCE = "def run():\n    return True\n\n\ndef extra():\n    return 1\n"
 
 
 def test_unavailable_review_with_passing_verification_parks_with_the_result(tmp_path):
-    res, run_dir, actions = _run_review_unavailable(tmp_path, "UNAVAIL-OK", _GOOD_SOURCE)
+    res, run_dir, entries = _run_review_unavailable(tmp_path, "UNAVAIL-OK", _GOOD_SOURCE)
     assert res.final_state == "awaiting_human" and res.exit_code == 2
     assert res.error_message == _UNAVAILABLE
     assert res.verification_plan.overall_status == "passed"
@@ -665,11 +684,11 @@ def test_unavailable_review_with_passing_verification_parks_with_the_result(tmp_
     for step in steps:
         assert packet.count(f"verification {step.name}: {step.status}") == 1
     assert "Extra helper is untested" in (run_dir / "reconciliation_report.md").read_text(encoding="utf-8")
-    assert actions.count("verification_completed") == 1
+    assert len(_actions(entries, "verification_completed")) == 1
 
 
 def test_unavailable_review_with_failing_verification_fails_instead_of_parking(tmp_path):
-    res, run_dir, actions = _run_review_unavailable(tmp_path, "UNAVAIL-FAIL", "SYNTAX ERROR :::\n")
+    res, run_dir, entries = _run_review_unavailable(tmp_path, "UNAVAIL-FAIL", "SYNTAX ERROR :::\n")
     failed = [s.name for s in res.verification_plan.steps if s.status == "failed" and s.required]
     assert failed
     assert res.final_state == "failed" and res.exit_code == 1
@@ -678,7 +697,49 @@ def test_unavailable_review_with_failing_verification_fails_instead_of_parking(t
         "Independent review was also unavailable."
     )
     assert not (run_dir / "decision_packet.md").exists()
-    assert actions.count("verification_completed") == 1
+    assert len(_actions(entries, "verification_completed")) == 1
+
+
+# Remediate, then park (issues.md #31 part 2, owner decision 2026-11-26): the
+# findings the available reviewers raised are remediated within the usual cycle
+# limit and re-reviewed before the task parks on unavailable independence.
+
+_CLEAN_REVIEW = "findings: []\n"
+
+
+def test_unavailable_review_remediates_the_findings_before_parking(tmp_path):
+    res, run_dir, entries = _run_review_unavailable(tmp_path, "UNAVAIL-REM", _GOOD_SOURCE, max_remediation_cycles=2)
+    started = _actions(entries, "remediation_started")
+    assert [e.metadata["remediating_without_independent_review"] for e in started] == [True, True]
+    assert len(res.review_cycles) == 3, "each remediation is re-reviewed by the reviewers available"
+    assert res.final_state == "awaiting_human" and res.error_message == _UNAVAILABLE
+    assert res.verification_plan.overall_status == "passed"
+    packet = (run_dir / "decision_packet.md").read_text(encoding="utf-8")
+    assert "2 remediation cycle(s) ran" in packet
+    assert "[MEDIUM] Extra helper is untested (correctness-reviewer)" in packet, "what still stands is shown"
+    assert "Max remediation cycles exceeded" not in _task_yaml_text(run_dir), "the cause stays independence"
+
+
+def test_unavailable_review_whose_findings_were_fixed_still_parks(tmp_path):
+    res, run_dir, entries = _run_review_unavailable(
+        tmp_path, "UNAVAIL-FIXED", _GOOD_SOURCE, reviews=(_RAISED_FINDING, _CLEAN_REVIEW))
+    assert len(_actions(entries, "remediation_started")) == 1 and len(res.review_cycles) == 2
+    assert res.final_state == "awaiting_human" and res.error_message == _UNAVAILABLE, "independence is still missing"
+    packet = (run_dir / "decision_packet.md").read_text(encoding="utf-8")
+    assert "1 remediation cycle(s) ran" in packet
+    assert "[MEDIUM] Extra helper is untested" not in packet, "a fixed finding is not presented as open"
+
+
+@pytest.mark.parametrize("reviews, cycles", [
+    ((_CLEAN_REVIEW,), 3),
+    (("I could not review this change.",), 3),  # a failed review asks for remediation but names nothing to fix
+    ((_RAISED_FINDING,), 0),
+], ids=["no_findings", "only_a_failed_review", "no_cycles_allowed"])
+def test_unavailable_review_with_nothing_to_remediate_parks_at_once(tmp_path, reviews, cycles):
+    res, _, entries = _run_review_unavailable(
+        tmp_path, "UNAVAIL-NONE", _GOOD_SOURCE, reviews=reviews, max_remediation_cycles=cycles)
+    assert not _actions(entries, "remediation_started") and len(res.review_cycles) == 1
+    assert res.final_state == "awaiting_human" and res.error_message == _UNAVAILABLE
 
 
 def test_remediation_limit_park_reason_is_unchanged(tmp_path):
