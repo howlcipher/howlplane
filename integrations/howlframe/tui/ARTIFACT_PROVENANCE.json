@@ -7,6 +7,6 @@
   },
   "hfbc_format": 2,
   "producer": "howlframe source build",
-  "producer_note": "Built with the CI runtime pin. The published v0.1.0 release rejects dict literals with mixed value types, so a source build at the pin is the producer; tests/test_tui_howlframe_engine.py rebuilds with the pinned compiler and compares bytes. Earlier builds used dffcb00, 928c005 and, before that, 41d56ce; the ADR 0009 reducer artifact was retired with the Python host. hfbc_format is the format the artifact header carries; earlier records said 1 while the header said 2.",
-  "producer_source_revision": "e64256e5059df32bef82ef42f9814750f3a06fad"
+  "producer_note": "Built with the CI runtime pin. The published v0.1.0 release rejects dict literals with mixed value types, so a source build at the pin is the producer; tests/test_tui_howlframe_engine.py rebuilds with the pinned compiler and compares bytes. Earlier builds used e64256e, dffcb00, 928c005 and, before that, 41d56ce; the ADR 0009 reducer artifact was retired with the Python host. hfbc_format is the format the artifact header carries; earlier records said 1 while the header said 2.",
+  "producer_source_revision": "e8f3349a3526f53435d915413c04cb062af1ce99"
 }
