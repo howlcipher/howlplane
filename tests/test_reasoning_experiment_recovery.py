@@ -161,7 +161,7 @@ def test_fresh_agent_can_reconstruct_from_journal_and_artifacts(tmp_path: Path):
     coordinator.run_arm(
         "EXP-RECOVERY-001", "baseline", "1", _successful_executor([]),
     )
-    journal = Path("documentation/task_journals/2026-08-24_reasoning_strategy_trajectories.md")
+    journal = Path("documentation/journals/2026-08-24_reasoning_strategy_trajectories.md")
     assert "WORKING_BRANCH" in journal.read_text(encoding="utf-8")
     fresh_agent = ReasoningExperimentCoordinator(experiment_store, trajectory_store)
     assert fresh_agent.next_action("EXP-RECOVERY-001") == "run_candidate"
