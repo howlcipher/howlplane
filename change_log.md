@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.1]
 
+### Changed
+
+- Backlog grooming (2026-11-27). Bugs #34 and #26 are marked Done: PRs #210 and #212 had fixed them, and their open follow-ups stay listed. #26's `status` worker-count note is now #35. #18 is closed, because the optional extras skip with a reason and the HowlFrame dogfood suite fails closed by design. The owner's rules for #33 and #31 part 2 are recorded. Improvement #86 checks HowlPlane against HowlFrame #320. Ten task journals for finished August items are deleted.
+
 ### Added
 
 - `howlplane tui` operator improvements (ADR 0010 amendment):
