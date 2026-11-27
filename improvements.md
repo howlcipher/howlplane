@@ -35,7 +35,7 @@ Scores apply to Pending rows only; Done, Closed, and Merged rows show `—`.
 
 | # | Improvement | Status | Score (V×D÷E) | Claude model | Gemini model | ROI rationale |
 | --- | --- | --- | --- | --- | --- | --- |
-| 86 | [Verify HowlPlane against HowlFrame #320 and move the pin](#86-verify-howlplane-against-howlframe-320-and-move-the-pin) | Pending | 4.0 (4×1.0÷1) | — | — | HowlFrame `main` moved to `8ec5315` (#320: persistent-vector VM lists, re-entrant backends, restored slopslint gate) after HowlPlane pinned `e64256e`. Nothing has run HowlPlane against it yet. |
+| 86 | [Verify HowlPlane against HowlFrame #320 and move the pin](#86-verify-howlplane-against-howlframe-320-and-move-the-pin) | Done (2026-11-27) | — | — | — | HowlFrame `main` moved to `8ec5315` (#320: persistent-vector VM lists, re-entrant backends, restored slopslint gate) after HowlPlane pinned `e64256e`. **Done 2026-11-27:** the check found a replay regression in #320, fixed upstream in howlframe#321; the pin is now that merge, `e8f3349`. |
 | 70 | [Host publish to E2E dogfood of the remote snapshot](#70-host-publish-to-e2e-dogfood-of-the-remote-snapshot) | Pending | 4.0 (8×1.0÷2) | Sonnet 5 | Gemini 3.7 Flash | Sequence 1 of 5. Owner on tallgeese commits the redacted snapshot; Board shows live status and Pending; one remote validate/format-check dry-run. Workers do not publish, take the lock, or start a campaign **2026-09-30:** the snapshot is already committed (6276da3, stopped campaign). Remaining steps are Owner-only: host provenance, Board evidence, one remote dry-run. |
 | 71 | [Lock the remote snapshot contract](#71-lock-the-remote-snapshot-contract) | Done (2026-09-30) | 2.0 (6×1.0÷3) | Sonnet 5 | Gemini 3.7 Flash | Sequence 2 of 5. Lock version, redaction, stale and SNAPSHOT_ABSENT, and tip SHA/path on howlplane.factory.status/v1, plus optional safe Board fields. Depends on 70 |
 | 72 | [Lock Pending admit evidence to the same identity](#72-lock-pending-admit-evidence-to-the-same-identity) | Pending | 2.0 (6×1.0÷3) | Sonnet 5 | Gemini 3.7 Flash | Sequence 3 of 5. Same row id and schema from Board preview through one admit path and thin validate/format-check evidence in Git. No second admit path and no supervisor lock **2026-09-30:** Plane side shipped (`factory pending`). Open: one recorded dry-run in Git by a remote role. |
@@ -964,3 +964,16 @@ The engine was usable only by someone who knew the Factory: `factory start|statu
 ### 86. Verify HowlPlane against HowlFrame #320 and move the pin
 
 **Filed** 2026-11-27. HowlFrame `main` is at `8ec5315`: #320 replaced the VM list copy with a persistent vector (HowlFrame #111), made the JS and Go backends re-entrant, restored the slopslint gate (HowlFrame #72) and added Verification Report v0. HowlPlane CI is pinned to `e64256e`, before that change. Acceptance: build `8ec5315`, run HowlPlane's TUI suites, the frame-artifact tests and the full gate against it; if they pass, move the pin in every place #228 moved it and rebuild the TUI artifact (regenerating its provenance if the bytes change); if not, reproduce the failure and fix or file it upstream.
+
+**Done 2026-11-27.**
+
+* **What the check found.** Against `8ec5315`, `tests/test_tui_logic.py` failed 31 of 32. #320 made VM lists a persistent `*vmList`, and the live `terminal_app` path reads them through `sliceFromList`. The `--replay` recorder still asserted `[]any`, so every replay record lost a list-literal view and its effects. HowlFrame's own replay tests passed because their apps build lists with `parse_json`. The live path was unaffected: the launcher, pty session, governed-run and feasibility suites (52 tests) passed on `8ec5315`.
+* **Upstream fix.** howlframe#321 makes the recorder read lists as `apply` does. Its regression test fails without the fix. It merged as `e8f3349`.
+* **Pin move.** The pin moves to `e8f3349` in every place #228 moved it:
+  * the three CI jobs;
+  * both provenance files;
+  * the provenance test;
+  * the README;
+  * `FRAME_ARTIFACTS.md`.
+* **Artifact.** The TUI artifact rebuilds to identical bytes under the new pin, so its provenance changes only in the recorded revision.
+* **Evidence.** Against a build of `e8f3349`, the TUI and frame-artifact suites passed: 137 passed and 3 skipped, the skips being dogfood repositories absent from the sandbox. The replay suite passed 32 of 32. The full gate result is in the pull request.

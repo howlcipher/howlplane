@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- The HowlFrame CI pin moves to `e8f3349` (howlframe#320 and #321; improvements.md #86). Against #320 the TUI replay tests failed 31 of 32. #320's persistent VM lists reached the `--replay` recorder, which still expected the old list type, so records lost list-literal views and effects; the live terminal path was unaffected. howlframe#321 fixed the recorder, and the suites pass against its merge. The TUI artifact rebuilds to identical bytes, so only the recorded revisions change.
 - Backlog grooming (2026-11-27). Bugs #34 and #26 are marked Done: PRs #210 and #212 had fixed them, and their open follow-ups stay listed. #26's `status` worker-count note is now #35. #18 is closed, because the optional extras skip with a reason and the HowlFrame dogfood suite fails closed by design. The owner's rules for #33 and #31 part 2 are recorded. Improvement #86 checks HowlPlane against HowlFrame #320. Of ten task journals for finished August items, nine are deleted. The #60A record moves to `documentation/journals/`, where its recovery test reads it.
 
 ### Added

@@ -125,7 +125,7 @@ def test_a_runtime_without_the_needed_flags_is_refused_before_anything_starts(tm
 
 def test_provenance_matches_committed_bytes():
     provenance = json.loads((TUI_DIR / "ARTIFACT_PROVENANCE.json").read_text(encoding="utf-8"))
-    assert provenance["producer_source_revision"] == "e64256e5059df32bef82ef42f9814750f3a06fad"
+    assert provenance["producer_source_revision"] == "e8f3349a3526f53435d915413c04cb062af1ce99"
     assert set(provenance["files"]) == {f"integrations/howlframe/tui/{n}" for n in ("tui_core.howl", "tui_app.howl", "tui_app.hfbc")}
     for name, digest in provenance["files"].items():
         assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest, name

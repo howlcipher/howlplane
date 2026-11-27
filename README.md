@@ -281,7 +281,7 @@ anything runs, `/cancel` (or Ctrl-C) stops a run, and `/quit` (or Ctrl-D) leaves
   `cancel_grace_seconds`; `step_deadline_seconds` is accepted but no longer
   used); all are finite and validated.
 * It needs a `howlframe` runtime whose `terminal_app` marks pasted lines and
-  draws styles (HowlFrame `main` at `e64256e`, so a release after v0.3.0;
+  draws styles (HowlFrame `main` from `e64256e` on, so a release after v0.3.0;
   `HOWLFRAME_BIN` or `PATH`). The launcher reads the runtime's interop
   descriptor and refuses an older one, saying what to install, before anything
   starts. Without a TTY it falls back to line mode, so it can also be scripted.
@@ -702,12 +702,14 @@ Validation maintenance separates existing Bandit annotation reasons from rule ID
 and removes obsolete suppressions. It changes no runtime behavior or trust policy.
 
 The generated-application CI suites compile and execute against HowlFrame source
-`e64256e5059df32bef82ef42f9814750f3a06fad` (2026-11-26; HowlFrame `main` with `terminal_app` replay, line
-editing, paste-marked lines, styled views and `--color`, which `howlplane tui`
-needs). Fast, full and
+`e8f3349a3526f53435d915413c04cb062af1ce99` (2026-11-27; HowlFrame `main` with persistent-vector VM
+lists and re-entrant backends from howlframe#320, and the `--replay` recorder
+fix of #321 that the TUI replay tests need). Fast, full and
 nightly jobs use that same immutable commit. Before the move, the full suite,
 including generated notes/todo acceptance and both packaged HFBC1 artifacts,
-passed against it; the previous pins were `dffcb001222d9bedc2d6eb615541450b5f68bcd3` (the versioned runtime
+passed against it; the previous pins were `e64256e5059df32bef82ef42f9814750f3a06fad` (`terminal_app`
+replay, line editing, paste-marked lines, styled views and `--color`, which
+`howlplane tui` needs), `dffcb001222d9bedc2d6eb615541450b5f68bcd3` (the versioned runtime
 error, exec process bounds, the `process:exec_inherit_env=` grant and
 `terminal_app`), `928c00503f1de75e21487d020864076e67323eb4` (VM resource-bound fixes
 for bugs #73 to #76) and `41d56cecd9e8f936cf9da35240331ab7da0244cd`. A moving sibling
